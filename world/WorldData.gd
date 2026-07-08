@@ -41,7 +41,8 @@ static var city_resource_amounts: Dictionary = {}
 static var world_map_mode_texture_cache: Dictionary = {}
 static var world_map_texture_cache_seed: int = -1
 static var world_map_texture_cache_size: Vector2i = Vector2i.ZERO
-
+static var world_map_texture_cache_visual_version: int = -1
+static var city_map_texture_cache_visual_version: int = -1
 static var city_map_mode_texture_cache: Dictionary = {}
 static var city_map_texture_cache_seed: int = -1
 static var city_map_texture_cache_size: Vector2i = Vector2i.ZERO
@@ -55,8 +56,7 @@ static var official_city_world = null
 static var official_city_seed: int = 0
 static var player_city_founded: bool = false
 static var player_city_data: Dictionary = {}
-
-
+static var debug_mode_enabled: bool = false
 static var official_selected_region_center: Vector2i = Vector2i(-1, -1)
 static var official_selected_region_top_left: Vector2i = Vector2i(-1, -1)
 static var official_region_size: int = 0
@@ -68,6 +68,7 @@ static var city_occupied_tiles: Dictionary = {}
 static var next_city_object_id: int = 1
 
 const CITY_OBJECT_CITY_CENTER := "city_center"
+const CITY_OBJECT_HOUSE := "house"
 const CITY_OBJECT_PLACEHOLDER_BUILDING := "placeholder_building"
 const CITY_OBJECT_ROAD := "road"
 
@@ -411,9 +412,11 @@ static func has_valid_world_map_texture_cache(source_world) -> bool:
 
 	if world_map_texture_cache_size != Vector2i(source_world.width, source_world.height):
 		return false
+	
+	if world_map_texture_cache_visual_version != MapVisuals.MAP_VISUAL_CACHE_VERSION:
+		return false
 
 	return true
-
 
 static func store_world_map_texture_cache(source_world, texture_cache: Dictionary) -> void:
 	if source_world == null:
@@ -422,7 +425,7 @@ static func store_world_map_texture_cache(source_world, texture_cache: Dictionar
 	world_map_texture_cache_seed = source_world.seed
 	world_map_texture_cache_size = Vector2i(source_world.width, source_world.height)
 	world_map_mode_texture_cache = texture_cache.duplicate(false)
-
+	world_map_texture_cache_visual_version = MapVisuals.MAP_VISUAL_CACHE_VERSION
 
 static func get_world_map_texture_cache() -> Dictionary:
 	return world_map_mode_texture_cache.duplicate(false)
@@ -446,7 +449,10 @@ static func has_valid_city_map_texture_cache(source_city_world, source_city_seed
 
 	if city_map_texture_cache_size != Vector2i(source_city_world.width, source_city_world.height):
 		return false
-
+		
+	if city_map_texture_cache_visual_version != MapVisuals.MAP_VISUAL_CACHE_VERSION:
+		return false
+		
 	return true
 
 
@@ -461,7 +467,7 @@ static func store_city_map_texture_cache(
 	city_map_texture_cache_seed = source_city_seed
 	city_map_texture_cache_size = Vector2i(source_city_world.width, source_city_world.height)
 	city_map_mode_texture_cache = texture_cache.duplicate(false)
-
+	city_map_texture_cache_visual_version = MapVisuals.MAP_VISUAL_CACHE_VERSION
 
 static func get_city_map_texture_cache() -> Dictionary:
 	return city_map_mode_texture_cache.duplicate(false)

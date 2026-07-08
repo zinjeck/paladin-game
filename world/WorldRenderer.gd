@@ -1,21 +1,12 @@
 extends Node2D
 
-enum ViewMode {
-	BIOME,
-	ELEVATION,
-	TEMPERATURE,
-	PRECIPITATION,
-	FERTILITY,
-	RESOURCES
-}
-
 enum RegionCursorState {
 	SINGLE_TILE,
 	REGION_PLACE,
 	REGION_SELECTED
 }
 
-var view_mode: ViewMode = ViewMode.BIOME
+var view_mode: int = MapVisuals.ViewMode.BIOME
 var world_map_texture: ImageTexture
 var world_map_mode_textures: Dictionary = {}
 var world_texture_warmup_running: bool = false
@@ -76,11 +67,10 @@ var selected_region_border_color := Color(0.0, 1.0, 1.0, 1.0)
 var region_cursor_border_width: float = 1.25
 var selected_region_border_width: float = 2.0
 
-var debug_mode_enabled: bool = false
 var debug_canvas_layer: CanvasLayer
 var debug_panel: Panel
 var debug_label: Label
-var debug_panel_position: Vector2 = Vector2(12.0, 12.0)
+var debug_panel_position: Vector2 = Vector2.ZERO
 var debug_panel_padding: Vector2 = Vector2(12.0, 10.0)
 var debug_panel_min_size: Vector2 = Vector2(260.0, 80.0)
 
@@ -169,7 +159,7 @@ func create_debug_panel() -> void:
 
 	debug_panel = Panel.new()
 	debug_panel.position = debug_panel_position
-	debug_panel.visible = false
+	debug_panel.visible = WorldData.debug_mode_enabled
 	debug_panel.mouse_filter = Control.MOUSE_FILTER_IGNORE
 
 	var panel_style: StyleBoxFlat = StyleBoxFlat.new()
@@ -194,21 +184,20 @@ func create_debug_panel() -> void:
 	fit_debug_panel_to_text()
 
 func toggle_debug_mode() -> void:
-	debug_mode_enabled = not debug_mode_enabled
+	WorldData.debug_mode_enabled = not WorldData.debug_mode_enabled
 
 	if debug_panel != null:
-		debug_panel.visible = debug_mode_enabled
+		debug_panel.visible = WorldData.debug_mode_enabled
 
 	update_debug_panel_text()
 
-	if debug_mode_enabled:
+	if WorldData.debug_mode_enabled:
 		print("Debug mode: ON")
 	else:
 		print("Debug mode: OFF")
 
-
 func update_debug_panel_text() -> void:
-	if not debug_mode_enabled:
+	if not WorldData.debug_mode_enabled:
 		return
 
 	if debug_label == null:
@@ -291,22 +280,7 @@ func get_hovered_tile_debug_text() -> String:
 
 
 func get_view_mode_name() -> String:
-	match view_mode:
-		ViewMode.BIOME:
-			return "Biome"
-		ViewMode.ELEVATION:
-			return "Elevation"
-		ViewMode.TEMPERATURE:
-			return "Temperature"
-		ViewMode.PRECIPITATION:
-			return "Precipitation"
-		ViewMode.FERTILITY:
-			return "Fertility"
-		ViewMode.RESOURCES:
-			return "Resources"
-
-	return "Unknown"
-
+	return MapVisuals.get_view_mode_name(view_mode)
 
 func bool_to_yes_no(value: bool) -> String:
 	if value:
@@ -569,23 +543,12 @@ func _input(event):
 			toggle_debug_mode()
 			return
 
-		if key_event.keycode == KEY_1:
-			set_world_view_mode(ViewMode.BIOME)
+		var requested_view_mode: int = MapVisuals.get_view_mode_for_keycode(key_event.keycode)
 
-		elif key_event.keycode == KEY_2:
-			set_world_view_mode(ViewMode.ELEVATION)
-
-		elif key_event.keycode == KEY_3:
-			set_world_view_mode(ViewMode.TEMPERATURE)
-
-		elif key_event.keycode == KEY_4:
-			set_world_view_mode(ViewMode.PRECIPITATION)
-
-		elif key_event.keycode == KEY_5:
-			set_world_view_mode(ViewMode.RESOURCES)
-
-		elif key_event.keycode == KEY_6:
-			set_world_view_mode(ViewMode.FERTILITY)
+		if requested_view_mode != MapVisuals.INVALID_VIEW_MODE:
+			set_world_view_mode(requested_view_mode)
+			get_viewport().set_input_as_handled()
+			return
 
 func set_world_view_mode(new_view_mode: int) -> void:
 	if view_mode == new_view_mode:
@@ -610,14 +573,7 @@ func _exit_tree() -> void:
 	world_texture_warmup_running = false
 
 func get_all_world_view_modes() -> Array[int]:
-	return [
-		ViewMode.BIOME,
-		ViewMode.ELEVATION,
-		ViewMode.TEMPERATURE,
-		ViewMode.PRECIPITATION,
-		ViewMode.FERTILITY,
-		ViewMode.RESOURCES
-	]
+	return MapVisuals.get_all_view_modes()
 
 func _draw():
 	if world == null:
@@ -704,26 +660,7 @@ func get_tile_color(tile: Dictionary) -> Color:
 
 
 func get_tile_color_for_mode(tile: Dictionary, mode: int) -> Color:
-	match mode:
-		ViewMode.BIOME:
-			return get_biome_color(tile)
-
-		ViewMode.ELEVATION:
-			return get_elevation_color(tile)
-
-		ViewMode.TEMPERATURE:
-			return get_temperature_color(tile)
-
-		ViewMode.PRECIPITATION:
-			return get_precipitation_color(tile)
-
-		ViewMode.FERTILITY:
-			return get_fertility_overlay_color(tile)
-
-		ViewMode.RESOURCES:
-			return get_resource_overlay_color(tile)
-
-	return Color.MAGENTA
+	return MapVisuals.get_tile_color_for_mode(tile, mode, 0.0)
 
 func rebuild_world_map_textures() -> void:
 	if world == null:
@@ -840,155 +777,13 @@ func apply_cached_world_map_texture() -> void:
 	world_map_texture = world_map_mode_textures[view_mode]
 
 func get_world_view_mode_name_for_mode(mode: int) -> String:
-	match mode:
-		ViewMode.BIOME:
-			return "Biome"
-
-		ViewMode.ELEVATION:
-			return "Elevation"
-
-		ViewMode.TEMPERATURE:
-			return "Temperature"
-
-		ViewMode.PRECIPITATION:
-			return "Precipitation"
-
-		ViewMode.FERTILITY:
-			return "Fertility"
-
-		ViewMode.RESOURCES:
-			return "Resources"
-
-	return "Unknown"
-
-func get_fertility_overlay_color(tile: Dictionary) -> Color:
-	var biome: String = tile["biome"]
-
-	if biome == WorldData.BIOME_OCEAN:
-		return get_biome_color(tile).darkened(0.65)
-
-	if biome == WorldData.BIOME_RIVER:
-		return Color(0.0, 0.85, 1.0)
-
-	var base_color := get_biome_color(tile).darkened(0.45)
-	var fertility: float = tile["fertility"]
-
-	var fertility_color := Color(
-		1.0 - fertility / 100.0,
-		fertility / 100.0,
-		0.08
-	)
-
-	return base_color.lerp(fertility_color, 0.75)
+	return MapVisuals.get_view_mode_name(mode)
 
 func get_biome_color(tile: Dictionary) -> Color:
-	var biome: String = tile["biome"]
-	var elevation: float = tile["elevation"]
+	return MapVisuals.get_biome_color(tile)
 
-	match biome:
-		WorldData.BIOME_OCEAN:
-			if elevation < -0.35:
-				return Color(0.01, 0.05, 0.28)
-			return Color(0.0, 0.18, 0.65)
-
-		WorldData.BIOME_MOUNTAIN:
-			return Color(0.45, 0.42, 0.38)
-			
-		WorldData.BIOME_HILLS:
-			return Color(0.46, 0.31, 0.24)
-			
-		WorldData.BIOME_DESERT:
-			return Color(0.86, 0.72, 0.36)
-
-		WorldData.BIOME_PLAIN:
-			return Color(0.18, 0.62, 0.20)
-
-		WorldData.BIOME_RIVER:
-			return Color(0.0, 0.45, 0.95)
-	
-		WorldData.BIOME_FOREST:
-			return Color(0.03, 0.32, 0.08)
-
-		WorldData.BIOME_TUNDRA:
-			return Color(0.58, 0.72, 0.58)
-
-		WorldData.BIOME_TAIGA:
-			return Color(0.05, 0.25, 0.16)
-
-		WorldData.BIOME_JUNGLE:
-			return Color(0.00, 0.45, 0.12)
-
-	return Color.MAGENTA
-
-
-func get_elevation_color(tile: Dictionary) -> Color:
-	var elevation: float = tile["elevation"]
-	var value: float = clamp((elevation + 1.0) / 2.0, 0.0, 1.0)
-
-	return Color(value, value, value)
-
-
-func get_temperature_color(tile: Dictionary) -> Color:
-	var biome: String = tile["biome"]
-
-	if biome == WorldData.BIOME_OCEAN:
-		return get_biome_color(tile).darkened(0.45)
-
-	if biome == WorldData.BIOME_RIVER:
-		return get_biome_color(tile)
-
-	var base_color := get_biome_color(tile).darkened(0.45)
-	var temperature: float = tile["temperature"]
-
-	var temperature_color := Color(
-		temperature,
-		0.10,
-		1.0 - temperature
-	)
-
-	return base_color.lerp(temperature_color, 0.70)
-
-
-func get_precipitation_color(tile: Dictionary) -> Color:
-	var biome: String = tile["biome"]
-
-	if biome == WorldData.BIOME_OCEAN:
-		return get_biome_color(tile).darkened(0.45)
-
-	if biome == WorldData.BIOME_RIVER:
-		return get_biome_color(tile)
-
-	var base_color := get_biome_color(tile).darkened(0.45)
-	var precipitation: float = tile["precipitation"]
-
-	var precipitation_color := Color(
-		0.08,
-		precipitation,
-		1.0 - precipitation
-	)
-
-	return base_color.lerp(precipitation_color, 0.70)
-	
-func get_resource_overlay_color(tile: Dictionary) -> Color:
-	var base_color := get_biome_color(tile)
-	var resource: String = tile["resource"]
-
-	if resource == WorldData.RESOURCE_NONE:
-		return base_color.darkened(0.55)
-
-	if resource == WorldData.RESOURCE_FISH:
-		return Color(0.82, 0.42, 0.95)
-
-	if resource == WorldData.RESOURCE_COAL:
-		return Color(0.02, 0.02, 0.02)
-
-	if resource == WorldData.RESOURCE_IRON:
-		return Color(0.73, 0.64, 0.48)
-
-	if resource == WorldData.RESOURCE_GOLD:
-		return Color(0.93, 0.74, 0.22)
-
-	return Color.MAGENTA
+func get_resource_color(resource: String) -> Color:
+	return MapVisuals.get_resource_color(resource)
 
 func create_world_bottom_buttons() -> void:
 	world_ui_layer = CanvasLayer.new()
