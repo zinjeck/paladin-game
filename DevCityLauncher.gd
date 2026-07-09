@@ -69,24 +69,78 @@ static func find_good_dev_region(world: WorldData, region_size: int) -> Vector2i
 	)
 
 	var half_size := int(region_size / 2)
+	var ocean_prefix_sum := build_ocean_prefix_sum(world)
 
 	var best_region := Vector2i(-1, -1)
-	var best_distance := INF
+	var best_distance_squared := INF
 
 	for y in range(half_size, world.height - half_size):
 		for x in range(half_size, world.width - half_size):
 			var region_top_left := Vector2i(x - half_size, y - half_size)
 
-			if not is_dev_region_valid(world, region_top_left, region_size):
+			if not is_dev_region_valid_with_prefix(ocean_prefix_sum, region_top_left, region_size):
 				continue
 
-			var distance := Vector2(x, y).distance_to(Vector2(center.x, center.y))
+			var dx := float(x - center.x)
+			var dy := float(y - center.y)
+			var distance_squared := dx * dx + dy * dy
 
-			if distance < best_distance:
-				best_distance = distance
+			if distance_squared < best_distance_squared:
+				best_distance_squared = distance_squared
 				best_region = region_top_left
 
 	return best_region
+
+
+static func build_ocean_prefix_sum(world: WorldData) -> Array:
+	var prefix := []
+
+	for y in range(world.height + 1):
+		var row := []
+
+		for x in range(world.width + 1):
+			row.append(0)
+
+		prefix.append(row)
+
+	for y in range(world.height):
+		var source_row: Array = world.tiles[y]
+		var prefix_row: Array = prefix[y + 1]
+		var previous_prefix_row: Array = prefix[y]
+		var row_total := 0
+
+		for x in range(world.width):
+			var tile: Dictionary = source_row[x]
+
+			if str(tile.get("biome", "")) == WorldData.BIOME_OCEAN:
+				row_total += 1
+
+			prefix_row[x + 1] = int(previous_prefix_row[x + 1]) + row_total
+
+	return prefix
+
+
+static func is_dev_region_valid_with_prefix(
+	ocean_prefix_sum: Array,
+	region_top_left: Vector2i,
+	region_size: int
+) -> bool:
+	var x0 := region_top_left.x
+	var y0 := region_top_left.y
+	var x1 := x0 + region_size
+	var y1 := y0 + region_size
+
+	var ocean_tiles: int = (
+		int(ocean_prefix_sum[y1][x1])
+		- int(ocean_prefix_sum[y0][x1])
+		- int(ocean_prefix_sum[y1][x0])
+		+ int(ocean_prefix_sum[y0][x0])
+	)
+
+	var total_tiles := region_size * region_size
+	var ocean_ratio := float(ocean_tiles) / float(total_tiles)
+
+	return ocean_ratio <= DEV_REGION_OCEAN_RATIO_LIMIT
 
 
 static func is_dev_region_valid(
@@ -110,7 +164,7 @@ static func is_dev_region_valid(
 		for x_offset in range(region_size):
 			var tile_x := region_top_left.x + x_offset
 			var tile_y := region_top_left.y + y_offset
-			var tile := world.get_tile(tile_x, tile_y)
+			var tile: Dictionary = world.tiles[tile_y][tile_x]
 
 			if str(tile.get("biome", "")) == WorldData.BIOME_OCEAN:
 				ocean_tiles += 1

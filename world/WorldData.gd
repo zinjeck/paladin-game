@@ -229,7 +229,16 @@ func setup(new_width: int, new_height: int, new_seed: int):
 		var row := []
 #THE TILE DICTIONARY \/ \/ \/ \/ \/
 		for x in range(width):
-			row.append(make_default_tile())
+			row.append({
+				"fertility": -1.0,
+				"elevation": 0.0,
+				"temperature": 0.0,
+				"precipitation": 0.0,
+				"terrain": TERRAIN_WATER,
+				"biome": BIOME_OCEAN,
+				"resource": RESOURCE_NONE,
+				"is_land": false
+			})
 
 		tiles.append(row)
 
