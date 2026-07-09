@@ -237,7 +237,7 @@ func add_debug_resource_to_selected_stockpile(resource: String, amount_delta: in
 		return
 
 	if selected_city_object_id < 0:
-		print("Debug storage add blocked: select a stockpile first.")
+		print("Debug storage add blocked: select a public storage object first.")
 		return
 
 	var city_object := get_city_object_by_id(selected_city_object_id)
@@ -246,24 +246,23 @@ func add_debug_resource_to_selected_stockpile(resource: String, amount_delta: in
 		print("Debug storage add blocked: selected object not found.")
 		return
 
-	var object_type: String = str(city_object.get("type", ""))
-
-	if object_type != WorldData.CITY_OBJECT_STOCKPILE:
-		print("Debug storage add blocked: selected object is not a stockpile.")
+	if not WorldData.city_object_counts_as_public_city_storage(city_object):
+		print("Debug storage add blocked: selected object is not public city storage.")
 		return
 
 	if not WorldData.can_city_object_store_resource(city_object, resource):
-		print("Debug storage add blocked: stockpile cannot store resource: ", resource)
+		print("Debug storage add blocked: selected storage cannot store resource: ", resource)
 		return
 
-	var current_amount := WorldData.get_city_object_stored_resource_amount(city_object, resource)
-	var next_amount := current_amount + amount_delta
-
-	WorldData.set_city_object_stored_resource_amount(
+	var accepted_amount := WorldData.add_resource_to_city_object_storage(
 		selected_city_object_id,
 		resource,
-		next_amount
+		amount_delta
 	)
+
+	if accepted_amount <= 0:
+		print("Debug storage add blocked: selected storage is full for resource: ", resource)
+		return
 
 	update_resource_bar_values()
 	update_selected_object_panel()
@@ -271,10 +270,10 @@ func add_debug_resource_to_selected_stockpile(resource: String, amount_delta: in
 
 	print(
 		"Debug added +",
-		amount_delta,
+		accepted_amount,
 		" ",
 		resource,
-		" to Stockpile #",
+		" to public storage object #",
 		selected_city_object_id
 	)
 
@@ -305,318 +304,14 @@ func generate_city_world() -> void:
 
 		for x in range(city_world.width):
 			var tile: Dictionary = row[x]
-			copy_city_source_profile_into_tile(tile, x, y, region_size)
+			var profile: Dictionary = get_city_source_profile(x, y, region_size)
+
+			copy_city_profile_into_tile(tile, profile, x, y)
 
 			row[x] = tile
 
 	WorldData.store_city_world_save(city_world, city_seed)
 	print("Stored official city world.")
-
-func copy_city_source_profile_into_tile(
-	tile: Dictionary,
-	city_x: int,
-	city_y: int,
-	region_size: int
-) -> void:
-	var source_fx: float = ((float(city_x) + 0.5) / float(city_world.width)) * float(region_size) - 0.5
-	var source_fy: float = ((float(city_y) + 0.5) / float(city_world.height)) * float(region_size) - 0.5
-
-	var warp_strength := 0.62
-
-	source_fx += biome_warp_noise.get_noise_2d(city_x, city_y) * warp_strength
-	source_fy += biome_warp_noise.get_noise_2d(city_x + 9173, city_y - 4289) * warp_strength
-
-	source_fx = clamp(source_fx, 0.0, float(region_size - 1))
-	source_fy = clamp(source_fy, 0.0, float(region_size - 1))
-
-	var x0: int = int(floor(source_fx))
-	var y0: int = int(floor(source_fy))
-	var x1: int = min(x0 + 1, region_size - 1)
-	var y1: int = min(y0 + 1, region_size - 1)
-
-	var tx: float = source_fx - float(x0)
-	var ty: float = source_fy - float(y0)
-
-	var w00: float = (1.0 - tx) * (1.0 - ty)
-	var w10: float = tx * (1.0 - ty)
-	var w01: float = (1.0 - tx) * ty
-	var w11: float = tx * ty
-
-	var profile_elevation := 0.0
-	var profile_temperature := 0.0
-	var profile_precipitation := 0.0
-	var profile_fertility := 0.0
-	var fertility_weight := 0.0
-	var water_weight := 0.0
-	var ocean_weight := 0.0
-	var river_weight := 0.0
-
-	var mountain_weight := 0.0
-	var hills_weight := 0.0
-	var desert_weight := 0.0
-	var plain_weight := 0.0
-	var forest_weight := 0.0
-	var tundra_weight := 0.0
-	var taiga_weight := 0.0
-	var jungle_weight := 0.0
-
-	var fish_weight := 0.0
-	var coal_weight := 0.0
-	var iron_weight := 0.0
-	var gold_weight := 0.0
-
-	for sample_index in range(4):
-		var source_tile: Dictionary
-		var weight := 0.0
-
-		match sample_index:
-			0:
-				source_tile = WorldData.city_start_tiles[y0][x0]
-				weight = w00
-			1:
-				source_tile = WorldData.city_start_tiles[y0][x1]
-				weight = w10
-			2:
-				source_tile = WorldData.city_start_tiles[y1][x0]
-				weight = w01
-			3:
-				source_tile = WorldData.city_start_tiles[y1][x1]
-				weight = w11
-
-		if weight <= 0.0:
-			continue
-
-		profile_elevation += float(source_tile["elevation"]) * weight
-		profile_temperature += float(source_tile["temperature"]) * weight
-		profile_precipitation += float(source_tile["precipitation"]) * weight
-
-		var source_fertility: float = float(source_tile["fertility"])
-
-		if source_fertility >= 0.0:
-			profile_fertility += source_fertility * weight
-			fertility_weight += weight
-
-		var source_terrain: String = str(source_tile["terrain"])
-		var source_biome: String = str(source_tile["biome"])
-		var source_resource: String = str(source_tile["resource"])
-
-		if source_terrain == WorldData.TERRAIN_WATER:
-			water_weight += weight
-
-		match source_biome:
-			WorldData.BIOME_OCEAN:
-				ocean_weight += weight
-			WorldData.BIOME_RIVER:
-				river_weight += weight
-			WorldData.BIOME_MOUNTAIN:
-				mountain_weight += weight
-			WorldData.BIOME_HILLS:
-				hills_weight += weight
-			WorldData.BIOME_DESERT:
-				desert_weight += weight
-			WorldData.BIOME_PLAIN:
-				plain_weight += weight
-			WorldData.BIOME_FOREST:
-				forest_weight += weight
-			WorldData.BIOME_TUNDRA:
-				tundra_weight += weight
-			WorldData.BIOME_TAIGA:
-				taiga_weight += weight
-			WorldData.BIOME_JUNGLE:
-				jungle_weight += weight
-
-		match source_resource:
-			WorldData.RESOURCE_FISH:
-				fish_weight += weight
-			WorldData.RESOURCE_COAL:
-				coal_weight += weight
-			WorldData.RESOURCE_IRON:
-				iron_weight += weight
-			WorldData.RESOURCE_GOLD:
-				gold_weight += weight
-
-	if fertility_weight > 0.0:
-		profile_fertility = profile_fertility / fertility_weight
-	else:
-		profile_fertility = -1.0
-
-	var local_detail: float = detail_noise.get_noise_2d(city_x, city_y) * 0.030
-	var local_fertility_detail: float = fertility_noise.get_noise_2d(city_x, city_y) * 7.0
-	var coastline_threshold: float = 0.50 + coast_noise.get_noise_2d(city_x, city_y) * 0.18
-	var river_threshold: float = 0.40 + coast_noise.get_noise_2d(city_x + 5000, city_y - 5000) * 0.10
-
-	var becomes_river: bool = river_weight > river_threshold
-	var becomes_water: bool = water_weight > coastline_threshold or becomes_river
-
-	tile["elevation"] = profile_elevation + local_detail
-	tile["temperature"] = profile_temperature
-	tile["precipitation"] = profile_precipitation
-
-	if becomes_water:
-		tile["terrain"] = WorldData.TERRAIN_WATER
-		tile["is_land"] = false
-		tile["fertility"] = -1.0
-
-		if becomes_river and river_weight >= ocean_weight:
-			tile["biome"] = WorldData.BIOME_RIVER
-		else:
-			tile["biome"] = WorldData.BIOME_OCEAN
-	else:
-		var land_biome: String = get_dominant_land_biome_from_weights(
-			mountain_weight,
-			hills_weight,
-			desert_weight,
-			plain_weight,
-			forest_weight,
-			tundra_weight,
-			taiga_weight,
-			jungle_weight,
-			city_x,
-			city_y
-		)
-
-		tile["biome"] = land_biome
-		tile["is_land"] = true
-
-		if land_biome == WorldData.BIOME_MOUNTAIN:
-			tile["terrain"] = WorldData.TERRAIN_MOUNTAIN
-		else:
-			tile["terrain"] = WorldData.TERRAIN_LAND
-
-		if profile_fertility >= 0.0:
-			tile["fertility"] = clamp(profile_fertility + local_fertility_detail, 0.0, 100.0)
-		else:
-			tile["fertility"] = 0.0
-
-	tile["resource"] = get_city_resource_from_weights(
-		fish_weight,
-		coal_weight,
-		iron_weight,
-		gold_weight,
-		city_x,
-		city_y,
-		str(tile["biome"]),
-		str(tile["terrain"])
-	)
-
-
-func get_dominant_land_biome_from_weights(
-	mountain_weight: float,
-	hills_weight: float,
-	desert_weight: float,
-	plain_weight: float,
-	forest_weight: float,
-	tundra_weight: float,
-	taiga_weight: float,
-	jungle_weight: float,
-	city_x: int,
-	city_y: int
-) -> String:
-	var best_biome := WorldData.BIOME_PLAIN
-	var best_score := -99999.0
-	var score := 0.0
-
-	if mountain_weight > 0.0:
-		score = mountain_weight + get_biome_boundary_bias(WorldData.BIOME_MOUNTAIN, city_x, city_y)
-		if score > best_score:
-			best_score = score
-			best_biome = WorldData.BIOME_MOUNTAIN
-
-	if hills_weight > 0.0:
-		score = hills_weight + get_biome_boundary_bias(WorldData.BIOME_HILLS, city_x, city_y)
-		if score > best_score:
-			best_score = score
-			best_biome = WorldData.BIOME_HILLS
-
-	if desert_weight > 0.0:
-		score = desert_weight + get_biome_boundary_bias(WorldData.BIOME_DESERT, city_x, city_y)
-		if score > best_score:
-			best_score = score
-			best_biome = WorldData.BIOME_DESERT
-
-	if plain_weight > 0.0:
-		score = plain_weight + get_biome_boundary_bias(WorldData.BIOME_PLAIN, city_x, city_y)
-		if score > best_score:
-			best_score = score
-			best_biome = WorldData.BIOME_PLAIN
-
-	if forest_weight > 0.0:
-		score = forest_weight + get_biome_boundary_bias(WorldData.BIOME_FOREST, city_x, city_y)
-		if score > best_score:
-			best_score = score
-			best_biome = WorldData.BIOME_FOREST
-
-	if tundra_weight > 0.0:
-		score = tundra_weight + get_biome_boundary_bias(WorldData.BIOME_TUNDRA, city_x, city_y)
-		if score > best_score:
-			best_score = score
-			best_biome = WorldData.BIOME_TUNDRA
-
-	if taiga_weight > 0.0:
-		score = taiga_weight + get_biome_boundary_bias(WorldData.BIOME_TAIGA, city_x, city_y)
-		if score > best_score:
-			best_score = score
-			best_biome = WorldData.BIOME_TAIGA
-
-	if jungle_weight > 0.0:
-		score = jungle_weight + get_biome_boundary_bias(WorldData.BIOME_JUNGLE, city_x, city_y)
-		if score > best_score:
-			best_score = score
-			best_biome = WorldData.BIOME_JUNGLE
-
-	return best_biome
-
-
-func get_city_resource_from_weights(
-	fish_weight: float,
-	coal_weight: float,
-	iron_weight: float,
-	gold_weight: float,
-	city_x: int,
-	city_y: int,
-	biome: String,
-	terrain: String
-) -> String:
-	var best_resource := WorldData.RESOURCE_NONE
-	var best_weight := 0.0
-
-	if fish_weight > best_weight:
-		best_weight = fish_weight
-		best_resource = WorldData.RESOURCE_FISH
-
-	if coal_weight > best_weight:
-		best_weight = coal_weight
-		best_resource = WorldData.RESOURCE_COAL
-
-	if iron_weight > best_weight:
-		best_weight = iron_weight
-		best_resource = WorldData.RESOURCE_IRON
-
-	if gold_weight > best_weight:
-		best_weight = gold_weight
-		best_resource = WorldData.RESOURCE_GOLD
-
-	if best_resource == WorldData.RESOURCE_NONE:
-		return WorldData.RESOURCE_NONE
-
-	if best_resource == WorldData.RESOURCE_FISH and terrain != WorldData.TERRAIN_WATER:
-		return WorldData.RESOURCE_NONE
-
-	if best_resource == WorldData.RESOURCE_GOLD:
-		if biome != WorldData.BIOME_HILLS and biome != WorldData.BIOME_MOUNTAIN:
-			return WorldData.RESOURCE_NONE
-
-	if best_resource != WorldData.RESOURCE_FISH and terrain == WorldData.TERRAIN_WATER:
-		return WorldData.RESOURCE_NONE
-
-	var noise_value: float = (resource_noise.get_noise_2d(city_x, city_y) + 1.0) * 0.5
-	var spawn_chance: float = clamp(best_weight * 0.55, 0.025, 0.42)
-
-	if noise_value > 1.0 - spawn_chance:
-		return best_resource
-
-	return WorldData.RESOURCE_NONE
-
 
 func get_city_source_profile(city_x: int, city_y: int, region_size: int) -> Dictionary:
 	var source_fx: float = ((float(city_x) + 0.5) / float(city_world.width)) * float(region_size) - 0.5
@@ -1271,9 +966,10 @@ func update_resource_bar_values() -> void:
 			continue
 
 		var resource: String = resource_order[i]
-		var amount := WorldData.get_total_stored_city_resource_amount(resource)
+		var amount := WorldData.get_total_public_city_resource_amount(resource)
+		var capacity := WorldData.get_total_public_city_resource_storage_capacity(resource)
 
-		resource_amount_labels[i].text = str(amount)
+		resource_amount_labels[i].text = str(amount) + "/" + str(capacity)
 
 func create_city_maps_menu() -> void:
 	city_maps_button = Button.new()
@@ -1760,6 +1456,40 @@ func layout_object_info_storage_rows(panel_width: float) -> void:
 			amount_label.position = Vector2(44.0, row_y)
 			amount_label.size = Vector2(panel_width - 58.0, row_height)
 
+func get_container_type_display_name(container_type: String) -> String:
+	match container_type:
+		WorldData.CONTAINER_TYPE_PUBLIC_CITY_STORAGE:
+			return "Public city storage"
+		WorldData.CONTAINER_TYPE_PRIVATE_HOME_STORAGE:
+			return "Private home storage"
+		WorldData.CONTAINER_TYPE_WORKPLACE_STORAGE:
+			return "Workplace storage"
+		WorldData.CONTAINER_TYPE_PERSONAL_INVENTORY:
+			return "Personal inventory"
+		WorldData.CONTAINER_TYPE_GROUND_PILE:
+			return "Ground pile"
+		_:
+			return "None"
+
+
+func get_storage_panel_title_for_object(city_object: Dictionary) -> String:
+	var container_type := WorldData.get_city_object_container_type(city_object)
+
+	match container_type:
+		WorldData.CONTAINER_TYPE_PUBLIC_CITY_STORAGE:
+			return "Public Storage"
+		WorldData.CONTAINER_TYPE_PRIVATE_HOME_STORAGE:
+			return "Private Storage"
+		WorldData.CONTAINER_TYPE_WORKPLACE_STORAGE:
+			return "Workplace Storage"
+		WorldData.CONTAINER_TYPE_PERSONAL_INVENTORY:
+			return "Personal Inventory"
+		WorldData.CONTAINER_TYPE_GROUND_PILE:
+			return "Ground Pile"
+		_:
+			return "Storage"
+
+
 func update_selected_object_panel() -> void:
 	if object_info_panel == null:
 		return
@@ -1788,12 +1518,45 @@ func update_selected_object_panel() -> void:
 	var top_left: Vector2i = city_object.get("top_left", Vector2i(-1, -1))
 	var size_tiles: Vector2i = city_object.get("size", Vector2i.ZERO)
 
-	object_info_body_label.text = (
-		"Object: " + get_city_object_display_name(city_object) + "\n"
-		+ "Owner: " + str(city_object.get("owner", "none")) + "\n"
-		+ "Position: " + str(top_left.x) + ", " + str(top_left.y) + "\n"
-		+ "Size: " + str(size_tiles.x) + " x " + str(size_tiles.y)
-	)
+	var container_type := WorldData.get_city_object_container_type(city_object)
+	var container_text := get_container_type_display_name(container_type)
+
+	var body_lines: Array = [
+		"Object: " + get_city_object_display_name(city_object)
+	]
+
+	if object_type == WorldData.CITY_OBJECT_CITY_CENTER:
+		WorldData.ensure_starting_city_population()
+		body_lines.append("Population: " + str(WorldData.get_city_population_count()))
+		body_lines.append(
+			"Housed: "
+			+ str(WorldData.get_city_housed_citizen_count())
+			+ " / "
+			+ str(WorldData.get_total_city_resident_capacity())
+		)
+		body_lines.append("Unemployed: " + str(WorldData.get_city_unemployed_citizen_count()))
+	elif object_type == WorldData.CITY_OBJECT_HOUSE:
+		body_lines.append(
+			"Residents: "
+			+ str(WorldData.get_city_object_resident_count(city_object))
+			+ " / "
+			+ str(WorldData.get_city_object_resident_capacity(city_object))
+		)
+
+	body_lines.append("Owner: " + str(city_object.get("owner", "none")))
+	body_lines.append("Container: " + container_text)
+	body_lines.append("Position: " + str(top_left.x) + ", " + str(top_left.y))
+	body_lines.append("Size: " + str(size_tiles.x) + " x " + str(size_tiles.y))
+
+	var body_text := ""
+
+	for line_index in range(body_lines.size()):
+		if line_index > 0:
+			body_text += "\n"
+
+		body_text += str(body_lines[line_index])
+
+	object_info_body_label.text = body_text
 	
 	update_object_info_storage_display(city_object)
 
@@ -1805,6 +1568,7 @@ func update_object_info_storage_display(city_object: Dictionary) -> void:
 		return
 
 	if object_info_storage_title_label != null:
+		object_info_storage_title_label.text = get_storage_panel_title_for_object(city_object)
 		object_info_storage_title_label.visible = true
 
 	for i in range(object_info_storage_icons.size()):
@@ -1818,6 +1582,7 @@ func update_object_info_storage_display(city_object: Dictionary) -> void:
 
 		var resource: String = storage_resources[i]
 		var amount := WorldData.get_city_object_stored_resource_amount(city_object, resource)
+		var capacity := WorldData.get_city_object_storage_capacity_for_resource(city_object, resource)
 
 		var icon := object_info_storage_icons[i]
 		icon.visible = true
@@ -1826,7 +1591,7 @@ func update_object_info_storage_display(city_object: Dictionary) -> void:
 		if i < object_info_storage_amount_labels.size():
 			var amount_label := object_info_storage_amount_labels[i]
 			amount_label.visible = true
-			amount_label.text = resource.capitalize() + ": " + str(amount)
+			amount_label.text = resource.capitalize() + ": " + str(amount) + " / " + str(capacity)
 
 
 func hide_object_info_storage_display() -> void:
@@ -3504,11 +3269,14 @@ func get_city_debug_object_text(city_object: Dictionary) -> String:
 	if city_object.has("id"):
 		object_id_text = str(city_object["id"])
 
+	var container_type := WorldData.get_city_object_container_type(city_object)
+
 	return (
 		"Object under cursor: " + get_city_object_display_name(city_object) + "\n"
 		+ "Object type: " + object_type + "\n"
 		+ "Object id: " + object_id_text + "\n"
 		+ "Owner: " + str(city_object.get("owner", "none")) + "\n"
+		+ "Container: " + get_container_type_display_name(container_type) + "\n"
 		+ "Object pos: " + str(top_left.x) + ", " + str(top_left.y) + "\n"
 		+ "Object size: " + str(size_tiles.x) + " x " + str(size_tiles.y) + "\n"
 	)
