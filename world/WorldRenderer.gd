@@ -8,14 +8,11 @@ enum RegionCursorState {
 
 var view_mode: int = MapVisuals.ViewMode.BIOME
 var world_map_texture: ImageTexture
-var world_map_mode_textures: Dictionary = {}
-var world_texture_warmup_running: bool = false
-var world_texture_warmup_token: int = 0
+var world_texture_cache := MapTextureCache.new()
 
 const WORLD_CURSOR_LOOK_FILL_COLOR: Color = Color(1.0, 1.0, 1.0, 0.08)
 const WORLD_CURSOR_LOOK_BORDER_COLOR: Color = Color(1.0, 1.0, 1.0, 0.58)
 const WORLD_CURSOR_LOOK_GRID_COLOR: Color = Color(1.0, 1.0, 1.0, 0.20)
-const WORLD_TEXTURE_WARMUP_ROWS_PER_FRAME: int = 24
 var settings := MapSettings.new()
 var world: WorldData
 var generator := WorldGenerator.new()
@@ -78,6 +75,7 @@ func _ready():
 
 	RenderingServer.set_default_clear_color(abyss_color)
 
+	setup_world_texture_cache()
 	create_hover_border_line()
 	create_region_selection_lines()
 	create_debug_panel()
@@ -91,6 +89,46 @@ func _ready():
 		world = null
 		print("World screen loaded. Press Generate World.")
 		queue_redraw()
+
+func _draw():
+	if world == null:
+		return
+
+	draw_abyss_background()
+	draw_world_map_texture()
+
+
+func _process(_delta):
+	update_hovered_tile()
+
+func _exit_tree() -> void:
+	if world_texture_cache != null:
+		world_texture_cache.cancel_warmup()
+
+func setup_world_texture_cache() -> void:
+	world_texture_cache.setup(
+		self,
+		"World",
+		24,
+		Callable(self, "get_tile_color_for_mode"),
+		Callable(self, "get_all_world_view_modes"),
+		Callable(self, "get_world_view_mode_name_for_mode"),
+		Callable(self, "has_valid_saved_world_map_texture_cache"),
+		Callable(self, "get_saved_world_map_texture_cache"),
+		Callable(self, "store_saved_world_map_texture_cache")
+	)
+
+
+func has_valid_saved_world_map_texture_cache(source_world: WorldData) -> bool:
+	return WorldData.has_valid_world_map_texture_cache(source_world)
+
+
+func get_saved_world_map_texture_cache() -> Dictionary:
+	return WorldData.get_world_map_texture_cache()
+
+
+func store_saved_world_map_texture_cache(source_world: WorldData, texture_cache: Dictionary) -> void:
+	WorldData.store_world_map_texture_cache(source_world, texture_cache)
 
 func load_locked_world_save() -> void:
 	world = WorldData.official_world
@@ -263,9 +301,6 @@ func is_tile_coastal(tile_x: int, tile_y: int) -> bool:
 			return true
 
 	return false
-
-func _process(_delta):
-	update_hovered_tile()
 
 func update_hovered_tile() -> void:
 	if world == null:
@@ -503,29 +538,17 @@ func set_world_view_mode(new_view_mode: int) -> void:
 
 	print("View: ", get_view_mode_name())
 
-	if world_texture_warmup_running:
-		world_texture_warmup_token += 1
-		world_texture_warmup_running = false
+	if world_texture_cache != null:
+		world_texture_cache.cancel_warmup()
 
 	apply_cached_world_map_texture()
 	start_world_texture_warmup()
 
 	update_debug_panel_text()
 	queue_redraw()
-	
-func _exit_tree() -> void:
-	world_texture_warmup_token += 1
-	world_texture_warmup_running = false
 
 func get_all_world_view_modes() -> Array[int]:
 	return MapVisuals.get_all_view_modes()
-
-func _draw():
-	if world == null:
-		return
-
-	draw_abyss_background()
-	draw_world_map_texture()
 
 func draw_world_map_texture() -> void:
 	if world_map_texture == null:
@@ -608,118 +631,38 @@ func get_tile_color_for_mode(tile: Dictionary, mode: int) -> Color:
 	return MapVisuals.get_tile_color_for_mode(tile, mode, 0.0)
 
 func rebuild_world_map_textures() -> void:
-	if world == null:
-		world_map_texture = null
-		world_map_mode_textures.clear()
-		return
+	if world_texture_cache == null:
+		setup_world_texture_cache()
 
-	if WorldData.has_valid_world_map_texture_cache(world):
-		world_map_mode_textures = WorldData.get_world_map_texture_cache()
-	else:
-		world_map_mode_textures.clear()
+	world_map_texture = world_texture_cache.rebuild(world, view_mode)
 
-	ensure_world_map_texture_for_mode(view_mode)
-	apply_cached_world_map_texture()
-
-	WorldData.store_world_map_texture_cache(world, world_map_mode_textures)
-
-	start_world_texture_warmup()
-
-	print("World map texture ready: ", get_view_mode_name())
 
 func ensure_world_map_texture_for_mode(mode: int) -> void:
-	if world == null:
-		return
+	if world_texture_cache == null:
+		setup_world_texture_cache()
 
-	if world_map_mode_textures.has(mode):
-		return
+	world_texture_cache.ensure_texture_for_mode(world, mode)
 
-	world_map_mode_textures[mode] = build_world_map_texture_for_mode(mode)
-	WorldData.store_world_map_texture_cache(world, world_map_mode_textures)
 
 func start_world_texture_warmup() -> void:
-	if world == null:
-		return
+	if world_texture_cache == null:
+		setup_world_texture_cache()
 
-	if world_texture_warmup_running:
-		return
+	world_texture_cache.start_warmup(world)
 
-	world_texture_warmup_token += 1
-	warm_world_texture_cache_async(world_texture_warmup_token)
-
-
-func warm_world_texture_cache_async(token: int) -> void:
-	world_texture_warmup_running = true
-
-	await get_tree().process_frame
-	await get_tree().process_frame
-
-	var modes := get_all_world_view_modes()
-
-	for mode in modes:
-		if token != world_texture_warmup_token:
-			world_texture_warmup_running = false
-			return
-
-		if not is_inside_tree():
-			world_texture_warmup_running = false
-			return
-
-		if world == null:
-			world_texture_warmup_running = false
-			return
-
-		if world_map_mode_textures.has(mode):
-			continue
-
-		var image := Image.create(world.width, world.height, false, Image.FORMAT_RGBA8)
-
-		for y in range(world.height):
-			var row: Array = world.tiles[y]
-
-			for x in range(world.width):
-				var tile: Dictionary = row[x]
-				image.set_pixel(x, y, get_tile_color_for_mode(tile, mode))
-
-			if y % WORLD_TEXTURE_WARMUP_ROWS_PER_FRAME == 0:
-				await get_tree().process_frame
-
-				if token != world_texture_warmup_token:
-					world_texture_warmup_running = false
-					return
-
-				if not is_inside_tree():
-					world_texture_warmup_running = false
-					return
-
-		world_map_mode_textures[mode] = ImageTexture.create_from_image(image)
-		WorldData.store_world_map_texture_cache(world, world_map_mode_textures)
-
-		print("Warmed world map texture: ", get_world_view_mode_name_for_mode(mode))
-
-	world_texture_warmup_running = false
-	print("World map texture warmup complete.")
 
 func build_world_map_texture_for_mode(mode: int) -> ImageTexture:
-	var image := Image.create(world.width, world.height, false, Image.FORMAT_RGBA8)
+	if world_texture_cache == null:
+		setup_world_texture_cache()
 
-	for y in range(world.height):
-		var row: Array = world.tiles[y]
-
-		for x in range(world.width):
-			var tile: Dictionary = row[x]
-			image.set_pixel(x, y, get_tile_color_for_mode(tile, mode))
-
-	return ImageTexture.create_from_image(image)
+	return world_texture_cache.build_texture_for_mode(world, mode)
 
 
 func apply_cached_world_map_texture() -> void:
-	if world == null:
-		world_map_texture = null
-		return
+	if world_texture_cache == null:
+		setup_world_texture_cache()
 
-	ensure_world_map_texture_for_mode(view_mode)
-	world_map_texture = world_map_mode_textures[view_mode]
+	world_map_texture = world_texture_cache.get_texture_for_mode(world, view_mode)
 
 func get_world_view_mode_name_for_mode(mode: int) -> String:
 	return MapVisuals.get_view_mode_name(mode)

@@ -1,13 +1,14 @@
 extends Control
 
 @export_file("*.tscn") var world_scene_path: String = "res://scenes/WorldScene.tscn"
+@export_file("*.tscn") var city_scene_path: String = "res://scenes/CityScreen.tscn"
 
 var background: ColorRect
 var title_label: Label
 var button_container: VBoxContainer
 var play_button: Button
 var exit_button: Button
-
+var dev_city_button: Button
 
 func _ready() -> void:
 	create_background()
@@ -77,14 +78,26 @@ func create_buttons() -> void:
 	add_child(button_container)
 
 	play_button = create_menu_button("Play")
+	dev_city_button = create_menu_button("Dev City")
 	exit_button = create_menu_button("Exit")
 
 	button_container.add_child(play_button)
+
+	if OS.is_debug_build():
+		button_container.add_child(dev_city_button)
+
 	button_container.add_child(exit_button)
 
 	play_button.pressed.connect(on_play_pressed)
+	dev_city_button.pressed.connect(on_dev_city_pressed)
 	exit_button.pressed.connect(on_exit_pressed)
 
+func on_dev_city_pressed() -> void:
+	DevCityLauncher.launch_dev_city(
+		get_tree(),
+		city_scene_path,
+		"res://scenes/MainMenu.tscn"
+	)
 
 func create_menu_button(button_text: String) -> Button:
 	var button: Button = Button.new()

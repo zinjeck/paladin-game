@@ -30,9 +30,7 @@ var resource_amount_labels: Array[Label] = []
 var build_option_button: Button
 var build_option_icon: Panel
 var city_terrain_texture: ImageTexture
-var city_map_mode_textures: Dictionary = {}
-var city_texture_warmup_running: bool = false
-var city_texture_warmup_token: int = 0
+var city_texture_cache := MapTextureCache.new()
 var debug_panel_ui: DebugPanel
 var debug_panel_position: Vector2 = Vector2.ZERO
 var debug_panel_padding: Vector2 = Vector2(12.0, 10.0)
@@ -40,7 +38,6 @@ var debug_panel_min_size: Vector2 = Vector2(330.0, 170.0)
 const DEFAULT_CITY_OBJECT_FRAME_COLOR: Color = Color(0.32, 0.30, 0.24, 0.95)
 const DEFAULT_CITY_OBJECT_FILL_COLOR: Color = Color(0.86, 0.84, 0.76, 0.55)
 const DEFAULT_CITY_OBJECT_FRAME_THICKNESS: float = 0.35
-const CITY_TEXTURE_WARMUP_ROWS_PER_FRAME: int = 16
 var is_road_placement_active: bool = false
 var is_road_dragging: bool = false
 var road_preview_tiles: Array = []
@@ -58,11 +55,14 @@ var hovered_city_tile: Vector2i = Vector2i(-1, -1)
 var previous_hovered_city_tile: Vector2i = Vector2i(-1, -1)
 var hover_tile_outline: Panel
 var selected_city_object_id: int = -1
+var observed_city_storage_version: int = -1
 var active_city_object_placement: Dictionary = {}
 var object_info_panel: Panel
 var object_info_title_label: Label
 var object_info_body_label: Label
-
+var object_info_storage_title_label: Label
+var object_info_storage_icons: Array[ColorRect] = []
+var object_info_storage_amount_labels: Array[Label] = []
 var object_selection_box_panel: Panel
 var is_object_selection_dragging: bool = false
 var object_selection_drag_start_screen: Vector2 = Vector2.ZERO
@@ -88,6 +88,7 @@ func _ready() -> void:
 	texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
 	RenderingServer.set_default_clear_color(Color.BLACK)
 
+	setup_city_texture_cache()
 	generate_city_world()
 	clear_invalid_old_city_foundation_state()
 	ensure_city_foundation_object_exists()
@@ -97,6 +98,185 @@ func _ready() -> void:
 	create_debug_panel()
 	update_debug_panel_text()
 	queue_redraw()
+
+
+func _process(_delta: float) -> void:
+	var current_hovered_tile := get_city_tile_under_mouse()
+
+	if current_hovered_tile != hovered_city_tile:
+		hovered_city_tile = current_hovered_tile
+		update_debug_panel_text()
+		queue_redraw()
+
+	if is_road_placement_active:
+		update_road_cursor_icon_position()
+
+	if is_road_dragging:
+		update_road_drag_selection()
+
+	if observed_city_storage_version != WorldData.city_storage_version:
+		observed_city_storage_version = WorldData.city_storage_version
+		update_resource_bar_values()
+		update_selected_object_panel()
+		update_debug_panel_text()
+
+func _input(event: InputEvent) -> void:
+	if event is InputEventKey and event.pressed and not event.echo:
+		var key_event: InputEventKey = event
+
+		var is_debug_toggle_key: bool = (
+			key_event.keycode == KEY_QUOTELEFT
+			or key_event.physical_keycode == KEY_QUOTELEFT
+			or key_event.unicode == 96
+			or key_event.unicode == 126
+		)
+
+		if is_debug_toggle_key:
+			toggle_debug_mode()
+			get_viewport().set_input_as_handled()
+			return
+
+		if WorldData.debug_mode_enabled:
+			var debug_resource := get_debug_stockpile_resource_for_key(key_event)
+
+			if debug_resource != "":
+				add_debug_resource_to_selected_stockpile(debug_resource, 10)
+				get_viewport().set_input_as_handled()
+				return
+
+		var requested_view_mode: int = MapVisuals.get_view_mode_for_keycode(key_event.keycode)
+
+		if requested_view_mode != MapVisuals.INVALID_VIEW_MODE:
+			set_city_view_mode(requested_view_mode)
+			get_viewport().set_input_as_handled()
+			return
+
+	if event is InputEventMouseButton:
+		if event.pressed and event.button_index == MOUSE_BUTTON_RIGHT:
+			if is_road_placement_active:
+				cancel_road_placement()
+				close_build_menu()
+				get_viewport().set_input_as_handled()
+				return
+
+			if has_active_city_object_placement():
+				cancel_active_city_object_placement()
+				close_all_city_object_menus()
+				get_viewport().set_input_as_handled()
+				return
+
+			if city_map_menu_open:
+				close_city_map_menu()
+				get_viewport().set_input_as_handled()
+				return
+
+			if build_option_button != null and build_option_button.visible:
+				close_build_menu()
+				get_viewport().set_input_as_handled()
+				return
+
+			if has_open_city_object_menu():
+				close_all_city_object_menus()
+				get_viewport().set_input_as_handled()
+				return
+
+			if selected_city_object_id != -1:
+				clear_selected_city_object()
+				get_viewport().set_input_as_handled()
+				return
+
+func _unhandled_input(event: InputEvent) -> void:
+	if event is InputEventMouseButton:
+		if event.button_index == MOUSE_BUTTON_LEFT:
+			if has_active_city_object_placement() and event.pressed:
+				confirm_active_city_object_placement()
+				get_viewport().set_input_as_handled()
+				return
+
+			if is_road_placement_active:
+				if event.pressed:
+					handle_road_left_mouse_pressed()
+				else:
+					handle_road_left_mouse_released()
+
+				get_viewport().set_input_as_handled()
+				return
+
+			if event.pressed:
+				start_object_selection_drag(event.position)
+			else:
+				finish_object_selection_drag(event.position)
+
+			get_viewport().set_input_as_handled()
+			return
+
+	if event is InputEventMouseMotion:
+		if is_object_selection_dragging:
+			update_object_selection_drag(event.position)
+			get_viewport().set_input_as_handled()
+			return
+
+func get_debug_stockpile_resource_for_key(key_event: InputEventKey) -> String:
+	if key_event.keycode == KEY_H or key_event.physical_keycode == KEY_H:
+		return WorldData.RESOURCE_FISH
+
+	if key_event.keycode == KEY_J or key_event.physical_keycode == KEY_J:
+		return WorldData.RESOURCE_COAL
+
+	if key_event.keycode == KEY_K or key_event.physical_keycode == KEY_K:
+		return WorldData.RESOURCE_IRON
+
+	if key_event.keycode == KEY_L or key_event.physical_keycode == KEY_L:
+		return WorldData.RESOURCE_GOLD
+
+	return ""
+
+
+func add_debug_resource_to_selected_stockpile(resource: String, amount_delta: int) -> void:
+	if not WorldData.debug_mode_enabled:
+		return
+
+	if selected_city_object_id < 0:
+		print("Debug storage add blocked: select a stockpile first.")
+		return
+
+	var city_object := get_city_object_by_id(selected_city_object_id)
+
+	if city_object.is_empty():
+		print("Debug storage add blocked: selected object not found.")
+		return
+
+	var object_type: String = str(city_object.get("type", ""))
+
+	if object_type != WorldData.CITY_OBJECT_STOCKPILE:
+		print("Debug storage add blocked: selected object is not a stockpile.")
+		return
+
+	if not WorldData.can_city_object_store_resource(city_object, resource):
+		print("Debug storage add blocked: stockpile cannot store resource: ", resource)
+		return
+
+	var current_amount := WorldData.get_city_object_stored_resource_amount(city_object, resource)
+	var next_amount := current_amount + amount_delta
+
+	WorldData.set_city_object_stored_resource_amount(
+		selected_city_object_id,
+		resource,
+		next_amount
+	)
+
+	update_resource_bar_values()
+	update_selected_object_panel()
+	update_debug_panel_text()
+
+	print(
+		"Debug added +",
+		amount_delta,
+		" ",
+		resource,
+		" to Stockpile #",
+		selected_city_object_id
+	)
 
 func generate_city_world() -> void:
 	if WorldData.has_active_city_save():
@@ -534,6 +714,26 @@ func set_road_option_selected(is_selected: bool) -> void:
 
 	build_option_icon.add_theme_stylebox_override("panel", icon_style)
 
+func update_build_button_state() -> void:
+	var can_build := WorldData.can_build_in_city()
+
+	if bottom_button_two != null:
+		bottom_button_two.disabled = not can_build
+		bottom_button_two.text = "2"
+
+	if build_option_button != null:
+		build_option_button.disabled = not can_build
+
+		if not can_build:
+			build_option_button.visible = false
+
+
+func is_placing_city_object_type(object_type: String) -> bool:
+	if not has_active_city_object_placement():
+		return false
+
+	return str(active_city_object_placement.get("type", "")) == object_type
+
 func create_bottom_city_buttons() -> void:
 	bottom_button_one = Button.new()
 	bottom_button_one.text = "1"
@@ -767,7 +967,7 @@ func update_resource_bar_values() -> void:
 			continue
 
 		var resource: String = resource_order[i]
-		var amount := WorldData.get_city_resource_amount(resource)
+		var amount := WorldData.get_total_stored_city_resource_amount(resource)
 
 		resource_amount_labels[i].text = str(amount)
 
@@ -927,8 +1127,8 @@ func apply_square_button_style(
 	button.add_theme_font_size_override("font_size", 14)
 
 func _exit_tree() -> void:
-	city_texture_warmup_token += 1
-	city_texture_warmup_running = false
+	if city_texture_cache != null:
+		city_texture_cache.cancel_warmup()
 
 func on_city_map_mode_button_pressed(mode: int) -> void:
 	set_city_view_mode(mode)
@@ -942,9 +1142,8 @@ func set_city_view_mode(mode: int) -> void:
 
 	print("City map mode: ", get_city_map_mode_name(city_view_mode))
 
-	if city_texture_warmup_running:
-		city_texture_warmup_token += 1
-		city_texture_warmup_running = false
+	if city_texture_cache != null:
+		city_texture_cache.cancel_warmup()
 
 	apply_cached_city_map_mode_texture()
 	start_city_texture_warmup()
@@ -1183,7 +1382,34 @@ func create_object_info_panel() -> void:
 	object_info_body_label.add_theme_color_override("font_color", Color(0.82, 0.82, 0.82, 1.0))
 	object_info_body_label.add_theme_font_size_override("font_size", 13)
 	object_info_panel.add_child(object_info_body_label)
+	create_object_info_storage_rows()
 
+func create_object_info_storage_rows() -> void:
+	object_info_storage_title_label = Label.new()
+	object_info_storage_title_label.text = "Storage"
+	object_info_storage_title_label.visible = false
+	object_info_storage_title_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	object_info_storage_title_label.add_theme_color_override("font_color", Color(0.88, 0.96, 1.0, 1.0))
+	object_info_storage_title_label.add_theme_font_size_override("font_size", 15)
+	object_info_panel.add_child(object_info_storage_title_label)
+
+	object_info_storage_icons.clear()
+	object_info_storage_amount_labels.clear()
+
+	for i in range(4):
+		var icon := ColorRect.new()
+		icon.visible = false
+		icon.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		object_info_panel.add_child(icon)
+		object_info_storage_icons.append(icon)
+
+		var amount_label := Label.new()
+		amount_label.visible = false
+		amount_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		amount_label.add_theme_color_override("font_color", Color(0.92, 0.92, 0.92, 1.0))
+		amount_label.add_theme_font_size_override("font_size", 13)
+		object_info_panel.add_child(amount_label)
+		object_info_storage_amount_labels.append(amount_label)
 
 func layout_object_info_panel(viewport_size: Vector2) -> void:
 	if object_info_panel == null:
@@ -1205,8 +1431,30 @@ func layout_object_info_panel(viewport_size: Vector2) -> void:
 
 	if object_info_body_label != null:
 		object_info_body_label.position = Vector2(14.0, 56.0)
-		object_info_body_label.size = Vector2(panel_width - 28.0, panel_height - 70.0)
+		object_info_body_label.size = Vector2(panel_width - 28.0, 90.0)
 
+	layout_object_info_storage_rows(panel_width)
+
+func layout_object_info_storage_rows(panel_width: float) -> void:
+	if object_info_storage_title_label != null:
+		object_info_storage_title_label.position = Vector2(14.0, 158.0)
+		object_info_storage_title_label.size = Vector2(panel_width - 28.0, 24.0)
+
+	var row_start_y := 190.0
+	var row_height := 28.0
+	var icon_size := 16.0
+
+	for i in range(object_info_storage_icons.size()):
+		var row_y := row_start_y + float(i) * row_height
+
+		var icon := object_info_storage_icons[i]
+		icon.position = Vector2(18.0, row_y + 4.0)
+		icon.size = Vector2(icon_size, icon_size)
+
+		if i < object_info_storage_amount_labels.size():
+			var amount_label := object_info_storage_amount_labels[i]
+			amount_label.position = Vector2(44.0, row_y)
+			amount_label.size = Vector2(panel_width - 58.0, row_height)
 
 func update_selected_object_panel() -> void:
 	if object_info_panel == null:
@@ -1214,12 +1462,14 @@ func update_selected_object_panel() -> void:
 
 	if selected_city_object_id < 0:
 		object_info_panel.visible = false
+		hide_object_info_storage_display()
 		return
 
 	var city_object: Dictionary = get_city_object_by_id(selected_city_object_id)
 
 	if city_object.is_empty():
 		object_info_panel.visible = false
+		hide_object_info_storage_display()
 		return
 
 	object_info_panel.visible = true
@@ -1240,6 +1490,50 @@ func update_selected_object_panel() -> void:
 		+ "Position: " + str(top_left.x) + ", " + str(top_left.y) + "\n"
 		+ "Size: " + str(size_tiles.x) + " x " + str(size_tiles.y)
 	)
+	
+	update_object_info_storage_display(city_object)
+
+func update_object_info_storage_display(city_object: Dictionary) -> void:
+	var storage_resources := WorldData.get_city_object_storage_resources(city_object)
+
+	if storage_resources.is_empty():
+		hide_object_info_storage_display()
+		return
+
+	if object_info_storage_title_label != null:
+		object_info_storage_title_label.visible = true
+
+	for i in range(object_info_storage_icons.size()):
+		if i >= storage_resources.size():
+			object_info_storage_icons[i].visible = false
+
+			if i < object_info_storage_amount_labels.size():
+				object_info_storage_amount_labels[i].visible = false
+
+			continue
+
+		var resource: String = storage_resources[i]
+		var amount := WorldData.get_city_object_stored_resource_amount(city_object, resource)
+
+		var icon := object_info_storage_icons[i]
+		icon.visible = true
+		icon.color = get_resource_color(resource)
+
+		if i < object_info_storage_amount_labels.size():
+			var amount_label := object_info_storage_amount_labels[i]
+			amount_label.visible = true
+			amount_label.text = resource.capitalize() + ": " + str(amount)
+
+
+func hide_object_info_storage_display() -> void:
+	if object_info_storage_title_label != null:
+		object_info_storage_title_label.visible = false
+
+	for icon in object_info_storage_icons:
+		icon.visible = false
+
+	for amount_label in object_info_storage_amount_labels:
+		amount_label.visible = false
 
 func create_object_selection_box_visual() -> void:
 	object_selection_box_panel = Panel.new()
@@ -1508,108 +1802,6 @@ func cancel_road_placement() -> void:
 
 func cancel_build_placement() -> void:
 	cancel_road_placement()
-
-func _process(_delta: float) -> void:
-	var current_hovered_tile := get_city_tile_under_mouse()
-
-	if current_hovered_tile != hovered_city_tile:
-		hovered_city_tile = current_hovered_tile
-		update_debug_panel_text()
-		queue_redraw()
-
-	if is_road_placement_active:
-		update_road_cursor_icon_position()
-
-	if is_road_dragging:
-		update_road_drag_selection()
-
-func _input(event: InputEvent) -> void:
-	if event is InputEventKey and event.pressed and not event.echo:
-		var key_event: InputEventKey = event
-
-		var is_debug_toggle_key: bool = (
-			key_event.keycode == KEY_QUOTELEFT
-			or key_event.physical_keycode == KEY_QUOTELEFT
-			or key_event.unicode == 96
-			or key_event.unicode == 126
-		)
-
-		if is_debug_toggle_key:
-			toggle_debug_mode()
-			get_viewport().set_input_as_handled()
-			return
-
-		var requested_view_mode: int = MapVisuals.get_view_mode_for_keycode(key_event.keycode)
-
-		if requested_view_mode != MapVisuals.INVALID_VIEW_MODE:
-			set_city_view_mode(requested_view_mode)
-			get_viewport().set_input_as_handled()
-			return
-
-	if event is InputEventMouseButton:
-		if event.pressed and event.button_index == MOUSE_BUTTON_RIGHT:
-			if is_road_placement_active:
-				cancel_road_placement()
-				close_build_menu()
-				get_viewport().set_input_as_handled()
-				return
-
-			if has_active_city_object_placement():
-				cancel_active_city_object_placement()
-				close_all_city_object_menus()
-				get_viewport().set_input_as_handled()
-				return
-
-			if city_map_menu_open:
-				close_city_map_menu()
-				get_viewport().set_input_as_handled()
-				return
-
-			if build_option_button != null and build_option_button.visible:
-				close_build_menu()
-				get_viewport().set_input_as_handled()
-				return
-
-			if has_open_city_object_menu():
-				close_all_city_object_menus()
-				get_viewport().set_input_as_handled()
-				return
-
-			if selected_city_object_id != -1:
-				clear_selected_city_object()
-				get_viewport().set_input_as_handled()
-				return
-
-func _unhandled_input(event: InputEvent) -> void:
-	if event is InputEventMouseButton:
-		if event.button_index == MOUSE_BUTTON_LEFT:
-			if has_active_city_object_placement() and event.pressed:
-				confirm_active_city_object_placement()
-				get_viewport().set_input_as_handled()
-				return
-
-			if is_road_placement_active:
-				if event.pressed:
-					handle_road_left_mouse_pressed()
-				else:
-					handle_road_left_mouse_released()
-
-				get_viewport().set_input_as_handled()
-				return
-
-			if event.pressed:
-				start_object_selection_drag(event.position)
-			else:
-				finish_object_selection_drag(event.position)
-
-			get_viewport().set_input_as_handled()
-			return
-
-	if event is InputEventMouseMotion:
-		if is_object_selection_dragging:
-			update_object_selection_drag(event.position)
-			get_viewport().set_input_as_handled()
-			return
 
 func confirm_active_city_object_placement() -> void:
 	if city_world == null:
@@ -2006,148 +2198,71 @@ func confirm_road_preview() -> void:
 
 	queue_redraw()
 
+func setup_city_texture_cache() -> void:
+	city_texture_cache.setup(
+		self,
+		"City",
+		16,
+		Callable(self, "get_city_tile_color_for_mode"),
+		Callable(self, "get_all_city_view_modes"),
+		Callable(self, "get_city_map_mode_name"),
+		Callable(self, "has_valid_saved_city_map_texture_cache"),
+		Callable(self, "get_saved_city_map_texture_cache"),
+		Callable(self, "store_saved_city_map_texture_cache")
+	)
+
+
+func has_valid_saved_city_map_texture_cache(source_world: WorldData) -> bool:
+	return WorldData.has_valid_city_map_texture_cache(source_world, city_seed)
+
+
+func get_saved_city_map_texture_cache() -> Dictionary:
+	return WorldData.get_city_map_texture_cache()
+
+
+func store_saved_city_map_texture_cache(source_world: WorldData, texture_cache: Dictionary) -> void:
+	WorldData.store_city_map_texture_cache(source_world, city_seed, texture_cache)
+
 func rebuild_city_terrain_texture() -> void:
-	if city_world == null:
-		city_terrain_texture = null
-		city_map_mode_textures.clear()
-		return
+	if city_texture_cache == null:
+		setup_city_texture_cache()
 
-	if WorldData.has_valid_city_map_texture_cache(city_world, city_seed):
-		city_map_mode_textures = WorldData.get_city_map_texture_cache()
-	else:
-		city_map_mode_textures.clear()
+	city_terrain_texture = city_texture_cache.rebuild(city_world, city_view_mode)
 
-	ensure_city_map_texture_for_mode(city_view_mode)
-	apply_cached_city_map_mode_texture()
-
-	WorldData.store_city_map_texture_cache(city_world, city_seed, city_map_mode_textures)
-
-	start_city_texture_warmup()
-
-	print("City map texture ready: ", get_city_map_mode_name(city_view_mode))
 
 func ensure_city_map_texture_for_mode(mode: int) -> void:
-	if city_world == null:
-		return
+	if city_texture_cache == null:
+		setup_city_texture_cache()
 
-	if city_map_mode_textures.has(mode):
-		return
+	city_texture_cache.ensure_texture_for_mode(city_world, mode)
 
-	city_map_mode_textures[mode] = build_city_map_mode_texture(mode)
-	WorldData.store_city_map_texture_cache(city_world, city_seed, city_map_mode_textures)
 
 func rebuild_all_city_map_mode_textures() -> void:
-	if city_world == null:
-		return
+	if city_texture_cache == null:
+		setup_city_texture_cache()
 
-	city_map_mode_textures.clear()
-
-	for mode in get_all_city_view_modes():
-		city_map_mode_textures[mode] = build_city_map_mode_texture(mode)
+	city_texture_cache.rebuild_all(city_world)
 
 
 func build_city_map_mode_texture(mode: int) -> ImageTexture:
-	var image := Image.create(city_world.width, city_world.height, false, Image.FORMAT_RGBA8)
+	if city_texture_cache == null:
+		setup_city_texture_cache()
 
-	for y in range(city_world.height):
-		var row: Array = city_world.tiles[y]
+	return city_texture_cache.build_texture_for_mode(city_world, mode)
 
-		for x in range(city_world.width):
-			var tile: Dictionary = row[x]
-			image.set_pixel(x, y, get_city_tile_color_for_mode(tile, mode))
-
-	return ImageTexture.create_from_image(image)
-
-func update_build_button_state() -> void:
-	var can_build := WorldData.can_build_in_city()
-
-	if bottom_button_two != null:
-		bottom_button_two.disabled = not can_build
-		bottom_button_two.text = "2"
-
-	if build_option_button != null:
-		build_option_button.disabled = not can_build
-
-		if not can_build:
-			build_option_button.visible = false
-
-
-func is_placing_city_object_type(object_type: String) -> bool:
-	if not has_active_city_object_placement():
-		return false
-
-	return str(active_city_object_placement.get("type", "")) == object_type
 
 func apply_cached_city_map_mode_texture() -> void:
-	if city_world == null:
-		city_terrain_texture = null
-		return
+	if city_texture_cache == null:
+		setup_city_texture_cache()
 
-	ensure_city_map_texture_for_mode(city_view_mode)
-	city_terrain_texture = city_map_mode_textures[city_view_mode]
+	city_terrain_texture = city_texture_cache.get_texture_for_mode(city_world, city_view_mode)
+
 
 func start_city_texture_warmup() -> void:
-	if city_world == null:
-		return
+	if city_texture_cache == null:
+		setup_city_texture_cache()
 
-	if city_texture_warmup_running:
-		return
-
-	city_texture_warmup_token += 1
-	warm_city_texture_cache_async(city_texture_warmup_token)
-
-
-func warm_city_texture_cache_async(token: int) -> void:
-	city_texture_warmup_running = true
-
-	await get_tree().process_frame
-	await get_tree().process_frame
-
-	var modes := get_all_city_view_modes()
-
-	for mode in modes:
-		if token != city_texture_warmup_token:
-			city_texture_warmup_running = false
-			return
-
-		if not is_inside_tree():
-			city_texture_warmup_running = false
-			return
-
-		if city_world == null:
-			city_texture_warmup_running = false
-			return
-
-		if city_map_mode_textures.has(mode):
-			continue
-
-		var image := Image.create(city_world.width, city_world.height, false, Image.FORMAT_RGBA8)
-
-		for y in range(city_world.height):
-			var row: Array = city_world.tiles[y]
-
-			for x in range(city_world.width):
-				var tile: Dictionary = row[x]
-				image.set_pixel(x, y, get_city_tile_color_for_mode(tile, mode))
-
-			if y % CITY_TEXTURE_WARMUP_ROWS_PER_FRAME == 0:
-				await get_tree().process_frame
-
-				if token != city_texture_warmup_token:
-					city_texture_warmup_running = false
-					return
-
-				if not is_inside_tree():
-					city_texture_warmup_running = false
-					return
-
-		city_map_mode_textures[mode] = ImageTexture.create_from_image(image)
-		WorldData.store_city_map_texture_cache(city_world, city_seed, city_map_mode_textures)
-
-		print("Warmed city map texture: ", get_city_map_mode_name(mode))
-
-	city_texture_warmup_running = false
-	print("City map texture warmup complete.")
+	city_texture_cache.start_warmup(city_world)
 
 func _draw() -> void:
 	if city_world == null:
