@@ -71,7 +71,132 @@ const CITY_OBJECT_CITY_CENTER := "city_center"
 const CITY_OBJECT_HOUSE := "house"
 const CITY_OBJECT_PLACEHOLDER_BUILDING := "placeholder_building"
 const CITY_OBJECT_ROAD := "road"
+const CITY_OBJECT_PLACEMENT_EFFECT_NONE := "none"
+const CITY_OBJECT_PLACEMENT_EFFECT_FOUND_CITY := "found_city"
+static func ensure_city_object_definitions_ready() -> void:
+	if city_object_definitions.is_empty():
+		setup_city_object_definitions()
 
+
+static func setup_city_object_definitions() -> void:
+	city_object_definitions.clear()
+
+	city_object_definitions[CITY_OBJECT_CITY_CENTER] = make_city_object_definition(
+		CITY_OBJECT_CITY_CENTER,
+		"City Keep",
+		Vector2i(2, 6),
+		1,
+		false,
+		true,
+		false,
+		CITY_OBJECT_PLACEMENT_EFFECT_FOUND_CITY,
+		Color(0.32, 0.30, 0.24, 0.95),
+		Color(0.86, 0.84, 0.76, 0.55),
+		0.35
+	)
+
+	city_object_definitions[CITY_OBJECT_HOUSE] = make_city_object_definition(
+		CITY_OBJECT_HOUSE,
+		"House",
+		Vector2i(3, 3),
+		3,
+		true,
+		false,
+		true,
+		CITY_OBJECT_PLACEMENT_EFFECT_NONE,
+		Color(0.32, 0.30, 0.24, 0.95),
+		Color(0.86, 0.84, 0.76, 0.55),
+		0.30
+	)
+
+
+static func make_city_object_definition(
+	object_type: String,
+	display_name: String,
+	size_tiles: Vector2i,
+	button_slot: int,
+	requires_city: bool,
+	requires_no_city: bool,
+	repeat_after_place: bool,
+	placement_effect: String,
+	frame_color: Color,
+	fill_color: Color,
+	frame_thickness: float
+) -> Dictionary:
+	return {
+		"type": object_type,
+		"display_name": display_name,
+		"size": size_tiles,
+		"button_slot": button_slot,
+		"requires_city": requires_city,
+		"requires_no_city": requires_no_city,
+		"repeat_after_place": repeat_after_place,
+		"placement_effect": placement_effect,
+		"frame_color": frame_color,
+		"fill_color": fill_color,
+		"frame_thickness": frame_thickness
+	}
+
+
+static func get_city_object_definition(object_type: String) -> Dictionary:
+	ensure_city_object_definitions_ready()
+
+	if city_object_definitions.has(object_type):
+		return city_object_definitions[object_type]
+
+	return {}
+
+
+static func get_city_object_display_name_for_type(object_type: String) -> String:
+	var definition := get_city_object_definition(object_type)
+
+	if definition.is_empty():
+		return object_type.capitalize()
+
+	return str(definition.get("display_name", object_type.capitalize()))
+
+
+static func get_city_object_size_for_type(object_type: String) -> Vector2i:
+	var definition := get_city_object_definition(object_type)
+
+	if definition.is_empty():
+		return Vector2i.ONE
+
+	return definition["size"]
+
+
+static func get_city_object_visual_style_for_type(object_type: String) -> Dictionary:
+	var definition := get_city_object_definition(object_type)
+
+	if definition.is_empty():
+		return {
+			"frame_color": Color(0.32, 0.30, 0.24, 0.95),
+			"fill_color": Color(0.86, 0.84, 0.76, 0.55),
+			"frame_thickness": 0.30
+		}
+
+	return {
+		"frame_color": definition["frame_color"],
+		"fill_color": definition["fill_color"],
+		"frame_thickness": definition["frame_thickness"]
+	}
+
+
+static func can_use_city_object_definition(object_type: String) -> bool:
+	var definition := get_city_object_definition(object_type)
+
+	if definition.is_empty():
+		return false
+
+	if bool(definition.get("requires_city", false)) and not can_build_in_city():
+		return false
+
+	if bool(definition.get("requires_no_city", false)) and has_player_city():
+		return false
+
+	return true
+
+static var city_object_definitions: Dictionary = {}
 func setup(new_width: int, new_height: int, new_seed: int):
 	width = new_width
 	height = new_height

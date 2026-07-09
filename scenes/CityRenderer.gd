@@ -34,7 +34,6 @@ var city_terrain_texture: ImageTexture
 var city_map_mode_textures: Dictionary = {}
 var city_texture_warmup_running: bool = false
 var city_texture_warmup_token: int = 0
-var city_object_visual_styles: Dictionary = {}
 var debug_canvas_layer: CanvasLayer
 var debug_panel: Panel
 var debug_label: Label
@@ -46,23 +45,18 @@ const DEFAULT_CITY_OBJECT_FRAME_COLOR: Color = Color(0.32, 0.30, 0.24, 0.95)
 const DEFAULT_CITY_OBJECT_FILL_COLOR: Color = Color(0.86, 0.84, 0.76, 0.55)
 const DEFAULT_CITY_OBJECT_FRAME_THICKNESS: float = 0.35
 const CITY_TEXTURE_WARMUP_ROWS_PER_FRAME: int = 16
-var last_found_city_preview_tile: Vector2i = Vector2i(-1, -1)
 var is_road_placement_active: bool = false
 var is_road_dragging: bool = false
 var road_preview_tiles: Array = []
 var road_preview_lookup: Dictionary = {}
 var bottom_button_three: Button
-var house_option_button: Button
-var house_option_icon: Panel
 var road_drag_start_tile: Vector2i = Vector2i(-1, -1)
 var road_drag_current_tile: Vector2i = Vector2i(-1, -1)
-
+var city_object_option_buttons: Dictionary = {}
+var city_object_option_icons: Dictionary = {}
 var road_cursor_icon: Panel
 var hovered_city_tile: Vector2i = Vector2i(-1, -1)
 var previous_hovered_city_tile: Vector2i = Vector2i(-1, -1)
-var found_city_option_button: Button
-var found_city_option_icon: Panel
-var is_found_city_placement_active: bool = false
 var hover_tile_outline: Panel
 var selected_city_object_id: int = -1
 var active_city_object_placement: Dictionary = {}
@@ -76,23 +70,25 @@ var object_selection_drag_start_screen: Vector2 = Vector2.ZERO
 var object_selection_drag_current_screen: Vector2 = Vector2.ZERO
 var object_selection_drag_start_world: Vector2 = Vector2.ZERO
 var object_selection_drag_current_world: Vector2 = Vector2.ZERO
-
+const DEBUG_CITY_OBJECT_NAME_TARGET_FONT_SIZE: int = 11
+const DEBUG_CITY_OBJECT_NAME_MIN_FONT_SIZE: int = 6
+const DEBUG_CITY_OBJECT_NAME_TEXT_COLOR: Color = Color(0.82, 0.94, 1.0, 1.0)
+const DEBUG_CITY_OBJECT_NAME_SHADOW_COLOR: Color = Color(0.0, 0.0, 0.0, 0.85)
+const DEBUG_CITY_OBJECT_NAME_BACKGROUND_COLOR: Color = Color(0.0, 0.0, 0.0, 0.55)
+const DEBUG_CITY_OBJECT_NAME_PADDING: Vector2 = Vector2(4.0, 2.0)
+const DEBUG_CITY_OBJECT_NAME_MAX_WIDTH_RATIO: float = 0.82
+const DEBUG_CITY_OBJECT_NAME_MAX_HEIGHT_RATIO: float = 0.45
 const OBJECT_SELECTION_DRAG_THRESHOLD_PIXELS: float = 4.0
 const SELECTED_OBJECT_BORDER_TILE_FRACTION: float = 0.02
 const CURSOR_LOOK_FILL_COLOR: Color = Color(1.0, 1.0, 1.0, 0.08)
 const CURSOR_LOOK_BORDER_COLOR: Color = Color(1.0, 1.0, 1.0, 0.58)
 const CURSOR_LOOK_GRID_COLOR: Color = Color(1.0, 1.0, 1.0, 0.22)
 const SELECTED_OBJECT_HIGHLIGHT_COLOR: Color = Color(0.0, 0.85, 1.0, 1.0)
-const FOUND_CITY_WIDTH_TILES: int = 2
-const FOUND_CITY_HEIGHT_TILES: int = 6
-const HOUSE_WIDTH_TILES: int = 3
-const HOUSE_HEIGHT_TILES: int = 3
 
 func _ready() -> void:
 	texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
 	RenderingServer.set_default_clear_color(Color.BLACK)
 
-	setup_city_object_visual_styles()
 	generate_city_world()
 	clear_invalid_old_city_foundation_state()
 	ensure_city_foundation_object_exists()
@@ -478,9 +474,9 @@ func create_city_ui() -> void:
 	ui_layer.add_child(ui_root)
 
 	create_bottom_city_buttons()
-	create_found_city_option_button()
+	create_city_object_option_button(WorldData.CITY_OBJECT_CITY_CENTER)
 	create_build_option_button()
-	create_house_option_button()
+	create_city_object_option_button(WorldData.CITY_OBJECT_HOUSE)
 	create_resource_bar()
 	create_city_maps_menu()
 	create_object_info_panel()
@@ -491,9 +487,8 @@ func create_city_ui() -> void:
 	get_viewport().size_changed.connect(update_city_ui_layout)
 	update_city_ui_layout()
 	update_resource_bar_values()
-	update_found_city_button_state()
+	update_city_object_button_states()
 	update_build_button_state()
-	update_house_button_state()
 
 func create_road_cursor_icon() -> void:
 	road_cursor_icon = Panel.new()
@@ -546,7 +541,7 @@ func create_bottom_city_buttons() -> void:
 	bottom_button_one.custom_minimum_size = Vector2(58.0, 58.0)
 	bottom_button_one.mouse_filter = Control.MOUSE_FILTER_STOP
 	ui_root.add_child(bottom_button_one)
-	bottom_button_one.pressed.connect(on_found_city_button_pressed)
+	bottom_button_one.pressed.connect(on_city_object_menu_button_pressed.bind(WorldData.CITY_OBJECT_CITY_CENTER))
 
 	bottom_button_two = Button.new()
 	bottom_button_two.text = "2"
@@ -562,7 +557,109 @@ func create_bottom_city_buttons() -> void:
 	bottom_button_three.custom_minimum_size = Vector2(58.0, 58.0)
 	bottom_button_three.mouse_filter = Control.MOUSE_FILTER_STOP
 	ui_root.add_child(bottom_button_three)
-	bottom_button_three.pressed.connect(on_house_menu_button_pressed)
+	bottom_button_three.pressed.connect(on_city_object_menu_button_pressed.bind(WorldData.CITY_OBJECT_HOUSE))
+
+func create_city_object_option_button(object_type: String) -> void:
+	var definition := WorldData.get_city_object_definition(object_type)
+
+	if definition.is_empty():
+		push_error("Missing city object definition for: " + object_type)
+		return
+
+	var option_button := Button.new()
+	option_button.text = ""
+	option_button.focus_mode = Control.FOCUS_NONE
+	option_button.custom_minimum_size = Vector2(58.0, 58.0)
+	option_button.mouse_filter = Control.MOUSE_FILTER_STOP
+	option_button.visible = false
+
+	ui_root.add_child(option_button)
+	option_button.pressed.connect(on_city_object_option_button_pressed.bind(object_type))
+
+	var icon := Panel.new()
+	icon.mouse_filter = Control.MOUSE_FILTER_IGNORE
+
+	var visual_style := WorldData.get_city_object_visual_style_for_type(object_type)
+
+	var icon_style := create_flat_ui_style(
+		Color(
+			float(visual_style["fill_color"].r),
+			float(visual_style["fill_color"].g),
+			float(visual_style["fill_color"].b),
+			1.0
+		),
+		Color(
+			float(visual_style["frame_color"].r),
+			float(visual_style["frame_color"].g),
+			float(visual_style["frame_color"].b),
+			1.0
+		),
+		1
+	)
+
+	icon.add_theme_stylebox_override("panel", icon_style)
+	option_button.add_child(icon)
+
+	city_object_option_buttons[object_type] = option_button
+	city_object_option_icons[object_type] = icon
+
+
+func get_bottom_button_for_slot(button_slot: int) -> Button:
+	match button_slot:
+		1:
+			return bottom_button_one
+		2:
+			return bottom_button_two
+		3:
+			return bottom_button_three
+
+	return null
+
+
+func layout_city_object_option_button(object_type: String, _viewport_size: Vector2) -> void:
+	if not city_object_option_buttons.has(object_type):
+		return
+
+	var definition := WorldData.get_city_object_definition(object_type)
+
+	if definition.is_empty():
+		return
+
+	var button_slot: int = int(definition.get("button_slot", 0))
+	var bottom_button := get_bottom_button_for_slot(button_slot)
+
+	if bottom_button == null:
+		return
+
+	var option_button: Button = city_object_option_buttons[object_type]
+	var button_size := 58.0
+	var gap := 6.0
+
+	option_button.position = Vector2(
+		bottom_button.position.x,
+		bottom_button.position.y - button_size - gap
+	)
+
+	option_button.size = Vector2(button_size, button_size)
+
+	if city_object_option_icons.has(object_type):
+		var icon: Panel = city_object_option_icons[object_type]
+		var size_tiles: Vector2i = definition["size"]
+		var largest_side: float = float(max(size_tiles.x, size_tiles.y))
+		var max_icon_size := 30.0
+
+		var icon_size := Vector2(
+			float(size_tiles.x) / largest_side * max_icon_size,
+			float(size_tiles.y) / largest_side * max_icon_size
+		)
+
+		icon.position = (Vector2(button_size, button_size) - icon_size) * 0.5
+		icon.size = icon_size
+
+
+func layout_all_city_object_option_buttons(viewport_size: Vector2) -> void:
+	for object_type in city_object_option_buttons.keys():
+		layout_city_object_option_button(str(object_type), viewport_size)
 
 func create_back_button() -> void:
 	back_button = Button.new()
@@ -599,67 +696,6 @@ func create_back_button() -> void:
 	ui_root.add_child(back_button)
 
 	back_button.pressed.connect(on_back_button_pressed)
-
-func on_found_city_button_pressed() -> void:
-	if found_city_option_button == null:
-		return
-		
-	close_city_map_menu()
-	
-	var should_open := not found_city_option_button.visible
-
-	close_build_menu()
-	cancel_build_placement()
-
-	if should_open:
-		found_city_option_button.visible = true
-		layout_found_city_option_button(get_viewport_rect().size)
-		found_city_option_button.move_to_front()
-	else:
-		cancel_found_city_placement()
-		found_city_option_button.visible = false
-
-	update_found_city_button_state()
-
-func update_found_city_button_state() -> void:
-	if bottom_button_one != null:
-		bottom_button_one.disabled = false
-		bottom_button_one.text = "1"
-
-	if found_city_option_button == null:
-		return
-
-	if WorldData.has_player_city_foundation():
-		found_city_option_button.disabled = true
-		found_city_option_button.text = "✓"
-
-		if found_city_option_icon != null:
-			found_city_option_icon.visible = false
-	else:
-		found_city_option_button.disabled = false
-		found_city_option_button.text = ""
-
-		if found_city_option_icon != null:
-			found_city_option_icon.visible = true
-	if bottom_button_one != null:
-		bottom_button_one.disabled = false
-		bottom_button_one.text = "1"
-
-	if found_city_option_button == null:
-		return
-
-	if WorldData.has_player_city():
-		found_city_option_button.disabled = true
-		found_city_option_button.text = "✓"
-
-		if found_city_option_icon != null:
-			found_city_option_icon.visible = false
-	else:
-		found_city_option_button.disabled = false
-		found_city_option_button.text = ""
-
-		if found_city_option_icon != null:
-			found_city_option_icon.visible = true
 
 func can_build_here() -> bool:
 	return WorldData.can_build_in_city()
@@ -942,13 +978,168 @@ func update_city_ui_layout() -> void:
 	var viewport_size: Vector2 = get_viewport_rect().size
 
 	layout_bottom_buttons(viewport_size)
-	layout_found_city_option_button(viewport_size)
+	layout_all_city_object_option_buttons(viewport_size)
 	layout_build_option_button(viewport_size)
-	layout_house_option_button(viewport_size)
 	layout_resource_bar(viewport_size)
 	layout_object_info_panel(viewport_size)
 	layout_city_maps_menu(viewport_size)
 	layout_back_button(viewport_size)
+func close_city_object_menu(object_type: String) -> void:
+	if city_object_option_buttons.has(object_type):
+		var option_button: Button = city_object_option_buttons[object_type]
+		option_button.visible = false
+
+
+func close_all_city_object_menus() -> void:
+	for object_type in city_object_option_buttons.keys():
+		close_city_object_menu(str(object_type))
+
+
+func has_open_city_object_menu() -> bool:
+	for object_type in city_object_option_buttons.keys():
+		var option_button: Button = city_object_option_buttons[object_type]
+
+		if option_button.visible:
+			return true
+
+	return false
+
+
+func on_city_object_menu_button_pressed(object_type: String) -> void:
+	if not WorldData.can_use_city_object_definition(object_type):
+		print("City object menu blocked: ", object_type)
+		update_city_object_button_states()
+		return
+
+	if not city_object_option_buttons.has(object_type):
+		return
+
+	close_city_map_menu()
+	close_build_menu()
+	cancel_road_placement()
+
+	var option_button: Button = city_object_option_buttons[object_type]
+	var should_open := not option_button.visible
+
+	close_all_city_object_menus()
+
+	if not should_open:
+		cancel_active_city_object_placement()
+		return
+
+	cancel_active_city_object_placement()
+
+	option_button.visible = true
+	layout_city_object_option_button(object_type, get_viewport_rect().size)
+	option_button.move_to_front()
+
+	update_city_object_button_states()
+
+func on_city_object_option_button_pressed(object_type: String) -> void:
+	if not WorldData.can_use_city_object_definition(object_type):
+		print("City object placement blocked: ", object_type)
+		update_city_object_button_states()
+		return
+
+	if is_placing_city_object_type(object_type):
+		cancel_active_city_object_placement()
+	else:
+		start_city_object_placement_from_definition(object_type)
+
+func start_city_object_placement_from_definition(object_type: String) -> void:
+	var definition := WorldData.get_city_object_definition(object_type)
+
+	if definition.is_empty():
+		push_error("Cannot start placement. Missing city object definition: " + object_type)
+		return
+
+	if not WorldData.can_use_city_object_definition(object_type):
+		print("Cannot place locked city object: ", object_type)
+		update_city_object_button_states()
+		return
+
+	close_build_menu()
+	cancel_road_placement()
+
+	var size_tiles: Vector2i = definition["size"]
+	var repeat_after_place: bool = bool(definition.get("repeat_after_place", false))
+
+	start_city_object_placement(
+		object_type,
+		size_tiles,
+		"player",
+		repeat_after_place
+	)
+
+	set_city_object_option_selected(object_type, true)
+	queue_redraw()
+
+	print("City object placement started: ", object_type)
+
+
+func cancel_active_city_object_placement() -> void:
+	if not has_active_city_object_placement():
+		return
+
+	var object_type: String = str(active_city_object_placement.get("type", ""))
+
+	clear_city_object_placement()
+
+	if object_type != "":
+		set_city_object_option_selected(object_type, false)
+
+	queue_redraw()
+
+	print("City object placement canceled: ", object_type)
+
+
+func set_city_object_option_selected(object_type: String, is_selected: bool) -> void:
+	if not city_object_option_icons.has(object_type):
+		return
+
+	var icon: Panel = city_object_option_icons[object_type]
+	var visual_style := WorldData.get_city_object_visual_style_for_type(object_type)
+
+	var fill_color: Color = visual_style["fill_color"]
+	var border_color: Color = visual_style["frame_color"]
+
+	fill_color = Color(fill_color.r, fill_color.g, fill_color.b, 1.0)
+	border_color = Color(border_color.r, border_color.g, border_color.b, 1.0)
+
+	if is_selected:
+		border_color = Color(0.0, 0.85, 1.0, 1.0)
+
+	var icon_style := create_flat_ui_style(
+		fill_color,
+		border_color,
+		1
+	)
+
+	icon.add_theme_stylebox_override("panel", icon_style)
+
+
+func update_city_object_button_states() -> void:
+	var city_center_definition := WorldData.get_city_object_definition(WorldData.CITY_OBJECT_CITY_CENTER)
+	var house_definition := WorldData.get_city_object_definition(WorldData.CITY_OBJECT_HOUSE)
+
+	if not city_center_definition.is_empty() and bottom_button_one != null:
+		bottom_button_one.disabled = not WorldData.can_use_city_object_definition(WorldData.CITY_OBJECT_CITY_CENTER)
+		bottom_button_one.text = "1"
+
+	if not house_definition.is_empty() and bottom_button_three != null:
+		bottom_button_three.disabled = not WorldData.can_use_city_object_definition(WorldData.CITY_OBJECT_HOUSE)
+		bottom_button_three.text = "3"
+
+	for object_type in city_object_option_buttons.keys():
+		var object_type_string := str(object_type)
+		var option_button: Button = city_object_option_buttons[object_type_string]
+		var can_use := WorldData.can_use_city_object_definition(object_type_string)
+
+		option_button.disabled = not can_use
+
+		if not can_use:
+			option_button.visible = false
+			set_city_object_option_selected(object_type_string, false)
 
 func create_object_info_panel() -> void:
 	object_info_panel = Panel.new()
@@ -1190,52 +1381,6 @@ func create_build_option_button() -> void:
 	build_option_icon.add_theme_stylebox_override("panel", icon_style)
 	build_option_button.add_child(build_option_icon)
 
-func create_house_option_button() -> void:
-	house_option_button = Button.new()
-	house_option_button.text = ""
-	house_option_button.focus_mode = Control.FOCUS_NONE
-	house_option_button.custom_minimum_size = Vector2(58.0, 58.0)
-	house_option_button.mouse_filter = Control.MOUSE_FILTER_STOP
-	house_option_button.visible = false
-
-	ui_root.add_child(house_option_button)
-	house_option_button.pressed.connect(on_house_option_button_pressed)
-
-	house_option_icon = Panel.new()
-	house_option_icon.mouse_filter = Control.MOUSE_FILTER_IGNORE
-
-	var icon_style := create_flat_ui_style(
-		Color(0.86, 0.84, 0.76, 1.0),
-		Color(0.32, 0.30, 0.24, 1.0),
-		1
-	)
-
-	house_option_icon.add_theme_stylebox_override("panel", icon_style)
-	house_option_button.add_child(house_option_icon)
-
-func create_found_city_option_button() -> void:
-	found_city_option_button = Button.new()
-	found_city_option_button.text = ""
-	found_city_option_button.focus_mode = Control.FOCUS_NONE
-	found_city_option_button.custom_minimum_size = Vector2(58.0, 58.0)
-	found_city_option_button.mouse_filter = Control.MOUSE_FILTER_STOP
-	found_city_option_button.visible = false
-
-	ui_root.add_child(found_city_option_button)
-	found_city_option_button.pressed.connect(on_found_city_option_button_pressed)
-
-	found_city_option_icon = Panel.new()
-	found_city_option_icon.mouse_filter = Control.MOUSE_FILTER_IGNORE
-
-	var icon_style := create_flat_ui_style(
-		Color(0.86, 0.84, 0.76, 1.0),
-		Color(0.32, 0.30, 0.24, 1.0),
-		1
-	)
-
-	found_city_option_icon.add_theme_stylebox_override("panel", icon_style)
-	found_city_option_button.add_child(found_city_option_icon)
-
 func layout_build_option_button(_viewport_size: Vector2) -> void:
 	if build_option_button == null or bottom_button_two == null:
 		return
@@ -1254,90 +1399,9 @@ func layout_build_option_button(_viewport_size: Vector2) -> void:
 		build_option_icon.position = Vector2(21.0, 21.0)
 		build_option_icon.size = Vector2(16.0, 16.0)
 
-func layout_found_city_option_button(_viewport_size: Vector2) -> void:
-	if found_city_option_button == null or bottom_button_one == null:
-		return
-
-	var button_size := 58.0
-	var gap := 6.0
-
-	found_city_option_button.position = Vector2(
-		bottom_button_one.position.x,
-		bottom_button_one.position.y - button_size - gap
-	)
-
-	found_city_option_button.size = Vector2(button_size, button_size)
-
-	if found_city_option_icon != null:
-		found_city_option_icon.position = Vector2(22.0, 8.0)
-		found_city_option_icon.size = Vector2(14.0, 42.0)
-
-func layout_house_option_button(_viewport_size: Vector2) -> void:
-	if house_option_button == null or bottom_button_three == null:
-		return
-
-	var button_size := 58.0
-	var gap := 6.0
-
-	house_option_button.position = Vector2(
-		bottom_button_three.position.x,
-		bottom_button_three.position.y - button_size - gap
-	)
-
-	house_option_button.size = Vector2(button_size, button_size)
-
-	if house_option_icon != null:
-		house_option_icon.position = Vector2(17.0, 17.0)
-		house_option_icon.size = Vector2(24.0, 24.0)
-
-func on_found_city_option_button_pressed() -> void:
-	if WorldData.has_player_city():
-		update_found_city_button_state()
-		return
-
-	if is_found_city_placement_active:
-		cancel_found_city_placement()
-	else:
-		start_found_city_placement()
-
-func start_found_city_placement() -> void:
-	close_build_menu()
-	cancel_build_placement()
-	close_house_menu()
-	cancel_house_placement()
-
-	is_found_city_placement_active = true
-	last_found_city_preview_tile = Vector2i(-1, -1)
-
-	start_city_object_placement(
-		WorldData.CITY_OBJECT_CITY_CENTER,
-		Vector2i(FOUND_CITY_WIDTH_TILES, FOUND_CITY_HEIGHT_TILES),
-		"player"
-	)
-
-	queue_redraw()
-
-	print("Found-city placement preview started.")
-
-func cancel_found_city_placement() -> void:
-	if not is_found_city_placement_active and active_city_object_placement.is_empty():
-		return
-
-	is_found_city_placement_active = false
-	last_found_city_preview_tile = Vector2i(-1, -1)
-
-	clear_city_object_placement()
-
-	queue_redraw()
-
 func close_build_menu() -> void:
 	if build_option_button != null:
 		build_option_button.visible = false
-
-
-func close_found_city_menu() -> void:
-	if found_city_option_button != null:
-		found_city_option_button.visible = false
 
 func on_build_menu_button_pressed() -> void:
 	if not WorldData.can_build_in_city():
@@ -1347,21 +1411,23 @@ func on_build_menu_button_pressed() -> void:
 
 	if build_option_button == null:
 		return
-		
+
 	close_city_map_menu()
-	
+
 	var should_open := not build_option_button.visible
 
-	close_house_menu()
-	cancel_house_placement()
-	close_found_city_menu()
-	cancel_found_city_placement()
+	close_all_city_object_menus()
+	cancel_active_city_object_placement()
 
 	if should_open:
 		build_option_button.visible = true
+		layout_build_option_button(get_viewport_rect().size)
+		build_option_button.move_to_front()
 	else:
 		cancel_road_placement()
 		build_option_button.visible = false
+
+	update_build_button_state()
 
 func on_build_option_button_pressed() -> void:
 	if is_road_placement_active:
@@ -1372,12 +1438,11 @@ func on_build_option_button_pressed() -> void:
 func start_road_placement() -> void:
 	if not WorldData.can_build_in_city():
 		print("Road placement blocked: found a city first.")
+		update_build_button_state()
 		return
 
-	close_house_menu()
-	cancel_house_placement()
-	cancel_found_city_placement()
-	close_found_city_menu()
+	close_all_city_object_menus()
+	cancel_active_city_object_placement()
 
 	is_road_placement_active = true
 	is_road_dragging = false
@@ -1392,6 +1457,7 @@ func start_road_placement() -> void:
 
 	set_road_option_selected(true)
 
+	update_build_button_state()
 	queue_redraw()
 
 	print("Road placement started. Drag a selection box, then left-click again to confirm.")
@@ -1468,15 +1534,9 @@ func _input(event: InputEvent) -> void:
 				get_viewport().set_input_as_handled()
 				return
 
-			if is_found_city_placement_active:
-				cancel_found_city_placement()
-				close_found_city_menu()
-				get_viewport().set_input_as_handled()
-				return
-
-			if is_placing_city_object_type(WorldData.CITY_OBJECT_HOUSE):
-				cancel_house_placement()
-				close_house_menu()
+			if has_active_city_object_placement():
+				cancel_active_city_object_placement()
+				close_all_city_object_menus()
 				get_viewport().set_input_as_handled()
 				return
 
@@ -1490,13 +1550,8 @@ func _input(event: InputEvent) -> void:
 				get_viewport().set_input_as_handled()
 				return
 
-			if house_option_button != null and house_option_button.visible:
-				close_house_menu()
-				get_viewport().set_input_as_handled()
-				return
-
-			if found_city_option_button != null and found_city_option_button.visible:
-				close_found_city_menu()
+			if has_open_city_object_menu():
+				close_all_city_object_menus()
 				get_viewport().set_input_as_handled()
 				return
 
@@ -1567,15 +1622,10 @@ func confirm_active_city_object_placement() -> void:
 
 	if not repeat_after_place:
 		clear_city_object_placement()
-		is_found_city_placement_active = false
-		last_found_city_preview_tile = Vector2i(-1, -1)
+		set_city_object_option_selected(object_type, false)
 
-	if object_type != WorldData.CITY_OBJECT_HOUSE:
-		set_house_option_selected(false)
-
-	update_found_city_button_state()
+	update_city_object_button_states()
 	update_build_button_state()
-	update_house_button_state()
 	update_debug_panel_text()
 
 	print("Placed city object: ", placed_object)
@@ -1587,9 +1637,16 @@ func after_city_object_placed(city_object: Dictionary) -> void:
 		return
 
 	var object_type: String = str(city_object.get("type", ""))
+	var definition := WorldData.get_city_object_definition(object_type)
 
-	if object_type == WorldData.CITY_OBJECT_CITY_CENTER:
-		after_city_center_placed(city_object)
+	if definition.is_empty():
+		return
+
+	var placement_effect: String = str(definition.get("placement_effect", WorldData.CITY_OBJECT_PLACEMENT_EFFECT_NONE))
+
+	match placement_effect:
+		WorldData.CITY_OBJECT_PLACEMENT_EFFECT_FOUND_CITY:
+			after_city_center_placed(city_object)
 
 func after_city_center_placed(city_object: Dictionary) -> void:
 	if WorldData.has_player_city():
@@ -1605,12 +1662,9 @@ func after_city_center_placed(city_object: Dictionary) -> void:
 		top_left,
 		size_tiles
 	)
-	
-	update_build_button_state()
-	update_house_button_state()
 
-	if found_city_option_button != null:
-		found_city_option_button.visible = true
+	update_city_object_button_states()
+	update_build_button_state()
 
 	print("Founded city at: ", top_left)
 	print("City data: ", WorldData.player_city_data)
@@ -1769,22 +1823,11 @@ func get_city_object_by_id(object_id) -> Dictionary:
 
 func get_city_object_display_name(city_object: Dictionary) -> String:
 	if city_object.is_empty():
-		return "None"
+		return "Unknown"
 
-	var object_type: String = str(city_object["type"])
+	var object_type: String = str(city_object.get("type", ""))
 
-	if object_type == WorldData.CITY_OBJECT_CITY_CENTER:
-		return "City Keep"
-	if object_type == WorldData.CITY_OBJECT_HOUSE:
-		return "House"
-	if object_type == WorldData.CITY_OBJECT_PLACEHOLDER_BUILDING:
-		return "Building"
-
-	if object_type == WorldData.CITY_OBJECT_ROAD:
-		return "Road"
-
-	return object_type
-
+	return WorldData.get_city_object_display_name_for_type(object_type)
 
 func get_city_object_world_rect(city_object: Dictionary) -> Rect2:
 	if city_object.is_empty():
@@ -1943,11 +1986,6 @@ func confirm_road_preview() -> void:
 
 	queue_redraw()
 
-func get_found_city_top_left_tile_from_mouse() -> Vector2i:
-	return get_city_object_top_left_tile_from_mouse(
-		Vector2i(FOUND_CITY_WIDTH_TILES, FOUND_CITY_HEIGHT_TILES)
-	)
-
 func rebuild_city_terrain_texture() -> void:
 	if city_world == null:
 		city_terrain_texture = null
@@ -2000,90 +2038,6 @@ func build_city_map_mode_texture(mode: int) -> ImageTexture:
 
 	return ImageTexture.create_from_image(image)
 
-func close_house_menu() -> void:
-	if house_option_button != null:
-		house_option_button.visible = false
-
-
-func on_house_menu_button_pressed() -> void:
-	if not WorldData.can_build_in_city():
-		print("House menu blocked: found a city first.")
-		return
-
-	if house_option_button == null:
-		return
-
-	close_city_map_menu()
-
-	var should_open := not house_option_button.visible
-
-	close_found_city_menu()
-	close_build_menu()
-	cancel_found_city_placement()
-	cancel_road_placement()
-
-	if should_open:
-		house_option_button.visible = true
-		layout_house_option_button(get_viewport_rect().size)
-		house_option_button.move_to_front()
-	else:
-		cancel_house_placement()
-		house_option_button.visible = false
-
-	update_house_button_state()
-
-
-func on_house_option_button_pressed() -> void:
-	if not WorldData.can_build_in_city():
-		print("House placement blocked: found a city first.")
-		update_house_button_state()
-		return
-
-	if is_placing_city_object_type(WorldData.CITY_OBJECT_HOUSE):
-		cancel_house_placement()
-	else:
-		start_house_placement()
-
-
-func start_house_placement() -> void:
-	close_found_city_menu()
-	cancel_found_city_placement()
-	cancel_road_placement()
-
-	start_city_object_placement(
-		WorldData.CITY_OBJECT_HOUSE,
-		Vector2i(HOUSE_WIDTH_TILES, HOUSE_HEIGHT_TILES),
-		"player",
-		true
-	)
-
-	set_house_option_selected(true)
-	queue_redraw()
-
-	print("House placement started.")
-
-
-func cancel_house_placement() -> void:
-	if not is_placing_city_object_type(WorldData.CITY_OBJECT_HOUSE):
-		return
-
-	clear_city_object_placement()
-	set_house_option_selected(false)
-	queue_redraw()
-
-	print("House placement canceled.")
-
-
-func update_house_button_state() -> void:
-	var can_build := WorldData.can_build_in_city()
-
-	if bottom_button_three != null:
-		bottom_button_three.disabled = not can_build
-		bottom_button_three.text = "3"
-
-	if house_option_button != null:
-		house_option_button.disabled = not can_build
-
 func update_build_button_state() -> void:
 	var can_build := WorldData.can_build_in_city()
 
@@ -2096,25 +2050,6 @@ func update_build_button_state() -> void:
 
 		if not can_build:
 			build_option_button.visible = false
-
-func set_house_option_selected(is_selected: bool) -> void:
-	if house_option_icon == null:
-		return
-
-	var fill_color := Color(0.86, 0.84, 0.76, 1.0)
-	var border_color := Color(0.32, 0.30, 0.24, 1.0)
-
-	if is_selected:
-		fill_color = Color(0.86, 0.84, 0.76, 1.0)
-		border_color = Color(0.0, 0.85, 1.0, 1.0)
-
-	var icon_style := create_flat_ui_style(
-		fill_color,
-		border_color,
-		1
-	)
-
-	house_option_icon.add_theme_stylebox_override("panel", icon_style)
 
 
 func is_placing_city_object_type(object_type: String) -> bool:
@@ -2214,29 +2149,206 @@ func _draw() -> void:
 	draw_city_roads()
 	draw_selected_city_object_highlight()
 	draw_hovered_city_tile_highlight()
+	draw_city_object_debug_names()
 	draw_active_city_object_placement_preview()
 	draw_road_preview()
 
-func setup_city_object_visual_styles() -> void:
-	city_object_visual_styles.clear()
 
-	city_object_visual_styles[WorldData.CITY_OBJECT_CITY_CENTER] = make_city_object_visual_style(
-		Color(0.32, 0.30, 0.24, 0.95),
-		Color(0.86, 0.84, 0.76, 0.55),
-		0.35
+func draw_city_object_debug_names() -> void:
+	if not WorldData.debug_mode_enabled:
+		return
+
+	var font: Font = ThemeDB.fallback_font
+
+	if font == null:
+		return
+
+	var pixels_per_world_unit := get_debug_pixels_per_world_unit()
+
+	if pixels_per_world_unit <= 0.0:
+		return
+
+	var world_units_per_screen_pixel := 1.0 / pixels_per_world_unit
+
+	for city_object in WorldData.city_objects:
+		if city_object.is_empty():
+			continue
+
+		var object_type: String = str(city_object.get("type", ""))
+
+		if object_type == WorldData.CITY_OBJECT_ROAD:
+			continue
+
+		var rect: Rect2 = get_city_object_world_rect(city_object)
+
+		if rect.size.x <= 0.0 or rect.size.y <= 0.0:
+			continue
+
+		var object_name := get_city_object_display_name(city_object)
+
+		if object_name == "":
+			continue
+
+		var label_center := get_city_object_debug_label_center(city_object, rect)
+		var object_screen_size := rect.size * pixels_per_world_unit
+
+		draw_centered_city_object_debug_name(
+			label_center,
+			object_screen_size,
+			object_name,
+			font,
+			world_units_per_screen_pixel
+		)
+
+func draw_centered_city_object_debug_name(
+	label_center: Vector2,
+	object_screen_size: Vector2,
+	object_name: String,
+	font: Font,
+	world_units_per_screen_pixel: float
+) -> void:
+	var font_size := get_debug_city_object_name_font_size(
+		object_name,
+		object_screen_size,
+		font
 	)
 
-	city_object_visual_styles[WorldData.CITY_OBJECT_PLACEHOLDER_BUILDING] = make_city_object_visual_style(
-		Color(0.28, 0.28, 0.24, 0.95),
-		Color(0.64, 0.62, 0.54, 0.72),
-		0.28
+	if font_size < DEBUG_CITY_OBJECT_NAME_MIN_FONT_SIZE:
+		return
+
+	var text_size := font.get_string_size(
+		object_name,
+		HORIZONTAL_ALIGNMENT_LEFT,
+		-1.0,
+		font_size
 	)
 
-	city_object_visual_styles[WorldData.CITY_OBJECT_HOUSE] = make_city_object_visual_style(
-	Color(0.32, 0.30, 0.24, 0.95),
-	Color(0.86, 0.84, 0.76, 0.55),
-	0.30
-)
+	var ascent := font.get_ascent(font_size)
+	var descent := font.get_descent(font_size)
+
+	var background_rect := Rect2(
+		-text_size * 0.5 - DEBUG_CITY_OBJECT_NAME_PADDING,
+		text_size + DEBUG_CITY_OBJECT_NAME_PADDING * 2.0
+	)
+
+	var text_position := Vector2(
+		-text_size.x * 0.5,
+		(ascent - descent) * 0.5
+	)
+
+	draw_set_transform(
+		label_center,
+		0.0,
+		Vector2(world_units_per_screen_pixel, world_units_per_screen_pixel)
+	)
+
+	draw_rect(
+		background_rect,
+		DEBUG_CITY_OBJECT_NAME_BACKGROUND_COLOR,
+		true
+	)
+
+	draw_string(
+		font,
+		text_position + Vector2(1.0, 1.0),
+		object_name,
+		HORIZONTAL_ALIGNMENT_LEFT,
+		-1.0,
+		font_size,
+		DEBUG_CITY_OBJECT_NAME_SHADOW_COLOR
+	)
+
+	draw_string(
+		font,
+		text_position,
+		object_name,
+		HORIZONTAL_ALIGNMENT_LEFT,
+		-1.0,
+		font_size,
+		DEBUG_CITY_OBJECT_NAME_TEXT_COLOR
+	)
+
+	draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
+
+func get_debug_pixels_per_world_unit() -> float:
+	var canvas_transform := get_canvas_transform()
+	var canvas_scale := canvas_transform.get_scale()
+
+	var x_scale: float = abs(canvas_scale.x)
+	var y_scale: float = abs(canvas_scale.y)
+
+	if x_scale <= 0.0 or y_scale <= 0.0:
+		return 1.0
+
+	return (x_scale + y_scale) * 0.5
+
+
+func get_debug_city_object_name_font_size(
+	object_name: String,
+	object_screen_size: Vector2,
+	font: Font
+) -> int:
+	var target_font_size := DEBUG_CITY_OBJECT_NAME_TARGET_FONT_SIZE
+
+	var text_size := font.get_string_size(
+		object_name,
+		HORIZONTAL_ALIGNMENT_LEFT,
+		-1.0,
+		target_font_size
+	)
+
+	var max_label_size := Vector2(
+		object_screen_size.x * DEBUG_CITY_OBJECT_NAME_MAX_WIDTH_RATIO,
+		object_screen_size.y * DEBUG_CITY_OBJECT_NAME_MAX_HEIGHT_RATIO
+	)
+
+	var padded_text_size := text_size + DEBUG_CITY_OBJECT_NAME_PADDING * 2.0
+
+	if padded_text_size.x <= 0.0 or padded_text_size.y <= 0.0:
+		return target_font_size
+
+	var width_fit := max_label_size.x / padded_text_size.x
+	var height_fit := max_label_size.y / padded_text_size.y
+	var fit_scale: float = min(1.0, width_fit, height_fit)
+
+	var fitted_font_size := int(floor(float(target_font_size) * fit_scale))
+
+	if fitted_font_size < DEBUG_CITY_OBJECT_NAME_MIN_FONT_SIZE:
+		return 0
+
+	return fitted_font_size
+
+
+func get_city_object_debug_label_center(city_object: Dictionary, fallback_rect: Rect2) -> Vector2:
+	var footprint_tiles := get_city_object_debug_footprint_tiles(city_object)
+
+	if not footprint_tiles.is_empty():
+		var total := Vector2.ZERO
+		var count := 0
+
+		for tile_value in footprint_tiles:
+			if tile_value is Vector2i:
+				var tile: Vector2i = tile_value
+				total += Vector2(
+					(float(tile.x) + 0.5) * float(city_tile_size),
+					(float(tile.y) + 0.5) * float(city_tile_size)
+				)
+				count += 1
+
+		if count > 0:
+			return total / float(count)
+
+	return fallback_rect.position + fallback_rect.size * 0.5
+
+
+func get_city_object_debug_footprint_tiles(city_object: Dictionary) -> Array:
+	if city_object.has("footprint_tiles"):
+		return city_object["footprint_tiles"]
+
+	if city_object.has("tiles"):
+		return city_object["tiles"]
+
+	return []
 
 func make_city_object_visual_style(
 	frame_color: Color,
@@ -2251,15 +2363,7 @@ func make_city_object_visual_style(
 
 
 func get_city_object_visual_style(object_type: String) -> Dictionary:
-	if city_object_visual_styles.has(object_type):
-		return city_object_visual_styles[object_type]
-
-	return make_city_object_visual_style(
-		DEFAULT_CITY_OBJECT_FRAME_COLOR,
-		DEFAULT_CITY_OBJECT_FILL_COLOR,
-		DEFAULT_CITY_OBJECT_FRAME_THICKNESS
-	)
-
+	return WorldData.get_city_object_visual_style_for_type(object_type)
 
 func with_alpha_multiplier(color: Color, alpha_multiplier: float) -> Color:
 	return Color(
@@ -2337,7 +2441,6 @@ func start_city_object_placement(
 		"owner": owner,
 		"repeat_after_place": repeat_after_place
 	}
-
 
 func clear_city_object_placement() -> void:
 	active_city_object_placement.clear()
@@ -2849,7 +2952,7 @@ func update_city_hover_visual() -> void:
 		hover_tile_outline.visible = false
 		return
 
-	if is_found_city_placement_active:
+	if has_active_city_object_placement():
 		hover_tile_outline.visible = false
 		return
 
@@ -2862,6 +2965,16 @@ func update_city_hover_visual() -> void:
 	hover_tile_outline.position = rect.position
 	hover_tile_outline.size = rect.size
 	hover_tile_outline.move_to_front()
+
+func update_debug_panel_text() -> void:
+	if not WorldData.debug_mode_enabled:
+		return
+
+	if debug_label == null:
+		return
+
+	debug_label.text = get_city_debug_panel_text()
+	fit_debug_panel_to_text()
 
 func create_debug_panel() -> void:
 	debug_canvas_layer = CanvasLayer.new()
@@ -2894,7 +3007,6 @@ func create_debug_panel() -> void:
 	debug_panel.add_child(debug_label)
 	fit_debug_panel_to_text()
 
-
 func toggle_debug_mode() -> void:
 	WorldData.debug_mode_enabled = not WorldData.debug_mode_enabled
 
@@ -2902,23 +3014,12 @@ func toggle_debug_mode() -> void:
 		debug_panel.visible = WorldData.debug_mode_enabled
 
 	update_debug_panel_text()
+	queue_redraw()
 
 	if WorldData.debug_mode_enabled:
 		print("Debug mode: ON")
 	else:
 		print("Debug mode: OFF")
-
-
-func update_debug_panel_text() -> void:
-	if not WorldData.debug_mode_enabled:
-		return
-
-	if debug_label == null:
-		return
-
-	debug_label.text = get_city_debug_panel_text()
-	fit_debug_panel_to_text()
-
 
 func fit_debug_panel_to_text() -> void:
 	if debug_panel == null:
