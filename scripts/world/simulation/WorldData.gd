@@ -219,6 +219,9 @@ const WORKPLACE_PRODUCTION_STATUS_BLOCKED_MISSING_INPUT := (
 const WORKPLACE_PRODUCTIVITY_BASIS_POINTS_SCALE := (
 	WORKPLACE_PRODUCTION_SYSTEM.PRODUCTIVITY_BASIS_POINTS_SCALE
 )
+const WORKPLACE_WORK_UNITS_PER_WORKER_MINUTE := (
+	WORKPLACE_PRODUCTION_SYSTEM.WORK_UNITS_PER_WORKER_MINUTE
+)
 const DEFAULT_WORKPLACE_SITE_PRODUCTIVITY_BASIS_POINTS := (
 	WORKPLACE_PRODUCTIVITY_BASIS_POINTS_SCALE
 )
@@ -1419,6 +1422,74 @@ static func get_city_object_site_productivity_basis_points(
 		)),
 		0
 	)
+
+
+static func get_city_object_hourly_production_rates(
+	city_object: Dictionary
+) -> Dictionary:
+	var hourly_rates: Dictionary = {}
+	var recipe := get_city_object_production_recipe(city_object)
+
+	if recipe.is_empty():
+		return hourly_rates
+
+	var raw_outputs = recipe.get("outputs", {})
+	var raw_work_units_per_batch = recipe.get(
+		"work_units_per_batch",
+		0
+	)
+
+	if (
+		not raw_outputs is Dictionary
+		or not raw_work_units_per_batch is int
+	):
+		return hourly_rates
+
+	var outputs: Dictionary = raw_outputs
+	var work_units_per_batch: int = raw_work_units_per_batch
+
+	if work_units_per_batch <= 0:
+		return hourly_rates
+
+	var productive_worker_count := (
+		get_city_object_productive_worker_count(city_object)
+	)
+	var site_productivity_basis_points := (
+		get_city_object_site_productivity_basis_points(
+			city_object
+		)
+	)
+	var effective_work_units_per_hour := (
+		float(
+			productive_worker_count
+			* 60
+			* WORKPLACE_WORK_UNITS_PER_WORKER_MINUTE
+		)
+		* float(site_productivity_basis_points)
+		/ float(WORKPLACE_PRODUCTIVITY_BASIS_POINTS_SCALE)
+	)
+	var batches_per_hour := (
+		effective_work_units_per_hour
+		/ float(work_units_per_batch)
+	)
+
+	for raw_resource in outputs.keys():
+		var raw_output_amount = outputs[raw_resource]
+
+		if not raw_output_amount is int:
+			continue
+
+		var output_amount: int = raw_output_amount
+
+		if output_amount <= 0:
+			continue
+
+		hourly_rates[str(raw_resource)] = (
+			batches_per_hour
+			* float(output_amount)
+		)
+
+	return hourly_rates
 
 
 static func is_valid_workplace_production_status(
