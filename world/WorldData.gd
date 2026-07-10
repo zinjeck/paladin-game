@@ -69,22 +69,66 @@ static var city_occupied_tiles: Dictionary = {}
 static var next_city_object_id: int = 1
 static var city_citizens: Array = []
 static var next_city_citizen_id: int = 1
+static var city_citizen_first_name_pool: Array = [
+	"Arlen",
+	"Tovan",
+	"Calen",
+	"Ronan",
+	"Darian",
+	"Kael",
+	"Bren",
+	"Orin",
+	"Levon",
+	"Theron",
+	"Jarek",
+	"Corin",
+	"Malric",
+	"Edrin",
+	"Tomas",
+	"Varon",
+	"Lucan",
+	"Alric",
+	"Fenric",
+	"Soren",
+	"Mira",
+	"Elia",
+	"Sera",
+	"Nira",
+	"Liora",
+	"Kaela",
+	"Maris",
+	"Elara",
+	"Vessa",
+	"Talia",
+	"Rina",
+	"Anya",
+	"Selene",
+	"Maera",
+	"Isolde",
+	"Lyra",
+	"Vela",
+	"Seris",
+	"Amara",
+	"Coralie"
+]
 
 const STARTING_CITY_POPULATION := 8
 const DEFAULT_CITIZEN_CARRY_CAPACITY := 10
 const DEFAULT_CITIZEN_HUNGER := 100
 const DEFAULT_CITIZEN_HAPPINESS := 70
-
 const CITY_CITIZEN_STATE_IDLE := "idle"
-
 const CITY_OBJECT_CITY_CENTER := "city_center"
 const CITY_OBJECT_HOUSE := "house"
 const CITY_OBJECT_STOCKPILE := "stockpile"
+const CITY_OBJECT_FISHING_GROUNDS := "fishing_grounds"
 const CITY_OBJECT_PLACEHOLDER_BUILDING := "placeholder_building"
 const CITY_OBJECT_ROAD := "road"
 const CITY_OBJECT_PLACEMENT_EFFECT_NONE := "none"
 const CITY_OBJECT_PLACEMENT_EFFECT_FOUND_CITY := "found_city"
-
+const CITY_OBJECT_SHAPE_RECTANGLE := "rectangle"
+const CITY_OBJECT_SHAPE_TILE_AREA := "tile_area"
+const WORKPLACE_KIND_NONE := "none"
+const WORKPLACE_KIND_GATHERING := "gathering"
 const CONTAINER_TYPE_NONE := "none"
 const CONTAINER_TYPE_PUBLIC_CITY_STORAGE := "public_city_storage"
 const CONTAINER_TYPE_PRIVATE_HOME_STORAGE := "private_home_storage"
@@ -152,6 +196,31 @@ static func setup_city_object_definitions() -> void:
 		"storage_capacity_per_resource": 100
 	})
 
+	city_object_definitions[CITY_OBJECT_FISHING_GROUNDS] = make_city_object_definition({
+		"type": CITY_OBJECT_FISHING_GROUNDS,
+		"display_name": "Fishing Grounds",
+		"container_type": CONTAINER_TYPE_WORKPLACE_STORAGE,
+		"counts_as_public_city_storage": false,
+		"shape_mode": CITY_OBJECT_SHAPE_RECTANGLE,
+		"size": Vector2i(4, 4),
+		"button_slot": 5,
+		"requires_city": true,
+		"requires_no_city": false,
+		"repeat_after_place": true,
+		"placement_effect": CITY_OBJECT_PLACEMENT_EFFECT_NONE,
+		"frame_color": Color(0.06, 0.34, 0.40, 0.95),
+		"fill_color": Color(0.18, 0.62, 0.70, 0.48),
+		"frame_thickness": 0.30,
+		"is_workplace": true,
+		"workplace_kind": WORKPLACE_KIND_GATHERING,
+		"worker_capacity": 4,
+		"output_resource": RESOURCE_FISH,
+		"storage_resources": [
+			RESOURCE_FISH
+		],
+		"storage_capacity_per_resource": 50
+	})
+
 static func make_city_object_definition(values: Dictionary) -> Dictionary:
 	var object_type: String = str(values.get("type", ""))
 	var storage_resources: Array[String] = []
@@ -169,6 +238,8 @@ static func make_city_object_definition(values: Dictionary) -> Dictionary:
 		"counts_as_public_city_storage",
 		container_type == CONTAINER_TYPE_PUBLIC_CITY_STORAGE
 	))
+	var shape_mode: String = str(values.get("shape_mode", CITY_OBJECT_SHAPE_RECTANGLE))
+	var is_workplace := bool(values.get("is_workplace", false))
 
 	return {
 		"type": object_type,
@@ -182,11 +253,16 @@ static func make_city_object_definition(values: Dictionary) -> Dictionary:
 		"frame_color": values.get("frame_color", Color(0.32, 0.30, 0.24, 0.95)),
 		"fill_color": values.get("fill_color", Color(0.86, 0.84, 0.76, 0.55)),
 		"frame_thickness": float(values.get("frame_thickness", 0.30)),
-		"container_type": container_type,
+				"container_type": container_type,
 		"counts_as_public_city_storage": counts_as_public_city_storage,
+		"shape_mode": shape_mode,
 		"storage_resources": storage_resources,
 		"storage_capacity_per_resource": int(values.get("storage_capacity_per_resource", 0)),
-		"resident_capacity": int(values.get("resident_capacity", 0))
+		"resident_capacity": int(values.get("resident_capacity", 0)),
+		"is_workplace": is_workplace,
+		"workplace_kind": str(values.get("workplace_kind", WORKPLACE_KIND_NONE)),
+		"worker_capacity": int(values.get("worker_capacity", 0)),
+		"output_resource": str(values.get("output_resource", RESOURCE_NONE))
 	}
 
 static func get_city_object_definition(object_type: String) -> Dictionary:
@@ -494,9 +570,77 @@ static func reset_city_citizen_state() -> void:
 static func make_empty_citizen_inventory() -> Dictionary:
 	return make_empty_resource_container(get_city_resource_types())
 
+static func get_city_citizen_name_seed() -> int:
+	var name_seed := int(official_city_seed)
+
+	if name_seed == 0:
+		name_seed = int(city_start_world_seed)
+
+	if name_seed == 0:
+		name_seed = 12345
+
+	return name_seed
+
+
+static func get_used_city_citizen_name_counts() -> Dictionary:
+	var used_name_counts := {}
+
+	for citizen in city_citizens:
+		if not citizen is Dictionary:
+			continue
+
+		var citizen_name := str(citizen.get("name", "")).strip_edges()
+
+		if citizen_name.is_empty():
+			continue
+
+		used_name_counts[citizen_name] = int(used_name_counts.get(citizen_name, 0)) + 1
+
+	return used_name_counts
+
+
+static func make_random_city_citizen_first_name() -> String:
+	if city_citizen_first_name_pool.is_empty():
+		return ""
+
+	var used_name_counts := get_used_city_citizen_name_counts()
+	var available_names := []
+
+	for raw_name in city_citizen_first_name_pool:
+		var candidate_name := str(raw_name).strip_edges()
+
+		if candidate_name.is_empty():
+			continue
+
+		if used_name_counts.has(candidate_name):
+			continue
+
+		available_names.append(candidate_name)
+
+	var candidate_pool := available_names
+
+	if candidate_pool.is_empty():
+		candidate_pool = city_citizen_first_name_pool
+
+	if candidate_pool.is_empty():
+		return ""
+
+	var rng := RandomNumberGenerator.new()
+	var seed_value := get_city_citizen_name_seed()
+	var citizen_number := next_city_citizen_id
+	var population_number := city_citizens.size()
+
+	rng.seed = int(abs(seed_value * 1000003 + citizen_number * 9176 + population_number * 6113 + 1337))
+
+	var random_index := rng.randi_range(0, candidate_pool.size() - 1)
+
+	return str(candidate_pool[random_index]).strip_edges()
 
 static func make_city_citizen(display_name: String = "") -> Dictionary:
-	var citizen_name := display_name
+	var citizen_name := display_name.strip_edges()
+
+	if citizen_name.is_empty():
+		citizen_name = make_random_city_citizen_first_name()
 
 	if citizen_name.is_empty():
 		citizen_name = "Citizen " + str(next_city_citizen_id)
@@ -528,8 +672,8 @@ static func ensure_starting_city_population() -> void:
 	if not city_citizens.is_empty():
 		return
 
-	for index in range(STARTING_CITY_POPULATION):
-		add_city_citizen("Citizen " + str(index + 1))
+	for _index in range(STARTING_CITY_POPULATION):
+		add_city_citizen()
 
 
 static func get_city_population_count() -> int:
@@ -569,6 +713,40 @@ static func get_city_unemployed_citizen_count() -> int:
 
 	return unemployed_count
 
+static func get_city_citizen_by_id(citizen_id: int) -> Dictionary:
+	ensure_starting_city_population()
+
+	for citizen in city_citizens:
+		if not citizen is Dictionary:
+			continue
+
+		if int(citizen.get("id", -1)) == citizen_id:
+			return citizen
+
+	return {}
+
+
+static func get_city_citizen_display_name(citizen_id: int) -> String:
+	var citizen := get_city_citizen_by_id(citizen_id)
+
+	if citizen.is_empty():
+		return "Citizen " + str(citizen_id)
+
+	return str(citizen.get("name", "Citizen " + str(citizen_id)))
+
+
+static func get_city_citizen_snapshot() -> Array:
+	ensure_starting_city_population()
+
+	var citizen_snapshot := []
+
+	for citizen in city_citizens:
+		if not citizen is Dictionary:
+			continue
+
+		citizen_snapshot.append(citizen.duplicate(true))
+
+	return citizen_snapshot
 
 static func get_city_object_resident_capacity(city_object: Dictionary) -> int:
 	if city_object.is_empty():
@@ -609,6 +787,52 @@ static func get_city_object_resident_count(city_object: Dictionary) -> int:
 
 	return resident_count
 
+static func get_city_object_resident_ids(city_object: Dictionary) -> Array:
+	var resident_ids := []
+
+	if city_object.is_empty():
+		return resident_ids
+
+	if city_object.has("resident_ids"):
+		var raw_resident_ids = city_object.get("resident_ids", [])
+
+		if raw_resident_ids is Array:
+			for resident_id in raw_resident_ids:
+				resident_ids.append(int(resident_id))
+
+			return resident_ids
+
+	var object_id := int(city_object.get("id", -1))
+
+	if object_id < 0:
+		return resident_ids
+
+	ensure_starting_city_population()
+
+	for citizen in city_citizens:
+		if not citizen is Dictionary:
+			continue
+
+		if int(citizen.get("home_object_id", -1)) != object_id:
+			continue
+
+		var citizen_id := int(citizen.get("id", -1))
+
+		if citizen_id < 0:
+			continue
+
+		resident_ids.append(citizen_id)
+
+	return resident_ids
+
+static func get_city_object_resident_names(city_object: Dictionary) -> Array:
+	var resident_names := []
+	var resident_ids := get_city_object_resident_ids(city_object)
+
+	for resident_id in resident_ids:
+		resident_names.append(get_city_citizen_display_name(int(resident_id)))
+
+	return resident_names
 
 static func get_total_city_resident_capacity() -> int:
 	var total_capacity := 0
@@ -620,6 +844,195 @@ static func get_total_city_resident_capacity() -> int:
 		total_capacity += get_city_object_resident_capacity(city_object)
 
 	return total_capacity
+
+static func city_object_is_workplace(city_object: Dictionary) -> bool:
+	if city_object.is_empty():
+		return false
+
+	if bool(city_object.get("is_workplace", false)):
+		return true
+
+	var definition := get_city_object_definition_from_object(city_object)
+
+	if definition.is_empty():
+		return false
+
+	return bool(definition.get("is_workplace", false))
+
+
+static func get_city_object_worker_capacity(city_object: Dictionary) -> int:
+	if city_object.is_empty():
+		return 0
+
+	if city_object.has("worker_capacity"):
+		return int(city_object.get("worker_capacity", 0))
+
+	var definition := get_city_object_definition_from_object(city_object)
+	return int(definition.get("worker_capacity", 0))
+
+
+static func get_city_object_output_resource(city_object: Dictionary) -> String:
+	if city_object.is_empty():
+		return RESOURCE_NONE
+
+	if city_object.has("output_resource"):
+		return str(city_object.get("output_resource", RESOURCE_NONE))
+
+	var definition := get_city_object_definition_from_object(city_object)
+	return str(definition.get("output_resource", RESOURCE_NONE))
+
+
+static func get_city_object_worker_ids(city_object: Dictionary) -> Array:
+	var worker_ids := []
+
+	if city_object.is_empty():
+		return worker_ids
+
+	if city_object.has("assigned_worker_ids"):
+		var raw_worker_ids = city_object.get("assigned_worker_ids", [])
+
+		if raw_worker_ids is Array:
+			for worker_id in raw_worker_ids:
+				worker_ids.append(int(worker_id))
+
+			return worker_ids
+
+	var object_id := int(city_object.get("id", -1))
+
+	if object_id < 0:
+		return worker_ids
+
+	ensure_starting_city_population()
+
+	for citizen in city_citizens:
+		if not citizen is Dictionary:
+			continue
+
+		if int(citizen.get("job_object_id", -1)) != object_id:
+			continue
+
+		var citizen_id := int(citizen.get("id", -1))
+
+		if citizen_id < 0:
+			continue
+
+		worker_ids.append(citizen_id)
+
+	return worker_ids
+
+
+static func get_city_object_worker_count(city_object: Dictionary) -> int:
+	return get_city_object_worker_ids(city_object).size()
+
+
+static func get_city_object_worker_names(city_object: Dictionary) -> Array:
+	var worker_names := []
+	var worker_ids := get_city_object_worker_ids(city_object)
+
+	for worker_id in worker_ids:
+		worker_names.append(get_city_citizen_display_name(int(worker_id)))
+
+	return worker_names
+
+
+static func get_first_unemployed_city_citizen_index() -> int:
+	ensure_starting_city_population()
+
+	for citizen_index in range(city_citizens.size()):
+		var raw_citizen = city_citizens[citizen_index]
+
+		if not raw_citizen is Dictionary:
+			continue
+
+		var citizen: Dictionary = raw_citizen
+
+		if not bool(citizen.get("alive", true)):
+			continue
+
+		if int(citizen.get("job_object_id", -1)) >= 0:
+			continue
+
+		return citizen_index
+
+	return -1
+
+
+static func assign_unemployed_citizens_to_available_workplaces() -> int:
+	ensure_starting_city_population()
+
+	var assigned_count := 0
+
+	for object_index in range(city_objects.size()):
+		var raw_city_object = city_objects[object_index]
+
+		if not raw_city_object is Dictionary:
+			continue
+
+		var city_object: Dictionary = raw_city_object
+
+		if not city_object_is_workplace(city_object):
+			continue
+
+		var workplace_id := int(city_object.get("id", -1))
+
+		if workplace_id < 0:
+			continue
+
+		var worker_capacity := get_city_object_worker_capacity(city_object)
+
+		if worker_capacity <= 0:
+			continue
+
+		var assigned_worker_ids: Array = []
+
+		for citizen in city_citizens:
+			if not citizen is Dictionary:
+				continue
+
+			if int(citizen.get("job_object_id", -1)) != workplace_id:
+				continue
+
+			var citizen_id := int(citizen.get("id", -1))
+
+			if citizen_id < 0:
+				continue
+
+			if assigned_worker_ids.has(citizen_id):
+				continue
+
+			if assigned_worker_ids.size() >= worker_capacity:
+				break
+
+			assigned_worker_ids.append(citizen_id)
+
+		while assigned_worker_ids.size() < worker_capacity:
+			var unemployed_citizen_index := get_first_unemployed_city_citizen_index()
+
+			if unemployed_citizen_index < 0:
+				break
+
+			var raw_citizen = city_citizens[unemployed_citizen_index]
+
+			if not raw_citizen is Dictionary:
+				break
+
+			var citizen: Dictionary = raw_citizen
+			var citizen_id := int(citizen.get("id", -1))
+
+			if citizen_id < 0:
+				break
+
+			citizen["job_object_id"] = workplace_id
+			city_citizens[unemployed_citizen_index] = citizen
+
+			if not assigned_worker_ids.has(citizen_id):
+				assigned_worker_ids.append(citizen_id)
+				assigned_count += 1
+
+		city_object["assigned_worker_ids"] = assigned_worker_ids
+		city_objects[object_index] = city_object
+
+	return assigned_count
 
 static func get_first_homeless_city_citizen_index() -> int:
 	ensure_starting_city_population()
@@ -772,27 +1185,88 @@ static func can_place_city_object(
 
 	return true
 
+static func make_rectangle_city_object_footprint_tiles(
+	top_left: Vector2i,
+	size_tiles: Vector2i
+) -> Array:
+	var footprint_tiles := []
+
+	if size_tiles.x <= 0 or size_tiles.y <= 0:
+		return footprint_tiles
+
+	for y in range(top_left.y, top_left.y + size_tiles.y):
+		for x in range(top_left.x, top_left.x + size_tiles.x):
+			footprint_tiles.append(Vector2i(x, y))
+
+	return footprint_tiles
+
+
+static func get_city_object_footprint_tiles(city_object: Dictionary) -> Array:
+	var footprint_tiles := []
+
+	if city_object.is_empty():
+		return footprint_tiles
+
+	if city_object.has("footprint_tiles"):
+		var raw_footprint_tiles = city_object.get("footprint_tiles", [])
+
+		if raw_footprint_tiles is Array:
+			for tile_position in raw_footprint_tiles:
+				if tile_position is Vector2i:
+					footprint_tiles.append(tile_position)
+
+			return footprint_tiles
+
+	if city_object.has("tiles"):
+		var raw_tiles = city_object.get("tiles", [])
+
+		if raw_tiles is Array:
+			for tile_position in raw_tiles:
+				if tile_position is Vector2i:
+					footprint_tiles.append(tile_position)
+
+			return footprint_tiles
+
+	if city_object.has("top_left") and city_object.has("size"):
+		var top_left: Vector2i = city_object.get("top_left", Vector2i(-1, -1))
+		var size_tiles: Vector2i = city_object.get("size", Vector2i.ZERO)
+		return make_rectangle_city_object_footprint_tiles(top_left, size_tiles)
+
+	return footprint_tiles
 
 static func add_city_object(
 	object_type: String,
 	top_left: Vector2i,
 	size_tiles: Vector2i,
-	owner: String = "player"
+	object_owner: String = "player"
 ) -> Dictionary:
 	var city_object := {
 		"id": next_city_object_id,
 		"type": object_type,
 		"top_left": top_left,
 		"size": size_tiles,
-		"owner": owner
+		"owner": object_owner
 	}
 
 	var definition := get_city_object_definition(object_type)
+	var shape_mode := str(definition.get("shape_mode", CITY_OBJECT_SHAPE_RECTANGLE))
+	var footprint_tiles := make_rectangle_city_object_footprint_tiles(top_left, size_tiles)
+
+	city_object["shape_mode"] = shape_mode
+	city_object["footprint_tiles"] = footprint_tiles
+
 	var resident_capacity := int(definition.get("resident_capacity", 0))
 
 	if resident_capacity > 0:
 		city_object["resident_capacity"] = resident_capacity
 		city_object["resident_ids"] = []
+
+	if bool(definition.get("is_workplace", false)):
+		city_object["is_workplace"] = true
+		city_object["workplace_kind"] = str(definition.get("workplace_kind", WORKPLACE_KIND_NONE))
+		city_object["worker_capacity"] = int(definition.get("worker_capacity", 0))
+		city_object["assigned_worker_ids"] = []
+		city_object["output_resource"] = str(definition.get("output_resource", RESOURCE_NONE))
 
 	var starting_storage := make_empty_city_object_storage_for_type(object_type)
 
@@ -811,6 +1285,10 @@ static func add_city_object(
 
 	if object_type == CITY_OBJECT_HOUSE:
 		assign_homeless_citizens_to_available_housing()
+		should_refresh_city_ui = true
+
+	if city_object_is_workplace(city_object):
+		assign_unemployed_citizens_to_available_workplaces()
 		should_refresh_city_ui = true
 
 	if should_refresh_city_ui:
@@ -1001,14 +1479,18 @@ static func add_resource_to_city_object_storage(
 	return 0
 
 static func occupy_city_object_tiles(city_object: Dictionary) -> void:
-	var top_left: Vector2i = city_object["top_left"]
-	var size_tiles: Vector2i = city_object["size"]
-	var object_id: int = int(city_object["id"])
+	var object_id: int = int(city_object.get("id", -1))
 
-	for y in range(top_left.y, top_left.y + size_tiles.y):
-		for x in range(top_left.x, top_left.x + size_tiles.x):
-			city_occupied_tiles[Vector2i(x, y)] = object_id
+	if object_id < 0:
+		return
 
+	var footprint_tiles := get_city_object_footprint_tiles(city_object)
+
+	for tile_position in footprint_tiles:
+		if not tile_position is Vector2i:
+			continue
+
+		city_occupied_tiles[tile_position] = object_id
 
 static func get_city_object_at_tile(tile_position: Vector2i) -> Dictionary:
 	if not city_occupied_tiles.has(tile_position):
@@ -1054,7 +1536,7 @@ static func can_place_city_road_tile(city_world: WorldData, tile_position: Vecto
 	return true
 
 
-static func add_city_road_object(tile_positions: Array, owner: String = "player") -> Dictionary:
+static func add_city_road_object(tile_positions: Array, object_owner: String = "player") -> Dictionary:
 	var clean_tiles: Array = []
 
 	for tile_position in tile_positions:
@@ -1073,7 +1555,7 @@ static func add_city_road_object(tile_positions: Array, owner: String = "player"
 		"id": next_city_object_id,
 		"type": CITY_OBJECT_ROAD,
 		"tiles": clean_tiles,
-		"owner": owner
+		"owner": object_owner
 	}
 
 	next_city_object_id += 1

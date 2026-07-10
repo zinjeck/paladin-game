@@ -35,6 +35,16 @@ var debug_panel_ui: DebugPanel
 var debug_panel_position: Vector2 = Vector2.ZERO
 var debug_panel_padding: Vector2 = Vector2(12.0, 10.0)
 var debug_panel_min_size: Vector2 = Vector2(330.0, 170.0)
+var citizen_debug_button: Button
+var citizen_debug_panel: Panel
+var citizen_debug_title_label: Label
+var citizen_debug_body_label: Label
+var is_citizen_debug_panel_open: bool = false
+
+const CITIZEN_DEBUG_BUTTON_POSITION: Vector2 = Vector2(154.0, 28.0)
+const CITIZEN_DEBUG_BUTTON_SIZE: Vector2 = Vector2(145.0, 26.0)
+const CITIZEN_DEBUG_PANEL_MARGIN: float = 10.0
+const CITIZEN_DEBUG_PANEL_SIZE: Vector2 = Vector2(540.0, 300.0)
 const DEFAULT_CITY_OBJECT_FRAME_COLOR: Color = Color(0.32, 0.30, 0.24, 0.95)
 const DEFAULT_CITY_OBJECT_FILL_COLOR: Color = Color(0.86, 0.84, 0.76, 0.55)
 const DEFAULT_CITY_OBJECT_FRAME_THICKNESS: float = 0.35
@@ -46,6 +56,7 @@ var bottom_button_one: Button
 var bottom_button_two: Button
 var bottom_button_three: Button
 var bottom_button_four: Button
+var bottom_button_five: Button
 var road_drag_start_tile: Vector2i = Vector2i(-1, -1)
 var road_drag_current_tile: Vector2i = Vector2i(-1, -1)
 var city_object_option_buttons: Dictionary = {}
@@ -119,6 +130,7 @@ func _process(_delta: float) -> void:
 		update_resource_bar_values()
 		update_selected_object_panel()
 		update_debug_panel_text()
+		update_citizen_debug_list_text()
 
 func _input(event: InputEvent) -> void:
 	if event is InputEventKey and event.pressed and not event.echo:
@@ -656,6 +668,7 @@ func create_city_ui() -> void:
 	create_build_option_button()
 	create_city_object_option_button(WorldData.CITY_OBJECT_HOUSE)
 	create_city_object_option_button(WorldData.CITY_OBJECT_STOCKPILE)
+	create_city_object_option_button(WorldData.CITY_OBJECT_FISHING_GROUNDS)
 	create_resource_bar()
 	create_city_maps_menu()
 	create_object_info_panel()
@@ -766,6 +779,14 @@ func create_bottom_city_buttons() -> void:
 	ui_root.add_child(bottom_button_four)
 	bottom_button_four.pressed.connect(on_city_object_menu_button_pressed.bind(WorldData.CITY_OBJECT_STOCKPILE))
 
+	bottom_button_five = Button.new()
+	bottom_button_five.text = "5"
+	bottom_button_five.focus_mode = Control.FOCUS_NONE
+	bottom_button_five.custom_minimum_size = Vector2(58.0, 58.0)
+	bottom_button_five.mouse_filter = Control.MOUSE_FILTER_STOP
+	ui_root.add_child(bottom_button_five)
+	bottom_button_five.pressed.connect(on_city_object_menu_button_pressed.bind(WorldData.CITY_OBJECT_FISHING_GROUNDS))
+
 func create_city_object_option_button(object_type: String) -> void:
 	var definition := WorldData.get_city_object_definition(object_type)
 
@@ -820,6 +841,8 @@ func get_bottom_button_for_slot(button_slot: int) -> Button:
 			return bottom_button_three
 		4:
 			return bottom_button_four
+		5:
+			return bottom_button_five
 
 	return null
 
@@ -1328,7 +1351,8 @@ func update_city_object_button_states() -> void:
 	var city_object_main_buttons := {
 		WorldData.CITY_OBJECT_CITY_CENTER: bottom_button_one,
 		WorldData.CITY_OBJECT_HOUSE: bottom_button_three,
-		WorldData.CITY_OBJECT_STOCKPILE: bottom_button_four
+		WorldData.CITY_OBJECT_STOCKPILE: bottom_button_four,
+		WorldData.CITY_OBJECT_FISHING_GROUNDS: bottom_button_five
 	}
 
 	for object_type in city_object_main_buttons.keys():
@@ -1416,7 +1440,7 @@ func layout_object_info_panel(viewport_size: Vector2) -> void:
 		return
 
 	var panel_width := 240.0
-	var panel_height := 430.0
+	var panel_height := 520.0
 
 	object_info_panel.position = Vector2(
 		0.0,
@@ -1431,16 +1455,16 @@ func layout_object_info_panel(viewport_size: Vector2) -> void:
 
 	if object_info_body_label != null:
 		object_info_body_label.position = Vector2(14.0, 56.0)
-		object_info_body_label.size = Vector2(panel_width - 28.0, 90.0)
+		object_info_body_label.size = Vector2(panel_width - 28.0, 260.0)
 
 	layout_object_info_storage_rows(panel_width)
 
 func layout_object_info_storage_rows(panel_width: float) -> void:
 	if object_info_storage_title_label != null:
-		object_info_storage_title_label.position = Vector2(14.0, 158.0)
+		object_info_storage_title_label.position = Vector2(14.0, 326.0)
 		object_info_storage_title_label.size = Vector2(panel_width - 28.0, 24.0)
 
-	var row_start_y := 190.0
+	var row_start_y := 358.0
 	var row_height := 28.0
 	var icon_size := 16.0
 
@@ -1542,6 +1566,29 @@ func update_selected_object_panel() -> void:
 			+ " / "
 			+ str(WorldData.get_city_object_resident_capacity(city_object))
 		)
+
+		var resident_names := WorldData.get_city_object_resident_names(city_object)
+
+		for resident_name in resident_names:
+			body_lines.append("- " + str(resident_name))
+	
+	elif WorldData.city_object_is_workplace(city_object):
+		body_lines.append(
+			"Workers: "
+			+ str(WorldData.get_city_object_worker_count(city_object))
+			+ " / "
+			+ str(WorldData.get_city_object_worker_capacity(city_object))
+		)
+
+		var worker_names := WorldData.get_city_object_worker_names(city_object)
+
+		for worker_name in worker_names:
+			body_lines.append("- " + str(worker_name))
+
+		var output_resource := WorldData.get_city_object_output_resource(city_object)
+
+		if output_resource != WorldData.RESOURCE_NONE:
+			body_lines.append("Output: " + output_resource)
 
 	body_lines.append("Owner: " + str(city_object.get("owner", "none")))
 	body_lines.append("Container: " + container_text)
@@ -1645,13 +1692,14 @@ func layout_bottom_buttons(viewport_size: Vector2) -> void:
 		or bottom_button_two == null
 		or bottom_button_three == null
 		or bottom_button_four == null
+		or bottom_button_five == null
 	):
 		return
 
 	var button_size := 58.0
 	var gap := 0.0
 
-	var total_width := button_size * 4.0 + gap * 3.0
+	var total_width := button_size * 5.0 + gap * 4.0
 	var start_x := viewport_size.x * 0.5 - total_width * 0.5
 	var y := viewport_size.y - button_size
 
@@ -1666,6 +1714,9 @@ func layout_bottom_buttons(viewport_size: Vector2) -> void:
 
 	bottom_button_four.position = Vector2(start_x + (button_size + gap) * 3.0, y)
 	bottom_button_four.size = Vector2(button_size, button_size)
+
+	bottom_button_five.position = Vector2(start_x + (button_size + gap) * 4.0, y)
+	bottom_button_five.size = Vector2(button_size, button_size)
 
 func layout_resource_bar(viewport_size: Vector2) -> void:
 	if resource_bar == null:
@@ -1885,7 +1936,7 @@ func confirm_active_city_object_placement() -> void:
 	var object_type: String = str(preview_object.get("type", ""))
 	var top_left: Vector2i = preview_object["top_left"]
 	var size_tiles: Vector2i = preview_object["size"]
-	var owner: String = str(preview_object.get("owner", "player"))
+	var object_owner: String = str(preview_object.get("owner", "player"))
 	var repeat_after_place: bool = bool(active_city_object_placement.get("repeat_after_place", false))
 
 	if not WorldData.can_place_city_object(city_world, top_left, size_tiles):
@@ -1896,7 +1947,7 @@ func confirm_active_city_object_placement() -> void:
 		object_type,
 		top_left,
 		size_tiles,
-		owner
+		object_owner
 	)
 
 	after_city_object_placed(placed_object)
@@ -2636,13 +2687,13 @@ func draw_city_objects() -> void:
 func start_city_object_placement(
 	object_type: String,
 	size_tiles: Vector2i,
-	owner: String = "player",
+	object_owner: String = "player",
 	repeat_after_place: bool = false
 ) -> void:
 	active_city_object_placement = {
 		"type": object_type,
 		"size": size_tiles,
-		"owner": owner,
+		"owner": object_owner,
 		"repeat_after_place": repeat_after_place
 	}
 
@@ -3175,6 +3226,7 @@ func update_debug_panel_text() -> void:
 		return
 
 	debug_panel_ui.refresh()
+	update_citizen_debug_ui()
 
 func create_debug_panel() -> void:
 	debug_panel_ui = DebugPanel.new()
@@ -3188,11 +3240,214 @@ func create_debug_panel() -> void:
 		Callable(self, "get_city_debug_panel_text")
 	)
 
+	create_citizen_debug_button()
+	create_citizen_debug_list_panel()
+	update_citizen_debug_ui()
+
+func create_citizen_debug_button() -> void:
+	if debug_panel_ui == null:
+		return
+
+	if debug_panel_ui.panel == null:
+		return
+
+	debug_panel_ui.panel.mouse_filter = Control.MOUSE_FILTER_PASS
+
+	citizen_debug_button = Button.new()
+	citizen_debug_button.text = "Citizens"
+	citizen_debug_button.position = CITIZEN_DEBUG_BUTTON_POSITION
+	citizen_debug_button.size = CITIZEN_DEBUG_BUTTON_SIZE
+	citizen_debug_button.focus_mode = Control.FOCUS_NONE
+	citizen_debug_button.mouse_filter = Control.MOUSE_FILTER_STOP
+	citizen_debug_button.visible = WorldData.debug_mode_enabled
+	citizen_debug_button.pressed.connect(Callable(self, "toggle_citizen_debug_list_panel"))
+
+	debug_panel_ui.panel.add_child(citizen_debug_button)
+
+
+func create_citizen_debug_list_panel() -> void:
+	if debug_panel_ui == null:
+		return
+
+	if debug_panel_ui.canvas_layer == null:
+		return
+
+	citizen_debug_panel = Panel.new()
+	citizen_debug_panel.visible = false
+	citizen_debug_panel.mouse_filter = Control.MOUSE_FILTER_STOP
+
+	var panel_style := StyleBoxFlat.new()
+	panel_style.bg_color = Color(0.0, 0.0, 0.0, 0.76)
+	panel_style.border_color = Color(0.0, 0.55, 1.0, 0.60)
+	panel_style.set_border_width_all(1)
+	panel_style.set_corner_radius_all(6)
+	citizen_debug_panel.add_theme_stylebox_override("panel", panel_style)
+
+	debug_panel_ui.canvas_layer.add_child(citizen_debug_panel)
+
+	citizen_debug_title_label = Label.new()
+	citizen_debug_title_label.text = "CITIZENS"
+	citizen_debug_title_label.position = Vector2(12.0, 10.0)
+	citizen_debug_title_label.size = Vector2(CITIZEN_DEBUG_PANEL_SIZE.x - 24.0, 24.0)
+	citizen_debug_title_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	citizen_debug_title_label.add_theme_color_override("font_color", Color(0.88, 0.96, 1.0, 1.0))
+	citizen_debug_title_label.add_theme_font_size_override("font_size", 15)
+	citizen_debug_panel.add_child(citizen_debug_title_label)
+
+	citizen_debug_body_label = Label.new()
+	citizen_debug_body_label.text = ""
+	citizen_debug_body_label.position = Vector2(12.0, 42.0)
+	citizen_debug_body_label.size = Vector2(CITIZEN_DEBUG_PANEL_SIZE.x - 24.0, CITIZEN_DEBUG_PANEL_SIZE.y - 54.0)
+	citizen_debug_body_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	citizen_debug_body_label.autowrap_mode = TextServer.AUTOWRAP_OFF
+	citizen_debug_body_label.clip_text = false
+	citizen_debug_body_label.add_theme_color_override("font_color", Color(0.82, 0.94, 1.0, 1.0))
+	citizen_debug_body_label.add_theme_font_size_override("font_size", 12)
+	citizen_debug_panel.add_child(citizen_debug_body_label)
+
+	layout_citizen_debug_list_panel()
+	update_citizen_debug_list_text()
+
+
+func toggle_citizen_debug_list_panel() -> void:
+	is_citizen_debug_panel_open = not is_citizen_debug_panel_open
+	update_citizen_debug_ui()
+
+
+func update_citizen_debug_ui() -> void:
+	if citizen_debug_button != null:
+		citizen_debug_button.visible = WorldData.debug_mode_enabled
+
+		if is_citizen_debug_panel_open:
+			citizen_debug_button.text = "Hide Citizens"
+		else:
+			citizen_debug_button.text = "Citizens"
+
+	if citizen_debug_panel != null:
+		citizen_debug_panel.visible = WorldData.debug_mode_enabled and is_citizen_debug_panel_open
+
+		if citizen_debug_panel.visible:
+			layout_citizen_debug_list_panel()
+			update_citizen_debug_list_text()
+
+
+func layout_citizen_debug_list_panel() -> void:
+	if citizen_debug_panel == null:
+		return
+
+	var panel_position := Vector2(
+		debug_panel_position.x + debug_panel_min_size.x + CITIZEN_DEBUG_PANEL_MARGIN,
+		debug_panel_position.y
+	)
+
+	if debug_panel_ui != null and debug_panel_ui.panel != null:
+		panel_position = debug_panel_ui.panel.position + Vector2(debug_panel_ui.panel.size.x + CITIZEN_DEBUG_PANEL_MARGIN, 0.0)
+
+	citizen_debug_panel.position = panel_position
+	citizen_debug_panel.size = CITIZEN_DEBUG_PANEL_SIZE
+
+	if citizen_debug_title_label != null:
+		citizen_debug_title_label.position = Vector2(12.0, 10.0)
+		citizen_debug_title_label.size = Vector2(CITIZEN_DEBUG_PANEL_SIZE.x - 24.0, 24.0)
+
+	if citizen_debug_body_label != null:
+		citizen_debug_body_label.position = Vector2(12.0, 42.0)
+		citizen_debug_body_label.size = Vector2(CITIZEN_DEBUG_PANEL_SIZE.x - 24.0, CITIZEN_DEBUG_PANEL_SIZE.y - 54.0)
+
+
+func update_citizen_debug_list_text() -> void:
+	if citizen_debug_body_label == null:
+		return
+
+	citizen_debug_body_label.text = get_citizen_debug_list_text()
+
+
+func get_citizen_debug_list_text() -> String:
+	var citizens := WorldData.get_city_citizen_snapshot()
+
+	if citizens.is_empty():
+		return "No citizens."
+
+	var lines := []
+
+	for citizen in citizens:
+		if not citizen is Dictionary:
+			continue
+
+		lines.append(get_citizen_debug_line(citizen))
+
+	return "\n".join(lines)
+
+
+func get_citizen_debug_line(citizen: Dictionary) -> String:
+	var citizen_id := int(citizen.get("id", -1))
+	var citizen_name := str(citizen.get("name", "Citizen " + str(citizen_id)))
+	var home_text := get_citizen_debug_home_text(citizen)
+	var job_text := get_citizen_debug_job_text(citizen)
+	var state_text := str(citizen.get("state", "unknown"))
+	var hunger := int(citizen.get("hunger", 0))
+	var happiness := int(citizen.get("happiness", 0))
+	var inventory_used := get_citizen_debug_inventory_used(citizen)
+	var carry_capacity := int(citizen.get("carry_capacity", 0))
+
+	return (
+		"#" + str(citizen_id)
+		+ " " + citizen_name
+		+ " | Home: " + home_text
+		+ " | Job: " + job_text
+		+ " | " + state_text
+		+ " | Hunger " + str(hunger)
+		+ " | Happiness " + str(happiness)
+		+ " | Inv " + str(inventory_used) + "/" + str(carry_capacity)
+	)
+
+func get_citizen_debug_home_text(citizen: Dictionary) -> String:
+	var home_object_id := int(citizen.get("home_object_id", -1))
+
+	if home_object_id < 0:
+		return "none"
+
+	var home_object := get_city_object_by_id(home_object_id)
+
+	if home_object.is_empty():
+		return "missing #" + str(home_object_id)
+
+	return get_city_object_display_name(home_object) + " #" + str(home_object_id)
+
+
+func get_citizen_debug_job_text(citizen: Dictionary) -> String:
+	var job_object_id := int(citizen.get("job_object_id", -1))
+
+	if job_object_id < 0:
+		return "none"
+
+	var job_object := get_city_object_by_id(job_object_id)
+
+	if job_object.is_empty():
+		return "missing #" + str(job_object_id)
+
+	return get_city_object_display_name(job_object) + " #" + str(job_object_id)
+
+
+func get_citizen_debug_inventory_used(citizen: Dictionary) -> int:
+	var inventory = citizen.get("inventory", {})
+
+	if not inventory is Dictionary:
+		return 0
+
+	var total_amount := 0
+
+	for resource in WorldData.get_city_resource_types():
+		total_amount += int(inventory.get(resource, 0))
+
+	return total_amount
+
 func toggle_debug_mode() -> void:
 	if debug_panel_ui == null:
 		return
 
 	var is_enabled := debug_panel_ui.toggle_enabled()
+	update_citizen_debug_ui()
 	queue_redraw()
 
 	if is_enabled:

@@ -21,8 +21,8 @@ func setup(
 	cache_label: String,
 	warmup_rows_per_frame: int,
 	get_color_for_mode: Callable,
-	get_all_modes: Callable,
-	get_mode_name: Callable,
+	get_all_modes_callable: Callable,
+	get_mode_name_callable: Callable,
 	has_valid_saved_cache: Callable,
 	get_saved_cache: Callable,
 	store_saved_cache: Callable
@@ -31,8 +31,8 @@ func setup(
 	label = cache_label
 	rows_per_frame = max(1, warmup_rows_per_frame)
 	color_provider = get_color_for_mode
-	modes_provider = get_all_modes
-	mode_name_provider = get_mode_name
+	modes_provider = get_all_modes_callable
+	mode_name_provider = get_mode_name_callable
 	has_valid_saved_cache_provider = has_valid_saved_cache
 	saved_cache_getter = get_saved_cache
 	saved_cache_storer = store_saved_cache
