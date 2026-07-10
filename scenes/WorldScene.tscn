@@ -1,7 +1,7 @@
 [gd_scene load_steps=3 format=3 uid="uid://b1mkgylo3ysid"]
 
-[ext_resource type="Script" uid="uid://ky1liajdyt6y" path="res://Camera.gd" id="1_pm5xc"]
-[ext_resource type="Script" uid="uid://dt770ge3rjqg8" path="res://world/WorldRenderer.gd" id="2_ikocj"]
+[ext_resource type="Script" uid="uid://ky1liajdyt6y" path="res://scripts/camera/Camera.gd" id="1_pm5xc"]
+[ext_resource type="Script" uid="uid://dt770ge3rjqg8" path="res://scripts/world/rendering/WorldRenderer.gd" id="2_ikocj"]
 
 [node name="Main" type="Node2D"]
 

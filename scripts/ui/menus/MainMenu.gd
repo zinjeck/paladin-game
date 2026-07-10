@@ -34,7 +34,7 @@ func create_background() -> void:
 
 func create_title() -> void:
 	title_label = Label.new()
-	title_label.text = "ASUNDER"
+	title_label.text = "PALADIN"
 
 	title_label.anchor_left = 0.0
 	title_label.anchor_top = 0.0

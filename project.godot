@@ -10,7 +10,7 @@ config_version=5
 
 [application]
 
-config/name="Asunder"
+config/name="Paladin"
 config/version="0.0.1"
 run/main_scene="uid://c0app5ii7ph85"
 config/features=PackedStringArray("4.4", "Forward Plus")
