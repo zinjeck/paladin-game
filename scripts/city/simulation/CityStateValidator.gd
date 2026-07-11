@@ -45,6 +45,13 @@ static func validate(
 		citizen_lookup
 	)
 
+	_validate_city_workplace_production(
+		errors,
+		warnings,
+		object_lookup,
+		citizen_lookup
+	)
+
 	var checked_inventory_count := _validate_citizen_inventories(
 		errors,
 		warnings,
@@ -69,7 +76,8 @@ static func validate(
 		"object_version": WorldData.city_object_version,
 		"container_version": WorldData.city_container_version,
 		"citizen_version": WorldData.city_citizen_version,
-		"assignment_version": WorldData.city_assignment_version
+		"assignment_version": WorldData.city_assignment_version,
+		"workplace_version": WorldData.city_workplace_version
 	}
 
 	_cached_result = result
@@ -146,6 +154,12 @@ static func _validation_cache_matches_current_state() -> bool:
 	if (
 		int(_cached_result.get("assignment_version", -1))
 		!= WorldData.city_assignment_version
+	):
+		return false
+
+	if (
+		int(_cached_result.get("workplace_version", -1))
+		!= WorldData.city_workplace_version
 	):
 		return false
 
@@ -1347,6 +1361,905 @@ static func _validate_citizen_inventories(
 			)
 
 	return checked_inventory_count
+
+
+static func _validate_city_workplace_production(
+	errors: Array[String],
+	warnings: Array[String],
+	object_lookup: Dictionary,
+	citizen_lookup: Dictionary
+) -> void:
+	for object_id in object_lookup.keys():
+		var object_index := int(object_lookup[object_id])
+		var city_object: Dictionary = WorldData.city_objects[object_index]
+
+		if not WorldData.city_object_is_workplace(city_object):
+			continue
+
+		var definition := WorldData.get_city_object_definition_from_object(
+			city_object
+		)
+
+		if definition.is_empty():
+			errors.append(
+				"Workplace "
+					+ str(object_id)
+					+ " has no valid city-object definition."
+			)
+			continue
+
+		var raw_production_recipe = (
+			_get_required_workplace_definition_dictionary(
+				errors,
+				definition,
+				int(object_id),
+				"production_recipe"
+			)
+		)
+
+		if raw_production_recipe is Dictionary:
+			var production_recipe: Dictionary = raw_production_recipe
+
+			if not production_recipe.is_empty():
+				var work_units_per_batch := _validate_workplace_recipe(
+					errors,
+					city_object,
+					int(object_id),
+					production_recipe
+				)
+
+				_validate_workplace_runtime_production_state(
+					errors,
+					warnings,
+					city_object,
+					int(object_id),
+					citizen_lookup,
+					work_units_per_batch
+				)
+
+		var raw_resource_source_policy = (
+			_get_required_workplace_definition_dictionary(
+				errors,
+				definition,
+				int(object_id),
+				"resource_source_policy"
+			)
+		)
+
+		if raw_resource_source_policy is Dictionary:
+			_validate_workplace_resource_source_policy(
+				errors,
+				int(object_id),
+				raw_resource_source_policy
+			)
+
+		var raw_work_location_policy = (
+			_get_required_workplace_definition_dictionary(
+				errors,
+				definition,
+				int(object_id),
+				"work_location_policy"
+			)
+		)
+
+		if raw_work_location_policy is Dictionary:
+			_validate_workplace_work_location_policy(
+				errors,
+				int(object_id),
+				raw_work_location_policy
+			)
+
+		var raw_work_movement_policy = (
+			_get_required_workplace_definition_dictionary(
+				errors,
+				definition,
+				int(object_id),
+				"work_movement_policy"
+			)
+		)
+
+		if raw_work_movement_policy is Dictionary:
+			_validate_workplace_movement_policy(
+				errors,
+				int(object_id),
+				raw_work_movement_policy
+			)
+
+		var raw_break_location_policy = (
+			_get_required_workplace_definition_dictionary(
+				errors,
+				definition,
+				int(object_id),
+				"break_location_policy"
+			)
+		)
+
+		if raw_break_location_policy is Dictionary:
+			_validate_workplace_break_location_policy(
+				errors,
+				int(object_id),
+				raw_break_location_policy
+			)
+
+		var raw_overflow_policy = (
+			_get_required_workplace_definition_dictionary(
+				errors,
+				definition,
+				int(object_id),
+				"overflow_policy"
+			)
+		)
+
+		if raw_overflow_policy is Dictionary:
+			_validate_workplace_overflow_policy(
+				errors,
+				int(object_id),
+				raw_overflow_policy
+			)
+
+
+static func _get_required_workplace_definition_dictionary(
+	errors: Array[String],
+	definition: Dictionary,
+	object_id: int,
+	field_name: String
+) -> Variant:
+	if not definition.has(field_name):
+		errors.append(
+			"Workplace "
+				+ str(object_id)
+				+ " definition is missing "
+				+ field_name
+				+ "."
+		)
+		return null
+
+	var raw_value = definition[field_name]
+
+	if not raw_value is Dictionary:
+		errors.append(
+			"Workplace "
+				+ str(object_id)
+				+ " definition has non-Dictionary "
+				+ field_name
+				+ "."
+		)
+		return null
+
+	return raw_value
+
+
+static func _validate_workplace_recipe(
+	errors: Array[String],
+	city_object: Dictionary,
+	object_id: int,
+	recipe: Dictionary
+) -> int:
+	var valid_resources := WorldData.get_city_resource_types()
+	var raw_inputs = recipe.get("inputs", null)
+
+	if not recipe.has("inputs"):
+		errors.append(
+			"Workplace "
+				+ str(object_id)
+				+ " production recipe is missing inputs."
+		)
+	elif not raw_inputs is Dictionary:
+		errors.append(
+			"Workplace "
+				+ str(object_id)
+				+ " production recipe has non-Dictionary inputs."
+		)
+	else:
+		_validate_workplace_recipe_resources(
+			errors,
+			city_object,
+			object_id,
+			raw_inputs,
+			valid_resources,
+			"input",
+			false
+		)
+
+	var raw_outputs = recipe.get("outputs", null)
+
+	if not recipe.has("outputs"):
+		errors.append(
+			"Workplace "
+				+ str(object_id)
+				+ " production recipe is missing outputs."
+		)
+	elif not raw_outputs is Dictionary:
+		errors.append(
+			"Workplace "
+				+ str(object_id)
+				+ " production recipe has non-Dictionary outputs."
+		)
+	else:
+		var outputs: Dictionary = raw_outputs
+
+		if outputs.is_empty():
+			errors.append(
+				"Workplace "
+					+ str(object_id)
+					+ " production recipe has no outputs."
+			)
+		else:
+			_validate_workplace_recipe_resources(
+				errors,
+				city_object,
+				object_id,
+				outputs,
+				valid_resources,
+				"output",
+				true
+			)
+
+	if not recipe.has("work_units_per_batch"):
+		errors.append(
+			"Workplace "
+				+ str(object_id)
+				+ " production recipe is missing work_units_per_batch."
+		)
+		return 0
+
+	var raw_work_units_per_batch = recipe["work_units_per_batch"]
+
+	if typeof(raw_work_units_per_batch) != TYPE_INT:
+		errors.append(
+			"Workplace "
+				+ str(object_id)
+				+ " production recipe has non-integer work_units_per_batch."
+		)
+		return 0
+
+	var work_units_per_batch: int = raw_work_units_per_batch
+
+	if work_units_per_batch <= 0:
+		errors.append(
+			"Workplace "
+				+ str(object_id)
+				+ " production recipe has non-positive work_units_per_batch "
+				+ str(work_units_per_batch)
+				+ "."
+		)
+		return 0
+
+	return work_units_per_batch
+
+
+static func _validate_workplace_recipe_resources(
+	errors: Array[String],
+	city_object: Dictionary,
+	object_id: int,
+	resource_amounts: Dictionary,
+	valid_resources: Array[String],
+	entry_label: String,
+	validate_output_storage: bool
+) -> void:
+	for raw_resource in resource_amounts.keys():
+		var resource := str(raw_resource)
+		var resource_is_known := valid_resources.has(resource)
+
+		if not resource_is_known:
+			errors.append(
+				"Workplace "
+					+ str(object_id)
+					+ " production recipe has unknown "
+					+ entry_label
+					+ " resource '"
+					+ resource
+					+ "'."
+			)
+
+		var raw_quantity = resource_amounts[raw_resource]
+
+		if typeof(raw_quantity) != TYPE_INT:
+			errors.append(
+				"Workplace "
+					+ str(object_id)
+					+ " production recipe has non-integer quantity for "
+					+ entry_label
+					+ " resource '"
+					+ resource
+					+ "'."
+			)
+		elif int(raw_quantity) <= 0:
+			errors.append(
+				"Workplace "
+					+ str(object_id)
+					+ " production recipe has non-positive quantity for "
+					+ entry_label
+					+ " resource '"
+					+ resource
+					+ "'."
+			)
+
+		if not validate_output_storage or not resource_is_known:
+			continue
+
+		if not WorldData.can_city_object_store_resource(
+			city_object,
+			resource
+		):
+			errors.append(
+				"Workplace "
+					+ str(object_id)
+					+ " cannot store recipe output resource '"
+					+ resource
+					+ "'."
+			)
+			continue
+
+		var output_capacity := (
+			WorldData.get_city_object_storage_capacity_for_resource(
+				city_object,
+				resource
+			)
+		)
+
+		if output_capacity <= 0:
+			errors.append(
+				"Workplace "
+					+ str(object_id)
+					+ " has non-positive storage capacity for recipe output '"
+					+ resource
+					+ "'."
+			)
+
+
+static func _validate_workplace_runtime_production_state(
+	errors: Array[String],
+	warnings: Array[String],
+	city_object: Dictionary,
+	object_id: int,
+	citizen_lookup: Dictionary,
+	work_units_per_batch: int
+) -> void:
+	if not city_object.has("production_progress_work_units"):
+		errors.append(
+			"Workplace "
+				+ str(object_id)
+				+ " is missing production_progress_work_units."
+		)
+	else:
+		var raw_progress = city_object["production_progress_work_units"]
+
+		if typeof(raw_progress) != TYPE_INT:
+			errors.append(
+				"Workplace "
+					+ str(object_id)
+					+ " has non-integer production_progress_work_units."
+			)
+		else:
+			var progress_work_units: int = raw_progress
+
+			if progress_work_units < 0:
+				errors.append(
+					"Workplace "
+						+ str(object_id)
+						+ " has negative production progress "
+						+ str(progress_work_units)
+						+ "."
+				)
+			elif (
+				work_units_per_batch > 0
+				and progress_work_units >= work_units_per_batch
+			):
+				errors.append(
+					"Workplace "
+						+ str(object_id)
+						+ " has production progress "
+						+ str(progress_work_units)
+						+ ", but one batch requires "
+						+ str(work_units_per_batch)
+						+ "."
+				)
+
+	if not city_object.has("production_status"):
+		errors.append(
+			"Workplace "
+				+ str(object_id)
+				+ " is missing production_status."
+		)
+	else:
+		var raw_status = city_object["production_status"]
+
+		if typeof(raw_status) != TYPE_STRING:
+			errors.append(
+				"Workplace "
+					+ str(object_id)
+					+ " has non-String production_status."
+			)
+		elif not WorldData.is_valid_city_workplace_production_status(
+			raw_status
+		):
+			errors.append(
+				"Workplace "
+					+ str(object_id)
+					+ " has unknown production status '"
+					+ str(raw_status)
+					+ "'."
+			)
+
+	if not city_object.has("productive_worker_count"):
+		errors.append(
+			"Workplace "
+				+ str(object_id)
+				+ " is missing productive_worker_count."
+		)
+	else:
+		var raw_productive_worker_count = city_object[
+			"productive_worker_count"
+		]
+
+		if typeof(raw_productive_worker_count) != TYPE_INT:
+			errors.append(
+				"Workplace "
+					+ str(object_id)
+					+ " has non-integer productive_worker_count."
+			)
+		else:
+			var productive_worker_count: int = (
+				raw_productive_worker_count
+			)
+			var worker_capacity := (
+				WorldData.get_city_object_worker_capacity(city_object)
+			)
+
+			if productive_worker_count < 0:
+				errors.append(
+					"Workplace "
+						+ str(object_id)
+						+ " has negative productive_worker_count "
+						+ str(productive_worker_count)
+						+ "."
+				)
+			elif productive_worker_count > worker_capacity:
+				errors.append(
+					"Workplace "
+						+ str(object_id)
+						+ " has productive_worker_count "
+						+ str(productive_worker_count)
+						+ " but worker capacity is "
+						+ str(worker_capacity)
+						+ "."
+				)
+
+			var expected_productive_worker_count := (
+				_get_expected_productive_worker_count(
+					city_object,
+					citizen_lookup
+				)
+			)
+			var production_status := str(
+				city_object.get("production_status", "")
+			)
+
+			# A newly staffed workplace can still be idle until the next tick.
+			# Compare the derived count only after production has evaluated it.
+			var production_has_evaluated_workers := (
+				production_status
+				== WorldData.WORKPLACE_PRODUCTION_STATUS_WORKING
+				or production_status
+				== WorldData.WORKPLACE_PRODUCTION_STATUS_BLOCKED_OUTPUT_FULL
+				or production_status
+				== WorldData.WORKPLACE_PRODUCTION_STATUS_BLOCKED_MISSING_INPUT
+			)
+
+			if (
+				production_has_evaluated_workers
+				and expected_productive_worker_count >= 0
+				and productive_worker_count
+				!= expected_productive_worker_count
+			):
+				warnings.append(
+					"Workplace "
+						+ str(object_id)
+						+ " caches "
+						+ str(productive_worker_count)
+						+ " productive workers, but current assignment data yields "
+						+ str(expected_productive_worker_count)
+						+ "."
+				)
+
+	if not city_object.has("site_productivity_basis_points"):
+		errors.append(
+			"Workplace "
+				+ str(object_id)
+				+ " is missing site_productivity_basis_points."
+		)
+	else:
+		var raw_site_productivity = city_object[
+			"site_productivity_basis_points"
+		]
+
+		if typeof(raw_site_productivity) != TYPE_INT:
+			errors.append(
+				"Workplace "
+					+ str(object_id)
+					+ " has non-integer site_productivity_basis_points."
+			)
+		elif int(raw_site_productivity) < 0:
+			errors.append(
+				"Workplace "
+					+ str(object_id)
+					+ " has negative site_productivity_basis_points "
+					+ str(raw_site_productivity)
+					+ "."
+			)
+
+
+static func _get_expected_productive_worker_count(
+	city_object: Dictionary,
+	citizen_lookup: Dictionary
+) -> int:
+	var raw_worker_ids = city_object.get("assigned_worker_ids", null)
+
+	if not raw_worker_ids is Array:
+		return -1
+
+	var workplace_id := int(city_object.get("id", -1))
+
+	if workplace_id <= 0:
+		return -1
+
+	var productive_worker_count := 0
+	var counted_worker_ids: Dictionary = {}
+
+	for raw_worker_id in raw_worker_ids:
+		if typeof(raw_worker_id) != TYPE_INT:
+			continue
+
+		var worker_id: int = raw_worker_id
+
+		if worker_id <= 0 or counted_worker_ids.has(worker_id):
+			continue
+
+		counted_worker_ids[worker_id] = true
+
+		if not citizen_lookup.has(worker_id):
+			continue
+
+		var citizen_index := int(citizen_lookup[worker_id])
+		var citizen: Dictionary = WorldData.city_citizens[citizen_index]
+
+		if not bool(citizen.get("alive", false)):
+			continue
+
+		if int(citizen.get("job_object_id", -1)) != workplace_id:
+			continue
+
+		productive_worker_count += 1
+
+	return mini(
+		productive_worker_count,
+		maxi(
+			WorldData.get_city_object_worker_capacity(city_object),
+			0
+		)
+	)
+
+
+static func _validate_workplace_resource_source_policy(
+	errors: Array[String],
+	object_id: int,
+	policy: Dictionary
+) -> void:
+	var mode := _get_workplace_policy_mode(
+		errors,
+		object_id,
+		"resource_source_policy",
+		policy
+	)
+
+	if mode.is_empty():
+		return
+
+	if not WorldData.is_valid_workplace_resource_source_mode(mode):
+		errors.append(
+			"Workplace "
+				+ str(object_id)
+				+ " has unknown resource_source_policy mode '"
+				+ mode
+				+ "'."
+		)
+		return
+
+	if mode != WorldData.WORKPLACE_RESOURCE_SOURCE_MODE_RADIUS:
+		return
+
+	_validate_known_workplace_policy_resource(
+		errors,
+		object_id,
+		"resource_source_policy",
+		policy,
+		"resource_type"
+	)
+
+	_validate_positive_workplace_policy_integer(
+		errors,
+		object_id,
+		"resource_source_policy",
+		policy,
+		"radius_tiles"
+	)
+
+	if not policy.has("anchor_mode"):
+		errors.append(
+			"Workplace "
+				+ str(object_id)
+				+ " resource_source_policy is missing anchor_mode."
+		)
+		return
+
+	var raw_anchor_mode = policy["anchor_mode"]
+
+	if typeof(raw_anchor_mode) != TYPE_STRING:
+		errors.append(
+			"Workplace "
+				+ str(object_id)
+				+ " resource_source_policy has non-String anchor_mode."
+		)
+		return
+
+	var anchor_mode: String = raw_anchor_mode
+
+	if not WorldData.is_valid_workplace_anchor_mode(anchor_mode):
+		errors.append(
+			"Workplace "
+				+ str(object_id)
+				+ " resource_source_policy has unknown anchor_mode '"
+				+ anchor_mode
+				+ "'."
+		)
+
+
+static func _validate_workplace_work_location_policy(
+	errors: Array[String],
+	object_id: int,
+	policy: Dictionary
+) -> void:
+	var mode := _get_workplace_policy_mode(
+		errors,
+		object_id,
+		"work_location_policy",
+		policy
+	)
+
+	if mode.is_empty():
+		return
+
+	if not WorldData.is_valid_workplace_work_location_mode(mode):
+		errors.append(
+			"Workplace "
+				+ str(object_id)
+				+ " has unknown work_location_policy mode '"
+				+ mode
+				+ "'."
+		)
+
+
+static func _validate_workplace_movement_policy(
+	errors: Array[String],
+	object_id: int,
+	policy: Dictionary
+) -> void:
+	var mode := _get_workplace_policy_mode(
+		errors,
+		object_id,
+		"work_movement_policy",
+		policy
+	)
+
+	if mode.is_empty():
+		return
+
+	if not WorldData.is_valid_workplace_movement_mode(mode):
+		errors.append(
+			"Workplace "
+				+ str(object_id)
+				+ " has unknown work_movement_policy mode '"
+				+ mode
+				+ "'."
+		)
+
+
+static func _validate_workplace_break_location_policy(
+	errors: Array[String],
+	object_id: int,
+	policy: Dictionary
+) -> void:
+	var mode := _get_workplace_policy_mode(
+		errors,
+		object_id,
+		"break_location_policy",
+		policy
+	)
+
+	if mode.is_empty():
+		return
+
+	if not WorldData.is_valid_workplace_break_location_mode(mode):
+		errors.append(
+			"Workplace "
+				+ str(object_id)
+				+ " has unknown break_location_policy mode '"
+				+ mode
+				+ "'."
+		)
+		return
+
+	if mode == WorldData.WORKPLACE_BREAK_LOCATION_MODE_FOOTPRINT_RADIUS:
+		_validate_positive_workplace_policy_integer(
+			errors,
+			object_id,
+			"break_location_policy",
+			policy,
+			"radius_tiles"
+		)
+
+
+static func _validate_workplace_overflow_policy(
+	errors: Array[String],
+	object_id: int,
+	policy: Dictionary
+) -> void:
+	var mode := _get_workplace_policy_mode(
+		errors,
+		object_id,
+		"overflow_policy",
+		policy
+	)
+
+	if mode.is_empty():
+		return
+
+	if not WorldData.is_valid_workplace_overflow_mode(mode):
+		errors.append(
+			"Workplace "
+				+ str(object_id)
+				+ " has unknown overflow_policy mode '"
+				+ mode
+				+ "'."
+		)
+		return
+
+	if mode == WorldData.WORKPLACE_OVERFLOW_MODE_FOOTPRINT_RADIUS:
+		_validate_positive_workplace_policy_integer(
+			errors,
+			object_id,
+			"overflow_policy",
+			policy,
+			"radius_tiles"
+		)
+
+
+static func _get_workplace_policy_mode(
+	errors: Array[String],
+	object_id: int,
+	policy_name: String,
+	policy: Dictionary
+) -> String:
+	if not policy.has("mode"):
+		errors.append(
+			"Workplace "
+				+ str(object_id)
+				+ " "
+				+ policy_name
+				+ " is missing mode."
+		)
+		return ""
+
+	var raw_mode = policy["mode"]
+
+	if typeof(raw_mode) != TYPE_STRING:
+		errors.append(
+			"Workplace "
+				+ str(object_id)
+				+ " "
+				+ policy_name
+				+ " has non-String mode."
+		)
+		return ""
+
+	return str(raw_mode)
+
+
+static func _validate_known_workplace_policy_resource(
+	errors: Array[String],
+	object_id: int,
+	policy_name: String,
+	policy: Dictionary,
+	field_name: String
+) -> void:
+	if not policy.has(field_name):
+		errors.append(
+			"Workplace "
+				+ str(object_id)
+				+ " "
+				+ policy_name
+				+ " is missing "
+				+ field_name
+				+ "."
+		)
+		return
+
+	var raw_resource = policy[field_name]
+
+	if typeof(raw_resource) != TYPE_STRING:
+		errors.append(
+			"Workplace "
+				+ str(object_id)
+				+ " "
+				+ policy_name
+				+ " has non-String "
+				+ field_name
+				+ "."
+		)
+		return
+
+	var resource: String = raw_resource
+
+	if not WorldData.get_city_resource_types().has(resource):
+		errors.append(
+			"Workplace "
+				+ str(object_id)
+				+ " "
+				+ policy_name
+				+ " has unknown "
+				+ field_name
+				+ " '"
+				+ resource
+				+ "'."
+		)
+
+
+static func _validate_positive_workplace_policy_integer(
+	errors: Array[String],
+	object_id: int,
+	policy_name: String,
+	policy: Dictionary,
+	field_name: String
+) -> void:
+	if not policy.has(field_name):
+		errors.append(
+			"Workplace "
+				+ str(object_id)
+				+ " "
+				+ policy_name
+				+ " is missing "
+				+ field_name
+				+ "."
+		)
+		return
+
+	var raw_value = policy[field_name]
+
+	if typeof(raw_value) != TYPE_INT:
+		errors.append(
+			"Workplace "
+				+ str(object_id)
+				+ " "
+				+ policy_name
+				+ " has non-integer "
+				+ field_name
+				+ "."
+		)
+		return
+
+	if int(raw_value) <= 0:
+		errors.append(
+			"Workplace "
+				+ str(object_id)
+				+ " "
+				+ policy_name
+				+ " has non-positive "
+				+ field_name
+				+ " "
+				+ str(raw_value)
+				+ "."
+		)
 
 
 static func _report_validation_problems(

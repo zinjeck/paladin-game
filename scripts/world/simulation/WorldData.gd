@@ -581,6 +581,67 @@ static func get_city_object_site_productivity_basis_points(
 	)
 
 
+static func is_valid_workplace_anchor_mode(mode: String) -> bool:
+	return (
+		mode == WORKPLACE_ANCHOR_MODE_FOOTPRINT_CENTER
+		or mode == WORKPLACE_ANCHOR_MODE_EXPLICIT_POINT
+		or mode == WORKPLACE_ANCHOR_MODE_EXPLICIT_TILE
+	)
+
+
+static func is_valid_workplace_resource_source_mode(mode: String) -> bool:
+	return (
+		mode == WORKPLACE_RESOURCE_SOURCE_MODE_NONE
+		or mode == WORKPLACE_RESOURCE_SOURCE_MODE_RADIUS
+		or mode == WORKPLACE_RESOURCE_SOURCE_MODE_LINKED_TILES
+		or mode == WORKPLACE_RESOURCE_SOURCE_MODE_LINKED_OBJECTS
+		or mode == WORKPLACE_RESOURCE_SOURCE_MODE_STORED_INPUTS
+		or mode == WORKPLACE_RESOURCE_SOURCE_MODE_EXPLICIT_WORK_POINTS
+	)
+
+
+static func is_valid_workplace_work_location_mode(mode: String) -> bool:
+	return (
+		mode == WORKPLACE_WORK_LOCATION_MODE_NONE
+		or mode == WORKPLACE_WORK_LOCATION_MODE_RESOURCE_SOURCE_TILES
+		or mode == WORKPLACE_WORK_LOCATION_MODE_LINKED_TILES
+		or mode == WORKPLACE_WORK_LOCATION_MODE_WORKSTATIONS
+		or mode == WORKPLACE_WORK_LOCATION_MODE_EXPLICIT_POINTS
+		or mode == WORKPLACE_WORK_LOCATION_MODE_FOOTPRINT
+	)
+
+
+static func is_valid_workplace_movement_mode(mode: String) -> bool:
+	return (
+		mode == WORKPLACE_MOVEMENT_MODE_NONE
+		or mode == WORKPLACE_MOVEMENT_MODE_MOVE_BETWEEN_WORK_POINTS
+		or mode == WORKPLACE_MOVEMENT_MODE_STATION_BASED
+		or mode == WORKPLACE_MOVEMENT_MODE_REMAIN_AT_STATION
+		or mode == WORKPLACE_MOVEMENT_MODE_LINKED_TILE_TASKS
+	)
+
+
+static func is_valid_workplace_break_location_mode(mode: String) -> bool:
+	return (
+		mode == WORKPLACE_BREAK_LOCATION_MODE_NONE
+		or mode == WORKPLACE_BREAK_LOCATION_MODE_FOOTPRINT
+		or mode == WORKPLACE_BREAK_LOCATION_MODE_FOOTPRINT_RADIUS
+		or mode == WORKPLACE_BREAK_LOCATION_MODE_LINKED_AREA
+		or mode == WORKPLACE_BREAK_LOCATION_MODE_EXPLICIT_TILES
+		or mode == WORKPLACE_BREAK_LOCATION_MODE_WORK_AREA
+		or mode == WORKPLACE_BREAK_LOCATION_MODE_INTERIOR
+	)
+
+
+static func is_valid_workplace_overflow_mode(mode: String) -> bool:
+	return (
+		mode == WORKPLACE_OVERFLOW_MODE_NONE
+		or mode == WORKPLACE_OVERFLOW_MODE_FOOTPRINT_RADIUS
+		or mode == WORKPLACE_OVERFLOW_MODE_EXPLICIT_TILES
+		or mode == WORKPLACE_OVERFLOW_MODE_LINKED_AREA
+	)
+
+
 static func is_valid_city_workplace_production_status(
 	production_status: String
 ) -> bool:
