@@ -26,6 +26,7 @@ var width: int
 var height: int
 var seed: int
 var tiles := []
+var tile_data_version: int = 0
 
 static var city_start_world_seed: int = 0
 static var city_start_region_center: Vector2i = Vector2i(-1, -1)
@@ -193,6 +194,7 @@ const WORKPLACE_ANCHOR_MODE_EXPLICIT_TILE := "explicit_tile"
 
 const WORKPLACE_RESOURCE_SOURCE_MODE_NONE := "none"
 const WORKPLACE_RESOURCE_SOURCE_MODE_RADIUS := "radius"
+const WORKPLACE_RESOURCE_SOURCE_MODE_FOOTPRINT_REACH := "footprint_reach"
 const WORKPLACE_RESOURCE_SOURCE_MODE_LINKED_TILES := "linked_tiles"
 const WORKPLACE_RESOURCE_SOURCE_MODE_LINKED_OBJECTS := "linked_objects"
 const WORKPLACE_RESOURCE_SOURCE_MODE_STORED_INPUTS := "stored_inputs"
@@ -231,6 +233,9 @@ const WORKPLACE_PRODUCTION_STATUS_IDLE_NO_WORKERS := "idle_no_workers"
 const WORKPLACE_PRODUCTION_STATUS_WORKING := "working"
 const WORKPLACE_PRODUCTION_STATUS_BLOCKED_OUTPUT_FULL := "blocked_output_full"
 const WORKPLACE_PRODUCTION_STATUS_BLOCKED_MISSING_INPUT := "blocked_missing_input"
+const WORKPLACE_PRODUCTION_STATUS_BLOCKED_NO_RESOURCE_SOURCE := (
+	"blocked_no_resource_source"
+)
 
 const CONTAINER_TYPE_NONE := "none"
 const CONTAINER_TYPE_PUBLIC_CITY_STORAGE := "public_city_storage"
@@ -326,10 +331,10 @@ static func setup_city_object_definitions() -> void:
 			"work_units_per_batch": 60_000
 		},
 		"resource_source_policy": {
-			"mode": WORKPLACE_RESOURCE_SOURCE_MODE_RADIUS,
+			"mode": WORKPLACE_RESOURCE_SOURCE_MODE_FOOTPRINT_REACH,
 			"resource_type": RESOURCE_FISH,
-			"radius_tiles": 8,
-			"anchor_mode": WORKPLACE_ANCHOR_MODE_FOOTPRINT_CENTER
+			"reach_tiles": 8,
+			"source_tiles_for_full_productivity": 100
 		},
 		"work_location_policy": {
 			"mode": WORKPLACE_WORK_LOCATION_MODE_RESOURCE_SOURCE_TILES
@@ -593,6 +598,7 @@ static func is_valid_workplace_resource_source_mode(mode: String) -> bool:
 	return (
 		mode == WORKPLACE_RESOURCE_SOURCE_MODE_NONE
 		or mode == WORKPLACE_RESOURCE_SOURCE_MODE_RADIUS
+		or mode == WORKPLACE_RESOURCE_SOURCE_MODE_FOOTPRINT_REACH
 		or mode == WORKPLACE_RESOURCE_SOURCE_MODE_LINKED_TILES
 		or mode == WORKPLACE_RESOURCE_SOURCE_MODE_LINKED_OBJECTS
 		or mode == WORKPLACE_RESOURCE_SOURCE_MODE_STORED_INPUTS
@@ -647,6 +653,7 @@ static func is_valid_city_workplace_production_status(
 ) -> bool:
 	return (
 		production_status == WORKPLACE_PRODUCTION_STATUS_INACTIVE
+		or production_status == WORKPLACE_PRODUCTION_STATUS_BLOCKED_NO_RESOURCE_SOURCE
 		or production_status == WORKPLACE_PRODUCTION_STATUS_IDLE_NO_WORKERS
 		or production_status == WORKPLACE_PRODUCTION_STATUS_WORKING
 		or production_status == WORKPLACE_PRODUCTION_STATUS_BLOCKED_OUTPUT_FULL
@@ -792,6 +799,7 @@ func setup(new_width: int, new_height: int, new_seed: int):
 	height = new_height
 	seed = new_seed
 	tiles.clear()
+	tile_data_version = 0
 
 	for y in range(height):
 		var row := []
@@ -833,6 +841,11 @@ func set_tile(x: int, y: int, data: Dictionary) -> void:
 		return
 
 	tiles[y][x] = data
+	tile_data_version += 1
+
+
+func mark_tile_data_changed() -> void:
+	tile_data_version += 1
 
 static func store_city_start_region(
 	source_world: WorldData,
@@ -907,6 +920,7 @@ static func has_active_city_save() -> bool:
 
 
 static func store_city_world_save(city_world: WorldData, city_seed: int) -> void:
+	WorkplaceProductionSystem.clear_resource_source_evaluation_cache()
 	official_city_world = city_world
 	official_city_seed = city_seed
 	clear_city_map_texture_cache()

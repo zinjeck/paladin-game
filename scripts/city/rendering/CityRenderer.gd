@@ -76,7 +76,9 @@ var observed_city_public_storage_version: int = -1
 var observed_city_citizen_version: int = -1
 var observed_city_assignment_version: int = -1
 var observed_city_workplace_version: int = -1
-
+var observed_city_tile_data_version: int = -1
+var workplace_zone_preview_render_cache: Dictionary = {}
+var selected_workplace_zone_render_cache: Dictionary = {}
 var active_city_object_placement: Dictionary = {}
 var object_info_panel: Panel
 var object_info_title_label: Label
@@ -104,6 +106,27 @@ const CURSOR_LOOK_FILL_COLOR: Color = Color(1.0, 1.0, 1.0, 0.08)
 const CURSOR_LOOK_BORDER_COLOR: Color = Color(1.0, 1.0, 1.0, 0.58)
 const CURSOR_LOOK_GRID_COLOR: Color = Color(1.0, 1.0, 1.0, 0.22)
 const SELECTED_OBJECT_HIGHLIGHT_COLOR: Color = Color(0.0, 0.85, 1.0, 1.0)
+const WORKPLACE_ZONE_TEXTURE_TARGET_PIXELS_PER_TILE: int = 12
+const WORKPLACE_ZONE_TEXTURE_MAXIMUM_DIMENSION: int = 1024
+const WORKPLACE_ZONE_TEXTURE_BORDER_PIXELS: int = 1
+const WORKPLACE_ZONE_PREVIEW_MAGENTA_FILL_COLOR: Color = (
+	Color(1.0, 0.0, 1.0, 0.22)
+)
+const WORKPLACE_ZONE_PREVIEW_MAGENTA_BORDER_COLOR: Color = (
+	Color(1.0, 0.0, 1.0, 0.55)
+)
+const WORKPLACE_ZONE_PREVIEW_RED_FILL_COLOR: Color = (
+	Color(1.0, 0.0, 0.0, 0.20)
+)
+const WORKPLACE_ZONE_PREVIEW_RED_BORDER_COLOR: Color = (
+	Color(1.0, 0.0, 0.0, 0.55)
+)
+const WORKPLACE_ZONE_SELECTED_RESOURCE_COLOR: Color = (
+	Color(1.0, 0.0, 1.0, 0.26)
+)
+const WORKPLACE_ZONE_SELECTED_BORDER_COLOR: Color = (
+	Color(1.0, 0.0, 1.0, 0.58)
+)
 
 func _ready() -> void:
 	texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
@@ -129,7 +152,17 @@ func _process(_delta: float) -> void:
 	if current_hovered_tile != hovered_city_tile:
 		hovered_city_tile = current_hovered_tile
 		update_debug_panel_text()
-		queue_redraw()
+
+		var hover_visual_can_change := (
+			selected_city_object_id < 0
+			or has_active_city_object_placement()
+			or is_road_placement_active
+			or is_road_dragging
+			or is_object_selection_dragging
+		)
+
+		if hover_visual_can_change:
+			queue_redraw()
 
 	if is_road_placement_active:
 		update_road_cursor_icon_position()
@@ -143,6 +176,19 @@ func _process(_delta: float) -> void:
 	var city_citizens_changed := false
 	var city_assignments_changed := false
 	var city_workplaces_changed := false
+	var city_tile_data_changed := false
+
+	if city_world != null:
+		if (
+			observed_city_tile_data_version
+			!= city_world.tile_data_version
+		):
+			observed_city_tile_data_version = (
+				city_world.tile_data_version
+			)
+			city_tile_data_changed = true
+			workplace_zone_preview_render_cache.clear()
+			selected_workplace_zone_render_cache.clear()
 
 	if observed_city_object_version != WorldData.city_object_version:
 		observed_city_object_version = WorldData.city_object_version
@@ -191,16 +237,18 @@ func _process(_delta: float) -> void:
 		or city_citizens_changed
 		or city_assignments_changed
 		or city_workplaces_changed
+		or city_tile_data_changed
 	):
 		update_selected_object_panel()
 
-	if city_objects_changed:
+	if city_objects_changed or city_tile_data_changed:
 		queue_redraw()
 
 	if (
 		city_objects_changed
 		or city_citizens_changed
 		or city_assignments_changed
+		or city_tile_data_changed
 	):
 		update_debug_panel_text()
 
@@ -414,6 +462,7 @@ func generate_city_world() -> void:
 
 			row[x] = tile
 
+	city_world.mark_tile_data_changed()
 	WorldData.store_city_world_save(city_world, city_seed)
 	print("Stored official city world.")
 
@@ -1630,8 +1679,6 @@ func get_storage_panel_title_for_object(city_object: Dictionary) -> String:
 		_:
 			return "Storage"
 
-
-
 func get_workplace_production_status_display_name(
 	production_status: String
 ) -> String:
@@ -1644,6 +1691,8 @@ func get_workplace_production_status_display_name(
 			return "Blocked - Output Storage Full"
 		WorldData.WORKPLACE_PRODUCTION_STATUS_BLOCKED_MISSING_INPUT:
 			return "Blocked - Missing Input"
+		WorldData.WORKPLACE_PRODUCTION_STATUS_BLOCKED_NO_RESOURCE_SOURCE:
+			return "Blocked - No Resource Source"
 		WorldData.WORKPLACE_PRODUCTION_STATUS_INACTIVE:
 			return "Inactive"
 		_:
@@ -1818,73 +1867,94 @@ func update_selected_object_panel() -> void:
 			)
 		var source_evaluation := (
 			WorkplaceProductionSystem.get_resource_source_evaluation(
-				city_object
+				city_object,
+				city_world
 			)
 		)
 
-		if bool(source_evaluation.get("evaluated", false)):
+		if bool(
+			source_evaluation.get(
+				"uses_environmental_source",
+				false
+			)
+		):
 			var source_resource := str(
 				source_evaluation.get(
 					"resource_type",
 					WorldData.RESOURCE_NONE
 				)
 			)
-
-			if source_resource != WorldData.RESOURCE_NONE:
-				var valid_source_tiles := int(
+			var resource_tile_count := int(
+				source_evaluation.get(
+					"resource_tile_count",
+					0
+				)
+			)
+			var zone_tile_count := int(
+				source_evaluation.get(
+					"zone_tile_count",
+					0
+				)
+			)
+			var density_percentage := (
+				float(
 					source_evaluation.get(
-						"valid_source_tile_count",
+						"density_basis_points",
 						0
 					)
 				)
-				var candidate_source_tiles := int(
-					source_evaluation.get(
-						"candidate_tile_count",
-						0
-					)
+				/ 100.0
+			)
+			var source_target := int(
+				source_evaluation.get(
+					"source_tiles_for_full_productivity",
+					0
 				)
-				var source_density_percentage := (
-					float(
-						source_evaluation.get(
-							"source_density_basis_points",
-							0
-						)
-					)
-					/ 100.0
+			)
+			var reach_tiles := int(
+				source_evaluation.get(
+					"reach_tiles",
+					0
 				)
-				var source_radius := int(
-					source_evaluation.get(
-						"radius_tiles",
-						0
-					)
-				)
+			)
 
-				body_lines.append(
-					source_resource.capitalize()
-					+ " Source: "
-					+ str(valid_source_tiles)
-					+ " / "
-					+ str(candidate_source_tiles)
-					+ " tiles"
-				)
+			body_lines.append(
+				source_resource.capitalize()
+				+ " Source: "
+				+ str(resource_tile_count)
+				+ " / "
+				+ str(zone_tile_count)
+				+ " zone tiles"
+			)
 
-				body_lines.append(
-					"Density: "
-					+ format_compact_production_number(
-						source_density_percentage
-					)
-					+ "% | Radius: "
-					+ str(source_radius)
+			body_lines.append(
+				"Density: "
+				+ format_compact_production_number(
+					density_percentage
 				)
+				+ "% | Target: "
+				+ str(source_target)
+				+ " | Reach: "
+				+ str(reach_tiles)
+			)
+
 		var site_productivity_percentage := (
 			float(
-				WorldData.get_city_object_site_productivity_basis_points(
-					city_object
+				WorkplaceProductionSystem.get_current_site_productivity_basis_points(
+					city_object,
+					city_world
 				)
 			)
 			/ 100.0
 		)
 
+		body_lines.append(
+			"Site Productivity: "
+			+ format_compact_production_number(
+				site_productivity_percentage
+			)
+			+ "%"
+		)
 		body_lines.append(
 			"Site Productivity: "
 			+ format_compact_production_number(
@@ -3035,9 +3105,575 @@ func get_active_city_object_placement_preview() -> Dictionary:
 		"owner": str(active_city_object_placement.get("owner", "player"))
 	}
 
+func get_cached_workplace_zone_overlay(
+	city_object: Dictionary,
+	preview_mode: bool
+) -> Dictionary:
+	var object_id := int(city_object.get("id", -1))
+	var object_type := str(city_object.get("type", ""))
+	var top_left: Vector2i = city_object.get(
+		"top_left",
+		Vector2i(-1, -1)
+	)
+	var size_tiles: Vector2i = city_object.get(
+		"size",
+		Vector2i.ZERO
+	)
+	var footprint_tiles := (
+		WorldData.get_city_object_footprint_tiles(
+			city_object
+		)
+	)
+	var footprint_hash_value := int(
+		hash(footprint_tiles)
+	)
+	var tile_data_version := -1
+
+	if city_world != null:
+		tile_data_version = city_world.tile_data_version
+
+	var active_cache: Dictionary
+
+	if preview_mode:
+		active_cache = workplace_zone_preview_render_cache
+	else:
+		active_cache = selected_workplace_zone_render_cache
+
+	if workplace_zone_render_cache_matches(
+		active_cache,
+		preview_mode,
+		object_id,
+		object_type,
+		top_left,
+		size_tiles,
+		footprint_hash_value,
+		tile_data_version
+	):
+		return active_cache
+
+	var new_cache := {
+		"preview_mode": preview_mode,
+		"object_id": object_id,
+		"object_type": object_type,
+		"top_left": top_left,
+		"size": size_tiles,
+		"footprint_hash": footprint_hash_value,
+		"tile_data_version": tile_data_version,
+		"has_zone": false,
+		"texture": null,
+		"world_rect": Rect2()
+	}
+
+	var source_evaluation := (
+		WorkplaceProductionSystem.get_resource_source_evaluation(
+			city_object,
+			city_world
+		)
+	)
+
+	if bool(
+		source_evaluation.get(
+			"uses_environmental_source",
+			false
+		)
+	):
+		new_cache["has_zone"] = true
+
+		var texture_data := (
+			build_workplace_zone_overlay_texture(
+				source_evaluation,
+				preview_mode
+			)
+		)
+
+		if not texture_data.is_empty():
+			new_cache["texture"] = texture_data.get(
+				"texture",
+				null
+			)
+			new_cache["world_rect"] = texture_data.get(
+				"world_rect",
+				Rect2()
+			)
+
+	if preview_mode:
+		workplace_zone_preview_render_cache = new_cache
+	else:
+		selected_workplace_zone_render_cache = new_cache
+
+	return new_cache
+
+
+func workplace_zone_render_cache_matches(
+	render_cache: Dictionary,
+	preview_mode: bool,
+	object_id: int,
+	object_type: String,
+	top_left: Vector2i,
+	size_tiles: Vector2i,
+	footprint_hash_value: int,
+	tile_data_version: int
+) -> bool:
+	if render_cache.is_empty():
+		return false
+
+	return (
+		bool(render_cache.get("preview_mode", false))
+		== preview_mode
+		and int(render_cache.get("object_id", -2))
+		== object_id
+		and str(render_cache.get("object_type", ""))
+		== object_type
+		and render_cache.get(
+			"top_left",
+			Vector2i(-2, -2)
+		)
+		== top_left
+		and render_cache.get(
+			"size",
+			Vector2i.ZERO
+		)
+		== size_tiles
+		and int(render_cache.get("footprint_hash", -1))
+		== footprint_hash_value
+		and int(render_cache.get("tile_data_version", -2))
+		== tile_data_version
+	)
+
+
+func build_workplace_zone_overlay_texture(
+	source_evaluation: Dictionary,
+	preview_mode: bool
+) -> Dictionary:
+	var zone_tiles: Array = source_evaluation.get(
+		"zone_tiles",
+		[]
+	)
+
+	if zone_tiles.is_empty():
+		return {}
+
+	var has_bounds := false
+	var minimum_tile := Vector2i.ZERO
+	var maximum_tile := Vector2i.ZERO
+
+	for raw_zone_tile in zone_tiles:
+		if not raw_zone_tile is Vector2i:
+			continue
+
+		var zone_tile: Vector2i = raw_zone_tile
+
+		if not has_bounds:
+			minimum_tile = zone_tile
+			maximum_tile = zone_tile
+			has_bounds = true
+			continue
+
+		minimum_tile.x = mini(
+			minimum_tile.x,
+			zone_tile.x
+		)
+		minimum_tile.y = mini(
+			minimum_tile.y,
+			zone_tile.y
+		)
+		maximum_tile.x = maxi(
+			maximum_tile.x,
+			zone_tile.x
+		)
+		maximum_tile.y = maxi(
+			maximum_tile.y,
+			zone_tile.y
+		)
+
+	if not has_bounds:
+		return {}
+
+	var width_tiles := (
+		maximum_tile.x - minimum_tile.x + 1
+	)
+	var height_tiles := (
+		maximum_tile.y - minimum_tile.y + 1
+	)
+	var maximum_dimension_tiles := maxi(
+		width_tiles,
+		height_tiles
+	)
+	var pixels_per_tile := clampi(
+		int(
+			floor(
+				float(
+					WORKPLACE_ZONE_TEXTURE_MAXIMUM_DIMENSION
+				)
+				/ float(maximum_dimension_tiles)
+			)
+		),
+		1,
+		WORKPLACE_ZONE_TEXTURE_TARGET_PIXELS_PER_TILE
+	)
+	var image_width := width_tiles * pixels_per_tile
+	var image_height := height_tiles * pixels_per_tile
+	var overlay_image := Image.create(
+		image_width,
+		image_height,
+		false,
+		Image.FORMAT_RGBA8
+	)
+
+	overlay_image.fill(
+		Color(0.0, 0.0, 0.0, 0.0)
+	)
+
+	var resource_tile_lookup: Dictionary = (
+		source_evaluation.get(
+			"resource_tile_lookup",
+			{}
+		)
+	)
+
+	if preview_mode:
+		for raw_zone_tile in zone_tiles:
+			if not raw_zone_tile is Vector2i:
+				continue
+
+			var zone_tile: Vector2i = raw_zone_tile
+
+			paint_workplace_zone_preview_tile(
+				overlay_image,
+				zone_tile,
+				minimum_tile,
+				pixels_per_tile,
+				resource_tile_lookup.has(zone_tile)
+			)
+	else:
+		var resource_tiles: Array = source_evaluation.get(
+			"resource_tiles",
+			[]
+		)
+
+		for raw_resource_tile in resource_tiles:
+			if not raw_resource_tile is Vector2i:
+				continue
+
+			var resource_tile: Vector2i = (
+				raw_resource_tile
+			)
+			var resource_rect := (
+				get_workplace_zone_texture_tile_rect(
+					resource_tile,
+					minimum_tile,
+					pixels_per_tile
+				)
+			)
+
+			overlay_image.fill_rect(
+				resource_rect,
+				WORKPLACE_ZONE_SELECTED_RESOURCE_COLOR
+			)
+
+		var zone_tile_lookup: Dictionary = (
+			source_evaluation.get(
+				"zone_tile_lookup",
+				{}
+			)
+		)
+
+		for raw_zone_tile in zone_tiles:
+			if not raw_zone_tile is Vector2i:
+				continue
+
+			var zone_tile: Vector2i = raw_zone_tile
+			var tile_rect := (
+				get_workplace_zone_texture_tile_rect(
+					zone_tile,
+					minimum_tile,
+					pixels_per_tile
+				)
+			)
+
+			paint_workplace_zone_texture_border(
+				overlay_image,
+				tile_rect,
+				WORKPLACE_ZONE_SELECTED_BORDER_COLOR,
+				not zone_tile_lookup.has(
+					zone_tile + Vector2i(0, -1)
+				),
+				not zone_tile_lookup.has(
+					zone_tile + Vector2i(0, 1)
+				),
+				not zone_tile_lookup.has(
+					zone_tile + Vector2i(-1, 0)
+				),
+				not zone_tile_lookup.has(
+					zone_tile + Vector2i(1, 0)
+				)
+			)
+
+	var overlay_texture := ImageTexture.create_from_image(
+		overlay_image
+	)
+	var world_rect := Rect2(
+		Vector2(
+			float(minimum_tile.x * city_tile_size),
+			float(minimum_tile.y * city_tile_size)
+		),
+		Vector2(
+			float(width_tiles * city_tile_size),
+			float(height_tiles * city_tile_size)
+		)
+	)
+
+	return {
+		"texture": overlay_texture,
+		"world_rect": world_rect
+	}
+
+
+func get_workplace_zone_texture_tile_rect(
+	tile_position: Vector2i,
+	minimum_tile: Vector2i,
+	pixels_per_tile: int
+) -> Rect2i:
+	return Rect2i(
+		(tile_position.x - minimum_tile.x)
+			* pixels_per_tile,
+		(tile_position.y - minimum_tile.y)
+			* pixels_per_tile,
+		pixels_per_tile,
+		pixels_per_tile
+	)
+
+
+func paint_workplace_zone_preview_tile(
+	overlay_image: Image,
+	tile_position: Vector2i,
+	minimum_tile: Vector2i,
+	pixels_per_tile: int,
+	has_resource: bool
+) -> void:
+	var tile_rect := (
+		get_workplace_zone_texture_tile_rect(
+			tile_position,
+			minimum_tile,
+			pixels_per_tile
+		)
+	)
+	var fill_color := (
+		WORKPLACE_ZONE_PREVIEW_RED_FILL_COLOR
+	)
+	var border_color := (
+		WORKPLACE_ZONE_PREVIEW_RED_BORDER_COLOR
+	)
+
+	if has_resource:
+		fill_color = (
+			WORKPLACE_ZONE_PREVIEW_MAGENTA_FILL_COLOR
+		)
+		border_color = (
+			WORKPLACE_ZONE_PREVIEW_MAGENTA_BORDER_COLOR
+		)
+
+	overlay_image.fill_rect(
+		tile_rect,
+		fill_color
+	)
+
+	paint_workplace_zone_texture_border(
+		overlay_image,
+		tile_rect,
+		border_color,
+		true,
+		true,
+		true,
+		true
+	)
+
+
+func paint_workplace_zone_texture_border(
+	overlay_image: Image,
+	tile_rect: Rect2i,
+	border_color: Color,
+	draw_top: bool,
+	draw_bottom: bool,
+	draw_left: bool,
+	draw_right: bool
+) -> void:
+	var border_width := clampi(
+		WORKPLACE_ZONE_TEXTURE_BORDER_PIXELS,
+		1,
+		mini(tile_rect.size.x, tile_rect.size.y)
+	)
+
+	if draw_top:
+		overlay_image.fill_rect(
+			Rect2i(
+				tile_rect.position,
+				Vector2i(
+					tile_rect.size.x,
+					border_width
+				)
+			),
+			border_color
+		)
+
+	if draw_bottom:
+		overlay_image.fill_rect(
+			Rect2i(
+				Vector2i(
+					tile_rect.position.x,
+					tile_rect.position.y
+						+ tile_rect.size.y
+						- border_width
+				),
+				Vector2i(
+					tile_rect.size.x,
+					border_width
+				)
+			),
+			border_color
+		)
+
+	if draw_left:
+		overlay_image.fill_rect(
+			Rect2i(
+				tile_rect.position,
+				Vector2i(
+					border_width,
+					tile_rect.size.y
+				)
+			),
+			border_color
+		)
+
+	if draw_right:
+		overlay_image.fill_rect(
+			Rect2i(
+				Vector2i(
+					tile_rect.position.x
+						+ tile_rect.size.x
+						- border_width,
+					tile_rect.position.y
+				),
+				Vector2i(
+					border_width,
+					tile_rect.size.y
+				)
+			),
+			border_color
+		)
+
+
+func draw_cached_workplace_zone_overlay(
+	render_cache: Dictionary
+) -> void:
+	var raw_texture = render_cache.get(
+		"texture",
+		null
+	)
+
+	if not raw_texture is Texture2D:
+		return
+
+	var overlay_texture := raw_texture as Texture2D
+	var world_rect: Rect2 = render_cache.get(
+		"world_rect",
+		Rect2()
+	)
+
+	if (
+		world_rect.size.x <= 0.0
+		or world_rect.size.y <= 0.0
+	):
+		return
+
+	draw_texture_rect(
+		overlay_texture,
+		world_rect,
+		false
+	)
+
+
+func draw_workplace_resource_zone_preview(
+	preview_object: Dictionary
+) -> bool:
+	var render_cache := get_cached_workplace_zone_overlay(
+		preview_object,
+		true
+	)
+
+	if not bool(render_cache.get("has_zone", false)):
+		return false
+
+	draw_cached_workplace_zone_overlay(
+		render_cache
+	)
+
+	return true
+
+
+func draw_selected_workplace_resource_zone(
+	city_object: Dictionary
+) -> bool:
+	var render_cache := get_cached_workplace_zone_overlay(
+		city_object,
+		false
+	)
+
+	if not bool(render_cache.get("has_zone", false)):
+		return false
+
+	draw_cached_workplace_zone_overlay(
+		render_cache
+	)
+
+	return true
+
+
+func draw_city_object_placement_outline(
+	preview_object: Dictionary,
+	can_place: bool
+) -> void:
+	var object_rect := get_city_object_world_rect(
+		preview_object
+	)
+
+	if (
+		object_rect.size.x <= 0.0
+		or object_rect.size.y <= 0.0
+	):
+		return
+
+	var border_color := (
+		WORKPLACE_ZONE_PREVIEW_RED_BORDER_COLOR
+	)
+
+	if can_place:
+		var object_type := str(
+			preview_object.get("type", "")
+		)
+		var style := get_city_object_visual_style(
+			object_type
+		)
+		var frame_color: Color = style["frame_color"]
+
+		border_color = Color(
+			frame_color.r,
+			frame_color.g,
+			frame_color.b,
+			WORKPLACE_ZONE_PREVIEW_MAGENTA_BORDER_COLOR.a
+		)
+
+	draw_screen_constant_inset_rect_border(
+		object_rect,
+		border_color,
+		0.0,
+		2.0
+	)
 
 func draw_active_city_object_placement_preview() -> void:
-	var preview_object := get_active_city_object_placement_preview()
+	var preview_object := (
+		get_active_city_object_placement_preview()
+	)
 
 	if preview_object.is_empty():
 		return
@@ -3050,6 +3686,17 @@ func draw_active_city_object_placement_preview() -> void:
 		top_left,
 		size_tiles
 	)
+
+	if draw_workplace_resource_zone_preview(
+		preview_object
+	):
+		# The cached zone texture supplies the transparent footprint.
+		# Only the building outline is added, preventing stacked opacity.
+		draw_city_object_placement_outline(
+			preview_object,
+			can_place
+		)
+		return
 
 	draw_city_object_visual(
 		preview_object,
@@ -3125,18 +3772,30 @@ func draw_selected_city_object_highlight() -> void:
 	if int(selected_city_object_id) < 0:
 		return
 
-	var city_object: Dictionary = get_city_object_by_id(selected_city_object_id)
+	var city_object: Dictionary = get_city_object_by_id(
+		selected_city_object_id
+	)
 
 	if not is_city_object_selectable(city_object):
 		return
 
-	var rect: Rect2 = get_city_object_world_rect(city_object)
+	if draw_selected_workplace_resource_zone(
+		city_object
+	):
+		return
 
-	if rect.size.x <= 0.0 or rect.size.y <= 0.0:
+	var object_rect: Rect2 = get_city_object_world_rect(
+		city_object
+	)
+
+	if (
+		object_rect.size.x <= 0.0
+		or object_rect.size.y <= 0.0
+	):
 		return
 
 	draw_screen_constant_inset_rect_border(
-		rect,
+		object_rect,
 		SELECTED_OBJECT_HIGHLIGHT_COLOR,
 		0.0,
 		2.0

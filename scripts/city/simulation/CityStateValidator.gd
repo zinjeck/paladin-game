@@ -1845,6 +1845,8 @@ static func _validate_workplace_runtime_production_state(
 				== WorldData.WORKPLACE_PRODUCTION_STATUS_BLOCKED_OUTPUT_FULL
 				or production_status
 				== WorldData.WORKPLACE_PRODUCTION_STATUS_BLOCKED_MISSING_INPUT
+				or production_status
+				== WorldData.WORKPLACE_PRODUCTION_STATUS_BLOCKED_NO_RESOURCE_SOURCE
 			)
 
 			if (
@@ -1940,7 +1942,6 @@ static func _get_expected_productive_worker_count(
 		)
 	)
 
-
 static func _validate_workplace_resource_source_policy(
 	errors: Array[String],
 	object_id: int,
@@ -1963,6 +1964,35 @@ static func _validate_workplace_resource_source_policy(
 				+ " has unknown resource_source_policy mode '"
 				+ mode
 				+ "'."
+		)
+		return
+
+	if (
+		mode
+		== WorldData.WORKPLACE_RESOURCE_SOURCE_MODE_FOOTPRINT_REACH
+	):
+		_validate_known_workplace_policy_resource(
+			errors,
+			object_id,
+			"resource_source_policy",
+			policy,
+			"resource_type"
+		)
+
+		_validate_positive_workplace_policy_integer(
+			errors,
+			object_id,
+			"resource_source_policy",
+			policy,
+			"reach_tiles"
+		)
+
+		_validate_positive_workplace_policy_integer(
+			errors,
+			object_id,
+			"resource_source_policy",
+			policy,
+			"source_tiles_for_full_productivity"
 		)
 		return
 
@@ -2013,7 +2043,6 @@ static func _validate_workplace_resource_source_policy(
 				+ anchor_mode
 				+ "'."
 		)
-
 
 static func _validate_workplace_work_location_policy(
 	errors: Array[String],
