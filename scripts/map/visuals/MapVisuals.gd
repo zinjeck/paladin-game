@@ -11,7 +11,7 @@ enum ViewMode {
 }
 
 const INVALID_VIEW_MODE: int = -1
-const MAP_VISUAL_CACHE_VERSION: int = 1
+const MAP_VISUAL_CACHE_VERSION: int = 2
 
 static func get_all_view_modes() -> Array[int]:
 	var modes: Array[int] = [
@@ -116,11 +116,13 @@ static func get_biome_mode_color(tile: Dictionary, resource_blend: float = 0.0) 
 
 	var resource: String = str(tile.get("resource", WorldData.RESOURCE_NONE))
 
-	if resource == WorldData.RESOURCE_NONE:
+	if (
+		resource == WorldData.RESOURCE_NONE
+		or resource == WorldData.RESOURCE_FISH
+	):
 		return base_color
 
 	return base_color.lerp(get_resource_color(resource), resource_blend)
-
 
 static func get_biome_color(tile: Dictionary) -> Color:
 	var biome: String = str(tile.get("biome", ""))

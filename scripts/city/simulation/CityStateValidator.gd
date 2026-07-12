@@ -34,6 +34,16 @@ static func validate(
 		object_lookup
 	)
 
+	_validate_city_citizen_spatial_state(
+		errors,
+		citizen_lookup
+	)
+
+	_validate_city_citizen_demographics(
+		errors,
+		citizen_lookup
+	)
+
 	var checked_container_count := _validate_city_containers(
 		errors,
 		object_lookup
@@ -76,6 +86,9 @@ static func validate(
 		"object_version": WorldData.city_object_version,
 		"container_version": WorldData.city_container_version,
 		"citizen_version": WorldData.city_citizen_version,
+		"citizen_spatial_version": (
+			WorldData.city_citizen_spatial_version
+		),
 		"assignment_version": WorldData.city_assignment_version,
 		"workplace_version": WorldData.city_workplace_version
 	}
@@ -148,6 +161,17 @@ static func _validation_cache_matches_current_state() -> bool:
 	if (
 		int(_cached_result.get("citizen_version", -1))
 		!= WorldData.city_citizen_version
+	):
+		return false
+
+	if (
+		int(
+			_cached_result.get(
+				"citizen_spatial_version",
+				-1
+			)
+		)
+		!= WorldData.city_citizen_spatial_version
 	):
 		return false
 
@@ -451,6 +475,462 @@ static func _validate_city_citizen_index(
 
 	return citizen_lookup
 
+static func _validate_city_citizen_spatial_state(
+	errors: Array[String],
+	citizen_lookup: Dictionary
+) -> void:
+	if citizen_lookup.is_empty():
+		if not (
+			WorldData
+			.city_citizen_ids_by_tile
+			.is_empty()
+		):
+			errors.append(
+				"Citizen spatial index contains entries "
+				+ "despite the city having no citizens."
+			)
+
+		return
+
+	var city_world = WorldData.official_city_world
+
+	if city_world == null:
+		errors.append(
+			"Citizens exist without an official city world."
+		)
+		return
+
+	for citizen_id in citizen_lookup.keys():
+		var citizen_index := int(
+			citizen_lookup[citizen_id]
+		)
+		var citizen: Dictionary = (
+			WorldData.city_citizens[
+				citizen_index
+			]
+		)
+
+		if not citizen.has("city_tile_position"):
+			errors.append(
+				"Citizen "
+				+ str(citizen_id)
+				+ " is missing city_tile_position."
+			)
+			continue
+
+		var raw_position = citizen.get(
+			"city_tile_position"
+		)
+
+		if not raw_position is Vector2i:
+			errors.append(
+				"Citizen "
+				+ str(citizen_id)
+				+ " has a non-Vector2i city position."
+			)
+			continue
+
+		var tile_position: Vector2i = (
+			raw_position
+		)
+
+		if (
+			tile_position
+			== WorldData.INVALID_CITY_TILE_POSITION
+		):
+			errors.append(
+				"Citizen "
+				+ str(citizen_id)
+				+ " has an invalid city position."
+			)
+			continue
+
+		if not city_world.is_in_bounds(
+			tile_position.x,
+			tile_position.y
+		):
+			errors.append(
+				"Citizen "
+				+ str(citizen_id)
+				+ " is outside the city at "
+				+ str(tile_position)
+				+ "."
+			)
+		elif (
+			bool(citizen.get("alive", true))
+			and not (
+				WorldData
+				.is_city_tile_walkable_for_citizen(
+					city_world,
+					tile_position
+				)
+			)
+		):
+			errors.append(
+				"Living citizen "
+				+ str(citizen_id)
+				+ " occupies non-walkable tile "
+				+ str(tile_position)
+				+ "."
+			)
+
+		if not (
+			WorldData.city_citizen_ids_by_tile.has(
+				tile_position
+			)
+		):
+			errors.append(
+				"Citizen "
+				+ str(citizen_id)
+				+ " is missing from the spatial index "
+				+ "at "
+				+ str(tile_position)
+				+ "."
+			)
+			continue
+
+		var raw_indexed_ids = (
+			WorldData.city_citizen_ids_by_tile[
+				tile_position
+			]
+		)
+
+		if not raw_indexed_ids is Array:
+			errors.append(
+				"Citizen spatial index entry at "
+				+ str(tile_position)
+				+ " is not an Array."
+			)
+		elif not raw_indexed_ids.has(
+			int(citizen_id)
+		):
+			errors.append(
+				"Citizen "
+				+ str(citizen_id)
+				+ " is absent from its spatial-index tile "
+				+ str(tile_position)
+				+ "."
+			)
+
+	for raw_tile_position in (
+		WorldData.city_citizen_ids_by_tile.keys()
+	):
+		if not raw_tile_position is Vector2i:
+			errors.append(
+				"Citizen spatial index contains "
+				+ "a non-Vector2i tile key."
+			)
+			continue
+
+		var tile_position: Vector2i = (
+			raw_tile_position
+		)
+		var raw_citizen_ids = (
+			WorldData.city_citizen_ids_by_tile[
+				tile_position
+			]
+		)
+
+		if not raw_citizen_ids is Array:
+			errors.append(
+				"Citizen spatial index entry at "
+				+ str(tile_position)
+				+ " is not an Array."
+			)
+			continue
+
+		if raw_citizen_ids.is_empty():
+			errors.append(
+				"Citizen spatial index contains "
+				+ "an empty entry at "
+				+ str(tile_position)
+				+ "."
+			)
+			continue
+
+		var local_citizen_ids: Dictionary = {}
+
+		for raw_citizen_id in raw_citizen_ids:
+			if typeof(raw_citizen_id) != TYPE_INT:
+				errors.append(
+					"Citizen spatial index at "
+						+ str(tile_position)
+						+ " contains a non-integer ID."
+				)
+				continue
+
+			var citizen_id: int = raw_citizen_id
+
+			if local_citizen_ids.has(citizen_id):
+				errors.append(
+					"Citizen "
+						+ str(citizen_id)
+						+ " appears more than once at "
+						+ str(tile_position)
+						+ " in the spatial index."
+				)
+				continue
+
+			local_citizen_ids[citizen_id] = true
+
+			if not citizen_lookup.has(citizen_id):
+				errors.append(
+					"Citizen spatial index at "
+						+ str(tile_position)
+						+ " references missing citizen "
+						+ str(citizen_id)
+						+ "."
+				)
+				continue
+
+			var citizen_index := int(
+				citizen_lookup[citizen_id]
+			)
+			var citizen: Dictionary = (
+				WorldData.city_citizens[
+					citizen_index
+				]
+			)
+			var indexed_position = citizen.get(
+				"city_tile_position",
+				WorldData.INVALID_CITY_TILE_POSITION
+			)
+
+			if indexed_position != tile_position:
+				errors.append(
+					"Citizen "
+						+ str(citizen_id)
+						+ " is indexed at "
+						+ str(tile_position)
+						+ " but stores position "
+						+ str(indexed_position)
+						+ "."
+				)
+
+static func _validate_city_citizen_name_pool(
+	errors: Array[String],
+	pool_display_name: String,
+	expected_sex: String,
+	name_pool: Array,
+	global_name_owners: Dictionary
+) -> void:
+	if name_pool.is_empty():
+		errors.append(
+			pool_display_name
+			+ " name pool is empty."
+		)
+		return
+
+	var local_name_lookup: Dictionary = {}
+
+	for raw_name in name_pool:
+		if typeof(raw_name) != TYPE_STRING:
+			errors.append(
+				pool_display_name
+				+ " name pool contains "
+				+ "a non-string entry."
+			)
+			continue
+
+		var raw_name_string: String = raw_name
+		var clean_name := (
+			raw_name_string.strip_edges()
+		)
+		var name_key := clean_name.to_lower()
+
+		if clean_name.is_empty():
+			errors.append(
+				pool_display_name
+				+ " name pool contains "
+				+ "an empty name."
+			)
+			continue
+
+		if clean_name != raw_name_string:
+			errors.append(
+				pool_display_name
+				+ " name '"
+				+ raw_name_string
+				+ "' contains surrounding whitespace."
+			)
+
+		if local_name_lookup.has(name_key):
+			errors.append(
+				pool_display_name
+				+ " name pool contains duplicate name '"
+				+ clean_name
+				+ "'."
+			)
+			continue
+
+		local_name_lookup[name_key] = true
+
+		if global_name_owners.has(name_key):
+			errors.append(
+				"Name '"
+				+ clean_name
+				+ "' appears in both the "
+				+ str(global_name_owners[name_key])
+				+ " and "
+				+ expected_sex
+				+ " name pools."
+			)
+			continue
+
+		global_name_owners[name_key] = expected_sex
+
+
+static func _validate_city_citizen_demographics(
+	errors: Array[String],
+	citizen_lookup: Dictionary
+) -> void:
+	var global_name_owners: Dictionary = {}
+
+	_validate_city_citizen_name_pool(
+		errors,
+		"Male",
+		WorldData.CITY_CITIZEN_SEX_MALE,
+		WorldData.city_citizen_male_name_pool,
+		global_name_owners
+	)
+
+	_validate_city_citizen_name_pool(
+		errors,
+		"Female",
+		WorldData.CITY_CITIZEN_SEX_FEMALE,
+		WorldData.city_citizen_female_name_pool,
+		global_name_owners
+	)
+
+	if not (
+		WorldData
+		.city_citizen_unassigned_name_pool
+		.is_empty()
+	):
+		errors.append(
+			"Citizen unassigned-name pool still contains "
+			+ str(
+				WorldData
+				.city_citizen_unassigned_name_pool
+				.size()
+			)
+			+ " names."
+		)
+
+	var male_count := 0
+	var female_count := 0
+
+	for citizen_id in citizen_lookup.keys():
+		var citizen_index := int(
+			citizen_lookup[citizen_id]
+		)
+		var citizen: Dictionary = (
+			WorldData.city_citizens[
+				citizen_index
+			]
+		)
+
+		if not citizen.has("sex"):
+			errors.append(
+				"Citizen "
+				+ str(citizen_id)
+				+ " is missing sex."
+			)
+			continue
+
+		var raw_sex = citizen.get("sex")
+
+		if typeof(raw_sex) != TYPE_STRING:
+			errors.append(
+				"Citizen "
+				+ str(citizen_id)
+				+ " has non-string sex data."
+			)
+			continue
+
+		var citizen_sex := (
+			WorldData.normalize_city_citizen_sex(
+				raw_sex
+			)
+		)
+
+		if not WorldData.is_valid_city_citizen_sex(
+			citizen_sex
+		):
+			errors.append(
+				"Citizen "
+				+ str(citizen_id)
+				+ " has invalid sex '"
+				+ str(raw_sex)
+				+ "'."
+			)
+			continue
+
+		if citizen_sex == WorldData.CITY_CITIZEN_SEX_MALE:
+			male_count += 1
+		else:
+			female_count += 1
+
+		var citizen_name := str(
+			citizen.get("name", "")
+		).strip_edges()
+		var expected_name_pool := (
+			WorldData.get_city_citizen_name_pool_for_sex(
+				citizen_sex
+			)
+		)
+
+		if citizen_name.is_empty():
+			errors.append(
+				"Citizen "
+					+ str(citizen_id)
+					+ " has an empty name."
+			)
+		elif not expected_name_pool.has(citizen_name):
+			errors.append(
+				"Citizen "
+					+ str(citizen_id)
+					+ " named '"
+					+ citizen_name
+					+ "' is absent from the "
+					+ citizen_sex
+					+ " name pool."
+			)
+
+	if (
+		WorldData.player_city_founded
+		and (
+			WorldData.city_citizens.size()
+			== WorldData.STARTING_CITY_POPULATION
+		)
+		and (
+			WorldData.next_city_citizen_id
+			== WorldData.STARTING_CITY_POPULATION + 1
+		)
+	):
+		if (
+			male_count
+			!= WorldData.STARTING_CITY_MALE_POPULATION
+			or female_count
+			!= WorldData.STARTING_CITY_FEMALE_POPULATION
+		):
+			errors.append(
+				"Founding population must contain "
+					+ str(
+						WorldData
+						.STARTING_CITY_MALE_POPULATION
+					)
+					+ " male and "
+					+ str(
+						WorldData
+						.STARTING_CITY_FEMALE_POPULATION
+					)
+					+ " female citizens, but contains "
+					+ str(male_count)
+					+ " male and "
+					+ str(female_count)
+					+ " female citizens."
+			)
 
 static func _validate_city_foundation_state(
 	errors: Array[String],
