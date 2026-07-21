@@ -207,8 +207,9 @@ static func run_tick(
 				movement_was_blocked = true
 				break
 
-			if not WorldData.is_city_tile_walkable_for_citizen(
+			if not WorldData.can_city_citizen_traverse_step(
 				city_world,
+				current_tile,
 				next_tile,
 				citizen_id
 			):

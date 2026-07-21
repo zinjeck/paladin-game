@@ -40,7 +40,8 @@ static func find_path_to_any_city_tile(
 	max_expanded_nodes: int = (
 		DEFAULT_MAX_EXPANDED_NODES
 	),
-	citizen_id: int = -1
+	citizen_id: int = -1,
+	heuristic_weight: int = HEURISTIC_WEIGHT
 ) -> Dictionary:
 	var search_start_usec := Time.get_ticks_usec()
 
@@ -125,12 +126,17 @@ static func find_path_to_any_city_tile(
 			destination_tiles
 		)
 	)
+	var safe_heuristic_weight := maxi(
+		heuristic_weight,
+		1
+	)
 
 	_push_open_heap_entry(
 		open_heap,
 		start_tile,
 		0,
-		start_heuristic
+		start_heuristic,
+		safe_heuristic_weight
 	)
 
 	var expanded_node_count := 0
@@ -232,13 +238,11 @@ static func find_path_to_any_city_tile(
 			if closed_tile_lookup.has(neighbor_tile):
 				continue
 
-			if not (
-				WorldData
-				.is_city_tile_walkable_for_citizen(
-					city_world,
-					neighbor_tile,
-					citizen_id
-				)
+			if not WorldData.can_city_citizen_traverse_step(
+				city_world,
+				current_tile,
+				neighbor_tile,
+				citizen_id
 			):
 				continue
 
@@ -276,7 +280,8 @@ static func find_path_to_any_city_tile(
 				open_heap,
 				neighbor_tile,
 				proposed_travel_cost,
-				neighbor_heuristic
+				neighbor_heuristic,
+				safe_heuristic_weight
 			)
 
 	result["status"] = PATH_STATUS_UNREACHABLE
@@ -375,11 +380,12 @@ static func _push_open_heap_entry(
 	open_heap: Array,
 	tile_position: Vector2i,
 	travel_cost: int,
-	heuristic: int
+	heuristic: int,
+	heuristic_weight: int
 ) -> void:
 	var entry := [
 		tile_position,
-		travel_cost + heuristic * HEURISTIC_WEIGHT,
+		travel_cost + heuristic * heuristic_weight,
 		heuristic,
 		travel_cost
 	]

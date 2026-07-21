@@ -806,10 +806,9 @@ static func _get_output_capacity_in_batches(
 	if outputs.is_empty():
 		return 0
 
-	var capacity_in_batches := -1
+	var total_output_amount_per_batch := 0
 
 	for raw_resource in outputs:
-		var resource := str(raw_resource)
 		var amount_per_batch := int(
 			outputs.get(raw_resource, 0)
 		)
@@ -817,23 +816,26 @@ static func _get_output_capacity_in_batches(
 		if amount_per_batch <= 0:
 			return 0
 
-		var free_space := (
-			WorldData.get_city_object_resource_free_space(
-				city_object,
-				resource
-			)
-		)
-		var resource_capacity_in_batches := int(
-			free_space / amount_per_batch
-		)
+		total_output_amount_per_batch += amount_per_batch
 
-		if (
-			capacity_in_batches < 0
-			or resource_capacity_in_batches < capacity_in_batches
-		):
-			capacity_in_batches = resource_capacity_in_batches
+	if total_output_amount_per_batch <= 0:
+		return 0
 
-	return maxi(capacity_in_batches, 0)
+	# Object containers use one shared total capacity. A multi-output batch must
+	# therefore fit the sum of every output, not each resource independently.
+	var shared_free_space := (
+		WorldData.get_city_object_storage_free_space(
+			city_object
+		)
+	)
+
+	return maxi(
+		floori(
+			float(shared_free_space)
+			/ float(total_output_amount_per_batch)
+		),
+		0
+	)
 
 
 static func _calculate_work_units(
@@ -880,6 +882,8 @@ static func _store_recipe_outputs(
 	if batch_count <= 0:
 		return false
 
+	var requested_resources: Dictionary = {}
+
 	for raw_resource in outputs:
 		var resource := str(raw_resource)
 		var amount_per_batch := int(
@@ -889,18 +893,16 @@ static func _store_recipe_outputs(
 			amount_per_batch
 			* batch_count
 		)
-		var accepted_amount := (
-			WorldData.add_resource_to_city_object_storage(
-				object_id,
-				resource,
-				requested_amount
-			)
-		)
 
-		if accepted_amount != requested_amount:
+		if requested_amount <= 0:
 			return false
 
-	return true
+		requested_resources[resource] = requested_amount
+
+	return WorldData.add_resource_bundle_to_city_object_storage(
+		object_id,
+		requested_resources
+	)
 
 
 static func _write_workplace_state(

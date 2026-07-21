@@ -4,6 +4,9 @@ class_name CitizenDecisionSystem
 const CityNavigationSystemScript = preload(
 	"res://scripts/city/simulation/systems/CityNavigationSystem.gd"
 )
+const CitizenHaulingSystemScript = preload(
+	"res://scripts/citizens/simulation/systems/CitizenHaulingSystem.gd"
+)
 
 # Temporary shared schedule for the first autonomous work pass.
 # These constants are intentionally centralized so the schedule can later be
@@ -11,12 +14,16 @@ const CityNavigationSystemScript = preload(
 const WORK_SHIFT_START_MINUTE_OF_DAY: int = 8 * 60
 const WORK_SHIFT_END_MINUTE_OF_DAY: int = 17 * 60
 const SCHEDULED_WORK_TASK_PRIORITY: int = 100
+const OUTSTANDING_CARGO_HAUL_TASK_PRIORITY: int = 150
+const SCHEDULED_OUTPUT_HAUL_TASK_PRIORITY: int = 75
+const SCHEDULED_RETURN_HOME_TASK_PRIORITY: int = 50
 const SCHEDULE_PHASE_WORK_SHIFT := "work_shift"
 const SCHEDULE_PHASE_OFF_SHIFT := "off_shift"
 const SCHEDULE_ACTIVITY_OUTSTANDING_OBLIGATION := (
 	"outstanding_obligation"
 )
 const SCHEDULE_ACTIVITY_ASSIGNED_WORK := "assigned_work"
+const SCHEDULE_ACTIVITY_ASSIGNED_HOME := "assigned_home"
 
 # Rules are evaluated in order. The first rule that returns a task request
 # wins, so obligations can precede ordinary schedule destinations.
@@ -27,6 +34,7 @@ const DEFAULT_SCHEDULE_ACTIVITY_RULES := {
 	],
 	SCHEDULE_PHASE_OFF_SHIFT: [
 		SCHEDULE_ACTIVITY_OUTSTANDING_OBLIGATION,
+		SCHEDULE_ACTIVITY_ASSIGNED_HOME,
 	],
 }
 const MAX_DECISIONS_PER_TICK: int = 32
@@ -246,6 +254,93 @@ static func _citizen_needs_scheduled_work_task(
 		== WorldData.CITY_CITIZEN_TASK_KIND_NONE
 	)
 
+
+static func _citizen_needs_scheduled_return_home_task(
+	citizen: Dictionary
+) -> bool:
+	if not bool(citizen.get("alive", false)):
+		return false
+
+	var home_id := int(
+		citizen.get("home_object_id", -1)
+	)
+
+	if home_id <= 0:
+		return false
+
+	var home := WorldData.get_city_object_by_id(home_id)
+	var citizen_id := int(citizen.get("id", -1))
+
+	if (
+		home.is_empty()
+		or WorldData.get_city_object_resident_capacity(home) <= 0
+		or not WorldData.city_object_supports_citizen_interior(home)
+		or not WorldData.get_city_object_resident_ids(
+			home
+		).has(citizen_id)
+		or not WorldData.city_citizen_can_access_object_interior(
+			citizen_id,
+			home
+		)
+	):
+		return false
+
+	if _citizen_has_satisfied_home_arrival(citizen, home):
+		return false
+
+	var raw_current_task = citizen.get("current_task", {})
+
+	if not raw_current_task is Dictionary:
+		return false
+
+	var current_task: Dictionary = raw_current_task
+
+	return (
+		str(current_task.get("kind", ""))
+		== WorldData.CITY_CITIZEN_TASK_KIND_NONE
+	)
+
+
+static func _citizen_has_satisfied_home_arrival(
+	citizen: Dictionary,
+	home: Dictionary
+) -> bool:
+	var home_tiles := WorldData.get_city_object_footprint_tiles(
+		home
+	)
+	var raw_current_tile = citizen.get(
+		"city_tile_position",
+		WorldData.INVALID_CITY_TILE_POSITION
+	)
+
+	if (
+		raw_current_tile is Vector2i
+		and home_tiles.has(raw_current_tile)
+	):
+		return true
+
+	var citizen_id := int(citizen.get("id", -1))
+	var raw_anchor_tile = _idle_anchor_tile_by_citizen_id.get(
+		citizen_id,
+		WorldData.INVALID_CITY_TILE_POSITION
+	)
+
+	if (
+		not raw_current_tile is Vector2i
+		or not raw_anchor_tile is Vector2i
+		or not home_tiles.has(raw_anchor_tile)
+	):
+		return false
+
+	var current_tile: Vector2i = raw_current_tile
+	var anchor_tile: Vector2i = raw_anchor_tile
+	var distance_from_home_anchor := (
+		absi(current_tile.x - anchor_tile.x)
+		+ absi(current_tile.y - anchor_tile.y)
+	)
+
+	return distance_from_home_anchor <= IDLE_ANCHOR_RADIUS_TILES
+
 static func _citizen_needs_scheduled_task(
 	citizen: Dictionary,
 	schedule_phase: String
@@ -312,16 +407,179 @@ static func _get_scheduled_activity_task_request(
 			)
 		SCHEDULE_ACTIVITY_ASSIGNED_WORK:
 			return _get_assigned_work_task_request(citizen)
+		SCHEDULE_ACTIVITY_ASSIGNED_HOME:
+			return _get_assigned_home_task_request(citizen)
 
 	return {}
 
 
 static func _get_outstanding_obligation_task_request(
-	_citizen: Dictionary
+	citizen: Dictionary
 ) -> Dictionary:
-	# Inventory and hauling do not exist yet. Later this rule can return the
-	# citizen's highest-priority unresolved obligation: deliver carried goods
-	# to the nearest valid stockpile, or create a ground pile if none exists.
+	var citizen_id := int(citizen.get("id", -1))
+
+	if citizen_id <= 0:
+		return {}
+
+	var cargo := WorldData.get_city_citizen_haul_cargo(
+		citizen_id
+	)
+	var cargo_amount := maxi(
+		int(cargo.get("amount", 0)),
+		0
+	)
+	var current_haul := WorldData.get_city_citizen_current_haul(
+		citizen_id
+	)
+
+	if cargo_amount > 0:
+		var raw_source = current_haul.get("source", {})
+		var raw_requester = current_haul.get("requester", {})
+
+		if not raw_source is Dictionary:
+			return {}
+
+		if not raw_requester is Dictionary:
+			return {}
+
+		var reason := str(
+			current_haul.get(
+				"reason",
+				WorldData.CITY_CITIZEN_HAUL_REASON_OUTSTANDING_CARGO
+			)
+		)
+
+		if reason == WorldData.CITY_CITIZEN_HAUL_REASON_NONE:
+			reason = (
+				WorldData.CITY_CITIZEN_HAUL_REASON_OUTSTANDING_CARGO
+			)
+
+		return (
+			CitizenHaulingSystemScript
+			.make_public_storage_haul_task_request({
+				"city_world": WorldData.official_city_world,
+				"citizen": citizen,
+				"source": raw_source,
+				"resource_type": str(
+					cargo.get(
+						"resource_type",
+						WorldData.RESOURCE_NONE
+					)
+				),
+				"requested_amount": cargo_amount,
+				"reason": reason,
+				"requester": raw_requester,
+				"source_access_purpose": str(
+					current_haul.get(
+						"source_access_purpose",
+						WorldData
+						.CONTAINER_HAUL_PURPOSE_WORKPLACE_OUTPUT
+					)
+				),
+				"destination_access_purpose": (
+					WorldData.CONTAINER_HAUL_PURPOSE_PUBLIC_STORAGE
+				),
+				"task_source": (
+					WorldData.CITY_CITIZEN_TASK_SOURCE_SCHEDULE
+				),
+				"task_priority": (
+					OUTSTANDING_CARGO_HAUL_TASK_PRIORITY
+				),
+			})
+		)
+
+	# Off-shift workers keep taking workplace-output trips until the buffer is
+	# empty or no reachable public storage has room, then return home. Existing
+	# cargo remains an obligation at any time.
+	if is_work_shift_active():
+		return {}
+
+	var home_id := int(citizen.get("home_object_id", -1))
+	var home := WorldData.get_city_object_by_id(home_id)
+
+	if (
+		home_id > 0
+		and not home.is_empty()
+		and _citizen_has_satisfied_home_arrival(citizen, home)
+	):
+		return {}
+
+	var workplace_id := int(
+		citizen.get("job_object_id", -1)
+	)
+	var workplace := WorldData.get_city_object_by_id(
+		workplace_id
+	)
+
+	if (
+		workplace_id <= 0
+		or workplace.is_empty()
+		or not WorldData.city_object_is_workplace(workplace)
+	):
+		return {}
+
+	var remaining_carry_capacity := (
+		WorldData.get_city_citizen_available_haul_capacity(
+			citizen_id
+		)
+	)
+
+	if remaining_carry_capacity <= 0:
+		return {}
+
+	var source := WorldData.make_city_citizen_haul_endpoint(
+		workplace_id
+	)
+
+	for resource in WorldData.get_city_object_output_resources(
+		workplace
+	):
+		var stored_amount := (
+			WorldData.get_city_object_stored_resource_amount(
+				workplace,
+				resource
+			)
+		)
+		var requested_amount := mini(
+			stored_amount,
+			remaining_carry_capacity
+		)
+
+		if requested_amount <= 0:
+			continue
+
+		var task_request := (
+			CitizenHaulingSystemScript
+			.make_public_storage_haul_task_request({
+				"city_world": WorldData.official_city_world,
+				"citizen": citizen,
+				"source": source,
+				"resource_type": resource,
+				"requested_amount": requested_amount,
+				"reason": (
+					WorldData
+					.CITY_CITIZEN_HAUL_REASON_WORKPLACE_OUTPUT_BEFORE_HOME
+				),
+				"requester": source,
+				"source_access_purpose": (
+					WorldData
+					.CONTAINER_HAUL_PURPOSE_WORKPLACE_OUTPUT
+				),
+				"destination_access_purpose": (
+					WorldData.CONTAINER_HAUL_PURPOSE_PUBLIC_STORAGE
+				),
+				"task_source": (
+					WorldData.CITY_CITIZEN_TASK_SOURCE_SCHEDULE
+				),
+				"task_priority": (
+					SCHEDULED_OUTPUT_HAUL_TASK_PRIORITY
+				),
+			})
+		)
+
+		if not task_request.is_empty():
+			return task_request
+
 	return {}
 
 
@@ -339,6 +597,25 @@ static func _get_assigned_work_task_request(
 		"priority": SCHEDULED_WORK_TASK_PRIORITY,
 		"target_object_id": int(
 			citizen.get("job_object_id", -1)
+		),
+		"player_locked": false
+	}
+
+
+static func _get_assigned_home_task_request(
+	citizen: Dictionary
+) -> Dictionary:
+	if not _citizen_needs_scheduled_return_home_task(citizen):
+		return {}
+
+	return {
+		"kind": WorldData.CITY_CITIZEN_TASK_KIND_RETURN_HOME,
+		"source": (
+			WorldData.CITY_CITIZEN_TASK_SOURCE_SCHEDULE
+		),
+		"priority": SCHEDULED_RETURN_HOME_TASK_PRIORITY,
+		"target_object_id": int(
+			citizen.get("home_object_id", -1)
 		),
 		"player_locked": false
 	}
@@ -404,8 +681,6 @@ static func _process_decision_queue(
 			WorldData.cancel_city_citizen_movement(
 				citizen_id
 			)
-
-
 static func _clear_schedule_sourced_tasks() -> void:
 	_clear_decision_queue()
 
@@ -424,6 +699,14 @@ static func _clear_schedule_sourced_tasks() -> void:
 		if (
 			str(current_task.get("source", ""))
 			!= WorldData.CITY_CITIZEN_TASK_SOURCE_SCHEDULE
+		):
+			continue
+
+		# A schedule transition must not strand or erase physical cargo. Hauls
+		# finish independently, then the next schedule decision can run.
+		if (
+			str(current_task.get("kind", ""))
+			== WorldData.CITY_CITIZEN_TASK_KIND_HAUL
 		):
 			continue
 
@@ -616,6 +899,13 @@ static func _citizen_is_available_for_idle_behavior(
 	if (
 		str(current_task.get("kind", ""))
 		!= WorldData.CITY_CITIZEN_TASK_KIND_NONE
+	):
+		return false
+
+	if (
+		WorldData.get_city_citizen_haul_cargo_amount(
+			int(citizen.get("id", -1))
+		) > 0
 	):
 		return false
 

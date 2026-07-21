@@ -137,6 +137,13 @@ var object_info_body_label: Label
 var object_info_storage_title_label: Label
 var object_info_storage_icons: Array[ColorRect] = []
 var object_info_storage_amount_labels: Array[Label] = []
+var workplace_details_button: Button
+var workplace_details_panel: Panel
+var workplace_details_title_label: Label
+var workplace_details_body_label: Label
+var workplace_details_open: bool = false
+var workplace_details_object_id: int = -1
+var workplace_details_button_body_line_count: int = 0
 var object_selection_box_panel: Panel
 var is_object_selection_dragging: bool = false
 var object_selection_drag_start_screen: Vector2 = Vector2.ZERO
@@ -161,6 +168,7 @@ const CITY_CITIZEN_MARKER_COLOR: Color = (
 	Color(0.824, 0.706, 0.549, 1.0)
 )
 const CITY_CITIZEN_MARKER_TILE_SCALE: float = 0.5
+const CITY_HAUL_CARGO_MARKER_CITIZEN_SCALE: float = 0.5
 const WORKPLACE_ZONE_TEXTURE_TARGET_PIXELS_PER_TILE: int = 8
 const WORKPLACE_ZONE_TEXTURE_MAXIMUM_DIMENSION: int = 1024
 const WORKPLACE_ZONE_TEXTURE_BORDER_PIXELS: int = 1
@@ -368,7 +376,11 @@ func _process(delta: float) -> void:
 	):
 		refresh_active_workplace_zone_preview_cache()
 
-	if city_containers_changed or public_storage_changed:
+	if (
+		city_containers_changed
+		or public_storage_changed
+		or city_citizens_changed
+	):
 		update_resource_bar_values()
 
 	if (
@@ -1336,7 +1348,7 @@ func update_resource_bar_values() -> void:
 
 		var resource: String = resource_order[i]
 		var amount := (
-			WorldData.get_total_stored_city_resource_amount(
+			WorldData.get_total_owned_city_resource_amount(
 				resource
 			)
 		)
@@ -1761,6 +1773,7 @@ func create_object_info_panel() -> void:
 	object_info_body_label.add_theme_font_size_override("font_size", 13)
 	object_info_panel.add_child(object_info_body_label)
 	create_object_info_storage_rows()
+	create_workplace_details_ui()
 
 func create_object_info_storage_rows() -> void:
 	object_info_storage_title_label = Label.new()
@@ -1774,7 +1787,12 @@ func create_object_info_storage_rows() -> void:
 	object_info_storage_icons.clear()
 	object_info_storage_amount_labels.clear()
 
-	for i in range(4):
+	for i in range(
+		maxi(
+			WorldData.get_city_resource_types().size(),
+			1
+		)
+	):
 		var icon := ColorRect.new()
 		icon.visible = false
 		icon.mouse_filter = Control.MOUSE_FILTER_IGNORE
@@ -1788,6 +1806,82 @@ func create_object_info_storage_rows() -> void:
 		amount_label.add_theme_font_size_override("font_size", 13)
 		object_info_panel.add_child(amount_label)
 		object_info_storage_amount_labels.append(amount_label)
+
+
+func create_workplace_details_ui() -> void:
+	workplace_details_button = Button.new()
+	workplace_details_button.text = "Workplace Details"
+	workplace_details_button.visible = false
+	workplace_details_button.focus_mode = Control.FOCUS_NONE
+	workplace_details_button.mouse_filter = (
+		Control.MOUSE_FILTER_STOP
+	)
+	object_info_panel.add_child(workplace_details_button)
+	workplace_details_button.pressed.connect(
+		on_workplace_details_button_pressed
+	)
+
+	workplace_details_panel = Panel.new()
+	workplace_details_panel.visible = false
+	workplace_details_panel.mouse_filter = (
+		Control.MOUSE_FILTER_STOP
+	)
+
+	var panel_style := create_flat_ui_style(
+		Color(0.16, 0.16, 0.16, 0.94),
+		Color(0.42, 0.42, 0.42, 1.0),
+		1
+	)
+
+	workplace_details_panel.add_theme_stylebox_override(
+		"panel",
+		panel_style
+	)
+	ui_root.add_child(workplace_details_panel)
+
+	workplace_details_title_label = Label.new()
+	workplace_details_title_label.text = "Workplace Details"
+	workplace_details_title_label.horizontal_alignment = (
+		HORIZONTAL_ALIGNMENT_CENTER
+	)
+	workplace_details_title_label.vertical_alignment = (
+		VERTICAL_ALIGNMENT_CENTER
+	)
+	workplace_details_title_label.mouse_filter = (
+		Control.MOUSE_FILTER_IGNORE
+	)
+	workplace_details_title_label.add_theme_color_override(
+		"font_color",
+		Color(0.88, 0.96, 1.0, 1.0)
+	)
+	workplace_details_title_label.add_theme_font_size_override(
+		"font_size",
+		18
+	)
+	workplace_details_panel.add_child(
+		workplace_details_title_label
+	)
+
+	workplace_details_body_label = Label.new()
+	workplace_details_body_label.text = ""
+	workplace_details_body_label.mouse_filter = (
+		Control.MOUSE_FILTER_IGNORE
+	)
+	workplace_details_body_label.autowrap_mode = (
+		TextServer.AUTOWRAP_WORD_SMART
+	)
+	workplace_details_body_label.add_theme_color_override(
+		"font_color",
+		Color(0.82, 0.82, 0.82, 1.0)
+	)
+	workplace_details_body_label.add_theme_font_size_override(
+		"font_size",
+		13
+	)
+	workplace_details_panel.add_child(
+		workplace_details_body_label
+	)
+
 
 func layout_object_info_panel(viewport_size: Vector2) -> void:
 	if object_info_panel == null:
@@ -1828,7 +1922,78 @@ func layout_object_info_panel(viewport_size: Vector2) -> void:
 			370.0
 		)
 
+	layout_workplace_details_button(
+		workplace_details_button_body_line_count
+	)
+	layout_workplace_details_panel(viewport_size)
 	layout_object_info_storage_rows(panel_width)
+
+
+func layout_workplace_details_button(
+	body_line_count: int
+) -> void:
+	if workplace_details_button == null:
+		return
+
+	var body_start_y := 56.0
+	var body_line_height := 21.0
+	var button_gap := 6.0
+	var button_y := (
+		body_start_y
+		+ float(body_line_count) * body_line_height
+		+ button_gap
+	)
+
+	workplace_details_button.position = Vector2(
+		14.0,
+		button_y
+	)
+	workplace_details_button.size = Vector2(
+		object_info_panel.size.x - 28.0,
+		30.0
+	)
+
+
+func layout_workplace_details_panel(
+	viewport_size: Vector2
+) -> void:
+	if workplace_details_panel == null:
+		return
+
+	var panel_gap := 8.0
+	var panel_width := 320.0
+	var panel_height := minf(600.0, viewport_size.y)
+
+	workplace_details_panel.position = Vector2(
+		object_info_panel.position.x
+			+ object_info_panel.size.x
+			+ panel_gap,
+		object_info_panel.position.y
+	)
+	workplace_details_panel.size = Vector2(
+		panel_width,
+		panel_height
+	)
+
+	if workplace_details_title_label != null:
+		workplace_details_title_label.position = Vector2(
+			0.0,
+			10.0
+		)
+		workplace_details_title_label.size = Vector2(
+			panel_width,
+			32.0
+		)
+
+	if workplace_details_body_label != null:
+		workplace_details_body_label.position = Vector2(
+			14.0,
+			56.0
+		)
+		workplace_details_body_label.size = Vector2(
+			panel_width - 28.0,
+			panel_height - 70.0
+		)
 
 func layout_object_info_storage_rows(panel_width: float) -> void:
 	if object_info_storage_title_label != null:
@@ -1858,7 +2023,7 @@ func get_container_type_display_name(container_type: String) -> String:
 		WorldData.CONTAINER_TYPE_PRIVATE_HOME_STORAGE:
 			return "Private home storage"
 		WorldData.CONTAINER_TYPE_WORKPLACE_STORAGE:
-			return "Workplace storage"
+			return "Workplace output buffer"
 		WorldData.CONTAINER_TYPE_PERSONAL_INVENTORY:
 			return "Personal inventory"
 		WorldData.CONTAINER_TYPE_GROUND_PILE:
@@ -1876,7 +2041,7 @@ func get_storage_panel_title_for_object(city_object: Dictionary) -> String:
 		WorldData.CONTAINER_TYPE_PRIVATE_HOME_STORAGE:
 			return "Private Storage"
 		WorldData.CONTAINER_TYPE_WORKPLACE_STORAGE:
-			return "Workplace Storage"
+			return "Workplace Output Buffer"
 		WorldData.CONTAINER_TYPE_PERSONAL_INVENTORY:
 			return "Personal Inventory"
 		WorldData.CONTAINER_TYPE_GROUND_PILE:
@@ -1915,6 +2080,8 @@ func format_compact_production_number(value: float) -> String:
 func update_selected_city_citizen_panel() -> void:
 	if object_info_panel == null:
 		return
+
+	hide_workplace_details_ui()
 
 	var citizen := (
 		WorldData.get_city_citizen_by_id(
@@ -2015,6 +2182,9 @@ func update_selected_city_citizen_panel() -> void:
 				citizen
 			)
 	]
+	body_lines.append_array(
+		get_citizen_haul_status_lines(citizen)
+	)
 	var body_text := ""
 
 	for line_index in range(body_lines.size()):
@@ -2026,6 +2196,292 @@ func update_selected_city_citizen_panel() -> void:
 		)
 
 	object_info_body_label.text = body_text
+	update_citizen_inventory_display(citizen)
+
+
+func get_citizen_haul_status_lines(
+	citizen: Dictionary
+) -> Array:
+	var citizen_id := int(citizen.get("id", -1))
+
+	if not WorldData.city_citizen_is_hauling(citizen_id):
+		return ["Hauling: No"]
+
+	var haul := WorldData.get_city_citizen_current_haul(
+		citizen_id
+	)
+	var cargo := WorldData.get_city_citizen_haul_cargo(
+		citizen_id
+	)
+	var resource := str(
+		haul.get("resource_type", WorldData.RESOURCE_NONE)
+	)
+
+	if resource == WorldData.RESOURCE_NONE:
+		resource = str(
+			cargo.get("resource_type", WorldData.RESOURCE_NONE)
+		)
+
+	var cargo_amount := maxi(
+		int(cargo.get("amount", 0)),
+		0
+	)
+	var carry_capacity := maxi(
+		int(citizen.get("carry_capacity", 0)),
+		0
+	)
+	var personal_inventory_used := (
+		WorldData.get_city_citizen_inventory_used_capacity(
+			citizen_id
+		)
+	)
+	var haul_capacity := maxi(
+		carry_capacity - personal_inventory_used,
+		0
+	)
+	var haul_phase := str(
+		haul.get(
+			"phase",
+			WorldData.CITY_CITIZEN_HAUL_PHASE_NONE
+		)
+	).replace("_", " ").capitalize()
+	var lines: Array = [
+		"Hauling: Yes",
+		"Haul resource: " + resource.capitalize(),
+		"Cargo: "
+			+ str(cargo_amount)
+			+ " / "
+			+ str(haul_capacity)
+			+ " (shared carry "
+			+ str(personal_inventory_used + cargo_amount)
+			+ " / "
+			+ str(carry_capacity)
+			+ ")",
+		"Haul source: "
+			+ get_haul_endpoint_display_text(
+				haul.get("source", {})
+			),
+		"Haul destination: "
+			+ get_haul_endpoint_display_text(
+				haul.get("destination", {})
+			),
+		"Haul phase: " + haul_phase,
+	]
+
+	return lines
+
+
+func get_haul_endpoint_display_text(
+	raw_endpoint
+) -> String:
+	if not raw_endpoint is Dictionary:
+		return "invalid"
+
+	var endpoint: Dictionary = raw_endpoint
+	var endpoint_kind := str(
+		endpoint.get(
+			"kind",
+			WorldData.CITY_CITIZEN_HAUL_ENDPOINT_KIND_NONE
+		)
+	)
+	var endpoint_id := int(endpoint.get("id", -1))
+
+	if endpoint_kind == WorldData.CITY_CITIZEN_HAUL_ENDPOINT_KIND_NONE:
+		return "none"
+
+	if (
+		endpoint_kind
+		!= WorldData
+		.CITY_CITIZEN_HAUL_ENDPOINT_KIND_CITY_OBJECT_CONTAINER
+	):
+		return endpoint_kind + " #" + str(endpoint_id)
+
+	var city_object := get_city_object_by_id(endpoint_id)
+
+	if city_object.is_empty():
+		return "missing #" + str(endpoint_id)
+
+	return (
+		get_city_object_display_name(city_object)
+		+ " #"
+		+ str(endpoint_id)
+	)
+
+
+func update_citizen_inventory_display(
+	citizen: Dictionary
+) -> void:
+	var raw_inventory = citizen.get("inventory", {})
+
+	if not raw_inventory is Dictionary:
+		hide_object_info_storage_display()
+		return
+
+	var inventory: Dictionary = raw_inventory
+	var present_resources := (
+		WorldData.get_resource_container_present_resources(
+			inventory
+		)
+	)
+	var used_capacity := (
+		WorldData.get_resource_container_total_amount(
+			inventory
+		)
+	)
+	var carry_capacity := maxi(
+		int(citizen.get("carry_capacity", 0)),
+		0
+	)
+	var citizen_id := int(citizen.get("id", -1))
+	var haul_cargo_amount := (
+		WorldData.get_city_citizen_haul_cargo_amount(
+			citizen_id
+		)
+	)
+
+	if object_info_storage_title_label != null:
+		var inventory_title := (
+			"Personal Inventory ("
+				+ str(used_capacity)
+				+ " / "
+				+ str(carry_capacity)
+				+ ")"
+		)
+
+		if haul_cargo_amount > 0:
+			inventory_title += (
+				" | Total Carried "
+				+ str(used_capacity + haul_cargo_amount)
+				+ " / "
+				+ str(carry_capacity)
+			)
+
+		object_info_storage_title_label.text = inventory_title
+
+		object_info_storage_title_label.visible = true
+
+	for i in range(object_info_storage_icons.size()):
+		if i >= present_resources.size():
+			object_info_storage_icons[i].visible = false
+
+			if i < object_info_storage_amount_labels.size():
+				object_info_storage_amount_labels[i].visible = false
+
+			continue
+
+		var resource: String = present_resources[i]
+		var amount := (
+			WorldData.get_resource_container_resource_amount(
+				inventory,
+				resource
+			)
+		)
+		var icon := object_info_storage_icons[i]
+		icon.visible = true
+		icon.color = get_resource_color(resource)
+
+		if i < object_info_storage_amount_labels.size():
+			var amount_label := object_info_storage_amount_labels[i]
+			amount_label.visible = true
+			amount_label.text = (
+				resource.capitalize()
+					+ ": "
+					+ str(amount)
+			)
+
+
+func get_object_info_lines_text(lines: Array) -> String:
+	var result := ""
+
+	for line_index in range(lines.size()):
+		if line_index > 0:
+			result += "\n"
+
+		result += str(lines[line_index])
+
+	return result
+
+
+func hide_workplace_details_ui() -> void:
+	workplace_details_open = false
+	workplace_details_object_id = -1
+	workplace_details_button_body_line_count = 0
+
+	if workplace_details_button != null:
+		workplace_details_button.visible = false
+		workplace_details_button.text = "Workplace Details"
+
+	if workplace_details_panel != null:
+		workplace_details_panel.visible = false
+
+
+func update_workplace_details_ui(
+	city_object: Dictionary,
+	main_body_line_count: int,
+	detail_lines: Array
+) -> void:
+	var object_id := int(city_object.get("id", -1))
+
+	if workplace_details_object_id != object_id:
+		workplace_details_open = false
+		workplace_details_object_id = object_id
+
+	workplace_details_button_body_line_count = (
+		main_body_line_count
+	)
+
+	if workplace_details_button != null:
+		workplace_details_button.visible = true
+
+		if workplace_details_open:
+			workplace_details_button.text = (
+				"Hide Workplace Details"
+			)
+		else:
+			workplace_details_button.text = (
+				"Workplace Details"
+			)
+
+		layout_workplace_details_button(
+			workplace_details_button_body_line_count
+		)
+
+	if workplace_details_title_label != null:
+		workplace_details_title_label.text = (
+			get_city_object_display_name(city_object)
+				+ " Details"
+		)
+
+	if workplace_details_body_label != null:
+		workplace_details_body_label.text = (
+			get_object_info_lines_text(detail_lines)
+		)
+
+	if workplace_details_panel != null:
+		workplace_details_panel.visible = (
+			workplace_details_open
+		)
+
+		if workplace_details_open:
+			workplace_details_panel.move_to_front()
+
+
+func on_workplace_details_button_pressed() -> void:
+	var city_object := get_city_object_by_id(
+		selected_city_object_id
+	)
+
+	if (
+		city_object.is_empty()
+		or not WorldData.city_object_is_workplace(
+			city_object
+		)
+	):
+		hide_workplace_details_ui()
+		return
+
+	workplace_details_open = not workplace_details_open
+	update_selected_entity_panel()
 
 func update_selected_entity_panel() -> void:
 	if object_info_panel == null:
@@ -2041,6 +2497,7 @@ func update_selected_entity_panel() -> void:
 	if selected_city_object_id < 0:
 		object_info_panel.visible = false
 		hide_object_info_storage_display()
+		hide_workplace_details_ui()
 		return
 
 	var city_object: Dictionary = get_city_object_by_id(selected_city_object_id)
@@ -2048,6 +2505,7 @@ func update_selected_entity_panel() -> void:
 	if city_object.is_empty():
 		object_info_panel.visible = false
 		hide_object_info_storage_display()
+		hide_workplace_details_ui()
 		return
 
 	object_info_panel.visible = true
@@ -2064,6 +2522,10 @@ func update_selected_entity_panel() -> void:
 
 	var container_type := WorldData.get_city_object_container_type(city_object)
 	var container_text := get_container_type_display_name(container_type)
+	var is_workplace: bool = (
+		WorldData.city_object_is_workplace(city_object)
+	)
+	var workplace_detail_lines: Array = []
 
 	var body_lines: Array = [
 		"Object: " + get_city_object_display_name(city_object)
@@ -2108,7 +2570,7 @@ func update_selected_entity_panel() -> void:
 		for resident_name in resident_names:
 			body_lines.append("- " + str(resident_name))
 	
-	elif WorldData.city_object_is_workplace(city_object):
+	elif is_workplace:
 		var production_status := (
 			WorldData.get_city_object_production_status(
 				city_object
@@ -2164,16 +2626,23 @@ func update_selected_entity_panel() -> void:
 		for worker_name in worker_names:
 			body_lines.append("- " + str(worker_name))
 
-		var output_resource := (
-			WorldData.get_city_object_output_resource(
+		var output_resources := (
+			WorldData.get_city_object_output_resources(
 				city_object
 			)
 		)
 
-		if output_resource != WorldData.RESOURCE_NONE:
-			body_lines.append(
+		if not output_resources.is_empty():
+			var output_names: Array[String] = []
+
+			for output_resource in output_resources:
+				output_names.append(
+					output_resource.capitalize()
+				)
+
+			workplace_detail_lines.append(
 				"Output: "
-				+ output_resource.capitalize()
+					+ ", ".join(output_names)
 			)
 
 		var production_recipe := (
@@ -2194,14 +2663,14 @@ func update_selected_entity_panel() -> void:
 		)
 
 		if work_units_per_batch > 0:
-			body_lines.append(
+			workplace_detail_lines.append(
 				"Progress: "
-				+ str(progress_work_units)
+					+ str(progress_work_units)
 				+ " / "
 				+ str(work_units_per_batch)
 			)
 
-		if output_resource != WorldData.RESOURCE_NONE:
+		for output_resource in output_resources:
 			var output_per_hour := (
 				WorkplaceProductionSystem.get_estimated_output_per_hour(
 					city_object,
@@ -2209,7 +2678,7 @@ func update_selected_entity_panel() -> void:
 				)
 			)
 
-			body_lines.append(
+			workplace_detail_lines.append(
 				"Rate: "
 				+ format_compact_production_number(
 					output_per_hour
@@ -2271,7 +2740,7 @@ func update_selected_entity_panel() -> void:
 				)
 			)
 
-			body_lines.append(
+			workplace_detail_lines.append(
 				source_resource.capitalize()
 				+ " Source: "
 				+ str(resource_tile_count)
@@ -2280,7 +2749,7 @@ func update_selected_entity_panel() -> void:
 				+ " zone tiles"
 			)
 
-			body_lines.append(
+			workplace_detail_lines.append(
 				"Density: "
 				+ format_compact_production_number(
 					density_percentage
@@ -2301,14 +2770,7 @@ func update_selected_entity_panel() -> void:
 			/ 100.0
 		)
 
-		body_lines.append(
-			"Site Productivity: "
-			+ format_compact_production_number(
-				site_productivity_percentage
-			)
-			+ "%"
-		)
-		body_lines.append(
+		workplace_detail_lines.append(
 			"Site Productivity: "
 			+ format_compact_production_number(
 				site_productivity_percentage
@@ -2316,36 +2778,86 @@ func update_selected_entity_panel() -> void:
 			+ "%"
 		)
 
-	body_lines.append("Owner: " + str(city_object.get("owner", "none")))
-	body_lines.append("Container: " + container_text)
-	body_lines.append("Position: " + str(top_left.x) + ", " + str(top_left.y))
-	body_lines.append("Size: " + str(size_tiles.x) + " x " + str(size_tiles.y))
+	var metadata_lines: Array = body_lines
 
-	var body_text := ""
+	if is_workplace:
+		metadata_lines = workplace_detail_lines
 
-	for line_index in range(body_lines.size()):
-		if line_index > 0:
-			body_text += "\n"
+	metadata_lines.append(
+		"Owner: "
+			+ str(city_object.get("owner", "none"))
+	)
+	metadata_lines.append("Container: " + container_text)
+	metadata_lines.append(
+		"Position: "
+			+ str(top_left.x)
+			+ ", "
+			+ str(top_left.y)
+	)
+	metadata_lines.append(
+		"Size: "
+			+ str(size_tiles.x)
+			+ " x "
+			+ str(size_tiles.y)
+	)
 
-		body_text += str(body_lines[line_index])
+	object_info_body_label.text = (
+		get_object_info_lines_text(body_lines)
+	)
 
-	object_info_body_label.text = body_text
+	if is_workplace:
+		update_workplace_details_ui(
+			city_object,
+			body_lines.size(),
+			workplace_detail_lines
+		)
+	else:
+		hide_workplace_details_ui()
 	
 	update_object_info_storage_display(city_object)
 
-func update_object_info_storage_display(city_object: Dictionary) -> void:
-	var storage_resources := WorldData.get_city_object_storage_resources(city_object)
+func update_object_info_storage_display(
+	city_object: Dictionary
+) -> void:
+	var allowed_resources := (
+		WorldData.get_city_object_storage_resources(
+			city_object
+		)
+	)
 
-	if storage_resources.is_empty():
+	if allowed_resources.is_empty():
 		hide_object_info_storage_display()
 		return
 
+	var stored_resources := (
+		WorldData.get_city_object_present_storage_resources(
+			city_object
+		)
+	)
+	var used_capacity := (
+		WorldData.get_city_object_storage_used_capacity(
+			city_object
+		)
+	)
+	var total_capacity := (
+		WorldData.get_city_object_storage_capacity(
+			city_object
+		)
+	)
+
 	if object_info_storage_title_label != null:
-		object_info_storage_title_label.text = get_storage_panel_title_for_object(city_object)
+		object_info_storage_title_label.text = (
+			get_storage_panel_title_for_object(city_object)
+				+ " ("
+				+ str(used_capacity)
+				+ " / "
+				+ str(total_capacity)
+				+ ")"
+		)
 		object_info_storage_title_label.visible = true
 
 	for i in range(object_info_storage_icons.size()):
-		if i >= storage_resources.size():
+		if i >= stored_resources.size():
 			object_info_storage_icons[i].visible = false
 
 			if i < object_info_storage_amount_labels.size():
@@ -2353,19 +2865,28 @@ func update_object_info_storage_display(city_object: Dictionary) -> void:
 
 			continue
 
-		var resource: String = storage_resources[i]
-		var amount := WorldData.get_city_object_stored_resource_amount(city_object, resource)
-		var capacity := WorldData.get_city_object_storage_capacity_for_resource(city_object, resource)
+		var resource: String = stored_resources[i]
+		var amount := (
+			WorldData.get_city_object_stored_resource_amount(
+				city_object,
+				resource
+			)
+		)
 
 		var icon := object_info_storage_icons[i]
 		icon.visible = true
 		icon.color = get_resource_color(resource)
 
 		if i < object_info_storage_amount_labels.size():
-			var amount_label := object_info_storage_amount_labels[i]
+			var amount_label := (
+				object_info_storage_amount_labels[i]
+			)
 			amount_label.visible = true
-			amount_label.text = resource.capitalize() + ": " + str(amount) + " / " + str(capacity)
-
+			amount_label.text = (
+				resource.capitalize()
+					+ ": "
+					+ str(amount)
+			)
 
 func hide_object_info_storage_display() -> void:
 	if object_info_storage_title_label != null:
@@ -3500,6 +4021,70 @@ func draw_city_citizens() -> void:
 			true
 		)
 
+
+func draw_city_haul_cargo_markers() -> void:
+	if city_world == null:
+		return
+
+	for raw_citizen in WorldData.city_citizens:
+		if not raw_citizen is Dictionary:
+			continue
+
+		var citizen: Dictionary = raw_citizen
+
+		if not bool(citizen.get("alive", false)):
+			continue
+
+		var citizen_id := int(citizen.get("id", -1))
+		var cargo := WorldData.get_city_citizen_haul_cargo(
+			citizen_id
+		)
+		var cargo_amount := maxi(
+			int(cargo.get("amount", 0)),
+			0
+		)
+
+		if cargo_amount <= 0:
+			continue
+
+		var resource := str(
+			cargo.get("resource_type", WorldData.RESOURCE_NONE)
+		)
+
+		if not WorldData.get_city_resource_types().has(resource):
+			continue
+
+		var citizen_rect := get_city_citizen_world_rect(
+			citizen
+		)
+
+		if (
+			citizen_rect.size.x <= 0.0
+			or citizen_rect.size.y <= 0.0
+		):
+			continue
+
+		var cargo_size := Vector2(
+			citizen_rect.size.x
+			* CITY_HAUL_CARGO_MARKER_CITIZEN_SCALE,
+			citizen_rect.size.y
+			* CITY_HAUL_CARGO_MARKER_CITIZEN_SCALE
+		)
+		var upper_right_corner := Vector2(
+			citizen_rect.end.x,
+			citizen_rect.position.y
+		)
+		var cargo_rect := Rect2(
+			upper_right_corner - cargo_size * 0.5,
+			cargo_size
+		)
+
+		draw_rect(
+			cargo_rect,
+			get_resource_color(resource),
+			true
+		)
+
 func draw_debug_navigation_path() -> void:
 	if not WorldData.debug_mode_enabled:
 		return
@@ -3571,6 +4156,7 @@ func _draw() -> void:
 	draw_city_roads()
 	draw_debug_navigation_path()
 	draw_city_citizens()
+	draw_city_haul_cargo_markers()
 	draw_debug_selected_city_tile_highlight()
 	draw_selected_city_object_highlight()
 	draw_selected_city_citizen_highlight()
@@ -5575,6 +6161,7 @@ func get_citizen_debug_line(citizen: Dictionary) -> String:
 	var happiness := int(citizen.get("happiness", 0))
 	var inventory_used := get_citizen_debug_inventory_used(citizen)
 	var carry_capacity := int(citizen.get("carry_capacity", 0))
+	var haul_text := get_citizen_debug_haul_text(citizen)
 
 	return (
 		"#" + str(citizen_id)
@@ -5588,6 +6175,64 @@ func get_citizen_debug_line(citizen: Dictionary) -> String:
 		+ " | Hunger " + str(hunger)
 		+ " | Happiness " + str(happiness)
 		+ " | Inv " + str(inventory_used) + "/" + str(carry_capacity)
+		+ " | Haul " + haul_text
+	)
+
+
+func get_citizen_debug_haul_text(
+	citizen: Dictionary
+) -> String:
+	var citizen_id := int(citizen.get("id", -1))
+
+	if not WorldData.city_citizen_is_hauling(citizen_id):
+		return "No"
+
+	var haul := WorldData.get_city_citizen_current_haul(
+		citizen_id
+	)
+	var cargo := WorldData.get_city_citizen_haul_cargo(
+		citizen_id
+	)
+	var resource := str(
+		haul.get("resource_type", WorldData.RESOURCE_NONE)
+	)
+
+	if resource == WorldData.RESOURCE_NONE:
+		resource = str(
+			cargo.get("resource_type", WorldData.RESOURCE_NONE)
+		)
+
+	var inventory_used := get_citizen_debug_inventory_used(
+		citizen
+	)
+	var haul_capacity := maxi(
+		int(citizen.get("carry_capacity", 0))
+		- inventory_used,
+		0
+	)
+	var phase := str(
+		haul.get(
+			"phase",
+			WorldData.CITY_CITIZEN_HAUL_PHASE_NONE
+		)
+	)
+
+	return (
+		resource
+		+ " "
+		+ str(maxi(int(cargo.get("amount", 0)), 0))
+		+ "/"
+		+ str(haul_capacity)
+		+ " | "
+		+ get_haul_endpoint_display_text(
+			haul.get("source", {})
+		)
+		+ " -> "
+		+ get_haul_endpoint_display_text(
+			haul.get("destination", {})
+		)
+		+ " | "
+		+ phase
 	)
 
 func get_citizen_debug_home_text(citizen: Dictionary) -> String:
@@ -5672,12 +6317,9 @@ func get_citizen_debug_inventory_used(citizen: Dictionary) -> int:
 	if not inventory is Dictionary:
 		return 0
 
-	var total_amount := 0
-
-	for resource in WorldData.get_city_resource_types():
-		total_amount += int(inventory.get(resource, 0))
-
-	return total_amount
+	return WorldData.get_resource_container_total_amount(
+		inventory
+	)
 
 func toggle_debug_mode() -> void:
 	if debug_panel_ui == null:

@@ -1384,6 +1384,252 @@ static func _validate_city_citizen_task_state(
 							+ str(target_object_id)
 							+ "."
 					)
+
+			WorldData.CITY_CITIZEN_TASK_KIND_HAUL:
+				if not CityCitizens.has_complete_city_citizen_haul_state(
+					citizen
+				):
+					errors.append(
+						"Citizen "
+							+ str(citizen_id)
+							+ " has an active haul task with incomplete haul state."
+					)
+					continue
+
+				var raw_haul = citizen.get("current_haul", {})
+				var raw_cargo = citizen.get("haul_cargo", {})
+
+				if not raw_haul is Dictionary:
+					continue
+
+				if not raw_cargo is Dictionary:
+					continue
+
+				var haul: Dictionary = raw_haul
+				var cargo: Dictionary = raw_cargo
+				var haul_resource := str(
+					haul.get(
+						"resource_type",
+						WorldData.RESOURCE_NONE
+					)
+				)
+				var haul_phase := str(
+					haul.get(
+						"phase",
+						WorldData.CITY_CITIZEN_HAUL_PHASE_NONE
+					)
+				)
+				var raw_haul_source = haul.get("source", {})
+				var raw_haul_destination = haul.get(
+					"destination",
+					{}
+				)
+				var raw_haul_requester = haul.get("requester", {})
+
+				if not WorldData.get_city_resource_types().has(
+					haul_resource
+				):
+					errors.append(
+						"Citizen "
+							+ str(citizen_id)
+							+ " haul task has invalid resource '"
+							+ haul_resource
+							+ "'."
+					)
+
+				if (
+					not CityCitizens.is_valid_city_citizen_haul_phase(
+						haul_phase
+					)
+					or haul_phase
+					== WorldData.CITY_CITIZEN_HAUL_PHASE_NONE
+				):
+					errors.append(
+						"Citizen "
+							+ str(citizen_id)
+							+ " haul task has invalid phase '"
+							+ haul_phase
+							+ "'."
+					)
+
+				if int(haul.get("requested_amount", 0)) <= 0:
+					errors.append(
+						"Citizen "
+							+ str(citizen_id)
+							+ " haul task has no requested amount."
+					)
+
+				if str(
+					haul.get(
+						"reason",
+						WorldData.CITY_CITIZEN_HAUL_REASON_NONE
+					)
+				) == WorldData.CITY_CITIZEN_HAUL_REASON_NONE:
+					errors.append(
+						"Citizen "
+							+ str(citizen_id)
+							+ " haul task has no reason."
+					)
+
+				if not raw_haul_source is Dictionary:
+					errors.append(
+						"Citizen "
+							+ str(citizen_id)
+							+ " haul task has invalid source data."
+					)
+				else:
+					var haul_source: Dictionary = raw_haul_source
+
+					if not CityCitizens.is_valid_city_citizen_haul_endpoint(
+						haul_source
+					):
+						errors.append(
+							"Citizen "
+								+ str(citizen_id)
+								+ " haul task has invalid source endpoint."
+						)
+					elif int(haul_source.get("id", -1)) != target_object_id:
+						errors.append(
+							"Citizen "
+								+ str(citizen_id)
+								+ " haul source does not match task target."
+						)
+
+				if not raw_haul_requester is Dictionary:
+					errors.append(
+						"Citizen "
+							+ str(citizen_id)
+							+ " haul task has invalid requester data."
+					)
+				elif not CityCitizens.is_valid_city_citizen_haul_endpoint(
+					raw_haul_requester
+				):
+					errors.append(
+						"Citizen "
+							+ str(citizen_id)
+							+ " haul task has invalid requester endpoint."
+					)
+
+				var cargo_amount := maxi(
+					int(cargo.get("amount", 0)),
+					0
+				)
+
+				if (
+					cargo_amount > 0
+					and str(
+						cargo.get(
+							"resource_type",
+							WorldData.RESOURCE_NONE
+						)
+					) != haul_resource
+				):
+					errors.append(
+						"Citizen "
+							+ str(citizen_id)
+							+ " haul task and cargo resources disagree."
+					)
+
+				if not raw_haul_destination is Dictionary:
+					errors.append(
+						"Citizen "
+							+ str(citizen_id)
+							+ " haul task has invalid destination data."
+					)
+				else:
+					var haul_destination: Dictionary = (
+						raw_haul_destination
+					)
+
+					if not CityCitizens.is_valid_city_citizen_haul_endpoint(
+						haul_destination,
+						cargo_amount > 0
+					):
+						errors.append(
+							"Citizen "
+								+ str(citizen_id)
+								+ " haul task has invalid destination endpoint."
+						)
+
+			WorldData.CITY_CITIZEN_TASK_KIND_RETURN_HOME:
+				if target_object_id <= 0:
+					errors.append(
+						"Citizen "
+						+ str(citizen_id)
+						+ " return-home task has invalid target object ID "
+						+ str(target_object_id)
+						+ "."
+					)
+					continue
+
+				if not object_lookup.has(target_object_id):
+					errors.append(
+						"Citizen "
+						+ str(citizen_id)
+						+ " return-home task targets missing object "
+						+ str(target_object_id)
+						+ "."
+					)
+					continue
+
+				var target_home := WorldData.get_city_object_by_id(
+					target_object_id
+				)
+
+				if (
+					WorldData.get_city_object_resident_capacity(
+						target_home
+					) <= 0
+					or not WorldData.city_object_supports_citizen_interior(
+						target_home
+					)
+				):
+					errors.append(
+						"Citizen "
+						+ str(citizen_id)
+						+ " return-home task targets non-residential "
+						+ "or non-interior object "
+						+ str(target_object_id)
+						+ "."
+					)
+
+				if (
+					int(citizen.get("home_object_id", -1))
+					!= target_object_id
+				):
+					errors.append(
+						"Citizen "
+						+ str(citizen_id)
+						+ " return-home task targets object "
+						+ str(target_object_id)
+						+ ", but its assigned home is "
+						+ str(citizen.get("home_object_id", -1))
+						+ "."
+					)
+
+				if not WorldData.get_city_object_resident_ids(
+					target_home
+				).has(citizen_id):
+					errors.append(
+						"Citizen "
+						+ str(citizen_id)
+						+ " return-home task lacks resident membership in "
+						+ str(target_object_id)
+						+ "."
+					)
+
+				if not WorldData.city_citizen_can_access_object_interior(
+					citizen_id,
+					target_home
+				):
+					errors.append(
+						"Citizen "
+						+ str(citizen_id)
+						+ " return-home task lacks interior access to "
+						+ str(target_object_id)
+						+ "."
+					)
+
 	expected_active_task_ids.sort()
 
 	if WorldData.city_active_task_ids != expected_active_task_ids:
@@ -2128,10 +2374,30 @@ static func _validate_city_containers(
 						+ "."
 				)
 
-			var raw_amount = stored_resources.get(
-				resource,
-				0
-			)
+		for raw_resource in stored_resources.keys():
+			if typeof(raw_resource) != TYPE_STRING:
+				errors.append(
+					"Container object "
+						+ str(object_id)
+						+ " has a non-String storage resource key."
+				)
+
+				continue
+
+			var resource: String = raw_resource
+
+			if not allowed_resources.has(resource):
+				errors.append(
+					"Container object "
+						+ str(object_id)
+						+ " stores unsupported resource '"
+						+ resource
+						+ "'."
+				)
+
+				continue
+
+			var raw_amount = stored_resources[raw_resource]
 
 			if typeof(raw_amount) != TYPE_INT:
 				errors.append(
@@ -2146,16 +2412,24 @@ static func _validate_city_containers(
 
 			var amount: int = raw_amount
 
-			if amount < 0:
+			if amount <= 0:
 				errors.append(
 					"Container object "
 						+ str(object_id)
-						+ " has negative "
+						+ " has non-positive "
 						+ resource
 						+ " amount "
 						+ str(amount)
-						+ "."
+						+ "; empty resources must be omitted."
 				)
+
+			var capacity := (
+				WorldData
+				.get_city_object_storage_capacity_for_resource(
+					city_object,
+					resource
+				)
+			)
 
 			if capacity >= 0 and amount > capacity:
 				errors.append(
@@ -2169,19 +2443,27 @@ static func _validate_city_containers(
 						+ str(capacity)
 						+ "."
 				)
+		var total_stored_amount := (
+			WorldData.get_city_object_storage_used_capacity(
+				city_object
+			)
+		)
+		var total_capacity := (
+			WorldData.get_city_object_storage_capacity(
+				city_object
+			)
+		)
 
-		for raw_resource in stored_resources.keys():
-			var resource := str(raw_resource)
-
-			if not allowed_resources.has(resource):
-				errors.append(
-					"Container object "
-						+ str(object_id)
-						+ " stores unsupported resource '"
-						+ resource
-						+ "'."
-				)
-
+		if total_stored_amount > total_capacity:
+			errors.append(
+				"Container object "
+					+ str(object_id)
+					+ " stores "
+					+ str(total_stored_amount)
+					+ " total units but capacity is "
+					+ str(total_capacity)
+					+ "."
+			)
 	return checked_container_count
 
 
@@ -2742,7 +3024,16 @@ static func _validate_citizen_inventories(
 		var total_inventory_amount := 0
 
 		for raw_resource in inventory.keys():
-			var resource := str(raw_resource)
+			if typeof(raw_resource) != TYPE_STRING:
+				errors.append(
+					"Citizen "
+						+ str(citizen_id)
+						+ " has a non-String inventory resource key."
+				)
+
+				continue
+
+			var resource: String = raw_resource
 			var raw_amount = inventory[raw_resource]
 
 			if typeof(raw_amount) != TYPE_INT:
@@ -2758,13 +3049,13 @@ static func _validate_citizen_inventories(
 
 			var amount: int = raw_amount
 
-			if amount < 0:
+			if amount <= 0:
 				errors.append(
 					"Citizen "
 						+ str(citizen_id)
-						+ " has negative inventory amount for "
+						+ " has non-positive inventory amount for "
 						+ resource
-						+ "."
+						+ "; empty resources must be omitted."
 				)
 
 			total_inventory_amount += maxi(amount, 0)
@@ -2778,12 +3069,97 @@ static func _validate_citizen_inventories(
 						+ "'."
 				)
 
-		if total_inventory_amount > carry_capacity:
+		var haul_cargo_amount := 0
+
+		if not CityCitizens.has_complete_city_citizen_haul_state(
+			citizen
+		):
+			errors.append(
+				"Citizen "
+					+ str(citizen_id)
+					+ " has incomplete haul state."
+			)
+		else:
+			var raw_haul_cargo = citizen.get("haul_cargo", {})
+
+			if not raw_haul_cargo is Dictionary:
+				errors.append(
+					"Citizen "
+						+ str(citizen_id)
+						+ " has non-Dictionary haul cargo."
+				)
+			else:
+				var haul_cargo: Dictionary = raw_haul_cargo
+				var raw_cargo_resource = haul_cargo.get(
+					"resource_type"
+				)
+				var raw_cargo_amount = haul_cargo.get("amount")
+
+				if typeof(raw_cargo_resource) != TYPE_STRING:
+					errors.append(
+						"Citizen "
+							+ str(citizen_id)
+							+ " has non-string haul cargo resource."
+					)
+
+				if typeof(raw_cargo_amount) != TYPE_INT:
+					errors.append(
+						"Citizen "
+							+ str(citizen_id)
+							+ " has non-integer haul cargo amount."
+					)
+				else:
+					haul_cargo_amount = maxi(
+						int(raw_cargo_amount),
+						0
+					)
+
+					if int(raw_cargo_amount) < 0:
+						errors.append(
+							"Citizen "
+								+ str(citizen_id)
+								+ " has negative haul cargo."
+						)
+
+				if (
+					typeof(raw_cargo_resource) == TYPE_STRING
+				):
+					var cargo_resource: String = raw_cargo_resource
+
+					if (
+						haul_cargo_amount <= 0
+						and cargo_resource != WorldData.RESOURCE_NONE
+					):
+						errors.append(
+							"Citizen "
+								+ str(citizen_id)
+								+ " has empty haul cargo with resource '"
+								+ cargo_resource
+								+ "'."
+						)
+
+					if (
+						haul_cargo_amount > 0
+						and not valid_resources.has(cargo_resource)
+					):
+						errors.append(
+							"Citizen "
+								+ str(citizen_id)
+								+ " hauls invalid resource '"
+								+ cargo_resource
+								+ "'."
+						)
+
+		var total_carried_amount := (
+			total_inventory_amount + haul_cargo_amount
+		)
+
+		if total_carried_amount > carry_capacity:
 			errors.append(
 				"Citizen "
 					+ str(citizen_id)
 					+ " carries "
-					+ str(total_inventory_amount)
+					+ str(total_carried_amount)
 					+ " items but capacity is "
 					+ str(carry_capacity)
 					+ "."

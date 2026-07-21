@@ -17,6 +17,8 @@ const INVALID_CITY_TILE_POSITION := Vector2i(-1, -1)
 # which records only how the citizen travels between tiles.
 const CITY_CITIZEN_TASK_KIND_NONE := "none"
 const CITY_CITIZEN_TASK_KIND_WORK := "work"
+const CITY_CITIZEN_TASK_KIND_HAUL := "haul"
+const CITY_CITIZEN_TASK_KIND_RETURN_HOME := "return_home"
 
 const CITY_CITIZEN_TASK_SOURCE_NONE := "none"
 const CITY_CITIZEN_TASK_SOURCE_PLAYER := "player"
@@ -31,6 +33,36 @@ const CITY_CITIZEN_TASK_PHASE_BLOCKED := "blocked"
 const CITY_CITIZEN_TASK_PRIORITY_NONE := 0
 const INVALID_CITY_CITIZEN_TASK_START_WORLD_MINUTE := -1
 const INVALID_CITY_CITIZEN_TASK_ACTION_WORLD_MINUTE := -1
+
+# Haul execution state is separate from personal inventory and from the
+# high-level current_task record. Endpoints and requesters are references so
+# future container kinds can be added without changing the haul schema.
+const CITY_CITIZEN_HAUL_ENDPOINT_KIND_NONE := "none"
+const CITY_CITIZEN_HAUL_ENDPOINT_KIND_CITY_OBJECT_CONTAINER := (
+	"city_object_container"
+)
+const CITY_CITIZEN_HAUL_REASON_NONE := "none"
+const CITY_CITIZEN_HAUL_REASON_WORKPLACE_OUTPUT_BEFORE_HOME := (
+	"workplace_output_before_home"
+)
+const CITY_CITIZEN_HAUL_REASON_OUTSTANDING_CARGO := (
+	"outstanding_cargo"
+)
+const CITY_CITIZEN_HAUL_PHASE_NONE := "none"
+const CITY_CITIZEN_HAUL_PHASE_PENDING_SOURCE := "pending_source"
+const CITY_CITIZEN_HAUL_PHASE_TRAVELING_TO_SOURCE := (
+	"traveling_to_source"
+)
+const CITY_CITIZEN_HAUL_PHASE_PICKING_UP := "picking_up"
+const CITY_CITIZEN_HAUL_PHASE_PENDING_DESTINATION := (
+	"pending_destination"
+)
+const CITY_CITIZEN_HAUL_PHASE_TRAVELING_TO_DESTINATION := (
+	"traveling_to_destination"
+)
+const CITY_CITIZEN_HAUL_PHASE_DEPOSITING := "depositing"
+const CITY_CITIZEN_HAUL_PHASE_RETARGETING := "retargeting"
+const CITY_CITIZEN_HAUL_PHASE_BLOCKED := "blocked"
 # High-level citizen state and movement state intentionally remain separate.
 # A citizen may later be working, hauling, or eating while its movement state
 # independently describes whether it is walking between authoritative tiles.
@@ -141,7 +173,9 @@ static var city_citizen_unassigned_name_pool: Array[String] = []
 static func get_city_citizen_task_kind_types() -> Array[String]:
 	return [
 		CITY_CITIZEN_TASK_KIND_NONE,
-		CITY_CITIZEN_TASK_KIND_WORK
+		CITY_CITIZEN_TASK_KIND_WORK,
+		CITY_CITIZEN_TASK_KIND_HAUL,
+		CITY_CITIZEN_TASK_KIND_RETURN_HOME
 	]
 
 
@@ -274,6 +308,209 @@ static func reset_city_citizen_task_state(
 	citizen: Dictionary
 ) -> void:
 	citizen["current_task"] = make_city_citizen_task()
+
+
+static func get_city_citizen_haul_phase_types() -> Array[String]:
+	return [
+		CITY_CITIZEN_HAUL_PHASE_NONE,
+		CITY_CITIZEN_HAUL_PHASE_PENDING_SOURCE,
+		CITY_CITIZEN_HAUL_PHASE_TRAVELING_TO_SOURCE,
+		CITY_CITIZEN_HAUL_PHASE_PICKING_UP,
+		CITY_CITIZEN_HAUL_PHASE_PENDING_DESTINATION,
+		CITY_CITIZEN_HAUL_PHASE_TRAVELING_TO_DESTINATION,
+		CITY_CITIZEN_HAUL_PHASE_DEPOSITING,
+		CITY_CITIZEN_HAUL_PHASE_RETARGETING,
+		CITY_CITIZEN_HAUL_PHASE_BLOCKED,
+	]
+
+
+static func is_valid_city_citizen_haul_phase(
+	haul_phase: String
+) -> bool:
+	return get_city_citizen_haul_phase_types().has(
+		haul_phase
+	)
+
+
+static func make_city_citizen_haul_endpoint(
+	values: Dictionary = {}
+) -> Dictionary:
+	return {
+		"kind": str(
+			values.get(
+				"kind",
+				CITY_CITIZEN_HAUL_ENDPOINT_KIND_NONE
+			)
+		),
+		"id": int(values.get("id", -1)),
+	}
+
+
+static func is_valid_city_citizen_haul_endpoint(
+	endpoint: Dictionary,
+	allow_none: bool = false
+) -> bool:
+	var endpoint_kind := str(
+		endpoint.get(
+			"kind",
+			CITY_CITIZEN_HAUL_ENDPOINT_KIND_NONE
+		)
+	)
+	var endpoint_id := int(endpoint.get("id", -1))
+
+	if endpoint_kind == CITY_CITIZEN_HAUL_ENDPOINT_KIND_NONE:
+		return allow_none and endpoint_id == -1
+
+	return (
+		endpoint_kind
+		== CITY_CITIZEN_HAUL_ENDPOINT_KIND_CITY_OBJECT_CONTAINER
+		and endpoint_id > 0
+	)
+
+
+static func make_city_citizen_haul_cargo(
+	values: Dictionary = {}
+) -> Dictionary:
+	var amount := maxi(
+		int(values.get("amount", 0)),
+		0
+	)
+	var resource_type := str(
+		values.get("resource_type", "none")
+	)
+
+	if amount <= 0:
+		resource_type = "none"
+
+	return {
+		"resource_type": resource_type,
+		"amount": amount,
+	}
+
+
+static func make_city_citizen_haul(
+	values: Dictionary = {}
+) -> Dictionary:
+	var raw_source = values.get("source", {})
+	var raw_destination = values.get("destination", {})
+	var raw_requester = values.get("requester", {})
+	var source_values: Dictionary = {}
+	var destination_values: Dictionary = {}
+	var requester_values: Dictionary = {}
+
+	if raw_source is Dictionary:
+		source_values = raw_source
+
+	if raw_destination is Dictionary:
+		destination_values = raw_destination
+
+	if raw_requester is Dictionary:
+		requester_values = raw_requester
+
+	return {
+		"source": make_city_citizen_haul_endpoint(
+			source_values
+		),
+		"destination": make_city_citizen_haul_endpoint(
+			destination_values
+		),
+		"resource_type": str(
+			values.get("resource_type", "none")
+		),
+		"requested_amount": maxi(
+			int(values.get("requested_amount", 0)),
+			0
+		),
+		"reason": str(
+			values.get(
+				"reason",
+				CITY_CITIZEN_HAUL_REASON_NONE
+			)
+		),
+		"requester": make_city_citizen_haul_endpoint(
+			requester_values
+		),
+		"source_access_purpose": str(
+			values.get("source_access_purpose", "none")
+		),
+		"destination_access_purpose": str(
+			values.get("destination_access_purpose", "none")
+		),
+		"phase": str(
+			values.get(
+				"phase",
+				CITY_CITIZEN_HAUL_PHASE_NONE
+			)
+		),
+		"source_tile": values.get(
+			"source_tile",
+			INVALID_CITY_TILE_POSITION
+		),
+		"destination_tile": values.get(
+			"destination_tile",
+			INVALID_CITY_TILE_POSITION
+		),
+	}
+
+
+static func has_complete_city_citizen_haul_state(
+	citizen: Dictionary
+) -> bool:
+	if not citizen.has("current_haul"):
+		return false
+
+	if not citizen.has("haul_cargo"):
+		return false
+
+	var raw_current_haul = citizen.get("current_haul")
+	var raw_haul_cargo = citizen.get("haul_cargo")
+
+	if not raw_current_haul is Dictionary:
+		return false
+
+	if not raw_haul_cargo is Dictionary:
+		return false
+
+	var current_haul: Dictionary = raw_current_haul
+	var haul_cargo: Dictionary = raw_haul_cargo
+	var required_haul_keys := [
+		"source",
+		"destination",
+		"resource_type",
+		"requested_amount",
+		"reason",
+		"requester",
+		"source_access_purpose",
+		"destination_access_purpose",
+		"phase",
+		"source_tile",
+		"destination_tile",
+	]
+
+	for key in required_haul_keys:
+		if not current_haul.has(key):
+			return false
+
+	return (
+		haul_cargo.has("resource_type")
+		and haul_cargo.has("amount")
+	)
+
+
+static func reset_city_citizen_haul_state(
+	citizen: Dictionary,
+	preserve_cargo: bool = false
+) -> void:
+	var cargo := make_city_citizen_haul_cargo()
+
+	if preserve_cargo:
+		var raw_cargo = citizen.get("haul_cargo", {})
+
+		if raw_cargo is Dictionary:
+			cargo = make_city_citizen_haul_cargo(raw_cargo)
+
+	citizen["current_haul"] = make_city_citizen_haul()
+	citizen["haul_cargo"] = cargo
 
 static func get_city_citizen_movement_state_types() -> Array[String]:
 	return [
@@ -560,6 +797,30 @@ static func make_random_city_citizen_first_name(
 	return str(candidate_pool[random_index]).strip_edges()
 
 
+static func make_sparse_city_citizen_inventory(
+	raw_inventory
+) -> Dictionary:
+	var inventory: Dictionary = {}
+
+	if not raw_inventory is Dictionary:
+		return inventory
+
+	for raw_resource in raw_inventory.keys():
+		var raw_amount = raw_inventory[raw_resource]
+
+		if typeof(raw_amount) != TYPE_INT:
+			continue
+
+		var amount: int = raw_amount
+
+		if amount <= 0:
+			continue
+
+		inventory[str(raw_resource)] = amount
+
+	return inventory
+
+
 static func make_city_citizen(
 	values: Dictionary
 ) -> Dictionary:
@@ -637,11 +898,9 @@ static func make_city_citizen(
 	if raw_city_tile_position is Vector2i:
 		city_tile_position = raw_city_tile_position
 
-	var inventory: Dictionary = {}
-	var raw_inventory = values.get("inventory", {})
-
-	if raw_inventory is Dictionary:
-		inventory = raw_inventory.duplicate(true)
+	var inventory := make_sparse_city_citizen_inventory(
+		values.get("inventory", {})
+	)
 
 	var citizen := {
 		"id": citizen_id,
@@ -659,5 +918,6 @@ static func make_city_citizen(
 	}
 
 	reset_city_citizen_task_state(citizen)
+	reset_city_citizen_haul_state(citizen)
 	reset_city_citizen_movement_state(citizen)
 	return citizen

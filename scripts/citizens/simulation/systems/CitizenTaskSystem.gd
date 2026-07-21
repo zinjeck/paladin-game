@@ -7,9 +7,14 @@ const CityNavigationSystemScript = preload(
 const CityActivityLocationResolverScript = preload(
 	"res://scripts/city/simulation/systems/CityActivityLocationResolver.gd"
 )
-const MAX_WORK_PATH_REQUESTS_PER_TICK: int = 1
+const CitizenHaulingSystemScript = preload(
+	"res://scripts/citizens/simulation/systems/CitizenHaulingSystem.gd"
+)
+const MAX_TASK_PATH_REQUESTS_PER_TICK: int = 1
 const MAX_WORK_PATH_EXPANDED_NODES: int = 10_000
 const BLOCKED_WORK_TASK_RETRY_DELAY_MINUTES: int = 30
+const MAX_RETURN_HOME_PATH_EXPANDED_NODES: int = 10_000
+const BLOCKED_RETURN_HOME_TASK_RETRY_DELAY_MINUTES: int = 30
 const WORK_ACTIVITY_DWELL_REQUIRED_KEYS := [
 	"citizen_id",
 	"workplace_id",
@@ -53,7 +58,7 @@ static func run_tick(
 	)
 
 	var path_requests_remaining := (
-		MAX_WORK_PATH_REQUESTS_PER_TICK
+		MAX_TASK_PATH_REQUESTS_PER_TICK
 	)
 
 	for citizen_id in active_task_ids:
@@ -84,6 +89,28 @@ static func run_tick(
 						current_task,
 						path_requests_remaining,
 						tick_index
+					)
+				)
+
+			WorldData.CITY_CITIZEN_TASK_KIND_HAUL:
+				path_requests_remaining = (
+					CitizenHaulingSystemScript.advance_haul_task(
+						city_world,
+						citizen_id,
+						citizen,
+						current_task,
+						path_requests_remaining
+					)
+				)
+
+			WorldData.CITY_CITIZEN_TASK_KIND_RETURN_HOME:
+				path_requests_remaining = (
+					_advance_return_home_task(
+						city_world,
+						citizen_id,
+						citizen,
+						current_task,
+						path_requests_remaining
 					)
 				)
 
@@ -595,6 +622,274 @@ static func _advance_work_task(
 			_set_work_task_blocked(citizen_id)
 
 	return path_requests_remaining
+
+
+static func _advance_return_home_task(
+	city_world: WorldData,
+	citizen_id: int,
+	citizen: Dictionary,
+	current_task: Dictionary,
+	path_requests_remaining: int
+) -> int:
+	var home_id := int(
+		current_task.get("target_object_id", -1)
+	)
+	var home := WorldData.get_city_object_by_id(home_id)
+	var resident_ids := (
+		WorldData.get_city_object_resident_ids(home)
+	)
+
+	if (
+		home_id <= 0
+		or home.is_empty()
+		or WorldData.get_city_object_resident_capacity(home) <= 0
+		or not WorldData.city_object_supports_citizen_interior(home)
+		or int(citizen.get("home_object_id", -1)) != home_id
+		or not resident_ids.has(citizen_id)
+		or not WorldData.city_citizen_can_access_object_interior(
+			citizen_id,
+			home
+		)
+	):
+		_clear_invalid_task(citizen_id)
+		return path_requests_remaining
+
+	var home_tiles := (
+		CityActivityLocationResolverScript
+		.get_object_interior_activity_tiles(
+			city_world,
+			home,
+			citizen_id
+		)
+	)
+	var raw_current_tile = citizen.get(
+		"city_tile_position",
+		WorldData.INVALID_CITY_TILE_POSITION
+	)
+
+	if not raw_current_tile is Vector2i or home_tiles.is_empty():
+		_set_return_home_task_blocked(citizen_id)
+		return path_requests_remaining
+
+	resident_ids.sort()
+	var resident_index := resident_ids.find(citizen_id)
+
+	if resident_index < 0:
+		_clear_invalid_task(citizen_id)
+		return path_requests_remaining
+
+	var assigned_home_tile: Vector2i = home_tiles[
+		resident_index % home_tiles.size()
+	]
+	var current_tile: Vector2i = raw_current_tile
+	var task_phase := str(
+		current_task.get(
+			"phase",
+			WorldData.CITY_CITIZEN_TASK_PHASE_NONE
+		)
+	)
+	var movement_state := str(
+		citizen.get(
+			"movement_state",
+			WorldData.CITY_CITIZEN_MOVEMENT_STATE_IDLE
+		)
+	)
+
+	if task_phase == WorldData.CITY_CITIZEN_TASK_PHASE_BLOCKED:
+		var retry_world_minute := int(
+			current_task.get(
+				"next_action_world_minute",
+				WorldData.INVALID_CITY_CITIZEN_TASK_ACTION_WORLD_MINUTE
+			)
+		)
+
+		if (
+			retry_world_minute
+			== WorldData.INVALID_CITY_CITIZEN_TASK_ACTION_WORLD_MINUTE
+		):
+			_set_return_home_task_blocked(citizen_id)
+			return path_requests_remaining
+
+		if SimulationClock.absolute_world_minutes < retry_world_minute:
+			return path_requests_remaining
+
+		WorldData.cancel_city_citizen_movement(citizen_id)
+
+		if not WorldData.set_city_citizen_task_activity_state({
+			"citizen_id": citizen_id,
+			"target_tile": WorldData.INVALID_CITY_TILE_POSITION,
+			"previous_target_tile": (
+				WorldData.INVALID_CITY_TILE_POSITION
+			),
+			"next_action_world_minute": (
+				WorldData.INVALID_CITY_CITIZEN_TASK_ACTION_WORLD_MINUTE
+			),
+			"relocation_count": 0,
+		}):
+			_set_return_home_task_blocked(citizen_id)
+			return path_requests_remaining
+
+		if not WorldData.set_city_citizen_task_phase(
+			citizen_id,
+			WorldData.CITY_CITIZEN_TASK_PHASE_PENDING
+		):
+			_set_return_home_task_blocked(citizen_id)
+			return path_requests_remaining
+
+		task_phase = WorldData.CITY_CITIZEN_TASK_PHASE_PENDING
+		movement_state = WorldData.CITY_CITIZEN_MOVEMENT_STATE_IDLE
+	elif (
+		task_phase != WorldData.CITY_CITIZEN_TASK_PHASE_PENDING
+		and task_phase != WorldData.CITY_CITIZEN_TASK_PHASE_TRAVELING
+		and task_phase != WorldData.CITY_CITIZEN_TASK_PHASE_PERFORMING
+	):
+		_set_return_home_task_blocked(citizen_id)
+		return path_requests_remaining
+
+	if (
+		movement_state == WorldData.CITY_CITIZEN_MOVEMENT_STATE_MOVING
+		and task_phase != WorldData.CITY_CITIZEN_TASK_PHASE_TRAVELING
+	):
+		WorldData.cancel_city_citizen_movement(citizen_id)
+		movement_state = WorldData.CITY_CITIZEN_MOVEMENT_STATE_IDLE
+
+	if (
+		current_tile == assigned_home_tile
+		and movement_state != WorldData.CITY_CITIZEN_MOVEMENT_STATE_MOVING
+	):
+		if not _complete_return_home_task(citizen_id):
+			_set_return_home_task_blocked(citizen_id)
+
+		return path_requests_remaining
+
+	if (
+		task_phase == WorldData.CITY_CITIZEN_TASK_PHASE_TRAVELING
+		and movement_state == WorldData.CITY_CITIZEN_MOVEMENT_STATE_MOVING
+	):
+		return path_requests_remaining
+
+	if movement_state == WorldData.CITY_CITIZEN_MOVEMENT_STATE_BLOCKED:
+		_set_return_home_task_blocked(citizen_id)
+		return path_requests_remaining
+
+	if path_requests_remaining <= 0:
+		return path_requests_remaining
+
+	path_requests_remaining -= 1
+
+	var path_result := (
+		CityNavigationSystemScript.find_path_to_any_city_tile(
+			city_world,
+			current_tile,
+			[assigned_home_tile],
+			MAX_RETURN_HOME_PATH_EXPANDED_NODES,
+			citizen_id
+		)
+	)
+
+	if not bool(path_result.get("success", false)):
+		_set_return_home_task_blocked(citizen_id)
+		return path_requests_remaining
+
+	var raw_path = path_result.get("path", [])
+	var raw_destination_tile = path_result.get(
+		"destination_tile",
+		WorldData.INVALID_CITY_TILE_POSITION
+	)
+
+	if (
+		not raw_path is Array
+		or not raw_destination_tile is Vector2i
+		or raw_destination_tile != assigned_home_tile
+	):
+		_set_return_home_task_blocked(citizen_id)
+		return path_requests_remaining
+
+	var movement_path: Array = raw_path
+
+	if not WorldData.set_city_citizen_task_activity_state({
+		"citizen_id": citizen_id,
+		"target_tile": assigned_home_tile,
+	}):
+		_set_return_home_task_blocked(citizen_id)
+		return path_requests_remaining
+
+	if movement_path.size() <= 1:
+		if not _complete_return_home_task(citizen_id):
+			_set_return_home_task_blocked(citizen_id)
+
+		return path_requests_remaining
+
+	if not WorldData.assign_city_citizen_movement_order(
+		citizen_id,
+		movement_path
+	):
+		_set_return_home_task_blocked(citizen_id)
+		return path_requests_remaining
+
+	WorldData.set_city_citizen_task_phase(
+		citizen_id,
+		WorldData.CITY_CITIZEN_TASK_PHASE_TRAVELING
+	)
+
+	return path_requests_remaining
+
+
+static func _complete_return_home_task(
+	citizen_id: int
+) -> bool:
+	var current_task := (
+		WorldData.get_city_citizen_current_task(citizen_id)
+	)
+	var task_source := str(
+		current_task.get(
+			"source",
+			WorldData.CITY_CITIZEN_TASK_SOURCE_NONE
+		)
+	)
+
+	if task_source == WorldData.CITY_CITIZEN_TASK_SOURCE_NONE:
+		return false
+
+	WorldData.cancel_city_citizen_movement(citizen_id)
+
+	return WorldData.clear_city_citizen_task(
+		citizen_id,
+		task_source
+	)
+
+
+static func _set_return_home_task_blocked(
+	citizen_id: int
+) -> void:
+	var current_task := (
+		WorldData.get_city_citizen_current_task(citizen_id)
+	)
+	var target_tile = current_task.get(
+		"target_tile",
+		WorldData.INVALID_CITY_TILE_POSITION
+	)
+
+	if not target_tile is Vector2i:
+		target_tile = WorldData.INVALID_CITY_TILE_POSITION
+
+	WorldData.cancel_city_citizen_movement(citizen_id)
+	WorldData.set_city_citizen_task_activity_state({
+		"citizen_id": citizen_id,
+		"target_tile": target_tile,
+		"previous_target_tile": (
+			WorldData.INVALID_CITY_TILE_POSITION
+		),
+		"next_action_world_minute": (
+			SimulationClock.absolute_world_minutes
+			+ BLOCKED_RETURN_HOME_TASK_RETRY_DELAY_MINUTES
+		),
+		"relocation_count": 0,
+	})
+	WorldData.set_city_citizen_task_phase(
+		citizen_id,
+		WorldData.CITY_CITIZEN_TASK_PHASE_BLOCKED
+	)
 
 
 static func _build_work_activity_claim_counts(
