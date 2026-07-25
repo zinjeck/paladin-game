@@ -109,6 +109,11 @@ static var city_citizen_index_by_id: Dictionary = {}
 static var city_citizen_ids_by_tile: Dictionary = {}
 static var city_active_mover_ids: Array[int] = []
 static var city_active_mover_id_lookup: Dictionary = {}
+# Transient, non-saved movement deltas consumed by the city presentation after
+# each simulation tick. This preserves exact traversed corners across batched
+# ticks and repaths without making cosmetic interpolation authoritative.
+static var city_citizen_movement_visual_events: Array = []
+static var city_citizen_movement_visual_tick_index: int = -1
 static var city_active_task_ids: Array[int] = []
 static var city_active_task_id_lookup: Dictionary = {}
 static var next_city_citizen_id: int = 1
@@ -314,6 +319,12 @@ const CITY_CITIZEN_MOVEMENT_FAILURE_NEXT_TILE_BLOCKED := (
 )
 const CITY_CITIZEN_MOVEMENT_FAILURE_REPATH_FAILED := (
 	CityCitizensScript.CITY_CITIZEN_MOVEMENT_FAILURE_REPATH_FAILED
+)
+const CITY_CITIZEN_CARDINAL_MOVEMENT_COST := (
+	CityCitizensScript.CITY_CITIZEN_CARDINAL_MOVEMENT_COST
+)
+const CITY_CITIZEN_DIAGONAL_MOVEMENT_COST := (
+	CityCitizensScript.CITY_CITIZEN_DIAGONAL_MOVEMENT_COST
 )
 const CITY_CITIZEN_MOVEMENT_PROGRESS_PER_TILE := (
 	CityCitizensScript.CITY_CITIZEN_MOVEMENT_PROGRESS_PER_TILE
@@ -1902,6 +1913,33 @@ static func rebuild_city_active_mover_registry() -> void:
 static func get_city_active_mover_ids_snapshot() -> Array[int]:
 	return city_active_mover_ids.duplicate()
 
+
+static func begin_city_citizen_movement_visual_tick(
+	tick_index: int
+) -> void:
+	city_citizen_movement_visual_events.clear()
+	city_citizen_movement_visual_tick_index = tick_index
+
+
+static func clear_city_citizen_movement_visual_events() -> void:
+	city_citizen_movement_visual_events.clear()
+	city_citizen_movement_visual_tick_index = -1
+
+
+static func take_city_citizen_movement_visual_events(
+	expected_tick_index: int
+) -> Array:
+	if city_citizen_movement_visual_tick_index != expected_tick_index:
+		clear_city_citizen_movement_visual_events()
+		return []
+
+	# Transfer ownership instead of deep-copying every route and corner.
+	var events := city_citizen_movement_visual_events
+	city_citizen_movement_visual_events = []
+	city_citizen_movement_visual_tick_index = -1
+	return events
+
+
 static func _add_city_active_task_id(
 	citizen_id: int
 ) -> void:
@@ -2289,6 +2327,8 @@ static func reset_city_citizen_state() -> void:
 	city_citizen_ids_by_tile.clear()
 	city_active_mover_ids.clear()
 	city_active_mover_id_lookup.clear()
+	city_citizen_movement_visual_events.clear()
+	city_citizen_movement_visual_tick_index = -1
 	city_active_task_ids.clear()
 	city_active_task_id_lookup.clear()
 	next_city_citizen_id = 1
@@ -5527,12 +5567,10 @@ static func _get_clean_city_citizen_movement_path(
 			return []
 
 		if previous_tile != INVALID_CITY_TILE_POSITION:
-			var cardinal_distance := (
-				absi(path_tile.x - previous_tile.x)
-				+ absi(path_tile.y - previous_tile.y)
-			)
-
-			if cardinal_distance != 1:
+			if get_city_citizen_movement_step_cost(
+				previous_tile,
+				path_tile
+			) <= 0:
 				return []
 
 			if not can_city_citizen_traverse_step(
@@ -5696,6 +5734,10 @@ static func commit_city_citizen_movement_tick(
 			"final_tile",
 			INVALID_CITY_TILE_POSITION
 		)
+		var raw_traversed_tiles = update.get(
+			"traversed_tiles",
+			[]
+		)
 
 		if citizen_id <= 0:
 			return result
@@ -5748,7 +5790,8 @@ static func commit_city_citizen_movement_tick(
 			"citizen_id": citizen_id,
 			"citizen_index": citizen_index,
 			"citizen": updated_citizen,
-			"final_tile": raw_final_tile
+			"final_tile": raw_final_tile,
+			"traversed_tiles": raw_traversed_tiles
 		}
 
 		clean_updates.append(clean_update)
@@ -5795,6 +5838,7 @@ static func commit_city_citizen_movement_tick(
 	clean_next_active_ids.sort()
 
 	var moved_citizen_count := 0
+	var movement_visual_events: Array = []
 
 	for clean_update in clean_updates:
 		var citizen_id := int(
@@ -5817,6 +5861,18 @@ static func commit_city_citizen_movement_tick(
 			"city_tile_position",
 			INVALID_CITY_TILE_POSITION
 		)
+		var movement_visual_event := (
+			_make_city_citizen_movement_visual_event(
+				existing_citizen,
+				updated_citizen,
+				old_tile,
+				final_tile,
+				clean_update.get("traversed_tiles", [])
+			)
+		)
+
+		if not movement_visual_event.is_empty():
+			movement_visual_events.append(movement_visual_event)
 
 		if old_tile != final_tile:
 			_remove_city_citizen_from_spatial_index(
@@ -5850,11 +5906,145 @@ static func commit_city_citizen_movement_tick(
 	if moved_citizen_count > 0:
 		_mark_city_citizen_spatial_changed()
 
+	city_citizen_movement_visual_events = movement_visual_events
 	result["success"] = true
 	result["updated_citizen_count"] = clean_updates.size()
 	result["moved_citizen_count"] = moved_citizen_count
 
 	return result
+
+
+static func _make_city_citizen_movement_visual_event(
+	before_citizen: Dictionary,
+	after_citizen: Dictionary,
+	before_tile: Vector2i,
+	after_tile: Vector2i,
+	raw_traversed_tiles
+) -> Dictionary:
+	var citizen_id := int(before_citizen.get("id", -1))
+
+	if citizen_id <= 0:
+		return {}
+
+	if int(after_citizen.get("id", -1)) != citizen_id:
+		return {}
+
+	return {
+		"citizen_id": citizen_id,
+		"before": _make_city_citizen_movement_visual_snapshot(
+			before_citizen,
+			before_tile
+		),
+		"after": _make_city_citizen_movement_visual_snapshot(
+			after_citizen,
+			after_tile
+		),
+		"traversed_tiles": (
+			_get_clean_city_citizen_movement_visual_trace(
+				before_tile,
+				after_tile,
+				raw_traversed_tiles
+			)
+		)
+	}
+
+
+static func _make_city_citizen_movement_visual_snapshot(
+	citizen: Dictionary,
+	tile_position: Vector2i
+) -> Dictionary:
+	var raw_path = citizen.get("movement_path", [])
+	var movement_path_index := int(citizen.get(
+		"movement_path_index",
+		0
+	))
+	var movement_progress := int(citizen.get(
+		"movement_progress_basis_points",
+		0
+	))
+	var movement_state := str(citizen.get("movement_state", ""))
+	var visual_position := Vector2(tile_position)
+	var visual_step_target_tile := INVALID_CITY_TILE_POSITION
+
+	if (
+		movement_state == CITY_CITIZEN_MOVEMENT_STATE_MOVING
+		and raw_path is Array
+		and movement_path_index >= 1
+		and movement_path_index < raw_path.size()
+		and raw_path[movement_path_index - 1] is Vector2i
+		and raw_path[movement_path_index] is Vector2i
+	):
+		var from_tile: Vector2i = raw_path[movement_path_index - 1]
+		var to_tile: Vector2i = raw_path[movement_path_index]
+		var step_cost := get_city_citizen_movement_step_cost(
+			from_tile,
+			to_tile
+		)
+
+		if step_cost > 0:
+			visual_step_target_tile = to_tile
+			visual_position = Vector2(from_tile).lerp(
+				Vector2(to_tile),
+				clampf(
+					float(movement_progress) / float(step_cost),
+					0.0,
+					1.0
+				)
+			)
+
+	return {
+		"id": int(citizen.get("id", -1)),
+		"alive": bool(citizen.get("alive", false)),
+		"city_tile_position": tile_position,
+		"movement_state": movement_state,
+		"movement_visual_position": visual_position,
+		"movement_visual_step_target_tile": visual_step_target_tile,
+		"movement_speed_basis_points_per_minute": int(citizen.get(
+			"movement_speed_basis_points_per_minute",
+			DEFAULT_CITIZEN_MOVEMENT_SPEED_PER_MINUTE
+		))
+	}
+
+
+static func _get_clean_city_citizen_movement_visual_trace(
+	before_tile: Vector2i,
+	after_tile: Vector2i,
+	raw_traversed_tiles
+) -> Array[Vector2i]:
+	var clean_tiles: Array[Vector2i] = [before_tile]
+
+	if raw_traversed_tiles is Array:
+		for raw_tile in raw_traversed_tiles:
+			if not raw_tile is Vector2i:
+				continue
+
+			var tile: Vector2i = raw_tile
+
+			if tile == clean_tiles.back():
+				continue
+
+			if (
+				get_city_citizen_movement_step_cost(
+					clean_tiles.back(),
+					tile
+				)
+				<= 0
+			):
+				break
+
+			clean_tiles.append(tile)
+
+	if (
+		clean_tiles.back() != after_tile
+		and get_city_citizen_movement_step_cost(
+			clean_tiles.back(),
+			after_tile
+		) > 0
+	):
+		clean_tiles.append(after_tile)
+
+	return clean_tiles
+
 
 static func get_city_population_count() -> int:
 	return city_citizens.size()
@@ -6822,18 +7012,37 @@ static func _city_object_boundary_tile_allows_entry(
 	return false
 
 
+static func get_city_citizen_movement_step_cost(
+	from_tile: Vector2i,
+	to_tile: Vector2i
+) -> int:
+	var delta_x := absi(to_tile.x - from_tile.x)
+	var delta_y := absi(to_tile.y - from_tile.y)
+
+	if delta_x > 1 or delta_y > 1:
+		return 0
+
+	if delta_x == 0 and delta_y == 0:
+		return 0
+
+	if delta_x == 1 and delta_y == 1:
+		return CITY_CITIZEN_DIAGONAL_MOVEMENT_COST
+
+	return CITY_CITIZEN_CARDINAL_MOVEMENT_COST
+
+
 static func can_city_citizen_traverse_step(
 	city_world: WorldData,
 	from_tile: Vector2i,
 	to_tile: Vector2i,
 	citizen_id: int = -1
 ) -> bool:
-	var cardinal_distance := (
-		absi(to_tile.x - from_tile.x)
-		+ absi(to_tile.y - from_tile.y)
+	var step_cost := get_city_citizen_movement_step_cost(
+		from_tile,
+		to_tile
 	)
 
-	if cardinal_distance != 1:
+	if step_cost <= 0:
 		return false
 
 	if not is_city_tile_walkable_for_citizen(
@@ -6843,6 +7052,56 @@ static func can_city_citizen_traverse_step(
 	):
 		return false
 
+	if step_cost == CITY_CITIZEN_DIAGONAL_MOVEMENT_COST:
+		var horizontal_side_tile := Vector2i(
+			to_tile.x,
+			from_tile.y
+		)
+		var vertical_side_tile := Vector2i(
+			from_tile.x,
+			to_tile.y
+		)
+
+		if not is_city_tile_walkable_for_citizen(
+			city_world,
+			horizontal_side_tile,
+			citizen_id
+		):
+			return false
+
+		if not _city_citizen_can_cross_object_boundary(
+			from_tile,
+			horizontal_side_tile,
+			citizen_id
+		):
+			return false
+
+		if not is_city_tile_walkable_for_citizen(
+			city_world,
+			vertical_side_tile,
+			citizen_id
+		):
+			return false
+
+		if not _city_citizen_can_cross_object_boundary(
+			from_tile,
+			vertical_side_tile,
+			citizen_id
+		):
+			return false
+
+	return _city_citizen_can_cross_object_boundary(
+		from_tile,
+		to_tile,
+		citizen_id
+	)
+
+
+static func _city_citizen_can_cross_object_boundary(
+	from_tile: Vector2i,
+	to_tile: Vector2i,
+	citizen_id: int
+) -> bool:
 	var from_object_id := int(
 		city_occupied_tiles.get(from_tile, -1)
 	)

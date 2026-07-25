@@ -2696,11 +2696,7 @@ static func _validate_city_citizen_movement_state(
 		var previous_path_tile = null
 		var path_entries_valid := true
 
-		if (
-			movement_progress < 0
-			or movement_progress
-			>= WorldData.CITY_CITIZEN_MOVEMENT_PROGRESS_PER_TILE
-		):
+		if movement_progress < 0:
 			errors.append(
 				"Citizen "
 					+ str(citizen_id)
@@ -2746,16 +2742,33 @@ static func _validate_city_citizen_movement_state(
 				path_entries_valid = false
 
 			if previous_path_tile is Vector2i:
-				var cardinal_distance := (
-					absi(path_tile.x - previous_path_tile.x)
-					+ absi(path_tile.y - previous_path_tile.y)
+				var step_cost := (
+					WorldData.get_city_citizen_movement_step_cost(
+						previous_path_tile,
+						path_tile
+					)
 				)
 
-				if cardinal_distance != 1:
+				if step_cost <= 0:
 					errors.append(
 						"Citizen "
 							+ str(citizen_id)
-							+ " movement path contains a non-cardinal step."
+							+ " movement path contains a non-adjacent step."
+					)
+					path_entries_valid = false
+				elif (
+					city_world != null
+					and not WorldData.can_city_citizen_traverse_step(
+						city_world,
+						previous_path_tile,
+						path_tile,
+						int(citizen_id)
+					)
+				):
+					errors.append(
+						"Citizen "
+							+ str(citizen_id)
+							+ " movement path contains a blocked or corner-cutting step."
 					)
 					path_entries_valid = false
 
@@ -2854,6 +2867,23 @@ static func _validate_city_citizen_movement_state(
 							+ str(citizen_id)
 							+ " path anchor disagrees with its position."
 					)
+				elif path_entries_valid:
+					var current_step_cost := (
+						WorldData.get_city_citizen_movement_step_cost(
+							movement_path[movement_index - 1],
+							movement_path[movement_index]
+						)
+					)
+
+					if (
+						current_step_cost <= 0
+						or movement_progress >= current_step_cost
+					):
+						errors.append(
+							"Moving citizen "
+								+ str(citizen_id)
+								+ " has progress outside its current step cost."
+						)
 
 				if (
 					not movement_path.is_empty()

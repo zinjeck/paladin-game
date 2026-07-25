@@ -121,6 +121,7 @@ var observed_city_public_storage_version: int = -1
 var observed_city_citizen_version: int = -1
 var observed_city_citizen_spatial_version: int = -1
 var observed_city_citizen_movement_version: int = -1
+var synchronized_city_citizen_movement_version: int = -1
 var observed_city_citizen_task_version: int = -1
 var observed_city_ground_pile_version: int = -1
 var observed_city_haul_reservation_version: int = -1
@@ -222,6 +223,12 @@ func _ready() -> void:
 	WorldData.ensure_city_citizen_task_state()
 	WorldData.ensure_city_citizen_movement_state()
 	city_citizen_movement_presentation.initialize()
+	synchronized_city_citizen_movement_version = (
+		WorldData.city_citizen_movement_version
+	)
+	# The presentation initialized from current authority. Discard any movement
+	# trace left by simulation ticks that ran while this renderer was inactive.
+	WorldData.clear_city_citizen_movement_visual_events()
 	rebuild_city_terrain_texture()
 	create_city_camera()
 	create_city_ui()
@@ -375,19 +382,22 @@ func _process(delta: float) -> void:
 		)
 		city_workplaces_changed = true
 
-	if city_citizens_changed or city_citizen_spatial_changed:
-		if (
-			city_citizen_spatial_changed
-			and city_citizen_movement_changed
-		):
-			city_citizen_movement_presentation.synchronize(true)
-		else:
-			# Non-movement position edits are teleports. Refresh any
-			# tracked mover without animating from a stale tile.
-			city_citizen_movement_presentation.synchronize(false)
-
 	if city_citizen_movement_changed:
-		city_citizen_movement_presentation.refresh_mover_tracking()
+		if (
+			synchronized_city_citizen_movement_version
+			!= observed_city_citizen_movement_version
+		):
+			# Movement snapshots include partial progress even when the citizen
+			# has not completed its current cardinal or diagonal tile step.
+			city_citizen_movement_presentation.synchronize(true)
+			city_citizen_movement_presentation.refresh_mover_tracking()
+			synchronized_city_citizen_movement_version = (
+				observed_city_citizen_movement_version
+			)
+	elif city_citizens_changed or city_citizen_spatial_changed:
+		# Non-movement position edits are teleports. Refresh any tracked mover
+		# without animating from a stale tile.
+		city_citizen_movement_presentation.synchronize(false)
 
 	if city_citizen_movement_presentation.update(delta):
 		queue_redraw()
@@ -427,6 +437,7 @@ func _process(delta: float) -> void:
 		or city_tile_data_changed
 		or city_citizens_changed
 		or city_citizen_spatial_changed
+		or city_citizen_movement_changed
 		or city_ground_piles_changed
 	):
 		queue_redraw()
@@ -598,6 +609,26 @@ func on_simulation_time_changed(
 	_hour: int,
 	_minute: int
 ) -> void:
+	var movement_visual_changed := (
+		city_citizen_movement_presentation.synchronize_committed_tick(
+			WorldData.take_city_citizen_movement_visual_events(
+				SimulationClock.tick_index
+			)
+		)
+	)
+
+	# This post-tick synchronization also captures work, haul, and return-home
+	# routes assigned after the movement system, before another batched tick can
+	# advance or complete them.
+	city_citizen_movement_presentation.synchronize(true)
+	city_citizen_movement_presentation.refresh_mover_tracking()
+	synchronized_city_citizen_movement_version = (
+		WorldData.city_citizen_movement_version
+	)
+
+	if movement_visual_changed:
+		queue_redraw()
+
 	if debug_panel_ui == null:
 		return
 
@@ -6204,7 +6235,9 @@ func request_debug_navigation_path() -> void:
 		" | Destination: ",
 		debug_navigation_destination_tile,
 		" | Path cost: ",
-		debug_navigation_path_cost,
+		format_debug_navigation_path_cost(
+			debug_navigation_path_cost
+		),
 		" | Expanded: ",
 		debug_navigation_expanded_nodes,
 		" | Time: ",
@@ -6302,8 +6335,10 @@ func get_navigation_debug_text() -> String:
 		+ " | End: "
 		+ str(debug_navigation_destination_tile)
 		+ "\n"
-		+ "Path Cost: "
-		+ str(debug_navigation_path_cost)
+		+ "Path Distance: "
+		+ format_debug_navigation_path_cost(
+			debug_navigation_path_cost
+		)
 		+ " | Candidates: "
 		+ str(debug_navigation_candidate_count)
 		+ " | Expanded: "
@@ -6315,6 +6350,18 @@ func get_navigation_debug_text() -> String:
 			/ 1000.0
 		)
 	)
+
+func format_debug_navigation_path_cost(path_cost: int) -> String:
+	return (
+		"%.3f tiles"
+		% (
+			float(maxi(path_cost, 0))
+			/ float(
+				WorldData.CITY_CITIZEN_CARDINAL_MOVEMENT_COST
+			)
+		)
+	)
+
 
 func get_simulation_debug_text() -> String:
 	return (

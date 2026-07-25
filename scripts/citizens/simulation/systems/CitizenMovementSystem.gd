@@ -9,9 +9,11 @@ const MAX_REPATH_REQUESTS_PER_TICK: int = 4
 const MAX_REPATH_EXPANDED_NODES: int = 10_000
 
 static func run_tick(
-	_tick_index: int,
+	tick_index: int,
 	minutes_advanced: int
 ) -> void:
+	WorldData.begin_city_citizen_movement_visual_tick(tick_index)
+
 	if minutes_advanced <= 0:
 		return
 
@@ -65,6 +67,7 @@ static func run_tick(
 			continue
 
 		var current_tile: Vector2i = raw_current_tile
+		var traversed_tiles: Array[Vector2i] = [current_tile]
 
 		if not bool(citizen.get("alive", false)):
 			CityCitizens.reset_city_citizen_movement_state(
@@ -75,7 +78,8 @@ static func run_tick(
 				citizen_updates,
 				citizen_id,
 				citizen,
-				current_tile
+				current_tile,
+				traversed_tiles
 			)
 			continue
 
@@ -125,7 +129,8 @@ static func run_tick(
 				citizen_updates,
 				citizen_id,
 				citizen,
-				current_tile
+				current_tile,
+				traversed_tiles
 			)
 			continue
 
@@ -138,13 +143,28 @@ static func run_tick(
 		)
 		var movement_destination: Vector2i = raw_destination
 
+		var current_step_cost := 0
+
+		if (
+			movement_path_index >= 1
+			and movement_path_index < movement_path.size()
+			and movement_path[movement_path_index - 1] is Vector2i
+			and movement_path[movement_path_index] is Vector2i
+		):
+			current_step_cost = (
+				WorldData.get_city_citizen_movement_step_cost(
+					movement_path[movement_path_index - 1],
+					movement_path[movement_path_index]
+				)
+			)
+
 		var path_state_is_valid: bool = (
 			movement_path.size() >= 2
 			and movement_path_index >= 1
 			and movement_path_index < movement_path.size()
+			and current_step_cost > 0
 			and movement_progress >= 0
-			and movement_progress
-			< WorldData.CITY_CITIZEN_MOVEMENT_PROGRESS_PER_TILE
+			and movement_progress < current_step_cost
 			and movement_speed > 0
 			and repath_attempt_count >= 0
 			and repath_attempt_count
@@ -164,7 +184,8 @@ static func run_tick(
 				citizen_updates,
 				citizen_id,
 				citizen,
-				current_tile
+				current_tile,
+				traversed_tiles
 			)
 			continue
 
@@ -174,11 +195,7 @@ static func run_tick(
 		var movement_was_blocked := false
 		var movement_repath_was_deferred := false
 
-		while (
-			movement_progress
-			>= WorldData.CITY_CITIZEN_MOVEMENT_PROGRESS_PER_TILE
-			and movement_path_index < movement_path.size()
-		):
+		while movement_path_index < movement_path.size():
 			var raw_next_tile = movement_path[
 				movement_path_index
 			]
@@ -193,12 +210,14 @@ static func run_tick(
 				break
 
 			var next_tile: Vector2i = raw_next_tile
-			var cardinal_distance := (
-				absi(next_tile.x - current_tile.x)
-				+ absi(next_tile.y - current_tile.y)
+			var step_cost := (
+				WorldData.get_city_citizen_movement_step_cost(
+					current_tile,
+					next_tile
+				)
 			)
 
-			if cardinal_distance != 1:
+			if step_cost <= 0:
 				_set_citizen_movement_blocked(
 					citizen,
 					movement_destination,
@@ -260,10 +279,12 @@ static func run_tick(
 
 				continue
 
-			movement_progress -= (
-				WorldData.CITY_CITIZEN_MOVEMENT_PROGRESS_PER_TILE
-			)
+			if movement_progress < step_cost:
+				break
+
+			movement_progress -= step_cost
 			current_tile = next_tile
+			traversed_tiles.append(current_tile)
 			movement_path_index += 1
 		if movement_repath_was_deferred:
 			citizen["movement_path"] = movement_path.duplicate()
@@ -280,7 +301,8 @@ static func run_tick(
 				citizen_updates,
 				citizen_id,
 				citizen,
-				current_tile
+				current_tile,
+				traversed_tiles
 			)
 			continue
 		if movement_was_blocked:
@@ -288,7 +310,8 @@ static func run_tick(
 				citizen_updates,
 				citizen_id,
 				citizen,
-				current_tile
+				current_tile,
+				traversed_tiles
 			)
 			continue
 
@@ -301,7 +324,8 @@ static func run_tick(
 				citizen_updates,
 				citizen_id,
 				citizen,
-				current_tile
+				current_tile,
+				traversed_tiles
 			)
 			continue
 
@@ -322,7 +346,8 @@ static func run_tick(
 			citizen_updates,
 			citizen_id,
 			citizen,
-			current_tile
+			current_tile,
+			traversed_tiles
 		)
 
 	var commit_result := (
@@ -379,12 +404,14 @@ static func _append_citizen_update(
 	citizen_updates: Array,
 	citizen_id: int,
 	citizen: Dictionary,
-	final_tile: Vector2i
+	final_tile: Vector2i,
+	traversed_tiles: Array[Vector2i]
 ) -> void:
 	citizen_updates.append({
 		"citizen_id": citizen_id,
 		"citizen": citizen,
-		"final_tile": final_tile
+		"final_tile": final_tile,
+		"traversed_tiles": traversed_tiles.duplicate()
 	})
 
 

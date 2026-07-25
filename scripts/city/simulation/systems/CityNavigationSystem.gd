@@ -17,8 +17,8 @@ const PATH_STATUS_RECONSTRUCTION_FAILED := (
 const DEFAULT_MAX_EXPANDED_NODES: int = 10_000
 const MAXIMUM_PATH_COST: int = 1_000_000_000
 
-# Prefer reaching the goal promptly over proving that every route is the
-# mathematically shortest possible route.
+# Prefer prompt, bounded route execution over proving that every ordinary route
+# is mathematically shortest. Exact-distance callers explicitly pass weight 1.
 const HEURISTIC_WEIGHT: int = 2
 
 const HEAP_TILE_INDEX: int = 0
@@ -26,11 +26,15 @@ const HEAP_TOTAL_COST_INDEX: int = 1
 const HEAP_HEURISTIC_INDEX: int = 2
 const HEAP_TRAVEL_COST_INDEX: int = 3
 
-const CARDINAL_NEIGHBOR_OFFSETS := [
+const NEIGHBOR_OFFSETS := [
 	Vector2i(0, -1),
 	Vector2i(-1, 0),
 	Vector2i(1, 0),
-	Vector2i(0, 1)
+	Vector2i(0, 1),
+	Vector2i(-1, -1),
+	Vector2i(1, -1),
+	Vector2i(-1, 1),
+	Vector2i(1, 1)
 ]
 
 static func find_path_to_any_city_tile(
@@ -121,7 +125,7 @@ static func find_path_to_any_city_tile(
 	var closed_tile_lookup: Dictionary = {}
 
 	var start_heuristic := (
-		_get_minimum_manhattan_distance(
+		_get_minimum_octile_distance(
 			start_tile,
 			destination_tiles
 		)
@@ -230,7 +234,7 @@ static func find_path_to_any_city_tile(
 				search_start_usec
 			)
 
-		for offset in CARDINAL_NEIGHBOR_OFFSETS:
+		for offset in NEIGHBOR_OFFSETS:
 			var neighbor_tile: Vector2i = (
 				current_tile + offset
 			)
@@ -246,8 +250,18 @@ static func find_path_to_any_city_tile(
 			):
 				continue
 
+			var step_cost := (
+				WorldData.get_city_citizen_movement_step_cost(
+					current_tile,
+					neighbor_tile
+				)
+			)
+
+			if step_cost <= 0:
+				continue
+
 			var proposed_travel_cost := (
-				current_travel_cost + 1
+				current_travel_cost + step_cost
 			)
 			var known_travel_cost := int(
 				travel_cost_by_tile.get(
@@ -270,7 +284,7 @@ static func find_path_to_any_city_tile(
 			)
 
 			var neighbor_heuristic := (
-				_get_minimum_manhattan_distance(
+				_get_minimum_octile_distance(
 					neighbor_tile,
 					destination_tiles
 				)
@@ -341,31 +355,28 @@ static func _sort_city_tiles_y_then_x(
 	return tile_a.y < tile_b.y
 
 
-static func _get_minimum_manhattan_distance(
+static func _get_minimum_octile_distance(
 	tile_position: Vector2i,
 	destination_tiles: Array
 ) -> int:
-	if destination_tiles.size() == 1:
-		var destination_tile: Vector2i = (
-			destination_tiles[0]
-		)
-
-		return (
-			absi(destination_tile.x - tile_position.x)
-			+ absi(destination_tile.y - tile_position.y)
-		)
 	var minimum_distance := MAXIMUM_PATH_COST
 
 	for destination_tile in destination_tiles:
+		var delta_x := absi(
+			destination_tile.x - tile_position.x
+		)
+		var delta_y := absi(
+			destination_tile.y - tile_position.y
+		)
+		var diagonal_steps := mini(delta_x, delta_y)
+		var straight_steps := (
+			maxi(delta_x, delta_y) - diagonal_steps
+		)
 		var distance := (
-			absi(
-				destination_tile.x
-				- tile_position.x
-			)
-			+ absi(
-				destination_tile.y
-				- tile_position.y
-			)
+			diagonal_steps
+			* WorldData.CITY_CITIZEN_DIAGONAL_MOVEMENT_COST
+			+ straight_steps
+			* WorldData.CITY_CITIZEN_CARDINAL_MOVEMENT_COST
 		)
 
 		minimum_distance = mini(

@@ -100,7 +100,14 @@ const CITY_CITIZEN_MOVEMENT_FAILURE_REPATH_FAILED := (
 	"repath_failed"
 )
 
-const CITY_CITIZEN_MOVEMENT_PROGRESS_PER_TILE := 10_000
+# Movement progress uses deterministic scaled distance units. One cardinal
+# tile is 10,000 units; one diagonal tile approximates sqrt(2) times that.
+const CITY_CITIZEN_CARDINAL_MOVEMENT_COST := 10_000
+const CITY_CITIZEN_DIAGONAL_MOVEMENT_COST := 14_142
+# Compatibility alias for systems that mean one cardinal tile of distance.
+const CITY_CITIZEN_MOVEMENT_PROGRESS_PER_TILE := (
+	CITY_CITIZEN_CARDINAL_MOVEMENT_COST
+)
 const DEFAULT_CITIZEN_MOVEMENT_SPEED_PER_MINUTE := 5_000
 const MAX_CITIZEN_MOVEMENT_REPATH_ATTEMPTS := 3
 

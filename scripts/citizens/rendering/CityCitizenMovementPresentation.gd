@@ -2,16 +2,21 @@ extends RefCounted
 class_name CityCitizenMovementPresentation
 
 # Cosmetic, centralized movement interpolation. This helper reads WorldData but
-# never mutates authoritative citizen positions or the spatial index. Its caches
-# contain only active or still-transitioning movers, not the whole population.
+# never mutates authoritative citizen positions or the spatial index. Visual
+# routes retain individual path corners so diagonal-to-cardinal turns cannot cut
+# across blocked geometry.
 
-var last_authoritative_tile_by_citizen_id: Dictionary = {}
+const POSITION_EPSILON: float = 0.0001
+
+var movement_snapshot_by_citizen_id: Dictionary = {}
+var visual_position_by_citizen_id: Dictionary = {}
 var transition_by_citizen_id: Dictionary = {}
 var tracked_mover_id_lookup: Dictionary = {}
 
 
 func initialize() -> void:
-	last_authoritative_tile_by_citizen_id.clear()
+	movement_snapshot_by_citizen_id.clear()
+	visual_position_by_citizen_id.clear()
 	transition_by_citizen_id.clear()
 	tracked_mover_id_lookup.clear()
 	refresh_mover_tracking()
@@ -53,6 +58,171 @@ func synchronize(animate_position_changes: bool) -> void:
 		)
 
 
+func synchronize_committed_tick(raw_events: Array) -> bool:
+	var visual_state_changed := false
+
+	for raw_event in raw_events:
+		if not raw_event is Dictionary:
+			continue
+
+		var event: Dictionary = raw_event
+		var citizen_id := int(event.get("citizen_id", -1))
+		var raw_before_citizen = event.get("before", {})
+		var raw_after_citizen = event.get("after", {})
+
+		if citizen_id <= 0:
+			continue
+
+		if (
+			not raw_before_citizen is Dictionary
+			or not raw_after_citizen is Dictionary
+		):
+			continue
+
+		var before_snapshot := _make_movement_snapshot(
+			raw_before_citizen
+		)
+		var after_snapshot := _make_movement_snapshot(
+			raw_after_citizen
+		)
+
+		if before_snapshot.is_empty() or after_snapshot.is_empty():
+			continue
+
+		if (
+			int(raw_before_citizen.get("id", -1)) != citizen_id
+			or int(raw_after_citizen.get("id", -1)) != citizen_id
+		):
+			continue
+
+		if not movement_snapshot_by_citizen_id.has(citizen_id):
+			movement_snapshot_by_citizen_id[citizen_id] = (
+				before_snapshot
+			)
+			visual_position_by_citizen_id[citizen_id] = (
+				before_snapshot["position"]
+			)
+			tracked_mover_id_lookup[citizen_id] = true
+			visual_state_changed = true
+		else:
+			var raw_previous_snapshot = (
+				movement_snapshot_by_citizen_id[citizen_id]
+			)
+
+			if raw_previous_snapshot is Dictionary:
+				var previous_snapshot: Dictionary = (
+					raw_previous_snapshot
+				)
+
+				if not visual_position_by_citizen_id.has(citizen_id):
+					visual_position_by_citizen_id[citizen_id] = (
+						previous_snapshot["position"]
+					)
+					visual_state_changed = true
+
+				var bridge_points := (
+					_build_snapshot_extension_points(
+						previous_snapshot,
+						before_snapshot
+					)
+				)
+
+				if not bridge_points.is_empty():
+					_queue_transition_extension(
+						citizen_id,
+						before_snapshot,
+						bridge_points
+					)
+					visual_state_changed = true
+			else:
+				movement_snapshot_by_citizen_id[citizen_id] = (
+					before_snapshot
+				)
+				visual_position_by_citizen_id[citizen_id] = (
+					before_snapshot["position"]
+				)
+				transition_by_citizen_id.erase(citizen_id)
+				visual_state_changed = true
+
+		var exact_trace_points: Array = []
+		var raw_traversed_tiles = event.get("traversed_tiles", [])
+
+		if raw_traversed_tiles is Array:
+			var trace_start_index := 1
+
+			if not raw_traversed_tiles.is_empty():
+				var raw_trace_origin = raw_traversed_tiles[0]
+				var raw_before_position = before_snapshot.get("position")
+				var expected_before_target = before_snapshot.get(
+					"movement_visual_step_target_tile",
+					WorldData.INVALID_CITY_TILE_POSITION
+				)
+				var actual_first_target = (
+					WorldData.INVALID_CITY_TILE_POSITION
+				)
+
+				if (
+					raw_traversed_tiles.size() >= 2
+					and raw_traversed_tiles[1] is Vector2i
+				):
+					actual_first_target = raw_traversed_tiles[1]
+				else:
+					actual_first_target = after_snapshot.get(
+						"movement_visual_step_target_tile",
+						WorldData.INVALID_CITY_TILE_POSITION
+					)
+
+				# A same-tick repath can turn while the previous snapshot is
+				# partway through its old segment. Return visually to the
+				# authoritative tile before following the replacement path.
+				if (
+					raw_trace_origin is Vector2i
+					and raw_before_position is Vector2
+					and expected_before_target is Vector2i
+					and actual_first_target is Vector2i
+					and expected_before_target != actual_first_target
+					and raw_before_position.distance_to(
+						Vector2(raw_trace_origin)
+					) > POSITION_EPSILON
+				):
+					trace_start_index = 0
+
+			for trace_index in range(
+				trace_start_index,
+				raw_traversed_tiles.size()
+			):
+				var raw_trace_tile = raw_traversed_tiles[trace_index]
+
+				if raw_trace_tile is Vector2i:
+					_append_unique_waypoint(
+						exact_trace_points,
+						Vector2(raw_trace_tile)
+					)
+
+		var raw_after_position = after_snapshot.get("position")
+
+		if raw_after_position is Vector2:
+			_append_unique_waypoint(
+				exact_trace_points,
+				raw_after_position
+			)
+
+		movement_snapshot_by_citizen_id[citizen_id] = after_snapshot
+		tracked_mover_id_lookup[citizen_id] = true
+
+		if not exact_trace_points.is_empty():
+			_queue_transition_extension(
+				citizen_id,
+				after_snapshot,
+				exact_trace_points
+			)
+			visual_state_changed = true
+
+		_release_mover_if_inactive(citizen_id)
+
+	return visual_state_changed
+
+
 func track_mover(citizen_id: int) -> void:
 	if citizen_id <= 0:
 		return
@@ -66,19 +236,15 @@ func track_mover(citizen_id: int) -> void:
 		erase_citizen(citizen_id)
 		return
 
-	var raw_authoritative_tile = citizen.get(
-		"city_tile_position",
-		WorldData.INVALID_CITY_TILE_POSITION
-	)
+	var snapshot := _make_movement_snapshot(citizen)
 
-	if not raw_authoritative_tile is Vector2i:
+	if snapshot.is_empty():
 		erase_citizen(citizen_id)
 		return
 
-	if not last_authoritative_tile_by_citizen_id.has(citizen_id):
-		last_authoritative_tile_by_citizen_id[citizen_id] = (
-			raw_authoritative_tile
-		)
+	if not movement_snapshot_by_citizen_id.has(citizen_id):
+		movement_snapshot_by_citizen_id[citizen_id] = snapshot
+		visual_position_by_citizen_id[citizen_id] = snapshot["position"]
 
 	tracked_mover_id_lookup[citizen_id] = true
 
@@ -89,19 +255,13 @@ func refresh_mover_tracking() -> void:
 
 	for raw_citizen_id in tracked_mover_id_lookup.keys():
 		if typeof(raw_citizen_id) != TYPE_INT:
+			movement_snapshot_by_citizen_id.erase(raw_citizen_id)
+			visual_position_by_citizen_id.erase(raw_citizen_id)
+			transition_by_citizen_id.erase(raw_citizen_id)
 			tracked_mover_id_lookup.erase(raw_citizen_id)
 			continue
 
-		var citizen_id := int(raw_citizen_id)
-
-		if WorldData.city_active_mover_id_lookup.has(citizen_id):
-			continue
-
-		if transition_by_citizen_id.has(citizen_id):
-			continue
-
-		tracked_mover_id_lookup.erase(citizen_id)
-		last_authoritative_tile_by_citizen_id.erase(citizen_id)
+		_release_mover_if_inactive(int(raw_citizen_id))
 
 
 func update(delta: float) -> bool:
@@ -132,10 +292,8 @@ func update(delta: float) -> bool:
 			0.001
 		)
 	)
-	var movement_progress_per_tile: float = maxf(
-		float(
-			WorldData.CITY_CITIZEN_MOVEMENT_PROGRESS_PER_TILE
-		),
+	var cardinal_cost: float = maxf(
+		float(WorldData.CITY_CITIZEN_CARDINAL_MOVEMENT_COST),
 		1.0
 	)
 	var visual_state_changed: bool = false
@@ -143,7 +301,6 @@ func update(delta: float) -> bool:
 	for raw_citizen_id in transition_by_citizen_id.keys():
 		if typeof(raw_citizen_id) != TYPE_INT:
 			transition_by_citizen_id.erase(raw_citizen_id)
-			tracked_mover_id_lookup.erase(raw_citizen_id)
 			visual_state_changed = true
 			continue
 
@@ -157,18 +314,18 @@ func update(delta: float) -> bool:
 			continue
 
 		var transition: Dictionary = raw_transition
-		var raw_from_tile = transition.get("from_tile")
-		var raw_to_tile = transition.get("to_tile")
+		var raw_waypoints = transition.get("waypoints", [])
 
-		if not (raw_from_tile is Vector2) or not (raw_to_tile is Vector2):
+		if not raw_waypoints is Array:
 			transition_by_citizen_id.erase(citizen_id)
 			_release_mover_if_inactive(citizen_id)
 			visual_state_changed = true
 			continue
 
-		var tile_distance: float = maxf(
-			float(transition.get("tile_distance", 1.0)),
-			1.0
+		var waypoints: Array = raw_waypoints
+		var current_position: Vector2 = visual_position_by_citizen_id.get(
+			citizen_id,
+			Vector2(-1.0, -1.0)
 		)
 		var movement_speed: float = maxf(
 			float(
@@ -179,28 +336,47 @@ func update(delta: float) -> bool:
 			),
 			1.0
 		)
-		var tiles_per_real_second: float = (
-			movement_speed
+		var distance_remaining: float = (
+			delta
+			* simulation_speed
+			* movement_speed
 			* world_minutes_per_real_second
-			/ movement_progress_per_tile
-		)
-		var progress: float = clampf(
-			float(transition.get("progress", 0.0))
-			+ (
-				delta
-				* simulation_speed
-				* tiles_per_real_second
-				/ tile_distance
-			),
-			0.0,
-			1.0
+			/ cardinal_cost
 		)
 
-		if progress >= 1.0:
+		while distance_remaining > 0.0 and not waypoints.is_empty():
+			var raw_target = waypoints[0]
+
+			if not raw_target is Vector2:
+				waypoints.pop_front()
+				continue
+
+			var target: Vector2 = raw_target
+			var segment_distance := current_position.distance_to(target)
+
+			if segment_distance <= POSITION_EPSILON:
+				current_position = target
+				waypoints.pop_front()
+				continue
+
+			if distance_remaining >= segment_distance:
+				current_position = target
+				distance_remaining -= segment_distance
+				waypoints.pop_front()
+			else:
+				current_position = current_position.move_toward(
+					target,
+					distance_remaining
+				)
+				distance_remaining = 0.0
+
+		visual_position_by_citizen_id[citizen_id] = current_position
+
+		if waypoints.is_empty():
 			transition_by_citizen_id.erase(citizen_id)
 			_release_mover_if_inactive(citizen_id)
 		else:
-			transition["progress"] = progress
+			transition["waypoints"] = waypoints
 			transition_by_citizen_id[citizen_id] = transition
 
 		visual_state_changed = true
@@ -218,42 +394,27 @@ func get_visual_tile_position(citizen: Dictionary) -> Vector2:
 		return Vector2(-1.0, -1.0)
 
 	var authoritative_tile: Vector2i = raw_authoritative_tile
-	var fallback_position: Vector2 = Vector2(
+	var fallback_position := Vector2(
 		float(authoritative_tile.x),
 		float(authoritative_tile.y)
 	)
 	var citizen_id := int(citizen.get("id", -1))
 
-	if not transition_by_citizen_id.has(citizen_id):
+	if not visual_position_by_citizen_id.has(citizen_id):
 		return fallback_position
 
-	var raw_transition = transition_by_citizen_id[citizen_id]
+	var raw_visual_position = visual_position_by_citizen_id[citizen_id]
 
-	if not raw_transition is Dictionary:
+	if not raw_visual_position is Vector2:
 		return fallback_position
 
-	var transition: Dictionary = raw_transition
-	var raw_from_tile = transition.get("from_tile")
-	var raw_to_tile = transition.get("to_tile")
-
-	if not (raw_from_tile is Vector2) or not (raw_to_tile is Vector2):
-		return fallback_position
-
-	var from_tile: Vector2 = raw_from_tile
-	var to_tile: Vector2 = raw_to_tile
-	var progress: float = clampf(
-		float(transition.get("progress", 0.0)),
-		0.0,
-		1.0
-	)
-
-	return from_tile.lerp(to_tile, progress)
+	return raw_visual_position
 
 
 func get_transitioning_citizen_ids_snapshot() -> Array[int]:
 	var citizen_ids: Array[int] = []
 
-	for raw_citizen_id in transition_by_citizen_id.keys():
+	for raw_citizen_id in visual_position_by_citizen_id.keys():
 		if typeof(raw_citizen_id) != TYPE_INT:
 			continue
 
@@ -268,103 +429,304 @@ func _synchronize_citizen_position(
 	animate_position_change: bool
 ) -> void:
 	var citizen_id := int(citizen.get("id", -1))
+
+	if citizen_id <= 0:
+		return
+
+	var current_snapshot := _make_movement_snapshot(citizen)
+
+	if current_snapshot.is_empty():
+		erase_citizen(citizen_id)
+		return
+
+	if not movement_snapshot_by_citizen_id.has(citizen_id):
+		movement_snapshot_by_citizen_id[citizen_id] = current_snapshot
+		visual_position_by_citizen_id[citizen_id] = (
+			current_snapshot["position"]
+		)
+		tracked_mover_id_lookup[citizen_id] = true
+		transition_by_citizen_id.erase(citizen_id)
+		_release_mover_if_inactive(citizen_id)
+		return
+
+	var raw_previous_snapshot = (
+		movement_snapshot_by_citizen_id[citizen_id]
+	)
+
+	if not raw_previous_snapshot is Dictionary:
+		movement_snapshot_by_citizen_id[citizen_id] = current_snapshot
+		visual_position_by_citizen_id[citizen_id] = (
+			current_snapshot["position"]
+		)
+		transition_by_citizen_id.erase(citizen_id)
+		_release_mover_if_inactive(citizen_id)
+		return
+
+	var previous_snapshot: Dictionary = raw_previous_snapshot
+	movement_snapshot_by_citizen_id[citizen_id] = current_snapshot
+
+	if not animate_position_change:
+		visual_position_by_citizen_id[citizen_id] = (
+			current_snapshot["position"]
+		)
+		transition_by_citizen_id.erase(citizen_id)
+		_release_mover_if_inactive(citizen_id)
+		return
+
+	var extension_points := _build_snapshot_extension_points(
+		previous_snapshot,
+		current_snapshot
+	)
+
+	if extension_points.is_empty():
+		_release_mover_if_inactive(citizen_id)
+		return
+
+	if not visual_position_by_citizen_id.has(citizen_id):
+		visual_position_by_citizen_id[citizen_id] = (
+			previous_snapshot["position"]
+		)
+
+	_queue_transition_extension(
+		citizen_id,
+		current_snapshot,
+		extension_points
+	)
+
+
+func _queue_transition_extension(
+	citizen_id: int,
+	current_snapshot: Dictionary,
+	extension_points: Array
+) -> void:
+	var transition: Dictionary = transition_by_citizen_id.get(
+		citizen_id,
+		{
+			"waypoints": [],
+			"movement_speed_basis_points_per_minute": (
+				WorldData.DEFAULT_CITIZEN_MOVEMENT_SPEED_PER_MINUTE
+			)
+		}
+	)
+	var raw_waypoints = transition.get("waypoints", [])
+	var waypoints: Array = []
+
+	if raw_waypoints is Array:
+		waypoints = raw_waypoints
+
+	for raw_point in extension_points:
+		if not raw_point is Vector2:
+			continue
+
+		_append_unique_waypoint(waypoints, raw_point)
+
+	if waypoints.is_empty():
+		transition_by_citizen_id.erase(citizen_id)
+		_release_mover_if_inactive(citizen_id)
+		return
+
+	transition["waypoints"] = waypoints
+	transition["movement_speed_basis_points_per_minute"] = maxi(
+		int(current_snapshot.get(
+			"movement_speed_basis_points_per_minute",
+			WorldData.DEFAULT_CITIZEN_MOVEMENT_SPEED_PER_MINUTE
+		)),
+		1
+	)
+	transition_by_citizen_id[citizen_id] = transition
+	tracked_mover_id_lookup[citizen_id] = true
+
+
+func _make_movement_snapshot(citizen: Dictionary) -> Dictionary:
 	var raw_authoritative_tile = citizen.get(
 		"city_tile_position",
 		WorldData.INVALID_CITY_TILE_POSITION
 	)
 
-	if citizen_id <= 0:
-		return
-
 	if not raw_authoritative_tile is Vector2i:
-		erase_citizen(citizen_id)
-		return
+		return {}
 
 	var authoritative_tile: Vector2i = raw_authoritative_tile
+	var movement_state := str(citizen.get("movement_state", ""))
+	var raw_path = citizen.get("movement_path", [])
+	var movement_path: Array = []
 
-	if not last_authoritative_tile_by_citizen_id.has(citizen_id):
-		last_authoritative_tile_by_citizen_id[citizen_id] = (
-			authoritative_tile
-		)
-		transition_by_citizen_id.erase(citizen_id)
-		_release_mover_if_inactive(citizen_id)
-		return
+	if raw_path is Array:
+		movement_path = raw_path.duplicate()
 
-	var raw_previous_authoritative_tile = (
-		last_authoritative_tile_by_citizen_id[citizen_id]
-	)
-
-	if not raw_previous_authoritative_tile is Vector2i:
-		last_authoritative_tile_by_citizen_id[citizen_id] = (
-			authoritative_tile
-		)
-		transition_by_citizen_id.erase(citizen_id)
-		_release_mover_if_inactive(citizen_id)
-		return
-
-	var previous_authoritative_tile: Vector2i = (
-		raw_previous_authoritative_tile
-	)
-
-	if previous_authoritative_tile == authoritative_tile:
-		_release_mover_if_inactive(citizen_id)
-		return
-
-	var visual_from_tile: Vector2 = Vector2(
-		float(previous_authoritative_tile.x),
-		float(previous_authoritative_tile.y)
-	)
-
-	if transition_by_citizen_id.has(citizen_id):
-		visual_from_tile = get_visual_tile_position(citizen)
-	var visual_to_tile: Vector2 = Vector2(
+	var movement_path_index := int(citizen.get("movement_path_index", 0))
+	var movement_progress := int(citizen.get(
+		"movement_progress_basis_points",
+		0
+	))
+	var position := Vector2(
 		float(authoritative_tile.x),
 		float(authoritative_tile.y)
 	)
-
-	last_authoritative_tile_by_citizen_id[citizen_id] = (
-		authoritative_tile
+	var visual_step_target_tile = citizen.get(
+		"movement_visual_step_target_tile",
+		WorldData.INVALID_CITY_TILE_POSITION
 	)
 
-	if not animate_position_change:
-		transition_by_citizen_id.erase(citizen_id)
-		_release_mover_if_inactive(citizen_id)
-		return
-
-	var tile_distance: float = (
-		absf(visual_to_tile.x - visual_from_tile.x)
-		+ absf(visual_to_tile.y - visual_from_tile.y)
-	)
-
-	if tile_distance <= 0.0:
-		transition_by_citizen_id.erase(citizen_id)
-		_release_mover_if_inactive(citizen_id)
-		return
-
-	var movement_speed := maxi(
-		int(
-			citizen.get(
-				"movement_speed_basis_points_per_minute",
-				WorldData.DEFAULT_CITIZEN_MOVEMENT_SPEED_PER_MINUTE
-			)
-		),
-		1
-	)
-
-	transition_by_citizen_id[citizen_id] = {
-		"from_tile": visual_from_tile,
-		"to_tile": visual_to_tile,
-		"progress": 0.0,
-		"tile_distance": maxf(tile_distance, 1.0),
-		"movement_speed_basis_points_per_minute": (
-			movement_speed
+	if (
+		movement_state == WorldData.CITY_CITIZEN_MOVEMENT_STATE_MOVING
+		and movement_path_index >= 1
+		and movement_path_index < movement_path.size()
+		and movement_path[movement_path_index - 1] is Vector2i
+		and movement_path[movement_path_index] is Vector2i
+	):
+		var from_tile: Vector2i = movement_path[movement_path_index - 1]
+		var to_tile: Vector2i = movement_path[movement_path_index]
+		var step_cost := WorldData.get_city_citizen_movement_step_cost(
+			from_tile,
+			to_tile
 		)
+
+		if step_cost > 0:
+			visual_step_target_tile = to_tile
+			var segment_progress := clampf(
+				float(movement_progress) / float(step_cost),
+				0.0,
+				1.0
+			)
+			position = Vector2(from_tile).lerp(
+				Vector2(to_tile),
+				segment_progress
+			)
+
+	var raw_visual_position = citizen.get(
+		"movement_visual_position",
+		null
+	)
+
+	if raw_visual_position is Vector2:
+		position = raw_visual_position
+
+	return {
+		"authoritative_tile": authoritative_tile,
+		"movement_state": movement_state,
+		"movement_path": movement_path,
+		"movement_path_index": movement_path_index,
+		"movement_progress_basis_points": movement_progress,
+		"movement_speed_basis_points_per_minute": int(citizen.get(
+			"movement_speed_basis_points_per_minute",
+			WorldData.DEFAULT_CITIZEN_MOVEMENT_SPEED_PER_MINUTE
+		)),
+		"movement_visual_step_target_tile": visual_step_target_tile,
+		"position": position
 	}
-	tracked_mover_id_lookup[citizen_id] = true
+
+
+func _build_snapshot_extension_points(
+	previous_snapshot: Dictionary,
+	current_snapshot: Dictionary
+) -> Array:
+	var points: Array = []
+	var previous_position: Vector2 = previous_snapshot.get(
+		"position",
+		Vector2(-1.0, -1.0)
+	)
+	var current_position: Vector2 = current_snapshot.get(
+		"position",
+		previous_position
+	)
+
+	if previous_position.distance_to(current_position) <= POSITION_EPSILON:
+		return points
+
+	var previous_path: Array = previous_snapshot.get("movement_path", [])
+	var current_path: Array = current_snapshot.get("movement_path", [])
+	var previous_index := int(previous_snapshot.get(
+		"movement_path_index",
+		0
+	))
+	var current_index := int(current_snapshot.get(
+		"movement_path_index",
+		0
+	))
+	var current_state := str(current_snapshot.get("movement_state", ""))
+
+	if (
+		_paths_match(previous_path, current_path)
+		and previous_index >= 1
+		and current_index >= previous_index
+	):
+		for path_index in range(previous_index, current_index):
+			if path_index >= previous_path.size():
+				break
+
+			var raw_path_tile = previous_path[path_index]
+
+			if raw_path_tile is Vector2i:
+				_append_unique_waypoint(points, Vector2(raw_path_tile))
+
+		_append_unique_waypoint(points, current_position)
+		return points
+
+	if (
+		current_state != WorldData.CITY_CITIZEN_MOVEMENT_STATE_MOVING
+		and previous_index >= 1
+		and previous_index < previous_path.size()
+		and not previous_path.is_empty()
+		and previous_path.back()
+		== current_snapshot.get(
+			"authoritative_tile",
+			WorldData.INVALID_CITY_TILE_POSITION
+		)
+	):
+		for path_index in range(previous_index, previous_path.size()):
+			var raw_path_tile = previous_path[path_index]
+
+			if raw_path_tile is Vector2i:
+				_append_unique_waypoint(points, Vector2(raw_path_tile))
+
+		return points
+
+	var current_authoritative_tile = current_snapshot.get(
+		"authoritative_tile",
+		WorldData.INVALID_CITY_TILE_POSITION
+	)
+
+	if current_authoritative_tile is Vector2i:
+		_append_unique_waypoint(
+			points,
+			Vector2(current_authoritative_tile)
+		)
+
+	_append_unique_waypoint(points, current_position)
+	return points
+
+
+func _paths_match(path_a: Array, path_b: Array) -> bool:
+	if path_a.size() != path_b.size():
+		return false
+
+	for path_index in range(path_a.size()):
+		if path_a[path_index] != path_b[path_index]:
+			return false
+
+	return true
+
+
+func _append_unique_waypoint(
+	waypoints: Array,
+	point: Vector2
+) -> void:
+	if not waypoints.is_empty():
+		var raw_last_point = waypoints.back()
+
+		if (
+			raw_last_point is Vector2
+			and raw_last_point.distance_to(point) <= POSITION_EPSILON
+		):
+			return
+
+	waypoints.append(point)
 
 
 func erase_citizen(citizen_id: int) -> void:
-	last_authoritative_tile_by_citizen_id.erase(citizen_id)
+	movement_snapshot_by_citizen_id.erase(citizen_id)
+	visual_position_by_citizen_id.erase(citizen_id)
 	transition_by_citizen_id.erase(citizen_id)
 	tracked_mover_id_lookup.erase(citizen_id)
 
@@ -376,5 +738,4 @@ func _release_mover_if_inactive(citizen_id: int) -> void:
 	if transition_by_citizen_id.has(citizen_id):
 		return
 
-	tracked_mover_id_lookup.erase(citizen_id)
-	last_authoritative_tile_by_citizen_id.erase(citizen_id)
+	erase_citizen(citizen_id)
