@@ -22,6 +22,7 @@ static func validate(
 
 	var object_lookup := _validate_city_object_index(errors)
 	var citizen_lookup := _validate_city_citizen_index(errors)
+	var ground_pile_lookup := _validate_city_ground_pile_state(errors)
 
 	_validate_city_foundation_state(
 		errors,
@@ -43,10 +44,21 @@ static func validate(
 		errors,
 		citizen_lookup
 	)
+	_validate_city_citizen_need_state(
+		errors,
+		citizen_lookup
+	)
 	_validate_city_citizen_task_state(
 		errors,
 		citizen_lookup,
 		object_lookup
+	)
+	var checked_haul_reservation_count := (
+		_validate_city_haul_reservations(
+			errors,
+			citizen_lookup,
+			ground_pile_lookup
+		)
 	)
 	_validate_city_citizen_movement_state(
 		errors,
@@ -91,6 +103,8 @@ static func validate(
 		"checked_occupied_tiles": WorldData.city_occupied_tiles.size(),
 		"checked_containers": checked_container_count,
 		"checked_inventories": checked_inventory_count,
+		"checked_ground_piles": ground_pile_lookup.size(),
+		"checked_haul_reservations": checked_haul_reservation_count,
 		"duration_usec": validation_duration_usec,
 		"object_version": WorldData.city_object_version,
 		"container_version": WorldData.city_container_version,
@@ -105,7 +119,11 @@ static func validate(
 			WorldData.city_citizen_task_version
 		),
 		"assignment_version": WorldData.city_assignment_version,
-		"workplace_version": WorldData.city_workplace_version
+		"workplace_version": WorldData.city_workplace_version,
+		"ground_pile_version": WorldData.city_ground_pile_version,
+		"haul_reservation_version": (
+			WorldData.city_haul_reservation_version
+		)
 	}
 
 	_cached_result = result
@@ -151,6 +169,12 @@ static func get_summary_text() -> String:
 		+ " citizens | "
 		+ str(result.get("checked_occupied_tiles", 0))
 		+ " occupied tiles"
+		+ "\n"
+		+ "Logistics: "
+		+ str(result.get("checked_ground_piles", 0))
+		+ " ground piles | "
+		+ str(result.get("checked_haul_reservations", 0))
+		+ " reservations"
 		+ "\n"
 		+ "Validation Cost: "
 		+ "%.3f ms" % duration_msec
@@ -218,6 +242,23 @@ static func _validation_cache_matches_current_state() -> bool:
 	if (
 		int(_cached_result.get("workplace_version", -1))
 		!= WorldData.city_workplace_version
+	):
+		return false
+
+	if (
+		int(_cached_result.get("ground_pile_version", -1))
+		!= WorldData.city_ground_pile_version
+	):
+		return false
+
+	if (
+		int(
+			_cached_result.get(
+				"haul_reservation_version",
+				-1
+			)
+		)
+		!= WorldData.city_haul_reservation_version
 	):
 		return false
 
@@ -508,6 +549,694 @@ static func _validate_city_citizen_index(
 		)
 
 	return citizen_lookup
+
+static func _validate_city_ground_pile_state(
+	errors: Array[String]
+) -> Dictionary:
+	var ground_pile_lookup: Dictionary = {}
+	var tile_resource_lookup: Dictionary = {}
+	var maximum_ground_pile_id := 0
+
+	for pile_index in range(WorldData.city_ground_piles.size()):
+		var raw_ground_pile = WorldData.city_ground_piles[pile_index]
+
+		if not raw_ground_pile is Dictionary:
+			errors.append(
+				"city_ground_piles["
+				+ str(pile_index)
+				+ "] is not a Dictionary."
+			)
+			continue
+
+		var ground_pile: Dictionary = raw_ground_pile
+		var ground_pile_id := int(ground_pile.get("id", -1))
+		var raw_tile_position = ground_pile.get(
+			"tile_position",
+			WorldData.INVALID_CITY_TILE_POSITION
+		)
+		var resource := str(
+			ground_pile.get("resource_type", WorldData.RESOURCE_NONE)
+		)
+		var raw_amount = ground_pile.get("amount")
+
+		if ground_pile_id <= 0:
+			errors.append(
+				"Ground pile at index "
+				+ str(pile_index)
+				+ " has invalid ID "
+				+ str(ground_pile_id)
+				+ "."
+			)
+			continue
+
+		if ground_pile_lookup.has(ground_pile_id):
+			errors.append(
+				"Duplicate ground pile ID "
+				+ str(ground_pile_id)
+				+ "."
+			)
+			continue
+
+		ground_pile_lookup[ground_pile_id] = pile_index
+		maximum_ground_pile_id = maxi(
+			maximum_ground_pile_id,
+			ground_pile_id
+		)
+
+		if not raw_tile_position is Vector2i:
+			errors.append(
+				"Ground pile "
+				+ str(ground_pile_id)
+				+ " has a non-Vector2i tile."
+			)
+		else:
+			var tile_position: Vector2i = raw_tile_position
+			var tile_resource_key := (
+				str(tile_position) + ":" + resource
+			)
+
+			if tile_resource_lookup.has(tile_resource_key):
+				errors.append(
+					"Ground piles "
+					+ str(tile_resource_lookup[tile_resource_key])
+					+ " and "
+					+ str(ground_pile_id)
+					+ " should have merged on tile "
+					+ str(tile_position)
+					+ " for "
+					+ resource
+					+ "."
+				)
+			else:
+				tile_resource_lookup[tile_resource_key] = (
+					ground_pile_id
+				)
+
+			if (
+				WorldData.official_city_world != null
+				and not WorldData.can_city_ground_pile_exist_at_tile(
+					WorldData.official_city_world,
+					tile_position
+				)
+			):
+				errors.append(
+					"Ground pile "
+					+ str(ground_pile_id)
+					+ " occupies invalid tile "
+					+ str(tile_position)
+					+ "."
+				)
+
+		if not WorldData.get_city_resource_types().has(resource):
+			errors.append(
+				"Ground pile "
+				+ str(ground_pile_id)
+				+ " has invalid resource '"
+				+ resource
+				+ "'."
+			)
+
+		if typeof(raw_amount) != TYPE_INT or int(raw_amount) <= 0:
+			errors.append(
+				"Ground pile "
+				+ str(ground_pile_id)
+				+ " has invalid amount "
+				+ str(raw_amount)
+				+ "."
+			)
+
+		if int(
+			WorldData.city_ground_pile_index_by_id.get(
+				ground_pile_id,
+				-1
+			)
+		) != pile_index:
+			errors.append(
+				"Ground pile index lookup disagrees for ID "
+				+ str(ground_pile_id)
+				+ "."
+			)
+
+	if (
+		WorldData.city_ground_pile_index_by_id.size()
+		!= ground_pile_lookup.size()
+	):
+		errors.append(
+			"Ground pile registry array and ID lookup have different sizes."
+		)
+
+	if WorldData.next_city_ground_pile_id <= maximum_ground_pile_id:
+		errors.append(
+			"next_city_ground_pile_id must be greater than every existing pile ID."
+		)
+
+	return ground_pile_lookup
+
+
+static func _validate_city_haul_reservations(
+	errors: Array[String],
+	citizen_lookup: Dictionary,
+	ground_pile_lookup: Dictionary
+) -> int:
+	var expected_citizen_lookup: Dictionary = {}
+	var expected_source_amount_by_key: Dictionary = {}
+	var expected_destination_amount_by_key: Dictionary = {}
+	var source_endpoint_by_key: Dictionary = {}
+	var source_resource_by_key: Dictionary = {}
+	var destination_endpoint_by_key: Dictionary = {}
+	var maximum_reservation_id := 0
+
+	for raw_reservation_id in WorldData.city_haul_reservations.keys():
+		if typeof(raw_reservation_id) != TYPE_INT:
+			errors.append(
+				"Haul reservation ledger contains a non-integer key."
+			)
+			continue
+
+		var reservation_id: int = raw_reservation_id
+		var raw_reservation = WorldData.city_haul_reservations[
+			reservation_id
+		]
+
+		if not raw_reservation is Dictionary:
+			errors.append(
+				"Haul reservation "
+				+ str(reservation_id)
+				+ " is not a Dictionary."
+			)
+			continue
+
+		var reservation: Dictionary = raw_reservation
+		var stored_reservation_id := int(
+			reservation.get("id", -1)
+		)
+		var citizen_id := int(reservation.get("citizen_id", -1))
+		var resource := str(
+			reservation.get("resource_type", WorldData.RESOURCE_NONE)
+		)
+		var raw_source = reservation.get("source", {})
+		var raw_destination = reservation.get("destination", {})
+		var raw_source_reserved_amount = reservation.get(
+			"source_reserved_amount",
+			0
+		)
+		var raw_destination_reserved_amount = reservation.get(
+			"destination_reserved_amount",
+			0
+		)
+		var source_reserved_amount := maxi(
+			int(raw_source_reserved_amount),
+			0
+		)
+		var destination_reserved_amount := maxi(
+			int(raw_destination_reserved_amount),
+			0
+		)
+
+		maximum_reservation_id = maxi(
+			maximum_reservation_id,
+			reservation_id
+		)
+
+		if reservation_id <= 0 or stored_reservation_id != reservation_id:
+			errors.append(
+				"Haul reservation key/ID mismatch for "
+				+ str(reservation_id)
+				+ "."
+			)
+
+		if (
+			typeof(raw_source_reserved_amount) != TYPE_INT
+			or int(raw_source_reserved_amount) < 0
+		):
+			errors.append(
+				"Haul reservation "
+				+ str(reservation_id)
+				+ " has invalid source reserved amount."
+			)
+
+		if (
+			typeof(raw_destination_reserved_amount) != TYPE_INT
+			or int(raw_destination_reserved_amount) < 0
+		):
+			errors.append(
+				"Haul reservation "
+				+ str(reservation_id)
+				+ " has invalid destination reserved amount."
+			)
+
+		if not citizen_lookup.has(citizen_id):
+			errors.append(
+				"Haul reservation "
+				+ str(reservation_id)
+				+ " references missing citizen "
+				+ str(citizen_id)
+				+ "."
+			)
+			continue
+
+		if expected_citizen_lookup.has(citizen_id):
+			errors.append(
+				"Citizen "
+				+ str(citizen_id)
+				+ " owns multiple haul reservations."
+			)
+		else:
+			expected_citizen_lookup[citizen_id] = reservation_id
+
+		if not WorldData.get_city_resource_types().has(resource):
+			errors.append(
+				"Haul reservation "
+				+ str(reservation_id)
+				+ " has invalid resource '"
+				+ resource
+				+ "'."
+			)
+
+		if not raw_source is Dictionary or not raw_destination is Dictionary:
+			errors.append(
+				"Haul reservation "
+				+ str(reservation_id)
+				+ " has invalid endpoint data."
+			)
+			continue
+
+		var source: Dictionary = raw_source
+		var destination: Dictionary = raw_destination
+		var source_is_valid := (
+			CityCitizens.is_valid_city_citizen_haul_endpoint(source)
+		)
+		var destination_is_valid := (
+			CityCitizens.is_valid_city_citizen_haul_endpoint(
+				destination,
+				destination_reserved_amount <= 0
+			)
+		)
+
+		if not source_is_valid:
+			errors.append(
+				"Haul reservation "
+				+ str(reservation_id)
+				+ " has invalid source endpoint."
+			)
+
+		if not destination_is_valid:
+			errors.append(
+				"Haul reservation "
+				+ str(reservation_id)
+				+ " has invalid destination endpoint."
+			)
+
+		var citizen := WorldData.get_city_citizen_by_id(citizen_id)
+		var current_task := WorldData.get_city_citizen_current_task(
+			citizen_id
+		)
+		var current_haul := WorldData.get_city_citizen_current_haul(
+			citizen_id
+		)
+		var cargo_amount := WorldData.get_city_citizen_haul_cargo_amount(
+			citizen_id
+		)
+
+		if not bool(citizen.get("alive", false)):
+			errors.append(
+				"Dead citizen "
+				+ str(citizen_id)
+				+ " owns haul reservation "
+				+ str(reservation_id)
+				+ "."
+			)
+
+		if (
+			str(current_task.get("kind", ""))
+			!= WorldData.CITY_CITIZEN_TASK_KIND_HAUL
+		):
+			errors.append(
+				"Haul reservation "
+				+ str(reservation_id)
+				+ " exists without an active haul task."
+			)
+
+		if int(
+			current_haul.get(
+				"reservation_id",
+				WorldData.INVALID_CITY_CITIZEN_HAUL_RESERVATION_ID
+			)
+		) != reservation_id:
+			errors.append(
+				"Citizen "
+				+ str(citizen_id)
+				+ " haul state does not point to reservation "
+				+ str(reservation_id)
+				+ "."
+			)
+
+		if str(
+			current_haul.get(
+				"resource_type",
+				WorldData.RESOURCE_NONE
+			)
+		) != resource:
+			errors.append(
+				"Citizen "
+				+ str(citizen_id)
+				+ " haul resource does not match reservation "
+				+ str(reservation_id)
+				+ "."
+			)
+
+		var raw_current_source = current_haul.get("source", {})
+
+		if (
+			not raw_current_source is Dictionary
+			or _get_validation_endpoint_key(raw_current_source)
+			!= _get_validation_endpoint_key(source)
+		):
+			errors.append(
+				"Citizen "
+				+ str(citizen_id)
+				+ " haul source does not match reservation "
+				+ str(reservation_id)
+				+ "."
+			)
+
+		if (
+			source_reserved_amount <= 0
+			and destination_reserved_amount <= 0
+			and (
+				cargo_amount <= 0
+				or str(
+					current_haul.get(
+						"phase",
+						WorldData.CITY_CITIZEN_HAUL_PHASE_NONE
+					)
+				) not in [
+					WorldData.CITY_CITIZEN_HAUL_PHASE_RETARGETING,
+					WorldData.CITY_CITIZEN_HAUL_PHASE_PENDING_DESTINATION,
+				]
+			)
+		):
+			errors.append(
+				"Haul reservation "
+				+ str(reservation_id)
+				+ " reserves neither source goods nor destination capacity."
+			)
+
+		if source_reserved_amount > 0 and cargo_amount > 0:
+			errors.append(
+				"Haul reservation "
+				+ str(reservation_id)
+				+ " reserves source goods after cargo was picked up."
+			)
+
+		if (
+			source_reserved_amount > 0
+			and source_reserved_amount != destination_reserved_amount
+		):
+			errors.append(
+				"Pre-pickup haul reservation "
+				+ str(reservation_id)
+				+ " has unequal source and destination amounts."
+			)
+
+		if (
+			source_reserved_amount > 0
+			and int(current_haul.get("requested_amount", 0))
+			!= source_reserved_amount
+		):
+			errors.append(
+				"Pre-pickup haul reservation "
+				+ str(reservation_id)
+				+ " disagrees with the haul's requested amount."
+			)
+
+		if (
+			cargo_amount > 0
+			and destination_reserved_amount > cargo_amount
+		):
+			errors.append(
+				"Haul reservation "
+				+ str(reservation_id)
+				+ " reserves more destination space than citizen cargo."
+			)
+
+		if source_reserved_amount > 0:
+			if not _city_haul_endpoint_exists(
+				source,
+				ground_pile_lookup
+			):
+				errors.append(
+					"Haul reservation "
+					+ str(reservation_id)
+					+ " reserves a missing source endpoint."
+				)
+
+			if not WorldData.city_haul_endpoint_can_provide_resource(
+				source,
+				resource,
+				str(
+					reservation.get(
+						"source_access_purpose",
+						WorldData.CONTAINER_HAUL_PURPOSE_NONE
+					)
+				),
+				false,
+				reservation_id
+			):
+				errors.append(
+					"Haul reservation "
+					+ str(reservation_id)
+					+ " has an incompatible source endpoint or purpose."
+				)
+
+			var source_key := _get_validation_source_key(
+				source,
+				resource
+			)
+			expected_source_amount_by_key[source_key] = (
+				int(expected_source_amount_by_key.get(source_key, 0))
+				+ source_reserved_amount
+			)
+			source_endpoint_by_key[source_key] = source
+			source_resource_by_key[source_key] = resource
+
+		if destination_reserved_amount > 0:
+			if (
+				str(
+					destination.get(
+						"kind",
+						WorldData.CITY_CITIZEN_HAUL_ENDPOINT_KIND_NONE
+					)
+				)
+				!= WorldData
+				.CITY_CITIZEN_HAUL_ENDPOINT_KIND_CITY_OBJECT_CONTAINER
+				or WorldData.get_city_object_by_id(
+					int(destination.get("id", -1))
+				).is_empty()
+			):
+				errors.append(
+					"Haul reservation "
+					+ str(reservation_id)
+					+ " reserves missing or non-object destination capacity."
+				)
+
+			var raw_current_destination = current_haul.get(
+				"destination",
+				{}
+			)
+
+			if (
+				not raw_current_destination is Dictionary
+				or _get_validation_endpoint_key(raw_current_destination)
+				!= _get_validation_endpoint_key(destination)
+			):
+				errors.append(
+					"Citizen "
+					+ str(citizen_id)
+					+ " haul destination does not match reservation "
+					+ str(reservation_id)
+					+ "."
+				)
+
+			var destination_object := WorldData.get_city_object_by_id(
+				int(destination.get("id", -1))
+			)
+
+			var destination_access_purpose := str(
+				reservation.get(
+					"destination_access_purpose",
+					WorldData.CONTAINER_HAUL_PURPOSE_NONE
+				)
+			)
+			var destination_policy_is_valid := (
+				WorldData.city_haul_endpoint_can_accept_resource(
+					destination,
+					resource,
+					destination_access_purpose,
+					false,
+					reservation_id
+				)
+			)
+
+			if (
+				destination_access_purpose
+				== WorldData.CONTAINER_HAUL_PURPOSE_PUBLIC_STORAGE
+				and WorldData.get_city_object_public_storage_tier(
+					destination_object
+				)
+				== WorldData.PUBLIC_CITY_STORAGE_TIER_NONE
+			):
+				destination_policy_is_valid = false
+			elif (
+				destination_access_purpose
+				== WorldData.CONTAINER_HAUL_PURPOSE_HOME_DELIVERY
+				and not WorldData.city_object_is_household_home(
+					destination_object
+				)
+			):
+				destination_policy_is_valid = false
+
+			if not destination_policy_is_valid:
+				errors.append(
+					"Haul reservation "
+					+ str(reservation_id)
+					+ " has an incompatible destination or purpose."
+				)
+
+			var destination_key := _get_validation_endpoint_key(
+				destination
+			)
+			expected_destination_amount_by_key[destination_key] = (
+				int(
+					expected_destination_amount_by_key.get(
+						destination_key,
+						0
+					)
+				)
+				+ destination_reserved_amount
+			)
+			destination_endpoint_by_key[destination_key] = destination
+
+	for source_key in expected_source_amount_by_key.keys():
+		var source: Dictionary = source_endpoint_by_key[source_key]
+		var resource: String = source_resource_by_key[source_key]
+		var reserved_amount := int(
+			expected_source_amount_by_key[source_key]
+		)
+
+		if (
+			reserved_amount
+			> WorldData.get_city_haul_endpoint_resource_amount(
+				source,
+				resource
+			)
+		):
+			errors.append(
+				"Source reservations exceed physical "
+				+ resource
+				+ " at "
+				+ str(source)
+				+ "."
+			)
+
+	for destination_key in expected_destination_amount_by_key.keys():
+		var destination: Dictionary = (
+			destination_endpoint_by_key[destination_key]
+		)
+		var city_object := WorldData.get_city_object_by_id(
+			int(destination.get("id", -1))
+		)
+		var reserved_amount := int(
+			expected_destination_amount_by_key[destination_key]
+		)
+
+		if (
+			not city_object.is_empty()
+			and reserved_amount
+			> WorldData.get_city_object_storage_free_space(city_object)
+		):
+			errors.append(
+				"Destination reservations exceed shared free capacity at "
+				+ str(destination)
+				+ "."
+			)
+
+	if (
+		WorldData.city_haul_reservation_id_by_citizen_id
+		!= expected_citizen_lookup
+	):
+		errors.append(
+			"Haul reservation citizen lookup does not match the ledger."
+		)
+
+	if (
+		WorldData.city_haul_source_reserved_amount_by_key
+		!= expected_source_amount_by_key
+	):
+		errors.append(
+			"Haul source reservation aggregate does not match the ledger."
+		)
+
+	if (
+		WorldData.city_haul_destination_reserved_amount_by_key
+		!= expected_destination_amount_by_key
+	):
+		errors.append(
+			"Haul destination reservation aggregate does not match the ledger."
+		)
+
+	if WorldData.next_city_haul_reservation_id <= maximum_reservation_id:
+		errors.append(
+			"next_city_haul_reservation_id must exceed every reservation ID."
+		)
+
+	return WorldData.city_haul_reservations.size()
+
+
+static func _city_haul_endpoint_exists(
+	endpoint: Dictionary,
+	ground_pile_lookup: Dictionary
+) -> bool:
+	match str(
+		endpoint.get(
+			"kind",
+			WorldData.CITY_CITIZEN_HAUL_ENDPOINT_KIND_NONE
+		)
+	):
+		WorldData.CITY_CITIZEN_HAUL_ENDPOINT_KIND_CITY_OBJECT_CONTAINER:
+			return not WorldData.get_city_object_by_id(
+				int(endpoint.get("id", -1))
+			).is_empty()
+
+		WorldData.CITY_CITIZEN_HAUL_ENDPOINT_KIND_GROUND_PILE:
+			return ground_pile_lookup.has(
+				int(endpoint.get("id", -1))
+			)
+
+	return false
+
+
+static func _get_validation_endpoint_key(
+	endpoint: Dictionary
+) -> String:
+	return (
+		str(
+			endpoint.get(
+				"kind",
+				WorldData.CITY_CITIZEN_HAUL_ENDPOINT_KIND_NONE
+			)
+		)
+		+ ":"
+		+ str(int(endpoint.get("id", -1)))
+	)
+
+
+static func _get_validation_source_key(
+	endpoint: Dictionary,
+	resource: String
+) -> String:
+	return _get_validation_endpoint_key(endpoint) + ":" + resource
+
 
 static func _validate_city_citizen_spatial_state(
 	errors: Array[String],
@@ -967,6 +1696,61 @@ static func _validate_city_citizen_demographics(
 					+ " female citizens."
 			)
 
+
+static func _validate_city_citizen_need_state(
+	errors: Array[String],
+	citizen_lookup: Dictionary
+) -> void:
+	for citizen_id in citizen_lookup.keys():
+		var citizen_index := int(citizen_lookup[citizen_id])
+		var citizen: Dictionary = WorldData.city_citizens[citizen_index]
+
+		if not CityCitizens.has_complete_city_citizen_need_state(citizen):
+			errors.append(
+				"Citizen "
+				+ str(citizen_id)
+				+ " has incomplete need state."
+			)
+			continue
+
+		var raw_hunger = citizen.get("hunger")
+		var raw_hunger_remainder = citizen.get("hunger_decay_remainder")
+
+		if (
+			typeof(raw_hunger) != TYPE_INT
+			or int(raw_hunger) < 0
+			or int(raw_hunger) > WorldData.MAX_CITIZEN_HUNGER
+		):
+			errors.append(
+				"Citizen "
+				+ str(citizen_id)
+				+ " has out-of-range hunger state."
+			)
+
+		if (
+			typeof(raw_hunger_remainder) != TYPE_INT
+			or int(raw_hunger_remainder) < 0
+			or int(raw_hunger_remainder)
+			>= WorldData.CITIZEN_HUNGER_DECAY_DENOMINATOR_MINUTES
+		):
+			errors.append(
+				"Citizen "
+				+ str(citizen_id)
+				+ " has invalid hunger-decay remainder."
+			)
+
+	for resource in WorldData.get_city_food_resource_types():
+		if (
+			not WorldData.get_city_resource_types().has(resource)
+			or WorldData.get_city_food_hunger_restore(resource) <= 0
+		):
+			errors.append(
+				"Food configuration contains invalid resource '"
+				+ resource
+				+ "'."
+			)
+
+
 static func _validate_city_citizen_task_state(
 	errors: Array[String],
 	citizen_lookup: Dictionary,
@@ -1316,6 +2100,22 @@ static func _validate_city_citizen_task_state(
 				+ "'."
 			)
 
+		if (
+			(
+				task_source == WorldData.CITY_CITIZEN_TASK_SOURCE_PLAYER
+				or task_source
+				== WorldData.CITY_CITIZEN_TASK_SOURCE_AUTONOMY
+			)
+			and int(citizen.get("job_object_id", -1)) > 0
+		):
+			errors.append(
+				"Employed citizen "
+				+ str(citizen_id)
+				+ " has ineligible task source '"
+				+ task_source
+				+ "'."
+			)
+
 		match task_kind:
 			WorldData.CITY_CITIZEN_TASK_KIND_WORK:
 				if target_object_id <= 0:
@@ -1419,6 +2219,19 @@ static func _validate_city_citizen_task_state(
 						WorldData.CITY_CITIZEN_HAUL_PHASE_NONE
 					)
 				)
+				var raw_reservation_id = haul.get("reservation_id")
+				var reservation_id := (
+					WorldData.INVALID_CITY_CITIZEN_HAUL_RESERVATION_ID
+				)
+
+				if typeof(raw_reservation_id) != TYPE_INT:
+					errors.append(
+						"Citizen "
+							+ str(citizen_id)
+							+ " haul task has non-integer reservation ID."
+					)
+				else:
+					reservation_id = int(raw_reservation_id)
 				var raw_haul_source = haul.get("source", {})
 				var raw_haul_destination = haul.get(
 					"destination",
@@ -1514,6 +2327,28 @@ static func _validate_city_citizen_task_state(
 					int(cargo.get("amount", 0)),
 					0
 				)
+
+				if cargo_amount <= 0 and reservation_id <= 0:
+					errors.append(
+						"Citizen "
+							+ str(citizen_id)
+							+ " has a pre-pickup haul without a reservation."
+					)
+
+				if (
+					cargo_amount > 0
+					and reservation_id <= 0
+					and not [
+						WorldData.CITY_CITIZEN_HAUL_PHASE_BLOCKED,
+						WorldData.CITY_CITIZEN_HAUL_PHASE_RETARGETING,
+						WorldData.CITY_CITIZEN_HAUL_PHASE_PENDING_DESTINATION,
+					].has(haul_phase)
+				):
+					errors.append(
+						"Citizen "
+							+ str(citizen_id)
+							+ " carries unreserved cargo outside destination retry."
+					)
 
 				if (
 					cargo_amount > 0

@@ -120,6 +120,180 @@ static func run_tick(
 			_:
 				_clear_invalid_task(citizen_id)
 
+
+# Future player-command gateways should call this before assigning a player
+# task. Employment is an absolute immunity check. An unemployed hauler drops
+# physical cargo first; every other current autonomous task is safely cleared.
+static func prepare_unemployed_citizen_for_player_command(
+	citizen_id: int
+) -> bool:
+	var citizen := WorldData.get_city_citizen_by_id(citizen_id)
+
+	if (
+		citizen.is_empty()
+		or not bool(citizen.get("alive", false))
+		or int(citizen.get("job_object_id", -1)) > 0
+	):
+		return false
+
+	var cargo := WorldData.get_city_citizen_haul_cargo(citizen_id)
+	var cargo_amount := maxi(int(cargo.get("amount", 0)), 0)
+
+	if cargo_amount > 0:
+		var city_world: WorldData = WorldData.official_city_world
+		var raw_current_tile = citizen.get(
+			"city_tile_position",
+			WorldData.INVALID_CITY_TILE_POSITION
+		)
+
+		if city_world == null or not raw_current_tile is Vector2i:
+			return false
+
+		var drop_tile := _find_nearest_valid_ground_pile_drop_tile(
+			city_world,
+			citizen_id,
+			raw_current_tile
+		)
+
+		if drop_tile == WorldData.INVALID_CITY_TILE_POSITION:
+			return false
+
+		var resource := str(
+			cargo.get("resource_type", WorldData.RESOURCE_NONE)
+		)
+		var added_amount := WorldData.add_resource_to_city_ground_pile(
+			drop_tile,
+			resource,
+			cargo_amount
+		)
+
+		if added_amount != cargo_amount:
+			return false
+
+		var final_cargo_amount := WorldData.set_city_citizen_haul_cargo(
+			citizen_id,
+			resource,
+			0
+		)
+
+		if final_cargo_amount != 0:
+			_rollback_interrupted_cargo_ground_pile(
+				drop_tile,
+				resource,
+				added_amount
+			)
+			return false
+
+	WorldData.release_city_haul_reservation_for_citizen(citizen_id)
+	WorldData.clear_city_citizen_task(
+		citizen_id,
+		WorldData.CITY_CITIZEN_TASK_SOURCE_PLAYER
+	)
+	WorldData.cancel_city_citizen_movement(citizen_id)
+	return true
+
+
+static func _find_nearest_valid_ground_pile_drop_tile(
+	city_world: WorldData,
+	citizen_id: int,
+	origin_tile: Vector2i
+) -> Vector2i:
+	if WorldData.can_city_ground_pile_exist_at_tile(
+		city_world,
+		origin_tile
+	):
+		return origin_tile
+
+	var maximum_radius := maxi(city_world.width, city_world.height)
+	var city_wide_expansion_limit := maxi(
+		city_world.width * city_world.height,
+		1
+	)
+
+	for radius in range(1, maximum_radius + 1):
+		var candidate_tiles: Array = []
+
+		for offset_y in range(-radius, radius + 1):
+			var offset_x_magnitude := radius - absi(offset_y)
+			var candidate_x_offsets := [offset_x_magnitude]
+
+			if offset_x_magnitude > 0:
+				candidate_x_offsets.append(-offset_x_magnitude)
+
+			for offset_x in candidate_x_offsets:
+				var candidate_tile := (
+					origin_tile + Vector2i(offset_x, offset_y)
+				)
+
+				if not WorldData.can_city_ground_pile_exist_at_tile(
+					city_world,
+					candidate_tile
+				):
+					continue
+
+				candidate_tiles.append(candidate_tile)
+
+		if candidate_tiles.is_empty():
+			continue
+
+		var path_result := (
+			CityNavigationSystemScript.find_path_to_any_city_tile(
+				city_world,
+				origin_tile,
+				candidate_tiles,
+				city_wide_expansion_limit,
+				citizen_id,
+				1
+			)
+		)
+
+		if not bool(path_result.get("success", false)):
+			continue
+
+		var raw_destination_tile = path_result.get(
+			"destination_tile",
+			WorldData.INVALID_CITY_TILE_POSITION
+		)
+
+		if raw_destination_tile is Vector2i:
+			return raw_destination_tile
+
+	return WorldData.INVALID_CITY_TILE_POSITION
+
+
+static func _rollback_interrupted_cargo_ground_pile(
+	tile_position: Vector2i,
+	resource: String,
+	amount: int
+) -> void:
+	for raw_ground_pile in WorldData.get_city_ground_piles_at_tile(
+		tile_position
+	):
+		if not raw_ground_pile is Dictionary:
+			continue
+
+		var ground_pile: Dictionary = raw_ground_pile
+
+		if str(
+			ground_pile.get("resource_type", WorldData.RESOURCE_NONE)
+		) != resource:
+			continue
+
+		var removed_amount := WorldData.remove_resource_from_city_ground_pile(
+			int(ground_pile.get("id", -1)),
+			resource,
+			amount
+		)
+
+		if removed_amount != amount:
+			push_error(
+				"Interrupted cargo ground-pile rollback failed for "
+				+ resource
+				+ "."
+			)
+
+		return
+
 static func _advance_work_task(
 	city_world: WorldData,
 	citizen_id: int,

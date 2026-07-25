@@ -16,7 +16,11 @@ const WORK_SHIFT_END_MINUTE_OF_DAY: int = 17 * 60
 const SCHEDULED_WORK_TASK_PRIORITY: int = 100
 const OUTSTANDING_CARGO_HAUL_TASK_PRIORITY: int = 150
 const SCHEDULED_OUTPUT_HAUL_TASK_PRIORITY: int = 75
+const SCHEDULED_HOME_FOOD_DELIVERY_TASK_PRIORITY: int = 65
 const SCHEDULED_RETURN_HOME_TASK_PRIORITY: int = 50
+const AUTONOMOUS_GROUND_PILE_HAUL_TASK_PRIORITY: int = 90
+const AUTONOMOUS_HOME_FOOD_DELIVERY_TASK_PRIORITY: int = 80
+const AUTONOMOUS_WORKPLACE_OUTPUT_HAUL_TASK_PRIORITY: int = 70
 const SCHEDULE_PHASE_WORK_SHIFT := "work_shift"
 const SCHEDULE_PHASE_OFF_SHIFT := "off_shift"
 const SCHEDULE_ACTIVITY_OUTSTANDING_OBLIGATION := (
@@ -51,6 +55,10 @@ const IDLE_MAXIMUM_PATH_STEPS: int = 6
 const IDLE_MAXIMUM_EXPANDED_NODES: int = 96
 const MAX_IDLE_SCANS_PER_TICK: int = 64
 const MAX_IDLE_PATH_REQUESTS_PER_TICK: int = 1
+const MAX_AUTONOMOUS_HAUL_ASSIGNMENTS_PER_TICK: int = 2
+const MAX_AUTONOMOUS_HAUL_CANDIDATES_PER_TICK: int = 32
+const MAX_AUTONOMOUS_HAUL_TASK_BUILD_ATTEMPTS_PER_TICK: int = 4
+const AUTONOMOUS_HAUL_EXACT_HEURISTIC_WEIGHT: int = 1
 
 static var _pending_decision_ids: Array[int] = []
 static var _pending_decision_id_lookup: Dictionary = {}
@@ -62,6 +70,7 @@ static var _idle_scan_cursor: int = 0
 static var _idle_anchor_tile_by_citizen_id: Dictionary = {}
 static var _next_idle_decision_minute_by_citizen_id: Dictionary = {}
 static var _idle_choice_sequence_by_citizen_id: Dictionary = {}
+static var _autonomous_haul_scan_cursor: int = 0
 
 static func run_tick(
 	_tick_index: int,
@@ -82,6 +91,10 @@ static func run_tick(
 	var schedule_phase := _get_schedule_phase(
 		work_shift_is_active
 	)
+
+	# Newly produced output first expands the oldest compatible pre-pickup load.
+	# Only the remainder is visible to autonomous task matching below.
+	WorldData.expand_pending_city_haul_reservations()
 
 	if not _runtime_initialized:
 		_runtime_initialized = true
@@ -117,6 +130,7 @@ static func run_tick(
 		schedule_phase
 	)
 	_process_decision_queue(schedule_phase)
+	_process_bounded_autonomous_hauling(schedule_phase)
 
 	_process_bounded_idle_behaviors(
 		work_shift_is_active
@@ -132,6 +146,7 @@ static func reset_runtime_state() -> void:
 	_idle_anchor_tile_by_citizen_id.clear()
 	_next_idle_decision_minute_by_citizen_id.clear()
 	_idle_choice_sequence_by_citizen_id.clear()
+	_autonomous_haul_scan_cursor = 0
 
 
 static func is_work_shift_active() -> bool:
@@ -511,68 +526,170 @@ static func _get_outstanding_obligation_task_request(
 		workplace_id
 	)
 
-	if (
-		workplace_id <= 0
-		or workplace.is_empty()
-		or not WorldData.city_object_is_workplace(workplace)
-	):
-		return {}
-
 	var remaining_carry_capacity := (
 		WorldData.get_city_citizen_available_haul_capacity(
 			citizen_id
 		)
 	)
 
+	if (
+		remaining_carry_capacity > 0
+		and workplace_id > 0
+		and not workplace.is_empty()
+		and WorldData.city_object_is_workplace(workplace)
+	):
+		var source := WorldData.make_city_citizen_haul_endpoint(
+			workplace_id
+		)
+
+		for resource in WorldData.get_city_object_output_resources(
+			workplace
+		):
+			var stored_amount := (
+				WorldData.get_city_object_stored_resource_amount(
+					workplace,
+					resource
+				)
+			)
+			var requested_amount := mini(
+				stored_amount,
+				remaining_carry_capacity
+			)
+
+			if requested_amount <= 0:
+				continue
+
+			var task_request := (
+				CitizenHaulingSystemScript
+				.make_public_storage_haul_task_request({
+					"city_world": WorldData.official_city_world,
+					"citizen": citizen,
+					"source": source,
+					"resource_type": resource,
+					"requested_amount": requested_amount,
+					"reason": (
+						WorldData
+						.CITY_CITIZEN_HAUL_REASON_WORKPLACE_OUTPUT_BEFORE_HOME
+					),
+					"requester": source,
+					"source_access_purpose": (
+						WorldData
+						.CONTAINER_HAUL_PURPOSE_WORKPLACE_OUTPUT
+					),
+					"destination_access_purpose": (
+						WorldData.CONTAINER_HAUL_PURPOSE_PUBLIC_STORAGE
+					),
+					"task_source": (
+						WorldData.CITY_CITIZEN_TASK_SOURCE_SCHEDULE
+					),
+					"task_priority": (
+						SCHEDULED_OUTPUT_HAUL_TASK_PRIORITY
+					),
+				})
+			)
+
+			if not task_request.is_empty():
+				return task_request
+
+	return _get_scheduled_home_food_delivery_task_request(citizen)
+
+
+static func _get_scheduled_home_food_delivery_task_request(
+	citizen: Dictionary
+) -> Dictionary:
+	var citizen_id := int(citizen.get("id", -1))
+	var home_id := int(citizen.get("home_object_id", -1))
+	var home := WorldData.get_city_object_by_id(home_id)
+	var raw_current_tile = citizen.get(
+		"city_tile_position",
+		WorldData.INVALID_CITY_TILE_POSITION
+	)
+
+	if (
+		citizen_id <= 0
+		or home_id <= 0
+		or not raw_current_tile is Vector2i
+		or not WorldData.city_object_is_household_home(home)
+		or WorldData.get_city_home_unfulfilled_food_nutrition(home) <= 0
+	):
+		return {}
+
+	var remaining_carry_capacity := (
+		WorldData.get_city_citizen_available_haul_capacity(citizen_id)
+	)
+
 	if remaining_carry_capacity <= 0:
 		return {}
 
-	var source := WorldData.make_city_citizen_haul_endpoint(
-		workplace_id
+	var destination := WorldData.make_city_citizen_haul_endpoint(
+		home_id
 	)
+	var current_tile: Vector2i = raw_current_tile
 
-	for resource in WorldData.get_city_object_output_resources(
-		workplace
-	):
-		var stored_amount := (
-			WorldData.get_city_object_stored_resource_amount(
-				workplace,
+	for resource in WorldData.get_city_food_resource_types():
+		var requested_amount := mini(
+			remaining_carry_capacity,
+			WorldData.get_city_home_requested_food_units(
+				home,
 				resource
 			)
 		)
-		var requested_amount := mini(
-			stored_amount,
-			remaining_carry_capacity
+
+		if requested_amount <= 0:
+			continue
+
+		var source_result := (
+			CitizenHaulingSystemScript
+			.find_nearest_eligible_public_storage_source({
+				"city_world": WorldData.official_city_world,
+				"start_tile": current_tile,
+				"citizen_id": citizen_id,
+				"resource_type": resource,
+				"source_access_purpose": (
+					WorldData.CONTAINER_HAUL_PURPOSE_HOME_DELIVERY
+				),
+				"requested_amount": requested_amount,
+			})
+		)
+
+		if source_result.is_empty():
+			continue
+
+		requested_amount = mini(
+			requested_amount,
+			maxi(
+				int(source_result.get("available_amount", 0)),
+				0
+			)
 		)
 
 		if requested_amount <= 0:
 			continue
 
 		var task_request := (
-			CitizenHaulingSystemScript
-			.make_public_storage_haul_task_request({
+			CitizenHaulingSystemScript.make_directed_haul_task_request({
 				"city_world": WorldData.official_city_world,
 				"citizen": citizen,
-				"source": source,
+				"source": source_result.get("endpoint", {}),
+				"destination": destination,
 				"resource_type": resource,
 				"requested_amount": requested_amount,
 				"reason": (
 					WorldData
-					.CITY_CITIZEN_HAUL_REASON_WORKPLACE_OUTPUT_BEFORE_HOME
+					.CITY_CITIZEN_HAUL_REASON_SCHEDULED_HOME_FOOD_DELIVERY
 				),
-				"requester": source,
+				"requester": destination,
 				"source_access_purpose": (
-					WorldData
-					.CONTAINER_HAUL_PURPOSE_WORKPLACE_OUTPUT
+					WorldData.CONTAINER_HAUL_PURPOSE_HOME_DELIVERY
 				),
 				"destination_access_purpose": (
-					WorldData.CONTAINER_HAUL_PURPOSE_PUBLIC_STORAGE
+					WorldData.CONTAINER_HAUL_PURPOSE_HOME_DELIVERY
 				),
 				"task_source": (
 					WorldData.CITY_CITIZEN_TASK_SOURCE_SCHEDULE
 				),
 				"task_priority": (
-					SCHEDULED_OUTPUT_HAUL_TASK_PRIORITY
+					SCHEDULED_HOME_FOOD_DELIVERY_TASK_PRIORITY
 				),
 			})
 		)
@@ -727,6 +844,758 @@ static func _clear_schedule_sourced_tasks() -> void:
 static func _clear_decision_queue() -> void:
 	_pending_decision_ids.clear()
 	_pending_decision_id_lookup.clear()
+
+
+static func _process_bounded_autonomous_hauling(
+	schedule_phase: String
+) -> void:
+	var city_world: WorldData = WorldData.official_city_world
+
+	if city_world == null:
+		return
+
+	var assigned_count := 0
+
+	while assigned_count < MAX_AUTONOMOUS_HAUL_ASSIGNMENTS_PER_TICK:
+		var candidates := _get_bounded_autonomous_haul_candidates(
+			schedule_phase
+		)
+
+		if candidates.is_empty():
+			return
+
+		# Loose ground resources are considered before protected workplace
+		# buffers. If no pile is deliverable, citizens may still perform a
+		# different valid workplace-output haul rather than idling.
+		if _try_assign_best_autonomous_haul(
+			city_world,
+			candidates,
+			_get_ground_pile_haul_opportunities()
+		):
+			assigned_count += 1
+			continue
+
+		if _try_assign_best_autonomous_home_food_haul(
+			city_world,
+			candidates
+		):
+			assigned_count += 1
+			continue
+
+		if _try_assign_best_autonomous_haul(
+			city_world,
+			candidates,
+			_get_workplace_output_haul_opportunities()
+		):
+			assigned_count += 1
+			continue
+
+		return
+
+
+static func _try_assign_best_autonomous_home_food_haul(
+	city_world: WorldData,
+	candidates: Array
+) -> bool:
+	var all_opportunities := _get_home_food_delivery_opportunities()
+
+	# Storage source tiers are absolute. A reachable Stockpile source must be
+	# exhausted before the City Keep can supply a household, even if the Keep is
+	# closer to an idle hauler.
+	for storage_tier in WorldData.get_public_city_storage_tiers():
+		var tier_opportunities: Array = []
+
+		for raw_opportunity in all_opportunities:
+			if (
+				raw_opportunity is Dictionary
+				and int(raw_opportunity.get("source_tier", -1))
+				== storage_tier
+			):
+				tier_opportunities.append(raw_opportunity)
+
+		if _try_assign_best_autonomous_haul(
+			city_world,
+			candidates,
+			tier_opportunities
+		):
+			return true
+
+	return false
+
+
+static func _get_bounded_autonomous_haul_candidates(
+	schedule_phase: String
+) -> Array:
+	var candidates: Array = []
+	var citizen_count := WorldData.city_citizens.size()
+
+	if citizen_count <= 0:
+		_autonomous_haul_scan_cursor = 0
+		return candidates
+
+	var scanned_count := 0
+
+	while (
+		scanned_count < citizen_count
+		and candidates.size()
+		< MAX_AUTONOMOUS_HAUL_CANDIDATES_PER_TICK
+	):
+		var citizen_index := (
+			_autonomous_haul_scan_cursor % citizen_count
+		)
+		_autonomous_haul_scan_cursor = (
+			(_autonomous_haul_scan_cursor + 1) % citizen_count
+		)
+		scanned_count += 1
+
+		var raw_citizen = WorldData.city_citizens[citizen_index]
+
+		if not raw_citizen is Dictionary:
+			continue
+
+		var citizen: Dictionary = raw_citizen
+
+		if not _citizen_is_available_for_autonomous_hauling(
+			citizen,
+			schedule_phase
+		):
+			continue
+
+		candidates.append(citizen.duplicate(true))
+
+	return candidates
+
+
+static func _citizen_is_available_for_autonomous_hauling(
+	citizen: Dictionary,
+	schedule_phase: String
+) -> bool:
+	if not bool(citizen.get("alive", false)):
+		return false
+
+	if int(citizen.get("job_object_id", -1)) > 0:
+		return false
+
+	if (
+		str(citizen.get("state", ""))
+		!= WorldData.CITY_CITIZEN_STATE_IDLE
+	):
+		return false
+
+	var raw_current_task = citizen.get("current_task", {})
+
+	if not raw_current_task is Dictionary:
+		return false
+
+	if (
+		str(raw_current_task.get("kind", ""))
+		!= WorldData.CITY_CITIZEN_TASK_KIND_NONE
+	):
+		return false
+
+	var citizen_id := int(citizen.get("id", -1))
+
+	if (
+		citizen_id <= 0
+		or WorldData.get_city_citizen_haul_cargo_amount(citizen_id) > 0
+		or not citizen.get("city_tile_position") is Vector2i
+	):
+		return false
+
+	# Scheduled obligations still outrank autonomous work. This is mainly the
+	# off-shift return-home rule for housed unemployed citizens.
+	return _get_next_scheduled_task_request(
+		citizen,
+		schedule_phase
+	).is_empty()
+
+
+static func _get_ground_pile_haul_opportunities() -> Array:
+	var opportunities: Array = []
+	var deliverable_resource_lookup: Dictionary = {}
+
+	for raw_ground_pile in WorldData.get_city_ground_pile_snapshot():
+		if not raw_ground_pile is Dictionary:
+			continue
+
+		var ground_pile: Dictionary = raw_ground_pile
+		var ground_pile_id := int(ground_pile.get("id", -1))
+		var resource := str(
+			ground_pile.get("resource_type", WorldData.RESOURCE_NONE)
+		)
+		var source := WorldData.make_city_ground_pile_haul_endpoint(
+			ground_pile_id
+		)
+
+		if not deliverable_resource_lookup.has(resource):
+			deliverable_resource_lookup[resource] = (
+				_resource_has_unreserved_public_storage_destination(
+					resource
+				)
+			)
+
+		if (
+			not bool(deliverable_resource_lookup[resource])
+			or not WorldData.city_haul_endpoint_can_provide_resource(
+				source,
+				resource,
+				WorldData.CONTAINER_HAUL_PURPOSE_GROUND_PILE_CLEANUP,
+				true
+			)
+		):
+			continue
+
+		opportunities.append({
+			"source": source,
+			"requester": source,
+			"resource_type": resource,
+			"reason": (
+				WorldData.CITY_CITIZEN_HAUL_REASON_GROUND_PILE_CLEANUP
+			),
+			"source_access_purpose": (
+				WorldData.CONTAINER_HAUL_PURPOSE_GROUND_PILE_CLEANUP
+			),
+			"task_priority": (
+				AUTONOMOUS_GROUND_PILE_HAUL_TASK_PRIORITY
+			),
+		})
+
+	return opportunities
+
+
+static func _get_home_food_delivery_opportunities() -> Array:
+	var opportunities: Array = []
+
+	for raw_home in WorldData.city_objects:
+		if not raw_home is Dictionary:
+			continue
+
+		var home: Dictionary = raw_home
+
+		if (
+			not WorldData.city_object_is_household_home(home)
+			or WorldData.get_city_home_unfulfilled_food_nutrition(home)
+			<= 0
+		):
+			continue
+
+		var home_id := int(home.get("id", -1))
+		var destination := WorldData.make_city_citizen_haul_endpoint(
+			home_id
+		)
+
+		for resource in WorldData.get_city_food_resource_types():
+			var demanded_amount := (
+				WorldData.get_city_home_requested_food_units(
+					home,
+					resource
+				)
+			)
+
+			if (
+				demanded_amount <= 0
+				or not WorldData.city_haul_endpoint_can_accept_resource(
+					destination,
+					resource,
+					WorldData.CONTAINER_HAUL_PURPOSE_HOME_DELIVERY,
+					true
+				)
+			):
+				continue
+
+			for raw_source_object in WorldData.city_objects:
+				if not raw_source_object is Dictionary:
+					continue
+
+				var source_object: Dictionary = raw_source_object
+				var source_tier := (
+					WorldData.get_city_object_public_storage_tier(
+						source_object
+					)
+				)
+
+				if source_tier == WorldData.PUBLIC_CITY_STORAGE_TIER_NONE:
+					continue
+
+				var source := WorldData.make_city_citizen_haul_endpoint(
+					int(source_object.get("id", -1))
+				)
+
+				if not WorldData.city_haul_endpoint_can_provide_resource(
+					source,
+					resource,
+					WorldData.CONTAINER_HAUL_PURPOSE_HOME_DELIVERY,
+					true
+				):
+					continue
+
+				var requested_amount := mini(
+					demanded_amount,
+					mini(
+						WorldData.get_city_haul_endpoint_unreserved_resource_amount(
+							source,
+							resource
+						),
+						WorldData.get_city_haul_endpoint_unreserved_destination_space(
+							destination
+						)
+					)
+				)
+
+				if requested_amount <= 0:
+					continue
+
+				opportunities.append({
+					"source": source,
+					"destination": destination,
+					"requester": destination,
+					"resource_type": resource,
+					"requested_amount": requested_amount,
+					"reason": (
+						WorldData
+						.CITY_CITIZEN_HAUL_REASON_AUTONOMOUS_HOME_FOOD_DELIVERY
+					),
+					"source_access_purpose": (
+						WorldData.CONTAINER_HAUL_PURPOSE_HOME_DELIVERY
+					),
+					"destination_access_purpose": (
+						WorldData.CONTAINER_HAUL_PURPOSE_HOME_DELIVERY
+					),
+					"source_tier": source_tier,
+					"task_priority": (
+						AUTONOMOUS_HOME_FOOD_DELIVERY_TASK_PRIORITY
+					),
+				})
+
+	return opportunities
+
+
+static func _get_workplace_output_haul_opportunities() -> Array:
+	var opportunities: Array = []
+	var deliverable_resource_lookup: Dictionary = {}
+
+	for raw_city_object in WorldData.city_objects:
+		if not raw_city_object is Dictionary:
+			continue
+
+		var workplace: Dictionary = raw_city_object
+
+		if not WorldData.city_object_is_workplace(workplace):
+			continue
+
+		var workplace_id := int(workplace.get("id", -1))
+		var source := WorldData.make_city_citizen_haul_endpoint(
+			workplace_id
+		)
+
+		for resource in WorldData.get_city_object_output_resources(
+			workplace
+		):
+			if not deliverable_resource_lookup.has(resource):
+				deliverable_resource_lookup[resource] = (
+					_resource_has_unreserved_public_storage_destination(
+						resource
+					)
+				)
+
+			if (
+				not bool(deliverable_resource_lookup[resource])
+				or not WorldData.city_haul_endpoint_can_provide_resource(
+					source,
+					resource,
+					WorldData.CONTAINER_HAUL_PURPOSE_WORKPLACE_OUTPUT,
+					true
+				)
+			):
+				continue
+
+			opportunities.append({
+				"source": source,
+				"requester": source,
+				"resource_type": resource,
+				"reason": (
+					WorldData
+					.CITY_CITIZEN_HAUL_REASON_AUTONOMOUS_WORKPLACE_OUTPUT
+				),
+				"source_access_purpose": (
+					WorldData.CONTAINER_HAUL_PURPOSE_WORKPLACE_OUTPUT
+				),
+				"task_priority": (
+					AUTONOMOUS_WORKPLACE_OUTPUT_HAUL_TASK_PRIORITY
+				),
+			})
+
+	return opportunities
+
+
+static func _resource_has_unreserved_public_storage_destination(
+	resource: String
+) -> bool:
+	for storage_tier in WorldData.get_public_city_storage_tiers():
+		for raw_city_object in WorldData.city_objects:
+			if not raw_city_object is Dictionary:
+				continue
+
+			var city_object: Dictionary = raw_city_object
+
+			if (
+				WorldData.get_city_object_public_storage_tier(city_object)
+				!= storage_tier
+			):
+				continue
+
+			var destination := WorldData.make_city_citizen_haul_endpoint(
+				int(city_object.get("id", -1))
+			)
+
+			if WorldData.city_haul_endpoint_can_accept_resource(
+				destination,
+				resource,
+				WorldData.CONTAINER_HAUL_PURPOSE_PUBLIC_STORAGE,
+				true
+			):
+				return true
+
+	return false
+
+
+static func _try_assign_best_autonomous_haul(
+	city_world: WorldData,
+	candidates: Array,
+	opportunities: Array
+) -> bool:
+	if candidates.is_empty() or opportunities.is_empty():
+		return false
+
+	var opportunity_indices_by_tile: Dictionary = {}
+	var source_tiles: Array = []
+
+	for opportunity_index in range(opportunities.size()):
+		var raw_opportunity = opportunities[opportunity_index]
+
+		if not raw_opportunity is Dictionary:
+			continue
+
+		var opportunity: Dictionary = raw_opportunity
+		var raw_source = opportunity.get("source", {})
+
+		if not raw_source is Dictionary:
+			continue
+
+		for access_tile in _get_autonomous_source_access_tiles(
+			city_world,
+			raw_source
+		):
+			if not opportunity_indices_by_tile.has(access_tile):
+				opportunity_indices_by_tile[access_tile] = []
+				source_tiles.append(access_tile)
+
+			var tile_opportunity_indices: Array = (
+				opportunity_indices_by_tile[access_tile]
+			)
+			tile_opportunity_indices.append(opportunity_index)
+			opportunity_indices_by_tile[access_tile] = (
+				tile_opportunity_indices
+			)
+
+	if source_tiles.is_empty():
+		return false
+
+	var matches: Array = []
+	var city_wide_expansion_limit := maxi(
+		city_world.width * city_world.height,
+		1
+	)
+
+	# Each candidate performs one exact search to every source tile. Taking the
+	# cheapest result across citizens gives a global closest match within this
+	# bounded candidate window rather than letting citizen iteration order win.
+	for raw_citizen in candidates:
+		if not raw_citizen is Dictionary:
+			continue
+
+		var citizen: Dictionary = raw_citizen
+		var citizen_id := int(citizen.get("id", -1))
+		var raw_current_tile = citizen.get(
+			"city_tile_position",
+			WorldData.INVALID_CITY_TILE_POSITION
+		)
+
+		if citizen_id <= 0 or not raw_current_tile is Vector2i:
+			continue
+
+		var path_result := (
+			CityNavigationSystemScript.find_path_to_any_city_tile(
+				city_world,
+				raw_current_tile,
+				source_tiles,
+				city_wide_expansion_limit,
+				citizen_id,
+				AUTONOMOUS_HAUL_EXACT_HEURISTIC_WEIGHT
+			)
+		)
+
+		if not bool(path_result.get("success", false)):
+			continue
+
+		var source_tile = path_result.get(
+			"destination_tile",
+			WorldData.INVALID_CITY_TILE_POSITION
+		)
+
+		if not source_tile is Vector2i:
+			continue
+
+		var raw_indices = opportunity_indices_by_tile.get(
+			source_tile,
+			[]
+		)
+
+		if not raw_indices is Array:
+			continue
+
+		for raw_opportunity_index in raw_indices:
+			var opportunity_index := int(raw_opportunity_index)
+			var source_tier := 0
+
+			if (
+				opportunity_index >= 0
+				and opportunity_index < opportunities.size()
+				and opportunities[opportunity_index] is Dictionary
+			):
+				source_tier = int(
+					(opportunities[opportunity_index] as Dictionary).get(
+						"source_tier",
+						0
+					)
+				)
+
+			matches.append({
+				"citizen_id": citizen_id,
+				"opportunity_index": opportunity_index,
+				"path_cost": int(path_result.get("path_cost", 0)),
+				"source_tier": source_tier,
+			})
+
+	matches.sort_custom(_sort_autonomous_haul_matches)
+	var build_attempt_count := 0
+
+	for raw_match in matches:
+		if (
+			build_attempt_count
+			>= MAX_AUTONOMOUS_HAUL_TASK_BUILD_ATTEMPTS_PER_TICK
+		):
+			break
+
+		if not raw_match is Dictionary:
+			continue
+
+		var match_data: Dictionary = raw_match
+		var citizen_id := int(match_data.get("citizen_id", -1))
+		var opportunity_index := int(
+			match_data.get("opportunity_index", -1)
+		)
+
+		if opportunity_index < 0 or opportunity_index >= opportunities.size():
+			continue
+
+		var raw_opportunity = opportunities[opportunity_index]
+
+		if not raw_opportunity is Dictionary:
+			continue
+
+		var opportunity: Dictionary = raw_opportunity
+		var citizen := WorldData.get_city_citizen_by_id(citizen_id)
+		var source: Dictionary = opportunity.get("source", {})
+		var resource := str(
+			opportunity.get("resource_type", WorldData.RESOURCE_NONE)
+		)
+		var source_access_purpose := str(
+			opportunity.get(
+				"source_access_purpose",
+				WorldData.CONTAINER_HAUL_PURPOSE_NONE
+			)
+		)
+		var raw_destination = opportunity.get("destination", {})
+		var has_fixed_destination := (
+			raw_destination is Dictionary
+			and CityCitizens.is_valid_city_citizen_haul_endpoint(
+				raw_destination
+			)
+		)
+		var destination: Dictionary = {}
+
+		if has_fixed_destination:
+			destination = (raw_destination as Dictionary).duplicate(true)
+
+		var destination_access_purpose := str(
+			opportunity.get(
+				"destination_access_purpose",
+				WorldData.CONTAINER_HAUL_PURPOSE_PUBLIC_STORAGE
+			)
+		)
+
+		if (
+			citizen.is_empty()
+			or int(citizen.get("job_object_id", -1)) > 0
+			or not WorldData.city_haul_endpoint_can_provide_resource(
+				source,
+				resource,
+				source_access_purpose,
+				true
+			)
+		):
+			continue
+
+		if (
+			has_fixed_destination
+			and not WorldData.city_haul_endpoint_can_accept_resource(
+				destination,
+				resource,
+				destination_access_purpose,
+				true
+			)
+		):
+			continue
+
+		var requested_amount := mini(
+			WorldData.get_city_citizen_available_haul_capacity(
+				citizen_id
+			),
+			WorldData.get_city_haul_endpoint_unreserved_resource_amount(
+				source,
+				resource
+			)
+		)
+		requested_amount = mini(
+			requested_amount,
+			maxi(
+				int(opportunity.get("requested_amount", requested_amount)),
+				0
+			)
+		)
+
+		if has_fixed_destination:
+			requested_amount = mini(
+				requested_amount,
+				WorldData.get_city_haul_endpoint_unreserved_destination_space(
+					destination
+				)
+			)
+
+		if requested_amount <= 0:
+			continue
+
+		build_attempt_count += 1
+		var request_values := {
+			"city_world": city_world,
+			"citizen": citizen,
+			"source": source,
+			"resource_type": resource,
+			"requested_amount": requested_amount,
+			"reason": str(
+				opportunity.get(
+					"reason",
+					WorldData.CITY_CITIZEN_HAUL_REASON_NONE
+				)
+			),
+			"requester": opportunity.get("requester", source),
+			"source_access_purpose": source_access_purpose,
+			"destination_access_purpose": destination_access_purpose,
+			"task_source": WorldData.CITY_CITIZEN_TASK_SOURCE_AUTONOMY,
+			"task_priority": int(opportunity.get("task_priority", 0)),
+		}
+		var task_request: Dictionary = {}
+
+		if has_fixed_destination:
+			request_values["destination"] = destination
+			task_request = (
+				CitizenHaulingSystemScript.make_directed_haul_task_request(
+					request_values
+				)
+			)
+		else:
+			task_request = (
+				CitizenHaulingSystemScript.make_public_storage_haul_task_request(
+					request_values
+				)
+			)
+
+		if task_request.is_empty():
+			continue
+
+		if not WorldData.assign_city_citizen_task(
+			citizen_id,
+			task_request
+		):
+			continue
+
+		WorldData.cancel_city_citizen_movement(citizen_id)
+		_clear_idle_activity_runtime(citizen_id)
+		return true
+
+	return false
+
+
+static func _get_autonomous_source_access_tiles(
+	city_world: WorldData,
+	source: Dictionary
+) -> Array:
+	var endpoint_kind := str(
+		source.get(
+			"kind",
+			WorldData.CITY_CITIZEN_HAUL_ENDPOINT_KIND_NONE
+		)
+	)
+	var endpoint_id := int(source.get("id", -1))
+
+	match endpoint_kind:
+		WorldData.CITY_CITIZEN_HAUL_ENDPOINT_KIND_CITY_OBJECT_CONTAINER:
+			return WorldData.get_city_object_access_tiles(
+				city_world,
+				WorldData.get_city_object_by_id(endpoint_id)
+			)
+
+		WorldData.CITY_CITIZEN_HAUL_ENDPOINT_KIND_GROUND_PILE:
+			var ground_pile := WorldData.get_city_ground_pile_by_id(
+				endpoint_id
+			)
+			var raw_tile_position = ground_pile.get(
+				"tile_position",
+				WorldData.INVALID_CITY_TILE_POSITION
+			)
+
+			if raw_tile_position is Vector2i:
+				return [raw_tile_position]
+
+	return []
+
+
+static func _sort_autonomous_haul_matches(
+	match_a: Dictionary,
+	match_b: Dictionary
+) -> bool:
+	var source_tier_a := int(match_a.get("source_tier", 0))
+	var source_tier_b := int(match_b.get("source_tier", 0))
+
+	if source_tier_a != source_tier_b:
+		return source_tier_a < source_tier_b
+
+	var path_cost_a := int(match_a.get("path_cost", 0))
+	var path_cost_b := int(match_b.get("path_cost", 0))
+
+	if path_cost_a != path_cost_b:
+		return path_cost_a < path_cost_b
+
+	var citizen_id_a := int(match_a.get("citizen_id", -1))
+	var citizen_id_b := int(match_b.get("citizen_id", -1))
+
+	if citizen_id_a != citizen_id_b:
+		return citizen_id_a < citizen_id_b
+
+	return int(match_a.get("opportunity_index", -1)) < int(
+		match_b.get("opportunity_index", -1)
+	)
 
 
 static func _process_bounded_idle_behaviors(

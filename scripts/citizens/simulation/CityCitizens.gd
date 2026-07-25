@@ -9,8 +9,14 @@ const CITY_CITIZEN_SEX_MALE := "male"
 const CITY_CITIZEN_SEX_FEMALE := "female"
 
 const DEFAULT_CITIZEN_CARRY_CAPACITY := 10
+const MAX_CITIZEN_HUNGER := 100
 const DEFAULT_CITIZEN_HUNGER := 100
 const DEFAULT_CITIZEN_HAPPINESS := 70
+const CITIZEN_HUNGER_LOSS_PER_DAY := 40
+const CITIZEN_HUNGER_DECAY_DENOMINATOR_MINUTES := 24 * 60
+const CITIZEN_FOOD_CARRY_TRIGGER_HUNGER := 70
+const CITIZEN_EAT_TRIGGER_HUNGER := 50
+const CITIZEN_EAT_TARGET_HUNGER := 90
 const CITY_CITIZEN_STATE_IDLE := "idle"
 const INVALID_CITY_TILE_POSITION := Vector2i(-1, -1)
 # A task records why a citizen is acting. It remains separate from movement,
@@ -23,6 +29,7 @@ const CITY_CITIZEN_TASK_KIND_RETURN_HOME := "return_home"
 const CITY_CITIZEN_TASK_SOURCE_NONE := "none"
 const CITY_CITIZEN_TASK_SOURCE_PLAYER := "player"
 const CITY_CITIZEN_TASK_SOURCE_SCHEDULE := "schedule"
+const CITY_CITIZEN_TASK_SOURCE_AUTONOMY := "autonomy"
 
 const CITY_CITIZEN_TASK_PHASE_NONE := "none"
 const CITY_CITIZEN_TASK_PHASE_PENDING := "pending"
@@ -41,13 +48,27 @@ const CITY_CITIZEN_HAUL_ENDPOINT_KIND_NONE := "none"
 const CITY_CITIZEN_HAUL_ENDPOINT_KIND_CITY_OBJECT_CONTAINER := (
 	"city_object_container"
 )
+const CITY_CITIZEN_HAUL_ENDPOINT_KIND_GROUND_PILE := "ground_pile"
 const CITY_CITIZEN_HAUL_REASON_NONE := "none"
 const CITY_CITIZEN_HAUL_REASON_WORKPLACE_OUTPUT_BEFORE_HOME := (
 	"workplace_output_before_home"
 )
+const CITY_CITIZEN_HAUL_REASON_AUTONOMOUS_WORKPLACE_OUTPUT := (
+	"autonomous_workplace_output"
+)
+const CITY_CITIZEN_HAUL_REASON_GROUND_PILE_CLEANUP := (
+	"ground_pile_cleanup"
+)
+const CITY_CITIZEN_HAUL_REASON_SCHEDULED_HOME_FOOD_DELIVERY := (
+	"scheduled_home_food_delivery"
+)
+const CITY_CITIZEN_HAUL_REASON_AUTONOMOUS_HOME_FOOD_DELIVERY := (
+	"autonomous_home_food_delivery"
+)
 const CITY_CITIZEN_HAUL_REASON_OUTSTANDING_CARGO := (
 	"outstanding_cargo"
 )
+const INVALID_CITY_CITIZEN_HAUL_RESERVATION_ID: int = -1
 const CITY_CITIZEN_HAUL_PHASE_NONE := "none"
 const CITY_CITIZEN_HAUL_PHASE_PENDING_SOURCE := "pending_source"
 const CITY_CITIZEN_HAUL_PHASE_TRAVELING_TO_SOURCE := (
@@ -80,7 +101,7 @@ const CITY_CITIZEN_MOVEMENT_FAILURE_REPATH_FAILED := (
 )
 
 const CITY_CITIZEN_MOVEMENT_PROGRESS_PER_TILE := 10_000
-const DEFAULT_CITIZEN_MOVEMENT_SPEED_PER_MINUTE := 4_167
+const DEFAULT_CITIZEN_MOVEMENT_SPEED_PER_MINUTE := 5_000
 const MAX_CITIZEN_MOVEMENT_REPATH_ATTEMPTS := 3
 
 static var city_citizen_male_name_pool: Array[String] = [
@@ -189,7 +210,8 @@ static func get_city_citizen_task_source_types() -> Array[String]:
 	return [
 		CITY_CITIZEN_TASK_SOURCE_NONE,
 		CITY_CITIZEN_TASK_SOURCE_PLAYER,
-		CITY_CITIZEN_TASK_SOURCE_SCHEDULE
+		CITY_CITIZEN_TASK_SOURCE_SCHEDULE,
+		CITY_CITIZEN_TASK_SOURCE_AUTONOMY
 	]
 
 
@@ -362,8 +384,12 @@ static func is_valid_city_citizen_haul_endpoint(
 		return allow_none and endpoint_id == -1
 
 	return (
-		endpoint_kind
-		== CITY_CITIZEN_HAUL_ENDPOINT_KIND_CITY_OBJECT_CONTAINER
+		(
+			endpoint_kind
+			== CITY_CITIZEN_HAUL_ENDPOINT_KIND_CITY_OBJECT_CONTAINER
+			or endpoint_kind
+			== CITY_CITIZEN_HAUL_ENDPOINT_KIND_GROUND_PILE
+		)
 		and endpoint_id > 0
 	)
 
@@ -420,6 +446,12 @@ static func make_city_citizen_haul(
 		"requested_amount": maxi(
 			int(values.get("requested_amount", 0)),
 			0
+		),
+		"reservation_id": int(
+			values.get(
+				"reservation_id",
+				INVALID_CITY_CITIZEN_HAUL_RESERVATION_ID
+			)
 		),
 		"reason": str(
 			values.get(
@@ -478,6 +510,7 @@ static func has_complete_city_citizen_haul_state(
 		"destination",
 		"resource_type",
 		"requested_amount",
+		"reservation_id",
 		"reason",
 		"requester",
 		"source_access_purpose",
@@ -511,6 +544,39 @@ static func reset_city_citizen_haul_state(
 
 	citizen["current_haul"] = make_city_citizen_haul()
 	citizen["haul_cargo"] = cargo
+
+
+static func has_complete_city_citizen_need_state(
+	citizen: Dictionary
+) -> bool:
+	return (
+		citizen.has("hunger")
+		and typeof(citizen.get("hunger")) == TYPE_INT
+		and citizen.has("hunger_decay_remainder")
+		and typeof(citizen.get("hunger_decay_remainder")) == TYPE_INT
+		and citizen.has("happiness")
+		and typeof(citizen.get("happiness")) == TYPE_INT
+	)
+
+
+static func normalize_city_citizen_need_state(
+	citizen: Dictionary
+) -> void:
+	citizen["hunger"] = clampi(
+		int(citizen.get("hunger", DEFAULT_CITIZEN_HUNGER)),
+		0,
+		MAX_CITIZEN_HUNGER
+	)
+	citizen["hunger_decay_remainder"] = clampi(
+		int(citizen.get("hunger_decay_remainder", 0)),
+		0,
+		CITIZEN_HUNGER_DECAY_DENOMINATOR_MINUTES - 1
+	)
+	citizen["happiness"] = clampi(
+		int(citizen.get("happiness", DEFAULT_CITIZEN_HAPPINESS)),
+		0,
+		100
+	)
 
 static func get_city_citizen_movement_state_types() -> Array[String]:
 	return [
@@ -907,8 +973,21 @@ static func make_city_citizen(
 		"name": citizen_name,
 		"sex": normalized_sex,
 		"alive": true,
-		"hunger": DEFAULT_CITIZEN_HUNGER,
-		"happiness": DEFAULT_CITIZEN_HAPPINESS,
+		"hunger": clampi(
+			int(values.get("hunger", DEFAULT_CITIZEN_HUNGER)),
+			0,
+			MAX_CITIZEN_HUNGER
+		),
+		"hunger_decay_remainder": clampi(
+			int(values.get("hunger_decay_remainder", 0)),
+			0,
+			CITIZEN_HUNGER_DECAY_DENOMINATOR_MINUTES - 1
+		),
+		"happiness": clampi(
+			int(values.get("happiness", DEFAULT_CITIZEN_HAPPINESS)),
+			0,
+			100
+		),
 		"home_object_id": -1,
 		"job_object_id": -1,
 		"state": CITY_CITIZEN_STATE_IDLE,

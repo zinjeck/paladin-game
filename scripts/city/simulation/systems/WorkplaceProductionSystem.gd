@@ -630,8 +630,15 @@ static func _run_workplace_tick(
 			outputs
 		)
 	)
+	var overflow_tile := _find_workplace_overflow_tile(
+		city_object
+	)
+	var can_overflow := (
+		overflow_tile
+		!= WorldData.INVALID_CITY_TILE_POSITION
+	)
 
-	if output_capacity_in_batches <= 0:
+	if output_capacity_in_batches <= 0 and not can_overflow:
 		_write_workplace_state({
 			"object_id": object_id,
 			"progress_work_units": current_progress,
@@ -678,15 +685,42 @@ static func _run_workplace_tick(
 		})
 		return
 
-	var batches_to_produce := mini(
+	var storage_batches_to_produce := mini(
 		potential_completed_batches,
-		output_capacity_in_batches
+		maxi(output_capacity_in_batches, 0)
+	)
+	var overflow_batches_to_produce := 0
+
+	if can_overflow:
+		overflow_batches_to_produce = maxi(
+			potential_completed_batches
+			- storage_batches_to_produce,
+			0
+		)
+
+	var batches_to_produce := (
+		storage_batches_to_produce
+		+ overflow_batches_to_produce
 	)
 
-	if not _store_recipe_outputs(
+	if batches_to_produce <= 0:
+		_write_workplace_state({
+			"object_id": object_id,
+			"progress_work_units": current_progress,
+			"production_status": (
+				WorldData.WORKPLACE_PRODUCTION_STATUS_BLOCKED_OUTPUT_FULL
+			),
+			"productive_worker_count": productive_worker_count,
+			"site_productivity_basis_points": site_productivity,
+		})
+		return
+
+	if not _store_recipe_output_distribution(
 		object_id,
 		outputs,
-		batches_to_produce
+		storage_batches_to_produce,
+		overflow_batches_to_produce,
+		overflow_tile
 	):
 		push_error(
 			"Workplace "
@@ -713,7 +747,10 @@ static func _run_workplace_tick(
 	# If this tick exhausted the available output capacity, workers stop
 	# at that moment. Extra work from the rest of the tick is not banked
 	# as an invisible completed-output backlog.
-	if batches_to_produce >= output_capacity_in_batches:
+	if (
+		not can_overflow
+		and batches_to_produce >= output_capacity_in_batches
+	):
 		new_progress = 0
 
 	var updated_city_object := WorldData.get_city_object_by_id(
@@ -730,7 +767,7 @@ static func _run_workplace_tick(
 		WorldData.WORKPLACE_PRODUCTION_STATUS_WORKING
 	)
 
-	if remaining_output_capacity <= 0:
+	if remaining_output_capacity <= 0 and not can_overflow:
 		new_status = (
 			WorldData.WORKPLACE_PRODUCTION_STATUS_BLOCKED_OUTPUT_FULL
 		)
@@ -822,9 +859,9 @@ static func _get_output_capacity_in_batches(
 		return 0
 
 	# Object containers use one shared total capacity. A multi-output batch must
-	# therefore fit the sum of every output, not each resource independently.
+	# fit the sum of every output after incoming haul reservations are removed.
 	var shared_free_space := (
-		WorldData.get_city_object_storage_free_space(
+		WorldData.get_city_object_unreserved_storage_free_space(
 			city_object
 		)
 	)
@@ -836,6 +873,194 @@ static func _get_output_capacity_in_batches(
 		),
 		0
 	)
+
+
+static func _find_workplace_overflow_tile(
+	city_object: Dictionary
+) -> Vector2i:
+	var active_world = WorldData.official_city_world
+
+	if active_world == null or city_object.is_empty():
+		return WorldData.INVALID_CITY_TILE_POSITION
+
+	var overflow_policy := (
+		WorldData.get_city_object_overflow_policy(
+			city_object
+		)
+	)
+	var mode := str(
+		overflow_policy.get(
+			"mode",
+			WorldData.WORKPLACE_OVERFLOW_MODE_NONE
+		)
+	)
+
+	if mode != WorldData.WORKPLACE_OVERFLOW_MODE_FOOTPRINT_RADIUS:
+		return WorldData.INVALID_CITY_TILE_POSITION
+
+	var radius_tiles := maxi(
+		int(overflow_policy.get("radius_tiles", 0)),
+		0
+	)
+
+	if radius_tiles <= 0:
+		return WorldData.INVALID_CITY_TILE_POSITION
+
+	var footprint_tiles := _get_unique_footprint_tiles(
+		city_object
+	)
+
+	if footprint_tiles.is_empty():
+		return WorldData.INVALID_CITY_TILE_POSITION
+
+	var access_tiles := WorldData.get_city_object_access_tiles(
+		active_world,
+		city_object
+	)
+
+	# The ordinary access ring is both the cheapest and most predictable
+	# overflow location. It avoids pathfinding in the common case.
+	for raw_access_tile in access_tiles:
+		if not raw_access_tile is Vector2i:
+			continue
+
+		var access_tile: Vector2i = raw_access_tile
+
+		if not _tile_is_within_footprint_radius(
+			access_tile,
+			footprint_tiles,
+			radius_tiles
+		):
+			continue
+
+		if WorldData.can_city_ground_pile_exist_at_tile(
+			active_world,
+			access_tile
+		):
+			return access_tile
+
+	if access_tiles.is_empty() or radius_tiles <= 1:
+		return WorldData.INVALID_CITY_TILE_POSITION
+
+	var candidate_lookup: Dictionary = {}
+
+	for raw_footprint_tile in footprint_tiles:
+		if not raw_footprint_tile is Vector2i:
+			continue
+
+		var footprint_tile: Vector2i = raw_footprint_tile
+
+		for offset_y in range(-radius_tiles, radius_tiles + 1):
+			for offset_x in range(-radius_tiles, radius_tiles + 1):
+				if abs(offset_x) + abs(offset_y) > radius_tiles:
+					continue
+
+				var candidate_tile := (
+					footprint_tile
+					+ Vector2i(offset_x, offset_y)
+				)
+
+				if candidate_lookup.has(candidate_tile):
+					continue
+
+				if not WorldData.can_city_ground_pile_exist_at_tile(
+					active_world,
+					candidate_tile
+				):
+					continue
+
+				candidate_lookup[candidate_tile] = true
+
+	var candidate_tiles: Array = candidate_lookup.keys()
+
+	if candidate_tiles.is_empty():
+		return WorldData.INVALID_CITY_TILE_POSITION
+
+	candidate_tiles.sort_custom(_sort_tiles_y_then_x)
+
+	# If buildings or roads consume the immediate ring, select the cheapest
+	# reachable tile inside the configured radius rather than spawning loose
+	# resources across an impassable boundary.
+	var best_tile := WorldData.INVALID_CITY_TILE_POSITION
+	var best_path_cost := CityNavigationSystem.MAXIMUM_PATH_COST
+
+	for raw_access_tile in access_tiles:
+		if not raw_access_tile is Vector2i:
+			continue
+
+		var access_tile: Vector2i = raw_access_tile
+		var path_result := (
+			CityNavigationSystem.find_path_to_any_city_tile(
+				active_world,
+				access_tile,
+				candidate_tiles,
+				CityNavigationSystem.DEFAULT_MAX_EXPANDED_NODES,
+				-1,
+				1
+			)
+		)
+
+		if not bool(path_result.get("success", false)):
+			continue
+
+		var candidate_tile = path_result.get(
+			"destination_tile",
+			WorldData.INVALID_CITY_TILE_POSITION
+		)
+
+		if not candidate_tile is Vector2i:
+			continue
+
+		var path_cost := maxi(
+			int(path_result.get("path_cost", 0)),
+			0
+		)
+
+		if (
+			path_cost < best_path_cost
+			or (
+				path_cost == best_path_cost
+				and _sort_tiles_y_then_x(
+					candidate_tile,
+					best_tile
+				)
+			)
+		):
+			best_path_cost = path_cost
+			best_tile = candidate_tile
+
+	return best_tile
+
+
+static func _tile_is_within_footprint_radius(
+	tile_position: Vector2i,
+	footprint_tiles: Array,
+	radius_tiles: int
+) -> bool:
+	for raw_footprint_tile in footprint_tiles:
+		if not raw_footprint_tile is Vector2i:
+			continue
+
+		var footprint_tile: Vector2i = raw_footprint_tile
+		var manhattan_distance: int = (
+			absi(tile_position.x - footprint_tile.x)
+			+ absi(tile_position.y - footprint_tile.y)
+		)
+
+		if manhattan_distance <= radius_tiles:
+			return true
+
+	return false
+
+
+static func _sort_tiles_y_then_x(
+	tile_a: Vector2i,
+	tile_b: Vector2i
+) -> bool:
+	if tile_a.y == tile_b.y:
+		return tile_a.x < tile_b.x
+
+	return tile_a.y < tile_b.y
 
 
 static func _calculate_work_units(
@@ -903,6 +1128,162 @@ static func _store_recipe_outputs(
 		object_id,
 		requested_resources
 	)
+
+
+static func _store_recipe_output_distribution(
+	object_id: int,
+	outputs: Dictionary,
+	storage_batch_count: int,
+	overflow_batch_count: int,
+	overflow_tile: Vector2i
+) -> bool:
+	var stored_in_object := false
+
+	if storage_batch_count > 0:
+		if not _store_recipe_outputs(
+			object_id,
+			outputs,
+			storage_batch_count
+		):
+			return false
+
+		stored_in_object = true
+
+	if overflow_batch_count <= 0:
+		return stored_in_object
+
+	if _store_recipe_outputs_in_ground_pile(
+		overflow_tile,
+		outputs,
+		overflow_batch_count
+	):
+		return true
+
+	if stored_in_object:
+		_rollback_recipe_outputs_from_city_object(
+			object_id,
+			outputs,
+			storage_batch_count
+		)
+
+	return false
+
+
+static func _store_recipe_outputs_in_ground_pile(
+	tile_position: Vector2i,
+	outputs: Dictionary,
+	batch_count: int
+) -> bool:
+	if (
+		batch_count <= 0
+		or tile_position
+		== WorldData.INVALID_CITY_TILE_POSITION
+	):
+		return false
+
+	var added_resources: Dictionary = {}
+
+	for raw_resource in outputs:
+		var resource := str(raw_resource)
+		var requested_amount := (
+			int(outputs.get(raw_resource, 0))
+			* batch_count
+		)
+		var added_amount := (
+			WorldData.add_resource_to_city_ground_pile(
+				tile_position,
+				resource,
+				requested_amount
+			)
+		)
+
+		if added_amount != requested_amount:
+			_rollback_ground_pile_resources(
+				tile_position,
+				added_resources
+			)
+			return false
+
+		added_resources[resource] = added_amount
+
+	return not added_resources.is_empty()
+
+
+static func _rollback_recipe_outputs_from_city_object(
+	object_id: int,
+	outputs: Dictionary,
+	batch_count: int
+) -> void:
+	for raw_resource in outputs:
+		var resource := str(raw_resource)
+		var requested_amount := (
+			int(outputs.get(raw_resource, 0))
+			* batch_count
+		)
+		var removed_amount := (
+			WorldData.remove_resource_from_city_object_storage(
+				object_id,
+				resource,
+				requested_amount
+			)
+		)
+
+		if removed_amount != requested_amount:
+			push_error(
+				"Failed to roll back workplace output after an "
+				+ "overflow transfer failure."
+			)
+
+
+static func _rollback_ground_pile_resources(
+	tile_position: Vector2i,
+	resources: Dictionary
+) -> void:
+	for raw_resource in resources:
+		var resource := str(raw_resource)
+		var requested_amount := maxi(
+			int(resources.get(raw_resource, 0)),
+			0
+		)
+
+		if requested_amount <= 0:
+			continue
+
+		var ground_piles := (
+			WorldData.get_city_ground_piles_at_tile(
+				tile_position
+			)
+		)
+
+		for raw_ground_pile in ground_piles:
+			if not raw_ground_pile is Dictionary:
+				continue
+
+			var ground_pile: Dictionary = raw_ground_pile
+
+			if str(
+				ground_pile.get(
+					"resource_type",
+					WorldData.RESOURCE_NONE
+				)
+			) != resource:
+				continue
+
+			var removed_amount := (
+				WorldData.remove_resource_from_city_ground_pile(
+					int(ground_pile.get("id", -1)),
+					resource,
+					requested_amount
+				)
+			)
+
+			if removed_amount != requested_amount:
+				push_error(
+					"Failed to roll back ground-pile output after "
+					+ "a multi-output transfer failure."
+				)
+
+			break
 
 
 static func _write_workplace_state(
