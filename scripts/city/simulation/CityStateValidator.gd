@@ -647,7 +647,7 @@ static func _validate_city_ground_pile_state(
 					+ "."
 				)
 
-		if not WorldData.get_city_resource_types().has(resource):
+		if not WorldData.is_city_resource_type(resource):
 			errors.append(
 				"Ground pile "
 				+ str(ground_pile_id)
@@ -804,7 +804,7 @@ static func _validate_city_haul_reservations(
 		else:
 			expected_citizen_lookup[citizen_id] = reservation_id
 
-		if not WorldData.get_city_resource_types().has(resource):
+		if not WorldData.is_city_resource_type(resource):
 			errors.append(
 				"Haul reservation "
 				+ str(reservation_id)
@@ -1741,7 +1741,7 @@ static func _validate_city_citizen_need_state(
 
 	for resource in WorldData.get_city_food_resource_types():
 		if (
-			not WorldData.get_city_resource_types().has(resource)
+			not WorldData.is_city_resource_type(resource)
 			or WorldData.get_city_food_hunger_restore(resource) <= 0
 		):
 			errors.append(
@@ -2239,9 +2239,7 @@ static func _validate_city_citizen_task_state(
 				)
 				var raw_haul_requester = haul.get("requester", {})
 
-				if not WorldData.get_city_resource_types().has(
-					haul_resource
-				):
+				if not WorldData.is_city_resource_type(haul_resource):
 					errors.append(
 						"Citizen "
 							+ str(citizen_id)
@@ -4906,7 +4904,7 @@ static func _validate_known_workplace_policy_resource(
 
 	var resource: String = raw_resource
 
-	if not WorldData.get_city_resource_types().has(resource):
+	if not WorldData.is_city_resource_type(resource):
 		errors.append(
 			"Workplace "
 				+ str(object_id)

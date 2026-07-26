@@ -254,6 +254,15 @@ static func get_resource_color(resource: String) -> Color:
 	if resource == WorldData.RESOURCE_FISH:
 		return Color(0.82, 0.42, 0.95)
 
+	if resource == WorldData.RESOURCE_MEAT:
+		return Color(0.78, 0.25, 0.22)
+
+	if resource == WorldData.RESOURCE_LUMBER:
+		return Color(0.46, 0.28, 0.12)
+
+	if resource == WorldData.RESOURCE_STONE:
+		return Color(0.56, 0.58, 0.62)
+
 	if resource == WorldData.RESOURCE_COAL:
 		return Color(0.02, 0.02, 0.02)
 

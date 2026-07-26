@@ -630,13 +630,21 @@ static func _run_workplace_tick(
 			outputs
 		)
 	)
-	var overflow_tile := _find_workplace_overflow_tile(
-		city_object
-	)
-	var can_overflow := (
-		overflow_tile
-		!= WorldData.INVALID_CITY_TILE_POSITION
-	)
+	var overflow_tile := WorldData.INVALID_CITY_TILE_POSITION
+	var can_overflow := false
+
+	# Do not search footprint rings or run pathfinding while ordinary output
+	# storage can still accept all work. A zero-capacity workplace must resolve
+	# overflow before accepting progress, preserving the existing fail-closed
+	# behavior.
+	if output_capacity_in_batches <= 0:
+		overflow_tile = _find_workplace_overflow_tile(
+			city_object
+		)
+		can_overflow = (
+			overflow_tile
+			!= WorldData.INVALID_CITY_TILE_POSITION
+		)
 
 	if output_capacity_in_batches <= 0 and not can_overflow:
 		_write_workplace_state({
@@ -690,6 +698,22 @@ static func _run_workplace_tick(
 		maxi(output_capacity_in_batches, 0)
 	)
 	var overflow_batches_to_produce := 0
+
+	# Resolve overflow only when this tick reaches the remaining storage
+	# capacity. Equality matters: an available overflow tile lets fractional
+	# progress survive after the last in-storage batch, matching prior behavior.
+	if (
+		not can_overflow
+		and potential_completed_batches
+		>= output_capacity_in_batches
+	):
+		overflow_tile = _find_workplace_overflow_tile(
+			city_object
+		)
+		can_overflow = (
+			overflow_tile
+			!= WorldData.INVALID_CITY_TILE_POSITION
+		)
 
 	if can_overflow:
 		overflow_batches_to_produce = maxi(

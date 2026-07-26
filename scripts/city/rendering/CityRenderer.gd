@@ -13,19 +13,23 @@ const CityCitizenMovementPresentationScript = preload(
 const CitizenDebugPanelScript = preload(
 	"res://scripts/ui/debug/CitizenDebugPanel.gd"
 )
+const CityRenderLayerScript = preload(
+	"res://scripts/city/rendering/CityRenderLayer.gd"
+)
+const CityWorkplaceZoneOverlayCacheScript = preload(
+	"res://scripts/city/rendering/CityWorkplaceZoneOverlayCache.gd"
+)
+const CityWorldGeneratorScript = preload(
+	"res://scripts/city/generation/CityWorldGenerator.gd"
+)
 @export_file("*.tscn") var world_scene_path: String = ""
 @export var local_tiles_per_world_tile: int = 64
 @export var city_tile_size: int = 2
 
 var city_world: WorldData
 var city_seed: int = 0
-var detail_noise := FastNoiseLite.new()
-var fertility_noise := FastNoiseLite.new()
-var resource_noise := FastNoiseLite.new()
-var biome_warp_noise := FastNoiseLite.new()
-var coast_noise := FastNoiseLite.new()
-var biome_edge_noise := FastNoiseLite.new()
 var camera: Camera2D
+var observed_city_camera_zoom: Vector2 = Vector2.ZERO
 var ui_layer: CanvasLayer
 var ui_root: Control
 
@@ -42,7 +46,11 @@ var build_option_button: Button
 var build_option_icon: Panel
 var city_terrain_texture: ImageTexture
 var city_texture_cache := MapTextureCache.new()
+var city_background_render_layer: CityRenderLayer
+var city_citizen_render_layer: CityRenderLayer
+var city_interaction_render_layer: CityRenderLayer
 var debug_panel_ui: DebugPanel
+var debug_refresh_pending: bool = false
 var debug_panel_position: Vector2 = Vector2.ZERO
 var debug_panel_padding: Vector2 = Vector2(12.0, 10.0)
 var debug_panel_min_size: Vector2 = Vector2(430.0, 170.0)
@@ -82,8 +90,6 @@ var city_object_option_buttons: Dictionary = {}
 var city_object_option_icons: Dictionary = {}
 var road_cursor_icon: Panel
 var hovered_city_tile: Vector2i = Vector2i(-1, -1)
-var previous_hovered_city_tile: Vector2i = Vector2i(-1, -1)
-var hover_tile_outline: Panel
 const CITY_SELECTION_KIND_NONE := "none"
 const CITY_SELECTION_KIND_OBJECT := "object"
 const CITY_SELECTION_KIND_CITIZEN := "citizen"
@@ -128,11 +134,14 @@ var observed_city_haul_reservation_version: int = -1
 var city_citizen_movement_presentation = (
 	CityCitizenMovementPresentationScript.new()
 )
+var city_citizen_draw_buffer: Array[Dictionary] = []
+var city_citizen_rect_draw_buffer: Array[Rect2] = []
 var observed_city_assignment_version: int = -1
 var observed_city_workplace_version: int = -1
 var observed_city_tile_data_version: int = -1
-var workplace_zone_preview_render_cache: Dictionary = {}
-var selected_workplace_zone_render_cache: Dictionary = {}
+var workplace_zone_overlay_cache = (
+	CityWorkplaceZoneOverlayCacheScript.new()
+)
 var active_city_object_placement: Dictionary = {}
 var object_info_panel: Panel
 var object_info_title_label: Label
@@ -174,27 +183,6 @@ const CITY_CITIZEN_MARKER_TILE_SCALE: float = 0.5
 const CITY_HAUL_CARGO_MARKER_CITIZEN_SCALE: float = 0.5
 const CITY_GROUND_PILE_MARKER_TILE_SCALE: float = 0.42
 const CITY_GROUND_PILE_BORDER_COLOR := Color(0.08, 0.08, 0.08, 0.95)
-const WORKPLACE_ZONE_TEXTURE_TARGET_PIXELS_PER_TILE: int = 8
-const WORKPLACE_ZONE_TEXTURE_MAXIMUM_DIMENSION: int = 1024
-const WORKPLACE_ZONE_TEXTURE_BORDER_PIXELS: int = 1
-const WORKPLACE_ZONE_PREVIEW_MAGENTA_FILL_COLOR: Color = (
-	Color(1.0, 0.0, 1.0, 0.44)
-)
-const WORKPLACE_ZONE_PREVIEW_MAGENTA_BORDER_COLOR: Color = (
-	Color(1.0, 0.0, 1.0, 0.72)
-)
-const WORKPLACE_ZONE_PREVIEW_RED_FILL_COLOR: Color = (
-	Color(1.0, 0.0, 0.0, 0.40)
-)
-const WORKPLACE_ZONE_PREVIEW_RED_BORDER_COLOR: Color = (
-	Color(1.0, 0.0, 0.0, 0.72)
-)
-const WORKPLACE_ZONE_SELECTED_RESOURCE_COLOR: Color = (
-	Color(1.0, 0.0, 1.0, 0.42)
-)
-const WORKPLACE_ZONE_SELECTED_BORDER_COLOR: Color = (
-	Color(1.0, 0.0, 1.0, 0.72)
-)
 const DEBUG_NAVIGATION_PATH_FILL_COLOR: Color = (
 	Color(1.0, 0.82, 0.0, 0.34)
 )
@@ -229,6 +217,7 @@ func _ready() -> void:
 	# The presentation initialized from current authority. Discard any movement
 	# trace left by simulation ticks that ran while this renderer was inactive.
 	WorldData.clear_city_citizen_movement_visual_events()
+	create_city_render_layers()
 	rebuild_city_terrain_texture()
 	create_city_camera()
 	create_city_ui()
@@ -236,10 +225,21 @@ func _ready() -> void:
 	connect_simulation_clock_signals()
 	SimulationClock.resume_simulation()
 	update_debug_panel_text()
-	queue_redraw()
+	queue_all_city_render_layers_redraw()
 
 
 func _process(delta: float) -> void:
+	if city_texture_cache != null:
+		city_texture_cache.process_warmup()
+
+	if (
+		camera != null
+		and camera.zoom != observed_city_camera_zoom
+	):
+		observed_city_camera_zoom = camera.zoom
+		queue_city_citizen_layer_redraw()
+		queue_city_interaction_layer_redraw()
+
 	var current_hovered_tile := (
 		get_city_tile_under_mouse()
 	)
@@ -261,7 +261,7 @@ func _process(delta: float) -> void:
 		)
 
 		if hover_visual_can_change:
-			queue_redraw()
+			queue_city_interaction_layer_redraw()
 
 	if is_road_placement_active:
 		update_road_cursor_icon_position()
@@ -291,12 +291,7 @@ func _process(delta: float) -> void:
 				city_world.tile_data_version
 			)
 			city_tile_data_changed = true
-			invalidate_workplace_zone_render_cache(
-				workplace_zone_preview_render_cache
-			)
-			invalidate_workplace_zone_render_cache(
-				selected_workplace_zone_render_cache
-			)
+			workplace_zone_overlay_cache.invalidate_all()
 
 	if observed_city_object_version != WorldData.city_object_version:
 		observed_city_object_version = WorldData.city_object_version
@@ -400,7 +395,7 @@ func _process(delta: float) -> void:
 		city_citizen_movement_presentation.synchronize(false)
 
 	if city_citizen_movement_presentation.update(delta):
-		queue_redraw()
+		queue_city_citizen_layer_redraw()
 
 	if (
 		has_active_city_object_placement()
@@ -410,6 +405,16 @@ func _process(delta: float) -> void:
 		)
 	):
 		refresh_active_workplace_zone_preview_cache()
+		queue_city_background_layer_redraw()
+
+	if (
+		has_selected_city_entity()
+		and (
+			city_objects_changed
+			or city_tile_data_changed
+		)
+	):
+		refresh_selected_workplace_zone_cache()
 
 	if (
 		city_containers_changed
@@ -435,15 +440,23 @@ func _process(delta: float) -> void:
 	if (
 		city_objects_changed
 		or city_tile_data_changed
-		or city_citizens_changed
-		or city_citizen_spatial_changed
-		or city_citizen_movement_changed
 		or city_ground_piles_changed
 	):
-		queue_redraw()
+		queue_city_background_layer_redraw()
 
 	if (
-		city_objects_changed
+		city_citizens_changed
+		or city_citizen_spatial_changed
+		or city_citizen_movement_changed
+	):
+		queue_city_citizen_layer_redraw()
+
+	if city_objects_changed or city_tile_data_changed:
+		queue_city_interaction_layer_redraw()
+
+	if (
+		debug_refresh_pending
+		or city_objects_changed
 		or city_citizens_changed
 		or city_citizen_spatial_changed
 		or city_assignments_changed
@@ -454,17 +467,7 @@ func _process(delta: float) -> void:
 		or city_haul_reservations_changed
 	):
 		update_debug_panel_text()
-
-	if (
-		(
-			city_citizen_spatial_changed
-			or city_citizen_movement_changed
-			or city_citizen_task_changed
-		)
-		and selected_city_entity_kind
-		== CITY_SELECTION_KIND_CITIZEN
-	):
-		update_selected_entity_panel()
+		debug_refresh_pending = false
 
 func _input(event: InputEvent) -> void:
 	if event is InputEventKey and event.pressed and not event.echo:
@@ -627,12 +630,12 @@ func on_simulation_time_changed(
 	)
 
 	if movement_visual_changed:
-		queue_redraw()
+		queue_city_citizen_layer_redraw()
 
-	if debug_panel_ui == null:
-		return
-
-	debug_panel_ui.refresh()
+	# Coalesce the clock update with version-driven debug refreshes in _process.
+	# This prevents the full validator/debug provider from running twice for
+	# one simulation tick.
+	debug_refresh_pending = true
 
 func get_debug_stockpile_resource_for_key(key_event: InputEventKey) -> String:
 	if key_event.keycode == KEY_H or key_event.physical_keycode == KEY_H:
@@ -710,327 +713,16 @@ func generate_city_world() -> void:
 		push_error("No selected world region was stored before entering the city screen.")
 		return
 
-	var region_size: int = WorldData.city_start_region_size
-	var city_width: int = region_size * local_tiles_per_world_tile
-	var city_height: int = region_size * local_tiles_per_world_tile
+	city_seed = CityWorldGeneratorScript.calculate_city_seed()
 
-	city_seed = get_city_seed()
+	var city_world_generator = CityWorldGeneratorScript.new()
+	city_world = city_world_generator.generate_city_world(
+		local_tiles_per_world_tile,
+		city_seed
+	)
 
-	setup_city_noise()
-
-	city_world = WorldData.new()
-	city_world.setup(city_width, city_height, city_seed)
-
-	for y in range(city_world.height):
-		var row: Array = city_world.tiles[y]
-
-		for x in range(city_world.width):
-			var tile: Dictionary = row[x]
-			var profile: Dictionary = get_city_source_profile(x, y, region_size)
-
-			copy_city_profile_into_tile(tile, profile, x, y)
-
-			row[x] = tile
-
-	city_world.mark_tile_data_changed()
 	WorldData.store_city_world_save(city_world, city_seed)
 	print("Stored official city world.")
-
-func get_city_source_profile(city_x: int, city_y: int, region_size: int) -> Dictionary:
-	var source_fx: float = ((float(city_x) + 0.5) / float(city_world.width)) * float(region_size) - 0.5
-	var source_fy: float = ((float(city_y) + 0.5) / float(city_world.height)) * float(region_size) - 0.5
-
-	var warp_strength := 0.62
-
-	source_fx += biome_warp_noise.get_noise_2d(city_x, city_y) * warp_strength
-	source_fy += biome_warp_noise.get_noise_2d(city_x + 9173, city_y - 4289) * warp_strength
-
-	source_fx = clamp(source_fx, 0.0, float(region_size - 1))
-	source_fy = clamp(source_fy, 0.0, float(region_size - 1))
-
-	var x0: int = int(floor(source_fx))
-	var y0: int = int(floor(source_fy))
-	var x1: int = min(x0 + 1, region_size - 1)
-	var y1: int = min(y0 + 1, region_size - 1)
-
-	var tx: float = source_fx - float(x0)
-	var ty: float = source_fy - float(y0)
-
-	var w00: float = (1.0 - tx) * (1.0 - ty)
-	var w10: float = tx * (1.0 - ty)
-	var w01: float = (1.0 - tx) * ty
-	var w11: float = tx * ty
-
-	var profile := {
-		"elevation": 0.0,
-		"temperature": 0.0,
-		"precipitation": 0.0,
-		"fertility": 0.0,
-		"fertility_weight": 0.0,
-		"water_weight": 0.0,
-		"ocean_weight": 0.0,
-		"river_weight": 0.0,
-		"mountain_weight": 0.0,
-		"biome_weights": {},
-		"resource_weights": {}
-	}
-
-	accumulate_city_source_sample(profile, WorldData.city_start_tiles[y0][x0], w00)
-	accumulate_city_source_sample(profile, WorldData.city_start_tiles[y0][x1], w10)
-	accumulate_city_source_sample(profile, WorldData.city_start_tiles[y1][x0], w01)
-	accumulate_city_source_sample(profile, WorldData.city_start_tiles[y1][x1], w11)
-
-	if float(profile["fertility_weight"]) > 0.0:
-		profile["fertility"] = float(profile["fertility"]) / float(profile["fertility_weight"])
-	else:
-		profile["fertility"] = -1.0
-
-	return profile
-
-
-func accumulate_city_source_sample(profile: Dictionary, source_tile: Dictionary, weight: float) -> void:
-	if weight <= 0.0:
-		return
-
-	var source_biome: String = str(source_tile["biome"])
-	var source_resource: String = str(source_tile["resource"])
-	var source_terrain: String = str(source_tile["terrain"])
-
-	profile["elevation"] = float(profile["elevation"]) + float(source_tile["elevation"]) * weight
-	profile["temperature"] = float(profile["temperature"]) + float(source_tile["temperature"]) * weight
-	profile["precipitation"] = float(profile["precipitation"]) + float(source_tile["precipitation"]) * weight
-
-	var source_fertility: float = float(source_tile["fertility"])
-
-	if source_fertility >= 0.0:
-		profile["fertility"] = float(profile["fertility"]) + source_fertility * weight
-		profile["fertility_weight"] = float(profile["fertility_weight"]) + weight
-
-	add_weight_to_dictionary(profile["biome_weights"], source_biome, weight)
-	add_weight_to_dictionary(profile["resource_weights"], source_resource, weight)
-
-	if source_terrain == WorldData.TERRAIN_WATER:
-		profile["water_weight"] = float(profile["water_weight"]) + weight
-
-	if source_biome == WorldData.BIOME_OCEAN:
-		profile["ocean_weight"] = float(profile["ocean_weight"]) + weight
-
-	if source_biome == WorldData.BIOME_RIVER:
-		profile["river_weight"] = float(profile["river_weight"]) + weight
-
-	if source_biome == WorldData.BIOME_MOUNTAIN:
-		profile["mountain_weight"] = float(profile["mountain_weight"]) + weight
-
-
-func add_weight_to_dictionary(weights: Dictionary, key: String, amount: float) -> void:
-	if not weights.has(key):
-		weights[key] = 0.0
-
-	weights[key] = float(weights[key]) + amount
-
-func get_city_seed() -> int:
-	var center: Vector2i = WorldData.city_start_region_center
-
-	var seed_value: int = int(WorldData.city_start_world_seed)
-	seed_value += int(center.x * 73856093)
-	seed_value += int(center.y * 19349663)
-	seed_value += int(WorldData.city_start_region_size * 83492791)
-
-	return seed_value
-
-func copy_city_profile_into_tile(tile: Dictionary, profile: Dictionary, city_x: int, city_y: int) -> void:
-	var local_detail: float = detail_noise.get_noise_2d(city_x, city_y) * 0.030
-	var local_fertility_detail: float = fertility_noise.get_noise_2d(city_x, city_y) * 7.0
-
-	var water_weight: float = float(profile["water_weight"])
-	var ocean_weight: float = float(profile["ocean_weight"])
-	var river_weight: float = float(profile["river_weight"])
-
-	var coastline_threshold: float = 0.50 + coast_noise.get_noise_2d(city_x, city_y) * 0.18
-	var river_threshold: float = 0.40 + coast_noise.get_noise_2d(city_x + 5000, city_y - 5000) * 0.10
-
-	var becomes_river: bool = river_weight > river_threshold
-	var becomes_water: bool = water_weight > coastline_threshold or becomes_river
-
-	tile["elevation"] = float(profile["elevation"]) + local_detail
-	tile["temperature"] = float(profile["temperature"])
-	tile["precipitation"] = float(profile["precipitation"])
-
-	if becomes_water:
-		tile["terrain"] = WorldData.TERRAIN_WATER
-		tile["is_land"] = false
-		tile["fertility"] = -1.0
-
-		if becomes_river and river_weight >= ocean_weight:
-			tile["biome"] = WorldData.BIOME_RIVER
-		else:
-			tile["biome"] = WorldData.BIOME_OCEAN
-
-	else:
-		var land_biome: String = get_dominant_land_biome(profile["biome_weights"], city_x, city_y)
-
-		tile["biome"] = land_biome
-		tile["is_land"] = true
-
-		if land_biome == WorldData.BIOME_MOUNTAIN:
-			tile["terrain"] = WorldData.TERRAIN_MOUNTAIN
-		else:
-			tile["terrain"] = WorldData.TERRAIN_LAND
-
-		var profile_fertility: float = float(profile["fertility"])
-
-		if profile_fertility >= 0.0:
-			tile["fertility"] = clamp(profile_fertility + local_fertility_detail, 0.0, 100.0)
-		else:
-			tile["fertility"] = 0.0
-
-	tile["resource"] = get_city_resource_from_profile(profile, city_x, city_y, str(tile["biome"]), str(tile["terrain"]))
-
-
-func get_dominant_land_biome(biome_weights: Dictionary, city_x: int, city_y: int) -> String:
-	var best_biome := WorldData.BIOME_PLAIN
-	var best_score := -99999.0
-
-	for biome_key in biome_weights.keys():
-		var biome := str(biome_key)
-
-		if biome == WorldData.BIOME_OCEAN:
-			continue
-
-		if biome == WorldData.BIOME_RIVER:
-			continue
-
-		var score: float = float(biome_weights[biome_key])
-		score += get_biome_boundary_bias(biome, city_x, city_y)
-
-		if score > best_score:
-			best_score = score
-			best_biome = biome
-
-	return best_biome
-
-
-func get_biome_boundary_bias(biome: String, city_x: int, city_y: int) -> float:
-	var offset: int = get_biome_noise_offset(biome)
-	var noise_value: float = biome_edge_noise.get_noise_2d(city_x + offset, city_y - offset)
-
-	return noise_value * 0.075
-
-func get_biome_noise_offset(biome: String) -> int:
-	match biome:
-		WorldData.BIOME_MOUNTAIN:
-			return 1000
-
-		WorldData.BIOME_HILLS:
-			return 2000
-
-		WorldData.BIOME_DESERT:
-			return 3000
-
-		WorldData.BIOME_PLAIN:
-			return 4000
-
-		WorldData.BIOME_FOREST:
-			return 5000
-
-		WorldData.BIOME_TUNDRA:
-			return 6000
-
-		WorldData.BIOME_TAIGA:
-			return 7000
-
-		WorldData.BIOME_JUNGLE:
-			return 8000
-
-	return 9000
-
-func setup_city_noise() -> void:
-	detail_noise.seed = city_seed
-	detail_noise.noise_type = FastNoiseLite.TYPE_SIMPLEX
-	detail_noise.frequency = 0.055
-	detail_noise.fractal_octaves = 4
-	detail_noise.fractal_gain = 0.50
-	detail_noise.fractal_lacunarity = 2.0
-
-	fertility_noise.seed = city_seed + 4111
-	fertility_noise.noise_type = FastNoiseLite.TYPE_SIMPLEX
-	fertility_noise.frequency = 0.075
-	fertility_noise.fractal_octaves = 3
-	fertility_noise.fractal_gain = 0.55
-	fertility_noise.fractal_lacunarity = 2.0
-
-	resource_noise.seed = city_seed + 9221
-	resource_noise.noise_type = FastNoiseLite.TYPE_SIMPLEX
-	resource_noise.frequency = 0.105
-	resource_noise.fractal_octaves = 3
-	resource_noise.fractal_gain = 0.50
-	resource_noise.fractal_lacunarity = 2.0
-
-	biome_warp_noise.seed = city_seed + 1771
-	biome_warp_noise.noise_type = FastNoiseLite.TYPE_SIMPLEX
-	biome_warp_noise.frequency = 0.026
-	biome_warp_noise.fractal_octaves = 3
-	biome_warp_noise.fractal_gain = 0.52
-	biome_warp_noise.fractal_lacunarity = 2.0
-
-	coast_noise.seed = city_seed + 2887
-	coast_noise.noise_type = FastNoiseLite.TYPE_SIMPLEX
-	coast_noise.frequency = 0.060
-	coast_noise.fractal_octaves = 4
-	coast_noise.fractal_gain = 0.52
-	coast_noise.fractal_lacunarity = 2.0
-
-	biome_edge_noise.seed = city_seed + 6397
-	biome_edge_noise.noise_type = FastNoiseLite.TYPE_SIMPLEX
-	biome_edge_noise.frequency = 0.050
-	biome_edge_noise.fractal_octaves = 3
-	biome_edge_noise.fractal_gain = 0.50
-	biome_edge_noise.fractal_lacunarity = 2.0
-
-func get_city_resource_from_profile(
-	profile: Dictionary,
-	city_x: int,
-	city_y: int,
-	biome: String,
-	terrain: String
-) -> String:
-	var resource_weights: Dictionary = profile["resource_weights"]
-
-	var best_resource := WorldData.RESOURCE_NONE
-	var best_weight := 0.0
-
-	for resource_key in resource_weights.keys():
-		var resource := str(resource_key)
-
-		if resource == WorldData.RESOURCE_NONE:
-			continue
-
-		var weight: float = float(resource_weights[resource_key])
-
-		if weight > best_weight:
-			best_weight = weight
-			best_resource = resource
-
-	if best_resource == WorldData.RESOURCE_NONE:
-		return WorldData.RESOURCE_NONE
-
-	if best_resource == WorldData.RESOURCE_FISH and terrain != WorldData.TERRAIN_WATER:
-		return WorldData.RESOURCE_NONE
-
-	if best_resource == WorldData.RESOURCE_GOLD:
-		if biome != WorldData.BIOME_HILLS and biome != WorldData.BIOME_MOUNTAIN:
-			return WorldData.RESOURCE_NONE
-
-	if best_resource != WorldData.RESOURCE_FISH and terrain == WorldData.TERRAIN_WATER:
-		return WorldData.RESOURCE_NONE
-
-	var noise_value: float = (resource_noise.get_noise_2d(city_x, city_y) + 1.0) * 0.5
-	var spawn_chance: float = clamp(best_weight * 0.55, 0.025, 0.42)
-
-	if noise_value > 1.0 - spawn_chance:
-		return best_resource
-
-	return WorldData.RESOURCE_NONE
 
 #endregion
 
@@ -1059,6 +751,7 @@ func create_city_camera() -> void:
 		camera.clamp_camera_to_map_bounds()
 
 	camera.make_current()
+	observed_city_camera_zoom = camera.zoom
 
 func store_current_city_camera_state() -> void:
 	if camera == null:
@@ -1346,9 +1039,6 @@ func create_back_button() -> void:
 
 	back_button.pressed.connect(on_back_button_pressed)
 
-func can_build_here() -> bool:
-	return WorldData.can_build_in_city()
-
 func create_resource_bar() -> void:
 	resource_bar = Control.new()
 	resource_bar.mouse_filter = Control.MOUSE_FILTER_IGNORE
@@ -1393,25 +1083,22 @@ func create_resource_bar() -> void:
 		resource_amount_labels.append(amount_label)
 
 func get_city_resource_order() -> Array[String]:
-	return [
-		WorldData.RESOURCE_FISH,
-		WorldData.RESOURCE_COAL,
-		WorldData.RESOURCE_IRON,
-		WorldData.RESOURCE_GOLD
-	]
+	return WorldData.get_city_resource_types()
 
 func update_resource_bar_values() -> void:
 	var resource_order := get_city_resource_order()
+	var owned_resource_amounts := (
+		WorldData.get_total_owned_city_resource_amounts()
+	)
 
 	for i in range(resource_amount_labels.size()):
 		if i >= resource_order.size():
 			continue
 
 		var resource: String = resource_order[i]
-		var amount := (
-			WorldData.get_total_owned_city_resource_amount(
-				resource
-			)
+		var amount := maxi(
+			int(owned_resource_amounts.get(resource, 0)),
+			0
 		)
 
 		resource_amount_labels[i].text = str(amount)
@@ -1455,12 +1142,15 @@ func layout_city_maps_menu(viewport_size: Vector2) -> void:
 	var button_size := 52.0
 	var resource_box_width := 52.0
 	var resource_box_height := 50.0
-	var gold_index := get_city_resource_order().find(WorldData.RESOURCE_GOLD)
+	var resource_order := get_city_resource_order()
+	var resource_count := maxi(resource_order.size(), 1)
+	var gold_index := resource_order.find(WorldData.RESOURCE_GOLD)
 
 	if gold_index < 0:
-		gold_index = 3
+		gold_index = resource_count - 1
 
-	var gold_box_x := viewport_size.x - resource_box_width * 4.0 + float(gold_index) * resource_box_width
+	var resource_bar_x := viewport_size.x - resource_box_width * float(resource_count)
+	var gold_box_x := resource_bar_x + float(gold_index) * resource_box_width
 	var gold_box_y := 0.0
 
 	city_maps_button.position = Vector2(gold_box_x, gold_box_y + resource_box_height)
@@ -1573,7 +1263,7 @@ func apply_square_button_style(
 
 func _exit_tree() -> void:
 	if city_texture_cache != null:
-		city_texture_cache.cancel_warmup()
+		city_texture_cache.dispose()
 
 func on_city_map_mode_button_pressed(mode: int) -> void:
 	set_city_view_mode(mode)
@@ -1594,7 +1284,7 @@ func set_city_view_mode(mode: int) -> void:
 	start_city_texture_warmup()
 
 	update_city_map_mode_button_visuals()
-	queue_redraw()
+	queue_city_background_layer_redraw()
 
 func get_city_map_mode_for_index(index: int) -> int:
 	return MapVisuals.get_view_mode_for_index(index)
@@ -1724,7 +1414,8 @@ func start_city_object_placement_from_definition(object_type: String) -> void:
 	)
 
 	set_city_object_option_selected(object_type, true)
-	queue_redraw()
+	queue_city_background_layer_redraw()
+	queue_city_interaction_layer_redraw()
 
 	print("City object placement started: ", object_type)
 
@@ -1740,7 +1431,8 @@ func cancel_active_city_object_placement() -> void:
 	if object_type != "":
 		set_city_object_option_selected(object_type, false)
 
-	queue_redraw()
+	queue_city_background_layer_redraw()
+	queue_city_interaction_layer_redraw()
 
 	print("City object placement canceled: ", object_type)
 
@@ -3121,7 +2813,7 @@ func layout_resource_bar(viewport_size: Vector2) -> void:
 
 	var box_width := 52.0
 	var box_height := 50.0
-	var box_count := 4
+	var box_count := resource_boxes.size()
 	var total_width := box_width * float(box_count)
 
 	resource_bar.position = Vector2(viewport_size.x - total_width, 0.0)
@@ -3293,7 +2985,7 @@ func start_road_placement() -> void:
 	set_road_option_selected(true)
 
 	update_build_button_state()
-	queue_redraw()
+	queue_city_interaction_layer_redraw()
 
 	print("Road placement started. Drag a selection box, then left-click again to confirm.")
 
@@ -3313,12 +3005,9 @@ func cancel_road_placement() -> void:
 
 	set_road_option_selected(false)
 
-	queue_redraw()
+	queue_city_interaction_layer_redraw()
 
 	print("Road placement canceled.")
-
-func cancel_build_placement() -> void:
-	cancel_road_placement()
 
 func confirm_active_city_object_placement() -> void:
 	if city_world == null:
@@ -3359,7 +3048,8 @@ func confirm_active_city_object_placement() -> void:
 
 	print("Placed city object: ", placed_object)
 
-	queue_redraw()
+	queue_city_background_layer_redraw()
+	queue_city_interaction_layer_redraw()
 
 func after_city_object_placed(city_object: Dictionary) -> void:
 	if city_object.is_empty():
@@ -3411,7 +3101,7 @@ func start_object_selection_drag(screen_position: Vector2) -> void:
 	object_selection_drag_current_world = object_selection_drag_start_world
 
 	update_object_selection_box_visual()
-	queue_redraw()
+	queue_city_interaction_layer_redraw()
 
 func update_object_selection_drag(screen_position: Vector2) -> void:
 	if not is_object_selection_dragging:
@@ -3421,7 +3111,7 @@ func update_object_selection_drag(screen_position: Vector2) -> void:
 	object_selection_drag_current_world = get_global_mouse_position()
 
 	update_object_selection_box_visual()
-	queue_redraw()
+	queue_city_interaction_layer_redraw()
 
 func finish_object_selection_drag(screen_position: Vector2) -> void:
 	if not is_object_selection_dragging:
@@ -3442,7 +3132,7 @@ func finish_object_selection_drag(screen_position: Vector2) -> void:
 	else:
 		select_city_object_in_drag_rect()
 
-	queue_redraw()
+	queue_city_interaction_layer_redraw()
 
 func get_selectable_city_citizen_ids_at_world_point(
 	tile_position: Vector2i,
@@ -3658,7 +3348,8 @@ func set_debug_selected_city_tile(
 	debug_selected_city_tile = tile_position
 	clear_debug_navigation_result()
 	update_debug_panel_text()
-	queue_redraw()
+	queue_city_background_layer_redraw()
+	queue_city_interaction_layer_redraw()
 
 
 func clear_debug_selected_city_tile() -> void:
@@ -3670,7 +3361,8 @@ func clear_debug_selected_city_tile() -> void:
 	)
 	clear_debug_navigation_result()
 	update_debug_panel_text()
-	queue_redraw()
+	queue_city_background_layer_redraw()
+	queue_city_interaction_layer_redraw()
 
 func set_selected_city_entity(
 	selection_kind: String,
@@ -3726,9 +3418,10 @@ func set_selected_city_entity(
 	selected_city_entity_kind = selection_kind
 	selected_city_entity_id = entity_id
 
+	refresh_selected_workplace_zone_cache()
 	update_selected_entity_panel()
 	update_debug_panel_text()
-	queue_redraw()
+	queue_all_city_render_layers_redraw()
 
 
 func set_selected_city_object(
@@ -3765,7 +3458,7 @@ func clear_selected_city_entity() -> void:
 
 	update_selected_entity_panel()
 	update_debug_panel_text()
-	queue_redraw()
+	queue_all_city_render_layers_redraw()
 
 func is_city_object_selectable(city_object: Dictionary) -> bool:
 	if city_object.is_empty():
@@ -3848,7 +3541,7 @@ func start_road_drag_selection() -> void:
 
 	rebuild_road_preview_rectangle(road_drag_start_tile, road_drag_current_tile)
 
-	queue_redraw()
+	queue_city_interaction_layer_redraw()
 
 func update_road_drag_selection() -> void:
 	if not is_road_dragging:
@@ -3866,7 +3559,7 @@ func update_road_drag_selection() -> void:
 
 	rebuild_road_preview_rectangle(road_drag_start_tile, road_drag_current_tile)
 
-	queue_redraw()
+	queue_city_interaction_layer_redraw()
 
 func rebuild_road_preview_rectangle(start_tile: Vector2i, end_tile: Vector2i) -> void:
 	road_preview_tiles.clear()
@@ -3892,16 +3585,6 @@ func rebuild_road_preview_rectangle(start_tile: Vector2i, end_tile: Vector2i) ->
 
 			road_preview_lookup[tile_position] = true
 			road_preview_tiles.append(tile_position)
-
-func add_road_preview_tile(tile_position: Vector2i) -> void:
-	if road_preview_lookup.has(tile_position):
-		return
-
-	if not WorldData.can_place_city_road_tile(city_world, tile_position):
-		return
-
-	road_preview_lookup[tile_position] = true
-	road_preview_tiles.append(tile_position)
 
 func get_city_tile_from_mouse() -> Vector2i:
 	if city_world == null:
@@ -3934,7 +3617,7 @@ func confirm_road_preview() -> void:
 		print("No valid road tiles could be placed.")
 		road_preview_tiles.clear()
 		road_preview_lookup.clear()
-		queue_redraw()
+		queue_city_interaction_layer_redraw()
 		return
 
 	print("Placed road with ", placed_tile_count, " tiles.")
@@ -3955,7 +3638,8 @@ func confirm_road_preview() -> void:
 
 	set_road_option_selected(true)
 
-	queue_redraw()
+	queue_city_background_layer_redraw()
+	queue_city_interaction_layer_redraw()
 
 #endregion
 
@@ -4011,27 +3695,6 @@ func rebuild_city_terrain_texture() -> void:
 	city_terrain_texture = city_texture_cache.rebuild(city_world, city_view_mode)
 
 
-func ensure_city_map_texture_for_mode(mode: int) -> void:
-	if city_texture_cache == null:
-		setup_city_texture_cache()
-
-	city_texture_cache.ensure_texture_for_mode(city_world, mode)
-
-
-func rebuild_all_city_map_mode_textures() -> void:
-	if city_texture_cache == null:
-		setup_city_texture_cache()
-
-	city_texture_cache.rebuild_all(city_world)
-
-
-func build_city_map_mode_texture(mode: int) -> ImageTexture:
-	if city_texture_cache == null:
-		setup_city_texture_cache()
-
-	return city_texture_cache.build_texture_for_mode(city_world, mode)
-
-
 func apply_cached_city_map_mode_texture() -> void:
 	if city_texture_cache == null:
 		setup_city_texture_cache()
@@ -4049,7 +3712,97 @@ func start_city_texture_warmup() -> void:
 
 #region Rendering and tile drawing
 
-func draw_selected_workplace_zone_background() -> void:
+func create_city_render_layers() -> void:
+	city_background_render_layer = CityRenderLayerScript.new()
+	city_background_render_layer.name = "CityBackgroundRenderLayer"
+	city_background_render_layer.setup(
+		Callable(self, "draw_city_background_layer")
+	)
+	add_child(city_background_render_layer)
+
+	city_citizen_render_layer = CityRenderLayerScript.new()
+	city_citizen_render_layer.name = "CityCitizenRenderLayer"
+	city_citizen_render_layer.setup(
+		Callable(self, "draw_city_citizen_layer")
+	)
+	add_child(city_citizen_render_layer)
+
+	city_interaction_render_layer = CityRenderLayerScript.new()
+	city_interaction_render_layer.name = "CityInteractionRenderLayer"
+	city_interaction_render_layer.setup(
+		Callable(self, "draw_city_interaction_layer")
+	)
+	add_child(city_interaction_render_layer)
+
+
+func queue_city_background_layer_redraw() -> void:
+	if city_background_render_layer != null:
+		city_background_render_layer.queue_redraw()
+
+
+func queue_city_citizen_layer_redraw() -> void:
+	if city_citizen_render_layer != null:
+		city_citizen_render_layer.queue_redraw()
+
+
+func queue_city_interaction_layer_redraw() -> void:
+	if city_interaction_render_layer != null:
+		city_interaction_render_layer.queue_redraw()
+
+
+func queue_all_city_render_layers_redraw() -> void:
+	queue_city_background_layer_redraw()
+	queue_city_citizen_layer_redraw()
+	queue_city_interaction_layer_redraw()
+
+
+func draw_city_background_layer(draw_target: CanvasItem) -> void:
+	if city_world == null:
+		return
+
+	if city_terrain_texture != null:
+		draw_target.draw_texture_rect(
+			city_terrain_texture,
+			Rect2(
+				0.0,
+				0.0,
+				float(city_world.width * city_tile_size),
+				float(city_world.height * city_tile_size)
+			),
+			false
+		)
+
+	draw_selected_workplace_zone_background(draw_target)
+	draw_active_workplace_zone_background(draw_target)
+	draw_city_objects(draw_target)
+	draw_city_roads(draw_target)
+	draw_debug_navigation_path(draw_target)
+	draw_city_ground_piles(draw_target)
+
+
+func draw_city_citizen_layer(draw_target: CanvasItem) -> void:
+	if city_world == null:
+		return
+
+	draw_city_citizens(draw_target)
+	draw_selected_city_citizen_highlight(draw_target)
+
+
+func draw_city_interaction_layer(draw_target: CanvasItem) -> void:
+	if city_world == null:
+		return
+
+	draw_debug_selected_city_tile_highlight(draw_target)
+	draw_selected_city_object_highlight(draw_target)
+	draw_hovered_city_tile_highlight(draw_target)
+	draw_city_object_debug_names(draw_target)
+	draw_active_city_object_placement_preview(draw_target)
+	draw_road_preview(draw_target)
+
+
+func draw_selected_workplace_zone_background(
+	draw_target: CanvasItem
+) -> void:
 	if selected_city_object_id == null:
 		return
 
@@ -4064,11 +3817,14 @@ func draw_selected_workplace_zone_background() -> void:
 		return
 
 	draw_selected_workplace_resource_zone(
-		city_object
+		city_object,
+		draw_target
 	)
 
 
-func draw_active_workplace_zone_background() -> void:
+func draw_active_workplace_zone_background(
+	draw_target: CanvasItem
+) -> void:
 	var preview_object := (
 		get_active_city_object_placement_preview()
 	)
@@ -4077,7 +3833,8 @@ func draw_active_workplace_zone_background() -> void:
 		return
 
 	draw_workplace_resource_zone_preview(
-		preview_object
+		preview_object,
+		draw_target
 	)
 
 func get_city_citizen_world_rect(
@@ -4140,9 +3897,12 @@ func get_city_citizen_world_rect(
 	)
 
 
-func draw_city_citizens() -> void:
+func draw_city_citizens(draw_target: CanvasItem) -> void:
 	if city_world == null:
 		return
+
+	city_citizen_draw_buffer.clear()
+	city_citizen_rect_draw_buffer.clear()
 
 	for raw_citizen in WorldData.city_citizens:
 		if not raw_citizen is Dictionary:
@@ -4165,14 +3925,72 @@ func draw_city_citizens() -> void:
 		):
 			continue
 
-		draw_rect(
+		draw_target.draw_rect(
 			marker_rect,
 			CITY_CITIZEN_MARKER_COLOR,
 			true
 		)
 
+		city_citizen_draw_buffer.append(citizen)
+		city_citizen_rect_draw_buffer.append(marker_rect)
 
-func draw_city_ground_piles() -> void:
+	for citizen_index in range(
+		city_citizen_draw_buffer.size()
+	):
+		draw_city_citizen_haul_cargo_marker(
+			draw_target,
+			city_citizen_draw_buffer[citizen_index],
+			city_citizen_rect_draw_buffer[citizen_index]
+		)
+
+
+func draw_city_citizen_haul_cargo_marker(
+	draw_target: CanvasItem,
+	citizen: Dictionary,
+	citizen_rect: Rect2
+) -> void:
+	var citizen_id := int(citizen.get("id", -1))
+	var cargo := WorldData.get_city_citizen_haul_cargo(
+		citizen_id
+	)
+	var cargo_amount := maxi(
+		int(cargo.get("amount", 0)),
+		0
+	)
+
+	if cargo_amount <= 0:
+		return
+
+	var resource := str(
+		cargo.get("resource_type", WorldData.RESOURCE_NONE)
+	)
+
+	if not WorldData.is_city_resource_type(resource):
+		return
+
+	var cargo_size := Vector2(
+		citizen_rect.size.x
+		* CITY_HAUL_CARGO_MARKER_CITIZEN_SCALE,
+		citizen_rect.size.y
+		* CITY_HAUL_CARGO_MARKER_CITIZEN_SCALE
+	)
+	var upper_right_corner := Vector2(
+		citizen_rect.end.x,
+		citizen_rect.position.y
+	)
+	var cargo_rect := Rect2(
+		upper_right_corner - cargo_size * 0.5,
+		cargo_size
+	)
+
+	draw_target.draw_rect(
+		cargo_rect,
+		get_resource_color(resource),
+		true
+	)
+
+
+func draw_city_ground_piles(draw_target: CanvasItem) -> void:
 	if city_world == null:
 		return
 
@@ -4218,7 +4036,7 @@ func draw_city_ground_piles() -> void:
 
 		if (
 			not raw_tile_position is Vector2i
-			or not WorldData.get_city_resource_types().has(resource)
+			or not WorldData.is_city_resource_type(resource)
 		):
 			continue
 
@@ -4250,78 +4068,19 @@ func draw_city_ground_piles() -> void:
 			0.5
 		)
 
-		draw_rect(
+		draw_target.draw_rect(
 			marker_rect.grow(border_width),
 			CITY_GROUND_PILE_BORDER_COLOR,
 			true
 		)
-		draw_rect(marker_rect, get_resource_color(resource), true)
-
-
-func draw_city_haul_cargo_markers() -> void:
-	if city_world == null:
-		return
-
-	for raw_citizen in WorldData.city_citizens:
-		if not raw_citizen is Dictionary:
-			continue
-
-		var citizen: Dictionary = raw_citizen
-
-		if not bool(citizen.get("alive", false)):
-			continue
-
-		var citizen_id := int(citizen.get("id", -1))
-		var cargo := WorldData.get_city_citizen_haul_cargo(
-			citizen_id
-		)
-		var cargo_amount := maxi(
-			int(cargo.get("amount", 0)),
-			0
-		)
-
-		if cargo_amount <= 0:
-			continue
-
-		var resource := str(
-			cargo.get("resource_type", WorldData.RESOURCE_NONE)
-		)
-
-		if not WorldData.get_city_resource_types().has(resource):
-			continue
-
-		var citizen_rect := get_city_citizen_world_rect(
-			citizen
-		)
-
-		if (
-			citizen_rect.size.x <= 0.0
-			or citizen_rect.size.y <= 0.0
-		):
-			continue
-
-		var cargo_size := Vector2(
-			citizen_rect.size.x
-			* CITY_HAUL_CARGO_MARKER_CITIZEN_SCALE,
-			citizen_rect.size.y
-			* CITY_HAUL_CARGO_MARKER_CITIZEN_SCALE
-		)
-		var upper_right_corner := Vector2(
-			citizen_rect.end.x,
-			citizen_rect.position.y
-		)
-		var cargo_rect := Rect2(
-			upper_right_corner - cargo_size * 0.5,
-			cargo_size
-		)
-
-		draw_rect(
-			cargo_rect,
+		draw_target.draw_rect(
+			marker_rect,
 			get_resource_color(resource),
 			true
 		)
 
-func draw_debug_navigation_path() -> void:
+
+func draw_debug_navigation_path(draw_target: CanvasItem) -> void:
 	if not WorldData.debug_mode_enabled:
 		return
 
@@ -4348,7 +4107,7 @@ func draw_debug_navigation_path() -> void:
 			+ tile_size_vector * 0.5
 		)
 
-		draw_rect(
+		draw_target.draw_rect(
 			Rect2(
 				tile_top_left,
 				tile_size_vector
@@ -4360,7 +4119,7 @@ func draw_debug_navigation_path() -> void:
 		path_points.append(tile_center)
 
 	if path_points.size() >= 2:
-		draw_polyline(
+		draw_target.draw_polyline(
 			path_points,
 			DEBUG_NAVIGATION_PATH_LINE_COLOR,
 			maxf(
@@ -4370,40 +4129,9 @@ func draw_debug_navigation_path() -> void:
 			false
 		)
 
-func _draw() -> void:
-	if city_world == null:
-		return
-
-	if city_terrain_texture != null:
-		draw_texture_rect(
-			city_terrain_texture,
-			Rect2(
-				0.0,
-				0.0,
-				float(city_world.width * city_tile_size),
-				float(city_world.height * city_tile_size)
-			),
-			false
-		)
-
-	draw_selected_workplace_zone_background()
-	draw_active_workplace_zone_background()
-	draw_city_objects()
-	draw_city_roads()
-	draw_debug_navigation_path()
-	draw_city_ground_piles()
-	draw_city_citizens()
-	draw_city_haul_cargo_markers()
-	draw_debug_selected_city_tile_highlight()
-	draw_selected_city_object_highlight()
-	draw_selected_city_citizen_highlight()
-	draw_hovered_city_tile_highlight()
-	draw_city_object_debug_names()
-	draw_active_city_object_placement_preview()
-	draw_road_preview()
-
-
-func draw_city_object_debug_names() -> void:
+func draw_city_object_debug_names(
+	draw_target: CanvasItem
+) -> void:
 	if not WorldData.debug_mode_enabled:
 		return
 
@@ -4442,6 +4170,7 @@ func draw_city_object_debug_names() -> void:
 		var object_screen_size := rect.size * pixels_per_world_unit
 
 		draw_centered_city_object_debug_name(
+			draw_target,
 			label_center,
 			object_screen_size,
 			object_name,
@@ -4450,6 +4179,7 @@ func draw_city_object_debug_names() -> void:
 		)
 
 func draw_centered_city_object_debug_name(
+	draw_target: CanvasItem,
 	label_center: Vector2,
 	object_screen_size: Vector2,
 	object_name: String,
@@ -4485,19 +4215,19 @@ func draw_centered_city_object_debug_name(
 		(ascent - descent) * 0.5
 	)
 
-	draw_set_transform(
+	draw_target.draw_set_transform(
 		label_center,
 		0.0,
 		Vector2(world_units_per_screen_pixel, world_units_per_screen_pixel)
 	)
 
-	draw_rect(
+	draw_target.draw_rect(
 		background_rect,
 		DEBUG_CITY_OBJECT_NAME_BACKGROUND_COLOR,
 		true
 	)
 
-	draw_string(
+	draw_target.draw_string(
 		font,
 		text_position + Vector2(1.0, 1.0),
 		object_name,
@@ -4507,7 +4237,7 @@ func draw_centered_city_object_debug_name(
 		DEBUG_CITY_OBJECT_NAME_SHADOW_COLOR
 	)
 
-	draw_string(
+	draw_target.draw_string(
 		font,
 		text_position,
 		object_name,
@@ -4517,7 +4247,11 @@ func draw_centered_city_object_debug_name(
 		DEBUG_CITY_OBJECT_NAME_TEXT_COLOR
 	)
 
-	draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
+	draw_target.draw_set_transform(
+		Vector2.ZERO,
+		0.0,
+		Vector2.ONE
+	)
 
 func get_debug_pixels_per_world_unit() -> float:
 	var canvas_transform := get_canvas_transform()
@@ -4599,18 +4333,6 @@ func get_city_object_debug_footprint_tiles(city_object: Dictionary) -> Array:
 
 	return []
 
-func make_city_object_visual_style(
-	frame_color: Color,
-	fill_color: Color,
-	frame_thickness: float
-) -> Dictionary:
-	return {
-		"frame_color": frame_color,
-		"fill_color": fill_color,
-		"frame_thickness": frame_thickness
-	}
-
-
 func get_city_object_visual_style(object_type: String) -> Dictionary:
 	return WorldData.get_city_object_visual_style_for_type(object_type)
 
@@ -4624,6 +4346,7 @@ func with_alpha_multiplier(color: Color, alpha_multiplier: float) -> Color:
 
 
 func draw_city_object_visual(
+	draw_target: CanvasItem,
 	city_object: Dictionary,
 	alpha_multiplier: float = 1.0,
 	is_valid_preview: bool = true
@@ -4655,6 +4378,7 @@ func draw_city_object_visual(
 	fill_color = with_alpha_multiplier(fill_color, alpha_multiplier)
 
 	draw_framed_city_object_rect(
+		draw_target,
 		rect,
 		frame_color,
 		fill_color,
@@ -4662,7 +4386,7 @@ func draw_city_object_visual(
 	)
 
 
-func draw_city_objects() -> void:
+func draw_city_objects(draw_target: CanvasItem) -> void:
 	for city_object in WorldData.city_objects:
 		if city_object.is_empty():
 			continue
@@ -4673,6 +4397,7 @@ func draw_city_objects() -> void:
 			continue
 
 		draw_city_object_visual(
+			draw_target,
 			city_object,
 			1.0,
 			true
@@ -4742,17 +4467,6 @@ func get_active_city_object_placement_preview() -> Dictionary:
 		"owner": str(active_city_object_placement.get("owner", "player"))
 	}
 
-func invalidate_workplace_zone_render_cache(
-	render_cache: Dictionary
-) -> void:
-	if render_cache.is_empty():
-		return
-
-	# Tile-data versions never use negative values.
-	# This forces one rebuild while preserving allocated resources.
-	render_cache["tile_data_version"] = -2
-
-
 func refresh_active_workplace_zone_preview_cache() -> void:
 	if not has_active_city_object_placement():
 		return
@@ -4764,664 +4478,60 @@ func refresh_active_workplace_zone_preview_cache() -> void:
 	if preview_object.is_empty():
 		return
 
-	var _render_cache := (
-		get_cached_workplace_zone_overlay(
-			preview_object,
-			true,
-			true
-		)
-	)
-
-func get_cached_workplace_zone_overlay(
-	city_object: Dictionary,
-	preview_mode: bool,
-	allow_rebuild: bool = true
-) -> Dictionary:
-	var object_id := int(
-		city_object.get("id", -1)
-	)
-	var object_type := str(
-		city_object.get("type", "")
-	)
-	var top_left: Vector2i = city_object.get(
-		"top_left",
-		Vector2i(-1, -1)
-	)
-	var size_tiles: Vector2i = city_object.get(
-		"size",
-		Vector2i.ZERO
-	)
-	var footprint_tiles := (
-		WorldData.get_city_object_footprint_tiles(
-			city_object
-		)
-	)
-	var footprint_hash_value := int(
-		hash(footprint_tiles)
-	)
-	var tile_data_version := -1
-
-	if city_world != null:
-		tile_data_version = (
-			city_world.tile_data_version
-		)
-
-	var active_cache: Dictionary
-
-	if preview_mode:
-		active_cache = (
-			workplace_zone_preview_render_cache
-		)
-	else:
-		active_cache = (
-			selected_workplace_zone_render_cache
-		)
-
-	if workplace_zone_render_cache_matches(
-		active_cache,
-		preview_mode,
-		object_id,
-		object_type,
-		top_left,
-		size_tiles,
-		footprint_hash_value,
-		tile_data_version
-	):
-		return active_cache
-
-	# Rendering is permitted to read only an already-prepared cache.
-	# Texture generation happens before _draw().
-	if not allow_rebuild:
-		return {}
-
-	var reusable_texture: ImageTexture = null
-	var reusable_image: Image = null
-	var raw_reusable_texture = active_cache.get(
-		"texture",
-		null
-	)
-	var raw_reusable_image = active_cache.get(
-		"image",
-		null
-	)
-
-	if raw_reusable_texture is ImageTexture:
-		reusable_texture = raw_reusable_texture
-
-	if raw_reusable_image is Image:
-		reusable_image = raw_reusable_image
-
-	var new_cache := {
-		"preview_mode": preview_mode,
-		"object_id": object_id,
-		"object_type": object_type,
-		"top_left": top_left,
-		"size": size_tiles,
-		"footprint_hash": footprint_hash_value,
-		"tile_data_version": tile_data_version,
-		"has_zone": false,
-		"texture": reusable_texture,
-		"image": reusable_image,
-		"world_rect": Rect2()
-	}
-
-	var source_evaluation := (
-		WorkplaceProductionSystem
-		.get_resource_source_evaluation(
-			city_object,
-			city_world
-		)
-	)
-
-	if bool(
-		source_evaluation.get(
-			"uses_environmental_source",
-			false
-		)
-	):
-		var texture_data := (
-			build_workplace_zone_overlay_texture(
-				source_evaluation,
-				preview_mode,
-				reusable_texture,
-				reusable_image
-			)
-		)
-
-		if not texture_data.is_empty():
-			new_cache["has_zone"] = true
-			new_cache["texture"] = texture_data.get(
-				"texture",
-				null
-			)
-			new_cache["image"] = texture_data.get(
-				"image",
-				null
-			)
-			new_cache["world_rect"] = texture_data.get(
-				"world_rect",
-				Rect2()
-			)
-
-	if preview_mode:
-		workplace_zone_preview_render_cache = (
-			new_cache
-		)
-	else:
-		selected_workplace_zone_render_cache = (
-			new_cache
-		)
-
-	return new_cache
-
-func workplace_zone_render_cache_matches(
-	render_cache: Dictionary,
-	preview_mode: bool,
-	object_id: int,
-	object_type: String,
-	top_left: Vector2i,
-	size_tiles: Vector2i,
-	footprint_hash_value: int,
-	tile_data_version: int
-) -> bool:
-	if render_cache.is_empty():
-		return false
-
-	return (
-		bool(render_cache.get("preview_mode", false))
-		== preview_mode
-		and int(render_cache.get("object_id", -2))
-		== object_id
-		and str(render_cache.get("object_type", ""))
-		== object_type
-		and render_cache.get(
-			"top_left",
-			Vector2i(-2, -2)
-		)
-		== top_left
-		and render_cache.get(
-			"size",
-			Vector2i.ZERO
-		)
-		== size_tiles
-		and int(render_cache.get("footprint_hash", -1))
-		== footprint_hash_value
-		and int(render_cache.get("tile_data_version", -2))
-		== tile_data_version
-	)
-
-func build_workplace_zone_overlay_texture(
-	source_evaluation: Dictionary,
-	preview_mode: bool,
-	reusable_texture: ImageTexture = null,
-	reusable_image: Image = null
-) -> Dictionary:
-	var zone_tiles: Array = source_evaluation.get(
-		"zone_tiles",
-		[]
-	)
-
-	if zone_tiles.is_empty():
-		return {}
-
-	var has_bounds := false
-	var minimum_tile := Vector2i.ZERO
-	var maximum_tile := Vector2i.ZERO
-
-	for raw_zone_tile in zone_tiles:
-		if not raw_zone_tile is Vector2i:
-			continue
-
-		var zone_tile: Vector2i = raw_zone_tile
-
-		if not has_bounds:
-			minimum_tile = zone_tile
-			maximum_tile = zone_tile
-			has_bounds = true
-			continue
-
-		minimum_tile.x = mini(
-			minimum_tile.x,
-			zone_tile.x
-		)
-		minimum_tile.y = mini(
-			minimum_tile.y,
-			zone_tile.y
-		)
-		maximum_tile.x = maxi(
-			maximum_tile.x,
-			zone_tile.x
-		)
-		maximum_tile.y = maxi(
-			maximum_tile.y,
-			zone_tile.y
-		)
-
-	if not has_bounds:
-		return {}
-
-	var width_tiles := (
-		maximum_tile.x - minimum_tile.x + 1
-	)
-	var height_tiles := (
-		maximum_tile.y - minimum_tile.y + 1
-	)
-	var maximum_dimension_tiles := maxi(
-		width_tiles,
-		height_tiles
-	)
-	var pixels_per_tile := clampi(
-		int(
-			floor(
-				float(
-					WORKPLACE_ZONE_TEXTURE_MAXIMUM_DIMENSION
-				)
-				/ float(maximum_dimension_tiles)
-			)
-		),
-		1,
-		WORKPLACE_ZONE_TEXTURE_TARGET_PIXELS_PER_TILE
-	)
-	var image_width := width_tiles * pixels_per_tile
-	var image_height := height_tiles * pixels_per_tile
-	var overlay_image: Image = reusable_image
-
-	if (
-		overlay_image == null
-		or overlay_image.get_width() != image_width
-		or overlay_image.get_height() != image_height
-		or (
-			overlay_image.get_format()
-			!= Image.FORMAT_RGBA8
-		)
-	):
-		overlay_image = Image.create(
-			image_width,
-			image_height,
-			false,
-			Image.FORMAT_RGBA8
-		)
-
-	overlay_image.fill(
-		Color(0.0, 0.0, 0.0, 0.0)
-	)
-
-	var resource_tile_lookup: Dictionary = (
-		source_evaluation.get(
-			"resource_tile_lookup",
-			{}
-		)
-	)
-
-	if preview_mode:
-		for raw_zone_tile in zone_tiles:
-			if not raw_zone_tile is Vector2i:
-				continue
-
-			var zone_tile: Vector2i = raw_zone_tile
-
-			paint_workplace_zone_preview_tile(
-				overlay_image,
-				zone_tile,
-				minimum_tile,
-				pixels_per_tile,
-				resource_tile_lookup.has(zone_tile)
-			)
-	else:
-		var resource_tiles: Array = source_evaluation.get(
-			"resource_tiles",
-			[]
-		)
-
-		for raw_resource_tile in resource_tiles:
-			if not raw_resource_tile is Vector2i:
-				continue
-
-			var resource_tile: Vector2i = (
-				raw_resource_tile
-			)
-			var resource_rect := (
-				get_workplace_zone_texture_tile_rect(
-					resource_tile,
-					minimum_tile,
-					pixels_per_tile
-				)
-			)
-
-			overlay_image.fill_rect(
-				resource_rect,
-				WORKPLACE_ZONE_SELECTED_RESOURCE_COLOR
-			)
-
-		var zone_tile_lookup: Dictionary = (
-			source_evaluation.get(
-				"zone_tile_lookup",
-				{}
-			)
-		)
-
-		for raw_zone_tile in zone_tiles:
-			if not raw_zone_tile is Vector2i:
-				continue
-
-			var zone_tile: Vector2i = raw_zone_tile
-			var tile_rect := (
-				get_workplace_zone_texture_tile_rect(
-					zone_tile,
-					minimum_tile,
-					pixels_per_tile
-				)
-			)
-
-			paint_workplace_zone_texture_border(
-				overlay_image,
-				tile_rect,
-				WORKPLACE_ZONE_SELECTED_BORDER_COLOR,
-				not zone_tile_lookup.has(
-					zone_tile + Vector2i(0, -1)
-				),
-				not zone_tile_lookup.has(
-					zone_tile + Vector2i(0, 1)
-				),
-				not zone_tile_lookup.has(
-					zone_tile + Vector2i(-1, 0)
-				),
-				not zone_tile_lookup.has(
-					zone_tile + Vector2i(1, 0)
-				)
-			)
-
-	var overlay_texture: ImageTexture = (
-		reusable_texture
-	)
-
-	if overlay_texture == null:
-		overlay_texture = (
-			ImageTexture.create_from_image(
-				overlay_image
-			)
-		)
-	elif (
-		overlay_texture.get_width() == image_width
-		and (
-			overlay_texture.get_height()
-			== image_height
-		)
-		and (
-			overlay_texture.get_format()
-			== Image.FORMAT_RGBA8
-		)
-	):
-		# Fast path: same GPU allocation, new pixel contents.
-		overlay_texture.update(
-			overlay_image
-		)
-	else:
-		# This should occur mainly when a zone becomes clipped
-		# against a map edge and changes dimensions.
-		overlay_texture.set_image(
-			overlay_image
-		)
-	var world_rect := Rect2(
-		Vector2(
-			float(minimum_tile.x * city_tile_size),
-			float(minimum_tile.y * city_tile_size)
-		),
-		Vector2(
-			float(width_tiles * city_tile_size),
-			float(height_tiles * city_tile_size)
-		)
-	)
-
-	return {
-		"texture": overlay_texture,
-		"image": overlay_image,
-		"world_rect": world_rect
-	}
-
-func get_workplace_zone_texture_tile_rect(
-	tile_position: Vector2i,
-	minimum_tile: Vector2i,
-	pixels_per_tile: int
-) -> Rect2i:
-	return Rect2i(
-		(tile_position.x - minimum_tile.x)
-			* pixels_per_tile,
-		(tile_position.y - minimum_tile.y)
-			* pixels_per_tile,
-		pixels_per_tile,
-		pixels_per_tile
-	)
-
-
-func paint_workplace_zone_preview_tile(
-	overlay_image: Image,
-	tile_position: Vector2i,
-	minimum_tile: Vector2i,
-	pixels_per_tile: int,
-	has_resource: bool
-) -> void:
-	var tile_rect := (
-		get_workplace_zone_texture_tile_rect(
-			tile_position,
-			minimum_tile,
-			pixels_per_tile
-		)
-	)
-	var fill_color := (
-		WORKPLACE_ZONE_PREVIEW_RED_FILL_COLOR
-	)
-	var border_color := (
-		WORKPLACE_ZONE_PREVIEW_RED_BORDER_COLOR
-	)
-
-	if has_resource:
-		fill_color = (
-			WORKPLACE_ZONE_PREVIEW_MAGENTA_FILL_COLOR
-		)
-		border_color = (
-			WORKPLACE_ZONE_PREVIEW_MAGENTA_BORDER_COLOR
-		)
-
-	overlay_image.fill_rect(
-		tile_rect,
-		fill_color
-	)
-
-	paint_workplace_zone_texture_border(
-		overlay_image,
-		tile_rect,
-		border_color,
+	workplace_zone_overlay_cache.prepare(
+		preview_object,
 		true,
-		true,
-		true,
-		true
+		city_world,
+		city_tile_size
 	)
 
 
-func paint_workplace_zone_texture_border(
-	overlay_image: Image,
-	tile_rect: Rect2i,
-	border_color: Color,
-	draw_top: bool,
-	draw_bottom: bool,
-	draw_left: bool,
-	draw_right: bool
-) -> void:
-	var border_width := clampi(
-		WORKPLACE_ZONE_TEXTURE_BORDER_PIXELS,
-		1,
-		mini(tile_rect.size.x, tile_rect.size.y)
-	)
-
-	if draw_top:
-		overlay_image.fill_rect(
-			Rect2i(
-				tile_rect.position,
-				Vector2i(
-					tile_rect.size.x,
-					border_width
-				)
-			),
-			border_color
-		)
-
-	if draw_bottom:
-		overlay_image.fill_rect(
-			Rect2i(
-				Vector2i(
-					tile_rect.position.x,
-					tile_rect.position.y
-						+ tile_rect.size.y
-						- border_width
-				),
-				Vector2i(
-					tile_rect.size.x,
-					border_width
-				)
-			),
-			border_color
-		)
-
-	if draw_left:
-		overlay_image.fill_rect(
-			Rect2i(
-				tile_rect.position,
-				Vector2i(
-					border_width,
-					tile_rect.size.y
-				)
-			),
-			border_color
-		)
-
-	if draw_right:
-		overlay_image.fill_rect(
-			Rect2i(
-				Vector2i(
-					tile_rect.position.x
-						+ tile_rect.size.x
-						- border_width,
-					tile_rect.position.y
-				),
-				Vector2i(
-					border_width,
-					tile_rect.size.y
-				)
-			),
-			border_color
-		)
-
-
-func draw_cached_workplace_zone_overlay(
-	render_cache: Dictionary
-) -> void:
-	var raw_texture = render_cache.get(
-		"texture",
-		null
-	)
-
-	if not raw_texture is Texture2D:
+func refresh_selected_workplace_zone_cache() -> void:
+	if selected_city_object_id < 0:
 		return
 
-	var overlay_texture := raw_texture as Texture2D
-	var world_rect: Rect2 = render_cache.get(
-		"world_rect",
-		Rect2()
+	var city_object := WorldData.get_city_object_by_id(
+		selected_city_object_id
 	)
 
-	if (
-		world_rect.size.x <= 0.0
-		or world_rect.size.y <= 0.0
-	):
+	if not is_city_object_selectable(city_object):
 		return
 
-	draw_texture_rect(
-		overlay_texture,
-		world_rect,
-		false
+	workplace_zone_overlay_cache.prepare(
+		city_object,
+		false,
+		city_world,
+		city_tile_size
 	)
 
 
 func draw_workplace_resource_zone_preview(
-	preview_object: Dictionary
+	preview_object: Dictionary,
+	draw_target: CanvasItem
 ) -> bool:
-	var render_cache := get_cached_workplace_zone_overlay(
+	return workplace_zone_overlay_cache.draw_cached(
 		preview_object,
 		true,
-		false
+		city_world,
+		draw_target
 	)
 
-	if not bool(render_cache.get("has_zone", false)):
-		return false
-
-	draw_cached_workplace_zone_overlay(
-		render_cache
-	)
-
-	return true
 
 func draw_selected_workplace_resource_zone(
-	city_object: Dictionary
+	city_object: Dictionary,
+	draw_target: CanvasItem
 ) -> bool:
-	var render_cache := get_cached_workplace_zone_overlay(
+	return workplace_zone_overlay_cache.draw_cached(
 		city_object,
-		false
+		false,
+		city_world,
+		draw_target
 	)
-
-	if not bool(render_cache.get("has_zone", false)):
-		return false
-
-	draw_cached_workplace_zone_overlay(
-		render_cache
-	)
-
-	return true
-
 #endregion
 
-func draw_city_object_placement_outline(
-	preview_object: Dictionary,
-	can_place: bool
+func draw_active_city_object_placement_preview(
+	draw_target: CanvasItem
 ) -> void:
-	var object_rect := get_city_object_world_rect(
-		preview_object
-	)
-
-	if (
-		object_rect.size.x <= 0.0
-		or object_rect.size.y <= 0.0
-	):
-		return
-
-	var border_color := (
-		WORKPLACE_ZONE_PREVIEW_RED_BORDER_COLOR
-	)
-
-	if can_place:
-		var object_type := str(
-			preview_object.get("type", "")
-		)
-		var style := get_city_object_visual_style(
-			object_type
-		)
-		var frame_color: Color = style["frame_color"]
-
-		border_color = Color(
-			frame_color.r,
-			frame_color.g,
-			frame_color.b,
-			WORKPLACE_ZONE_PREVIEW_MAGENTA_BORDER_COLOR.a
-		)
-
-	draw_screen_constant_inset_rect_border(
-		object_rect,
-		border_color,
-		0.0,
-		2.0
-	)
-
-func draw_active_city_object_placement_preview() -> void:
 	var preview_object := (
 		get_active_city_object_placement_preview()
 	)
@@ -5438,23 +4548,18 @@ func draw_active_city_object_placement_preview() -> void:
 		size_tiles
 	)
 
-	var preview_render_cache := (
-		get_cached_workplace_zone_overlay(
+	var has_workplace_zone := (
+		workplace_zone_overlay_cache.has_cached_zone(
 			preview_object,
 			true,
-			false
-		)
-	)
-	var has_workplace_zone := bool(
-		preview_render_cache.get(
-			"has_zone",
-			false
+			city_world
 		)
 	)
 
 	if has_workplace_zone:
 		# The zone was already drawn beneath the buildings.
 		draw_city_object_visual(
+			draw_target,
 			preview_object,
 			0.65,
 			can_place
@@ -5462,6 +4567,7 @@ func draw_active_city_object_placement_preview() -> void:
 		return
 
 	draw_city_object_visual(
+		draw_target,
 		preview_object,
 		0.45,
 		can_place
@@ -5478,6 +4584,7 @@ func get_screen_constant_world_width(pixel_width: float) -> float:
 	return pixel_width / zoom_x
 
 func draw_screen_constant_inset_rect_border(
+	draw_target: CanvasItem,
 	rect: Rect2,
 	border_color: Color,
 	inset_amount: float,
@@ -5498,13 +4605,13 @@ func draw_screen_constant_inset_rect_border(
 
 	var inner := rect.grow(-safe_inset)
 
-	draw_rect(
+	draw_target.draw_rect(
 		Rect2(inner.position, Vector2(inner.size.x, safe_width)),
 		border_color,
 		true
 	)
 
-	draw_rect(
+	draw_target.draw_rect(
 		Rect2(
 			Vector2(inner.position.x, inner.position.y + inner.size.y - safe_width),
 			Vector2(inner.size.x, safe_width)
@@ -5513,13 +4620,13 @@ func draw_screen_constant_inset_rect_border(
 		true
 	)
 
-	draw_rect(
+	draw_target.draw_rect(
 		Rect2(inner.position, Vector2(safe_width, inner.size.y)),
 		border_color,
 		true
 	)
 
-	draw_rect(
+	draw_target.draw_rect(
 		Rect2(
 			Vector2(inner.position.x + inner.size.x - safe_width, inner.position.y),
 			Vector2(safe_width, inner.size.y)
@@ -5528,7 +4635,9 @@ func draw_screen_constant_inset_rect_border(
 		true
 	)
 
-func draw_selected_city_citizen_highlight() -> void:
+func draw_selected_city_citizen_highlight(
+	draw_target: CanvasItem
+) -> void:
 	if selected_city_citizen_id < 0:
 		return
 
@@ -5561,13 +4670,16 @@ func draw_selected_city_citizen_highlight() -> void:
 	)
 
 	draw_screen_constant_inset_rect_border(
+		draw_target,
 		highlight_rect,
 		SELECTED_OBJECT_HIGHLIGHT_COLOR,
 		0.0,
 		2.0
 	)
 
-func draw_debug_selected_city_tile_highlight() -> void:
+func draw_debug_selected_city_tile_highlight(
+	draw_target: CanvasItem
+) -> void:
 	if not WorldData.debug_mode_enabled:
 		return
 
@@ -5592,13 +4704,16 @@ func draw_debug_selected_city_tile_highlight() -> void:
 	)
 
 	draw_screen_constant_inset_rect_border(
+		draw_target,
 		tile_rect,
 		DEBUG_SELECTED_TILE_HIGHLIGHT_COLOR,
 		0.0,
 		2.0
 	)
 
-func draw_selected_city_object_highlight() -> void:
+func draw_selected_city_object_highlight(
+	draw_target: CanvasItem
+) -> void:
 	if selected_city_object_id == null:
 		return
 
@@ -5623,6 +4738,7 @@ func draw_selected_city_object_highlight() -> void:
 		return
 
 	draw_screen_constant_inset_rect_border(
+		draw_target,
 		object_rect,
 		SELECTED_OBJECT_HIGHLIGHT_COLOR,
 		0.0,
@@ -5630,6 +4746,7 @@ func draw_selected_city_object_highlight() -> void:
 	)
 
 func draw_framed_city_object_rect(
+	draw_target: CanvasItem,
 	rect: Rect2,
 	frame_color: Color,
 	fill_color: Color,
@@ -5642,123 +4759,17 @@ func draw_framed_city_object_rect(
 	var max_y_thickness: float = maxf(0.01, rect.size.y * 0.5 - 0.01)
 	var safe_thickness: float = minf(frame_thickness, minf(max_x_thickness, max_y_thickness))
 
-	draw_rect(rect, frame_color, true)
+	draw_target.draw_rect(rect, frame_color, true)
 
 	var inner_rect := rect.grow(-safe_thickness)
 
 	if inner_rect.size.x <= 0.0 or inner_rect.size.y <= 0.0:
 		return
 
-	draw_rect(inner_rect, fill_color, true)
+	draw_target.draw_rect(inner_rect, fill_color, true)
 
 
-func draw_inset_rect_border(
-	rect: Rect2,
-	border_color: Color,
-	inset_amount: float = 0.35,
-	border_width: float = 0.45
-) -> void:
-	if rect.size.x <= 0.0 or rect.size.y <= 0.0:
-		return
-
-	var safe_inset: float = min(
-		inset_amount,
-		max(0.0, rect.size.x * 0.5 - 0.01),
-		max(0.0, rect.size.y * 0.5 - 0.01)
-	)
-
-	var safe_width: float = min(
-		border_width,
-		max(0.01, rect.size.x - safe_inset * 2.0),
-		max(0.01, rect.size.y - safe_inset * 2.0)
-	)
-
-	var inner := rect.grow(-safe_inset)
-
-	draw_rect(
-		Rect2(inner.position, Vector2(inner.size.x, safe_width)),
-		border_color,
-		true
-	)
-
-	draw_rect(
-		Rect2(
-			Vector2(inner.position.x, inner.position.y + inner.size.y - safe_width),
-			Vector2(inner.size.x, safe_width)
-		),
-		border_color,
-		true
-	)
-
-	draw_rect(
-		Rect2(inner.position, Vector2(safe_width, inner.size.y)),
-		border_color,
-		true
-	)
-
-	draw_rect(
-		Rect2(
-			Vector2(inner.position.x + inner.size.x - safe_width, inner.position.y),
-			Vector2(safe_width, inner.size.y)
-		),
-		border_color,
-		true
-	)
-
-func draw_inner_tile_fraction_rect_border(
-	rect: Rect2,
-	border_color: Color,
-	tile_fraction: float
-) -> void:
-	if rect.size.x <= 0.0 or rect.size.y <= 0.0:
-		return
-
-	var border_width: float = float(city_tile_size) * tile_fraction
-
-	border_width = minf(
-		border_width,
-		minf(rect.size.x * 0.5, rect.size.y * 0.5)
-	)
-
-	border_width = maxf(border_width, 0.01)
-
-	draw_rect(
-		Rect2(
-			rect.position,
-			Vector2(rect.size.x, border_width)
-		),
-		border_color,
-		true
-	)
-
-	draw_rect(
-		Rect2(
-			Vector2(rect.position.x, rect.position.y + rect.size.y - border_width),
-			Vector2(rect.size.x, border_width)
-		),
-		border_color,
-		true
-	)
-
-	draw_rect(
-		Rect2(
-			rect.position,
-			Vector2(border_width, rect.size.y)
-		),
-		border_color,
-		true
-	)
-
-	draw_rect(
-		Rect2(
-			Vector2(rect.position.x + rect.size.x - border_width, rect.position.y),
-			Vector2(border_width, rect.size.y)
-		),
-		border_color,
-		true
-	)
-
-func draw_city_roads() -> void:
+func draw_city_roads(draw_target: CanvasItem) -> void:
 	for city_object in WorldData.city_objects:
 		var object_type: String = str(city_object["type"])
 
@@ -5781,9 +4792,13 @@ func draw_city_roads() -> void:
 				float(city_tile_size)
 			)
 
-			draw_rect(rect, Color(0.34, 0.34, 0.34, 0.95), true)
+			draw_target.draw_rect(
+				rect,
+				Color(0.34, 0.34, 0.34, 0.95),
+				true
+			)
 
-func draw_road_preview() -> void:
+func draw_road_preview(draw_target: CanvasItem) -> void:
 	if not is_road_placement_active:
 		return
 
@@ -5803,19 +4818,22 @@ func draw_road_preview() -> void:
 			float(city_tile_size)
 		)
 
-		draw_rect(
+		draw_target.draw_rect(
 			rect,
 			CURSOR_LOOK_FILL_COLOR,
 			true
 		)
 
 		draw_inner_box_border(
+			draw_target,
 			rect,
 			CURSOR_LOOK_BORDER_COLOR,
 			border_width
 		)
 
-func draw_hovered_city_tile_highlight() -> void:
+func draw_hovered_city_tile_highlight(
+	draw_target: CanvasItem
+) -> void:
 	if hovered_city_tile == Vector2i(-1, -1):
 		return
 
@@ -5843,12 +4861,18 @@ func draw_hovered_city_tile_highlight() -> void:
 	var border_width: float = float(city_tile_size) * 0.08
 
 	draw_inner_box_border(
+		draw_target,
 		rect,
 		CURSOR_LOOK_BORDER_COLOR,
 		border_width
 	)
 
-func draw_inner_box_border(rect: Rect2, border_color: Color, border_width: float) -> void:
+func draw_inner_box_border(
+	draw_target: CanvasItem,
+	rect: Rect2,
+	border_color: Color,
+	border_width: float
+) -> void:
 	if rect.size.x <= 0.0 or rect.size.y <= 0.0:
 		return
 
@@ -5859,13 +4883,13 @@ func draw_inner_box_border(rect: Rect2, border_color: Color, border_width: float
 
 	safe_width = maxf(safe_width, 0.01)
 
-	draw_rect(
+	draw_target.draw_rect(
 		Rect2(rect.position, Vector2(rect.size.x, safe_width)),
 		border_color,
 		true
 	)
 
-	draw_rect(
+	draw_target.draw_rect(
 		Rect2(
 			Vector2(rect.position.x, rect.position.y + rect.size.y - safe_width),
 			Vector2(rect.size.x, safe_width)
@@ -5874,13 +4898,13 @@ func draw_inner_box_border(rect: Rect2, border_color: Color, border_width: float
 		true
 	)
 
-	draw_rect(
+	draw_target.draw_rect(
 		Rect2(rect.position, Vector2(safe_width, rect.size.y)),
 		border_color,
 		true
 	)
 
-	draw_rect(
+	draw_target.draw_rect(
 		Rect2(
 			Vector2(rect.position.x + rect.size.x - safe_width, rect.position.y),
 			Vector2(safe_width, rect.size.y)
@@ -5941,74 +4965,6 @@ func get_city_tile_under_mouse() -> Vector2i:
 
 	return Vector2i(tile_x, tile_y)
 
-
-func update_hovered_city_tile() -> void:
-	previous_hovered_city_tile = hovered_city_tile
-	hovered_city_tile = get_city_tile_under_mouse()
-
-func create_city_tile_hover_visual() -> void:
-	hover_tile_outline = Panel.new()
-	hover_tile_outline.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	hover_tile_outline.visible = false
-
-	var style := create_flat_ui_style(
-		Color(0.0, 0.0, 0.0, 0.0),
-		Color(0.0, 1.0, 1.0, 0.95),
-		1
-	)
-
-	hover_tile_outline.add_theme_stylebox_override("panel", style)
-	ui_root.add_child(hover_tile_outline)
-
-func city_world_position_to_screen(world_position: Vector2) -> Vector2:
-	if camera == null:
-		return world_position
-
-	var viewport_size: Vector2 = get_viewport_rect().size
-
-	return Vector2(
-		(world_position.x - camera.position.x) * camera.zoom.x + viewport_size.x * 0.5,
-		(world_position.y - camera.position.y) * camera.zoom.y + viewport_size.y * 0.5
-	)
-
-
-func city_tile_rect_to_screen_rect(top_left_tile: Vector2i, size_tiles: Vector2i) -> Rect2:
-	var world_top_left := Vector2(
-		float(top_left_tile.x * city_tile_size),
-		float(top_left_tile.y * city_tile_size)
-	)
-
-	var world_bottom_right := Vector2(
-		float((top_left_tile.x + size_tiles.x) * city_tile_size),
-		float((top_left_tile.y + size_tiles.y) * city_tile_size)
-	)
-
-	var screen_top_left := city_world_position_to_screen(world_top_left)
-	var screen_bottom_right := city_world_position_to_screen(world_bottom_right)
-
-	return Rect2(screen_top_left, screen_bottom_right - screen_top_left)
-
-func update_city_hover_visual() -> void:
-	if hover_tile_outline == null:
-		return
-
-	if hovered_city_tile == Vector2i(-1, -1):
-		hover_tile_outline.visible = false
-		return
-
-	if has_active_city_object_placement():
-		hover_tile_outline.visible = false
-		return
-
-	var rect := city_tile_rect_to_screen_rect(
-		hovered_city_tile,
-		Vector2i(1, 1)
-	)
-
-	hover_tile_outline.visible = true
-	hover_tile_outline.position = rect.position
-	hover_tile_outline.size = rect.size
-	hover_tile_outline.move_to_front()
 
 #endregion
 
@@ -6113,7 +5069,8 @@ func request_debug_navigation_path() -> void:
 			.PATH_STATUS_INVALID_WORLD
 		)
 		update_debug_panel_text()
-		queue_redraw()
+		queue_city_background_layer_redraw()
+		queue_city_interaction_layer_redraw()
 		return
 
 	var citizen := (
@@ -6126,7 +5083,8 @@ func request_debug_navigation_path() -> void:
 			.PATH_STATUS_INVALID_START
 		)
 		update_debug_panel_text()
-		queue_redraw()
+		queue_city_background_layer_redraw()
+		queue_city_interaction_layer_redraw()
 		return
 
 	var raw_start_tile = citizen.get(
@@ -6140,7 +5098,8 @@ func request_debug_navigation_path() -> void:
 			.PATH_STATUS_INVALID_START
 		)
 		update_debug_panel_text()
-		queue_redraw()
+		queue_city_background_layer_redraw()
+		queue_city_interaction_layer_redraw()
 		return
 
 	var start_tile: Vector2i = raw_start_tile
@@ -6155,7 +5114,8 @@ func request_debug_navigation_path() -> void:
 			.PATH_STATUS_NO_DESTINATIONS
 		)
 		update_debug_panel_text()
-		queue_redraw()
+		queue_city_background_layer_redraw()
+		queue_city_interaction_layer_redraw()
 		return
 
 	var target_object := (
@@ -6246,7 +5206,8 @@ func request_debug_navigation_path() -> void:
 	)
 
 	update_debug_panel_text()
-	queue_redraw()
+	queue_city_background_layer_redraw()
+	queue_city_interaction_layer_redraw()
 
 func assign_debug_navigation_path_to_selected_citizen() -> void:
 	if selected_city_citizen_id < 0:
@@ -6603,7 +5564,7 @@ func toggle_debug_mode() -> void:
 
 	var is_enabled := debug_panel_ui.toggle_enabled()
 	citizen_debug_ui.refresh()
-	queue_redraw()
+	queue_all_city_render_layers_redraw()
 
 	if is_enabled:
 		CityStateValidator.validate(true, true)

@@ -141,6 +141,11 @@ func refresh() -> void:
 	if label == null:
 		return
 
+	# Minimized panels do not display their text. Avoid rebuilding expensive
+	# validator and resource-conservation diagnostics until expansion.
+	if is_minimized:
+		return
+
 	if text_provider.is_valid():
 		label.text = str(text_provider.call())
 
@@ -212,7 +217,11 @@ func set_minimized(
 				"Minimize debug panel"
 			)
 
-	fit_to_text()
+	if is_minimized:
+		fit_to_text()
+	else:
+		refresh()
+
 	minimized_changed.emit(is_minimized)
 
 

@@ -102,11 +102,14 @@ func _draw():
 
 
 func _process(_delta):
+	if world_texture_cache != null:
+		world_texture_cache.process_warmup()
+
 	update_hovered_tile()
 
 func _exit_tree() -> void:
 	if world_texture_cache != null:
-		world_texture_cache.cancel_warmup()
+		world_texture_cache.dispose()
 
 func connect_simulation_clock_signals() -> void:
 	var time_changed_callable := Callable(

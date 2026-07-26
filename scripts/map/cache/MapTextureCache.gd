@@ -6,7 +6,14 @@ var label: String = "Map"
 var rows_per_frame: int = 16
 var mode_textures: Dictionary = {}
 var warmup_running: bool = false
-var warmup_token: int = 0
+var warmup_source_world: WorldData
+var warmup_source_instance_id: int = 0
+var warmup_source_tile_data_version: int = -1
+var warmup_modes: Array = []
+var warmup_mode_index: int = 0
+var warmup_next_row: int = 0
+var warmup_delay_frames: int = 0
+var warmup_image: Image
 
 var color_provider: Callable
 var modes_provider: Callable
@@ -84,9 +91,27 @@ func clear() -> void:
 	mode_textures.clear()
 
 
+func dispose() -> void:
+	clear()
+	owner = null
+	color_provider = Callable()
+	modes_provider = Callable()
+	mode_name_provider = Callable()
+	has_valid_saved_cache_provider = Callable()
+	saved_cache_getter = Callable()
+	saved_cache_storer = Callable()
+
+
 func cancel_warmup() -> void:
-	warmup_token += 1
 	warmup_running = false
+	warmup_source_world = null
+	warmup_source_instance_id = 0
+	warmup_source_tile_data_version = -1
+	warmup_modes.clear()
+	warmup_mode_index = 0
+	warmup_next_row = 0
+	warmup_delay_frames = 0
+	warmup_image = null
 
 
 func rebuild(source_world: WorldData, active_mode: int) -> ImageTexture:
@@ -94,6 +119,7 @@ func rebuild(source_world: WorldData, active_mode: int) -> ImageTexture:
 		clear()
 		return null
 
+	cancel_warmup()
 	load_saved_cache_if_valid(source_world)
 	ensure_texture_for_mode(source_world, active_mode)
 	store_cache(source_world)
@@ -145,6 +171,7 @@ func ensure_texture_for_mode(source_world: WorldData, mode: int) -> void:
 
 
 func rebuild_all(source_world: WorldData) -> void:
+	cancel_warmup()
 	mode_textures.clear()
 
 	if source_world == null:
@@ -186,78 +213,139 @@ func start_warmup(source_world: WorldData) -> void:
 		return
 
 	if warmup_running:
-		return
-
-	warmup_token += 1
-	warm_texture_cache_async(source_world, warmup_token)
-
-
-func warm_texture_cache_async(source_world: WorldData, token: int) -> void:
-	warmup_running = true
-
-	if not is_warmup_still_valid(source_world, token):
-		return
-
-	await owner.get_tree().process_frame
-
-	if not is_warmup_still_valid(source_world, token):
-		return
-
-	await owner.get_tree().process_frame
-
-	for mode in get_all_modes():
-		var mode_int := int(mode)
-
-		if not is_warmup_still_valid(source_world, token):
+		if (
+			source_world == warmup_source_world
+			and source_world.get_instance_id()
+			== warmup_source_instance_id
+			and source_world.tile_data_version
+			== warmup_source_tile_data_version
+		):
 			return
 
-		if mode_textures.has(mode_int):
-			continue
+		cancel_warmup()
 
-		var image := Image.create(source_world.width, source_world.height, false, Image.FORMAT_RGBA8)
+	warmup_running = true
+	warmup_source_world = source_world
+	warmup_source_instance_id = source_world.get_instance_id()
+	warmup_source_tile_data_version = (
+		source_world.tile_data_version
+	)
+	warmup_modes = get_all_modes().duplicate()
+	warmup_mode_index = 0
+	warmup_next_row = 0
+	warmup_delay_frames = 2
+	warmup_image = null
 
-		for y in range(source_world.height):
-			var row: Array = source_world.tiles[y]
 
-			for x in range(source_world.width):
-				var tile: Dictionary = row[x]
-				image.set_pixel(x, y, get_tile_color(tile, mode_int))
+func process_warmup() -> void:
+	if not warmup_running:
+		return
 
-			if y % rows_per_frame == 0:
-				await owner.get_tree().process_frame
+	if not is_warmup_still_valid(warmup_source_world):
+		cancel_warmup()
+		return
 
-				if not is_warmup_still_valid(source_world, token):
-					return
+	if warmup_delay_frames > 0:
+		warmup_delay_frames -= 1
+		return
 
-		mode_textures[mode_int] = ImageTexture.create_from_image(image)
-		store_cache(source_world)
+	while warmup_mode_index < warmup_modes.size():
+		var cached_mode := int(warmup_modes[warmup_mode_index])
 
-		if WorldData.debug_mode_enabled:
-			print(
-				"Warmed " + label.to_lower() + " map texture: ",
-				get_mode_name(mode_int)
+		if not mode_textures.has(cached_mode):
+			break
+
+		warmup_mode_index += 1
+
+	if warmup_mode_index >= warmup_modes.size():
+		finish_warmup()
+		return
+
+	var mode_int := int(warmup_modes[warmup_mode_index])
+
+	if warmup_image == null:
+		warmup_image = Image.create(
+			warmup_source_world.width,
+			warmup_source_world.height,
+			false,
+			Image.FORMAT_RGBA8
+		)
+
+	var end_row := mini(
+		warmup_next_row + rows_per_frame,
+		warmup_source_world.height
+	)
+
+	for y in range(warmup_next_row, end_row):
+		var row: Array = warmup_source_world.tiles[y]
+
+		for x in range(warmup_source_world.width):
+			var tile: Dictionary = row[x]
+			warmup_image.set_pixel(
+				x,
+				y,
+				get_tile_color(tile, mode_int)
 			)
 
-	warmup_running = false
+	warmup_next_row = end_row
 
+	if warmup_next_row < warmup_source_world.height:
+		return
+
+	mode_textures[mode_int] = ImageTexture.create_from_image(
+		warmup_image
+	)
+	store_cache(warmup_source_world)
+
+	if WorldData.debug_mode_enabled:
+		print(
+			"Warmed " + label.to_lower() + " map texture: ",
+			get_mode_name(mode_int)
+		)
+
+	warmup_mode_index += 1
+	warmup_next_row = 0
+	warmup_image = null
+
+
+func finish_warmup() -> void:
 	if WorldData.debug_mode_enabled:
 		print(label + " map texture warmup complete.")
 
+	warmup_running = false
+	warmup_source_world = null
+	warmup_source_instance_id = 0
+	warmup_source_tile_data_version = -1
+	warmup_modes.clear()
+	warmup_mode_index = 0
+	warmup_next_row = 0
+	warmup_delay_frames = 0
+	warmup_image = null
 
-func is_warmup_still_valid(source_world: WorldData, token: int) -> bool:
-	if token != warmup_token:
+
+func is_warmup_still_valid(source_world: WorldData) -> bool:
+	if not warmup_running:
 		return false
 
 	if owner == null:
-		warmup_running = false
 		return false
 
 	if not owner.is_inside_tree():
-		warmup_running = false
 		return false
 
 	if source_world == null:
-		warmup_running = false
+		return false
+
+	if source_world != warmup_source_world:
+		return false
+
+	if source_world.get_instance_id() != warmup_source_instance_id:
+		return false
+
+	if (
+		source_world.tile_data_version
+		!= warmup_source_tile_data_version
+	):
 		return false
 
 	return true

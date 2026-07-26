@@ -88,7 +88,7 @@ static func make_public_storage_haul_task_request(
 		citizen_id <= 0
 		or not bool(citizen.get("alive", false))
 		or not raw_current_tile is Vector2i
-		or not WorldData.get_city_resource_types().has(resource)
+		or not WorldData.is_city_resource_type(resource)
 		or reason == WorldData.CITY_CITIZEN_HAUL_REASON_NONE
 		or source_access_purpose
 		== WorldData.CONTAINER_HAUL_PURPOSE_NONE
@@ -357,7 +357,7 @@ static func make_directed_haul_task_request(
 		or not bool(citizen.get("alive", false))
 		or not raw_current_tile is Vector2i
 		or WorldData.get_city_citizen_haul_cargo_amount(citizen_id) > 0
-		or not WorldData.get_city_resource_types().has(resource)
+		or not WorldData.is_city_resource_type(resource)
 		or requested_amount <= 0
 		or reason == WorldData.CITY_CITIZEN_HAUL_REASON_NONE
 		or source_access_purpose
@@ -538,7 +538,7 @@ static func _find_nearest_eligible_public_storage_source_in_tier(
 
 	if (
 		citizen_id <= 0
-		or not WorldData.get_city_resource_types().has(resource)
+		or not WorldData.is_city_resource_type(resource)
 		or source_access_purpose
 		== WorldData.CONTAINER_HAUL_PURPOSE_NONE
 	):
@@ -714,7 +714,7 @@ static func _find_nearest_eligible_destination_in_tier(
 
 	if (
 		citizen_id <= 0
-		or not WorldData.get_city_resource_types().has(resource)
+		or not WorldData.is_city_resource_type(resource)
 		or destination_access_purpose
 		== WorldData.CONTAINER_HAUL_PURPOSE_NONE
 	):
@@ -1028,7 +1028,7 @@ static func advance_haul_task(
 		)
 	)
 
-	if not WorldData.get_city_resource_types().has(haul_resource):
+	if not WorldData.is_city_resource_type(haul_resource):
 		_finish_haul_without_pickup(citizen_id, current_task)
 		return path_requests_remaining
 
