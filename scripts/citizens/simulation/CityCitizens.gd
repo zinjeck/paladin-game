@@ -24,6 +24,7 @@ const INVALID_CITY_TILE_POSITION := Vector2i(-1, -1)
 const CITY_CITIZEN_TASK_KIND_NONE := "none"
 const CITY_CITIZEN_TASK_KIND_WORK := "work"
 const CITY_CITIZEN_TASK_KIND_HAUL := "haul"
+const CITY_CITIZEN_TASK_KIND_PLAYER_COMMAND := "player_command"
 const CITY_CITIZEN_TASK_KIND_RETURN_HOME := "return_home"
 
 const CITY_CITIZEN_TASK_SOURCE_NONE := "none"
@@ -203,6 +204,7 @@ static func get_city_citizen_task_kind_types() -> Array[String]:
 		CITY_CITIZEN_TASK_KIND_NONE,
 		CITY_CITIZEN_TASK_KIND_WORK,
 		CITY_CITIZEN_TASK_KIND_HAUL,
+		CITY_CITIZEN_TASK_KIND_PLAYER_COMMAND,
 		CITY_CITIZEN_TASK_KIND_RETURN_HOME
 	]
 
@@ -404,20 +406,64 @@ static func is_valid_city_citizen_haul_endpoint(
 static func make_city_citizen_haul_cargo(
 	values: Dictionary = {}
 ) -> Dictionary:
-	var amount := maxi(
-		int(values.get("amount", 0)),
-		0
-	)
-	var resource_type := str(
+	var normalized_resources: Dictionary = {}
+	var raw_resources = values.get("resources", {})
+
+	if raw_resources is Dictionary:
+		for raw_resource in raw_resources.keys():
+			if typeof(raw_resource) != TYPE_STRING:
+				continue
+
+			var resource: String = raw_resource
+			var amount := maxi(
+				int(raw_resources.get(raw_resource, 0)),
+				0
+			)
+
+			if resource == "none" or amount <= 0:
+				continue
+
+			normalized_resources[resource] = amount
+
+	# Legacy snapshots stored a single resource and amount. Normalize them into
+	# the manifest so old saves and existing callers remain compatible.
+	if normalized_resources.is_empty():
+		var legacy_amount := maxi(
+			int(values.get("amount", 0)),
+			0
+		)
+		var legacy_resource := str(
+			values.get("resource_type", "none")
+		)
+
+		if legacy_amount > 0 and legacy_resource != "none":
+			normalized_resources[legacy_resource] = legacy_amount
+
+	var total_amount := 0
+
+	for raw_amount in normalized_resources.values():
+		total_amount += maxi(int(raw_amount), 0)
+
+	var primary_resource := str(
 		values.get("resource_type", "none")
 	)
 
-	if amount <= 0:
-		resource_type = "none"
+	if (
+		total_amount <= 0
+		or not normalized_resources.has(primary_resource)
+	):
+		primary_resource = "none"
+
+		var resource_names: Array = normalized_resources.keys()
+		resource_names.sort()
+
+		if not resource_names.is_empty():
+			primary_resource = str(resource_names[0])
 
 	return {
-		"resource_type": resource_type,
-		"amount": amount,
+		"resource_type": primary_resource,
+		"amount": total_amount,
+		"resources": normalized_resources,
 	}
 
 
@@ -489,6 +535,16 @@ static func make_city_citizen_haul(
 			"destination_tile",
 			INVALID_CITY_TILE_POSITION
 		),
+		"allow_ground_pile_pickup_chaining": bool(
+			values.get(
+				"allow_ground_pile_pickup_chaining",
+				false
+			)
+		),
+		"pickup_stop_count": maxi(
+			int(values.get("pickup_stop_count", 0)),
+			0
+		),
 	}
 
 
@@ -525,6 +581,8 @@ static func has_complete_city_citizen_haul_state(
 		"phase",
 		"source_tile",
 		"destination_tile",
+		"allow_ground_pile_pickup_chaining",
+		"pickup_stop_count",
 	]
 
 	for key in required_haul_keys:
@@ -534,6 +592,8 @@ static func has_complete_city_citizen_haul_state(
 	return (
 		haul_cargo.has("resource_type")
 		and haul_cargo.has("amount")
+		and haul_cargo.has("resources")
+		and haul_cargo.get("resources") is Dictionary
 	)
 
 

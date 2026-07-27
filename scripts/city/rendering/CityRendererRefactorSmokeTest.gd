@@ -4,6 +4,9 @@ const CITY_SCENE := preload("res://scenes/CityScreen.tscn")
 const CityStateValidatorScript = preload(
 	"res://scripts/city/simulation/CityStateValidator.gd"
 )
+const CityWorldGeneratorScript = preload(
+	"res://scripts/city/generation/CityWorldGenerator.gd"
+)
 
 var failure_count: int = 0
 var background_draw_count: int = 0
@@ -54,6 +57,7 @@ func _run_smoke_test() -> void:
 		"Interaction render layer must exist."
 	)
 
+	_test_city_natural_features(renderer)
 	await _test_focused_layer_invalidation(renderer)
 	_test_resource_catalog_and_bulk_totals()
 	_place_and_validate_city_fixture(renderer)
@@ -137,6 +141,214 @@ func _on_interaction_layer_draw() -> void:
 	interaction_draw_count += 1
 
 
+func _test_city_natural_features(
+	renderer: CityRenderer
+) -> void:
+	var tree_count := 0
+	var rock_count := 0
+	var first_tree_tile := Vector2i(-1, -1)
+	var first_rock_tile := Vector2i(-1, -1)
+
+	for y in range(renderer.city_world.height):
+		var row: Array = renderer.city_world.tiles[y]
+
+		for x in range(renderer.city_world.width):
+			var tile: Dictionary = row[x]
+			var surface_feature := (
+				WorldData.get_city_surface_feature(tile)
+			)
+
+			if (
+				surface_feature
+				== WorldData.CITY_SURFACE_FEATURE_TREE
+			):
+				tree_count += 1
+
+				if first_tree_tile == Vector2i(-1, -1):
+					first_tree_tile = Vector2i(x, y)
+
+				_expect(
+					str(tile.get("terrain", ""))
+					== WorldData.TERRAIN_LAND,
+					"Trees must generate only on walkable land terrain."
+				)
+				_expect(
+					not [
+						WorldData.BIOME_MOUNTAIN,
+						WorldData.BIOME_OCEAN,
+						WorldData.BIOME_RIVER,
+					].has(str(tile.get("biome", ""))),
+					"Mountains and water biomes must contain no trees."
+				)
+				continue
+
+			if (
+				surface_feature
+				== WorldData.CITY_SURFACE_FEATURE_ROCK
+			):
+				rock_count += 1
+
+				if first_rock_tile == Vector2i(-1, -1):
+					first_rock_tile = Vector2i(x, y)
+
+				_expect(
+					str(tile.get("terrain", ""))
+					== WorldData.TERRAIN_LAND,
+					"Rocks must generate only where citizens can reach them."
+				)
+
+	_expect(tree_count > 0, "The dev city must generate trees.")
+	_expect(
+		renderer.city_tree_multimesh != null
+		and renderer.city_tree_multimesh.instance_count
+		== tree_count,
+		"Tree MultiMesh count must match generated tree tiles."
+	)
+	_expect(
+		renderer.city_rock_multimesh != null
+		and renderer.city_rock_multimesh.instance_count
+		== rock_count,
+		"Rock MultiMesh count must match generated rock tiles."
+	)
+
+	if first_tree_tile != Vector2i(-1, -1):
+		_expect(
+			WorldData.is_city_tile_walkable_for_citizen(
+				renderer.city_world,
+				first_tree_tile
+			),
+			"Citizens must be able to walk beneath tree canopies."
+		)
+		_expect(
+			not WorldData.can_city_ground_pile_exist_at_tile(
+				renderer.city_world,
+				first_tree_tile
+			),
+			"Ground piles must remain excluded from tree tiles."
+		)
+
+		var tree_multimesh_before := renderer.city_tree_multimesh
+		var tile_data_version_before_harvest := (
+			renderer.city_world.tile_data_version
+		)
+		var tree_tile := renderer.city_world.get_tile(
+			first_tree_tile.x,
+			first_tree_tile.y
+		)
+		tree_tile.erase("surface_feature")
+		renderer.city_world.mark_city_surface_feature_changed(
+			first_tree_tile,
+			WorldData.CITY_SURFACE_FEATURE_TREE,
+			WorldData.CITY_SURFACE_FEATURE_NONE
+		)
+		var feature_changes := (
+			renderer.city_world.consume_city_surface_feature_changes()
+		)
+
+		_expect(
+			renderer.apply_city_surface_feature_changes(feature_changes),
+			"A harvested tree must update its existing MultiMesh in place."
+		)
+		_expect(
+			renderer.city_tree_multimesh == tree_multimesh_before,
+			"Tree harvesting must not rebuild the full tree MultiMesh."
+		)
+		_expect(
+			renderer.city_tree_multimesh.visible_instance_count
+			== tree_count - 1,
+			"Harvesting one tree must hide exactly one tree instance."
+		)
+		_expect(
+			renderer.city_world.tile_data_version
+			== tile_data_version_before_harvest,
+			"Harvesting a tree must not invalidate broad tile data."
+		)
+
+		# Restore the fixture after the focused incremental-removal check.
+		tree_tile["surface_feature"] = WorldData.CITY_SURFACE_FEATURE_TREE
+		renderer.rebuild_city_natural_feature_multimeshes()
+		renderer.observed_city_surface_feature_change_version = (
+			renderer.city_world.city_surface_feature_change_version
+		)
+
+	if first_rock_tile != Vector2i(-1, -1):
+		_expect(
+			WorldData.is_city_tile_walkable_for_citizen(
+				renderer.city_world,
+				first_rock_tile
+			),
+			"A rock tile must remain walkable."
+		)
+
+	_expect(
+		WorldData.get_city_surface_feature_resource_type(
+			WorldData.CITY_SURFACE_FEATURE_TREE
+		)
+		== WorldData.RESOURCE_LUMBER,
+		"Trees must map to lumber for future foraging."
+	)
+	_expect(
+		WorldData.get_city_surface_feature_resource_type(
+			WorldData.CITY_SURFACE_FEATURE_ROCK
+		)
+		== WorldData.RESOURCE_STONE,
+		"Rocks must map to stone for future foraging."
+	)
+
+	var previous_view_mode := renderer.city_view_mode
+	renderer.city_view_mode = MapVisuals.ViewMode.RESOURCES
+	_expect(
+		not renderer.should_draw_city_trees(),
+		"Trees must be hidden in Resources map mode."
+	)
+	renderer.city_view_mode = MapVisuals.ViewMode.BIOME
+	_expect(
+		renderer.should_draw_city_trees(),
+		"Trees must remain visible outside Resources map mode."
+	)
+	renderer.city_view_mode = previous_view_mode
+
+	_test_city_keep_accepts_tree_covered_access()
+
+
+func _test_city_keep_accepts_tree_covered_access() -> void:
+	var keep_size := WorldData.get_city_object_size_for_type(
+		WorldData.CITY_OBJECT_CITY_CENTER
+	)
+	var test_world := WorldData.new()
+	test_world.setup(
+		keep_size.x + 2,
+		keep_size.y + 2,
+		9091
+	)
+	var keep_top_left := Vector2i.ONE
+
+	for y in range(test_world.height):
+		for x in range(test_world.width):
+			var tile: Dictionary = test_world.get_tile(x, y)
+			tile["terrain"] = WorldData.TERRAIN_LAND
+
+			if (
+				x == 0
+				or y == 0
+				or x == test_world.width - 1
+				or y == test_world.height - 1
+			):
+				tile["surface_feature"] = (
+					WorldData.CITY_SURFACE_FEATURE_TREE
+				)
+
+	_expect(
+		WorldData.can_place_city_object(
+			test_world,
+			keep_top_left,
+			keep_size,
+			WorldData.CITY_OBJECT_CITY_CENTER
+		),
+		"A City Keep must accept tree-covered access tiles."
+	)
+
+
 func _prepare_dev_city_region() -> void:
 	DevCityLauncher.reset_dev_city_state()
 
@@ -213,13 +425,53 @@ func _test_resource_catalog_and_bulk_totals() -> void:
 	_expect(
 		int(
 			fishery_source_policy.get(
-				"source_tiles_for_full_productivity",
+				"source_density_for_full_productivity_basis_points",
 				0
 			)
 		)
-		== 10,
-		"Fishing Grounds full productivity must remain ten fish tiles."
+		== 1_000,
+		"Fishing Grounds full productivity must require 10% fish density."
 	)
+	var fishery_recipe: Dictionary = fishery_definition.get(
+		"production_recipe",
+		{}
+	)
+	_expect(
+		int(fishery_recipe.get("work_units_per_batch", 0)) == 180_000,
+		"Fishing Grounds must require three worker-hours per fish."
+	)
+
+
+	var house_definition := WorldData.get_city_object_definition(
+		WorldData.CITY_OBJECT_HOUSE
+	)
+	var house_container_policy: Dictionary = house_definition.get(
+		"container_access_policy",
+		{}
+	)
+	_expect(
+		not bool(
+			house_container_policy.get(
+				WorldData.CONTAINER_ACCESS_COUNTS_TOWARD_CITY_OWNED_TOTALS,
+				true
+			)
+		),
+		"Private house storage must not count as secured city resources."
+	)
+
+	var city_generator := CityWorldGeneratorScript.new()
+	for biome in [
+		WorldData.BIOME_PLAIN,
+		WorldData.BIOME_FOREST,
+		WorldData.BIOME_TAIGA,
+		WorldData.BIOME_JUNGLE,
+		WorldData.BIOME_TUNDRA,
+		WorldData.BIOME_DESERT,
+	]:
+		_expect(
+			city_generator.get_sparse_rock_base_spawn_chance(biome) > 0.0,
+			"Every non-hill land biome must retain sparse rock generation."
+		)
 
 
 func _place_and_validate_city_fixture(
@@ -230,7 +482,8 @@ func _place_and_validate_city_fixture(
 	)
 	var keep_top_left := _find_placeable_rectangle(
 		renderer.city_world,
-		keep_size
+		keep_size,
+		WorldData.CITY_OBJECT_CITY_CENTER
 	)
 
 	_expect(
@@ -241,11 +494,65 @@ func _place_and_validate_city_fixture(
 	if keep_top_left == Vector2i(-1, -1):
 		return
 
+	var tree_test_tile := keep_top_left
+	var rock_test_tile := keep_top_left + Vector2i(1, 0)
+	renderer.city_world.get_tile(
+		tree_test_tile.x,
+		tree_test_tile.y
+	)["surface_feature"] = WorldData.CITY_SURFACE_FEATURE_TREE
+	renderer.city_world.get_tile(
+		rock_test_tile.x,
+		rock_test_tile.y
+	)["surface_feature"] = WorldData.CITY_SURFACE_FEATURE_ROCK
+	renderer.city_world.mark_tile_data_changed()
+	var tile_data_version_before_placement := (
+		renderer.city_world.tile_data_version
+	)
+
+	_expect(
+		WorldData.can_place_city_object(
+			renderer.city_world,
+			keep_top_left,
+			keep_size,
+			WorldData.CITY_OBJECT_CITY_CENTER
+		),
+		"Surface features must not invalidate building placement."
+	)
+
 	var keep := WorldData.add_city_object(
 		WorldData.CITY_OBJECT_CITY_CENTER,
 		keep_top_left,
-		keep_size
+		keep_size,
+		"player",
+		renderer.city_world
 	)
+
+	_expect(
+		WorldData.get_city_surface_feature(
+			renderer.city_world.get_tile(
+				tree_test_tile.x,
+				tree_test_tile.y
+			)
+		)
+		== WorldData.CITY_SURFACE_FEATURE_NONE,
+		"Placed buildings must remove covered trees."
+	)
+	_expect(
+		WorldData.get_city_surface_feature(
+			renderer.city_world.get_tile(
+				rock_test_tile.x,
+				rock_test_tile.y
+			)
+		)
+		== WorldData.CITY_SURFACE_FEATURE_NONE,
+		"Placed buildings must remove covered rocks."
+	)
+	_expect(
+		renderer.city_world.tile_data_version
+		== tile_data_version_before_placement + 1,
+		"One placement must publish one surface-feature tile change."
+	)
+
 	renderer.after_city_center_placed(keep)
 
 	_expect(
@@ -280,6 +587,97 @@ func _place_and_validate_city_fixture(
 		"Bulk owned-resource cache must invalidate after storage changes."
 	)
 
+
+	var first_citizen := WorldData.city_citizens[0]
+	var first_citizen_id := int(first_citizen.get("id", -1))
+	var removed_fish := WorldData.remove_resource_from_city_object_storage(
+		keep_id,
+		WorldData.RESOURCE_FISH,
+		1
+	)
+	var carried_fish := WorldData.set_city_citizen_haul_cargo(
+		first_citizen_id,
+		WorldData.RESOURCE_FISH,
+		removed_fish
+	)
+	_expect(removed_fish == 1 and carried_fish == 1, "Fixture haul pickup must succeed.")
+	_expect(
+		WorldData.get_total_owned_city_resource_amount(
+			WorldData.RESOURCE_FISH
+		)
+		== 2,
+		"In-transit citizen cargo must not count as secured city resources."
+	)
+	_expect(
+		WorldData.get_total_physical_city_resource_amount(
+			WorldData.RESOURCE_FISH
+		)
+		== 3,
+		"Resource conservation must still include in-transit cargo."
+	)
+	WorldData.set_city_citizen_haul_cargo(
+		first_citizen_id,
+		WorldData.RESOURCE_NONE,
+		0
+	)
+	WorldData.add_resource_to_city_object_storage(
+		keep_id,
+		WorldData.RESOURCE_FISH,
+		1
+	)
+
+	var mixed_cargo := CityCitizens.make_city_citizen_haul_cargo({
+		"resources": {
+			WorldData.RESOURCE_LUMBER: 4,
+			WorldData.RESOURCE_STONE: 4,
+			WorldData.RESOURCE_FISH: 2,
+		},
+	})
+	_expect(
+		int(mixed_cargo.get("amount", 0)) == 10,
+		"Mixed haul cargo must sum every resource amount."
+	)
+	var mixed_resources: Dictionary = mixed_cargo.get("resources", {})
+	_expect(
+		int(mixed_resources.get(WorldData.RESOURCE_LUMBER, 0)) == 4
+		and int(mixed_resources.get(WorldData.RESOURCE_STONE, 0)) == 4
+		and int(mixed_resources.get(WorldData.RESOURCE_FISH, 0)) == 2,
+		"Mixed haul cargo must preserve its 4 + 4 + 2 manifest."
+	)
+	_expect(
+		WorldData.set_city_citizen_haul_cargo_resources(
+			first_citizen_id,
+			mixed_cargo.get("resources", {})
+		) == 10,
+		"A citizen with capacity ten must accept a full mixed load."
+	)
+	_expect(
+		WorldData.get_city_citizen_haul_cargo_resource_amount(
+			first_citizen_id,
+			WorldData.RESOURCE_STONE
+		) == 4,
+		"Mixed cargo lookup must return the requested resource amount."
+	)
+	WorldData.set_city_citizen_haul_cargo_resources(
+		first_citizen_id,
+		{}
+	)
+
+	var chained_haul := CityCitizens.make_city_citizen_haul({
+		"allow_ground_pile_pickup_chaining": true,
+		"pickup_stop_count": 3,
+	})
+	_expect(
+		bool(
+			chained_haul.get(
+				"allow_ground_pile_pickup_chaining",
+				false
+			)
+		)
+		and int(chained_haul.get("pickup_stop_count", 0)) == 3,
+		"Haul state must preserve multi-stop ground-pile routing."
+	)
+
 	var first_access_tiles := WorldData.get_city_object_access_tiles(
 		renderer.city_world,
 		keep
@@ -310,7 +708,8 @@ func _place_and_validate_city_fixture(
 
 func _find_placeable_rectangle(
 	city_world: WorldData,
-	size_tiles: Vector2i
+	size_tiles: Vector2i,
+	object_type: String = ""
 ) -> Vector2i:
 	if city_world == null:
 		return Vector2i(-1, -1)
@@ -322,7 +721,8 @@ func _find_placeable_rectangle(
 			if WorldData.can_place_city_object(
 				city_world,
 				top_left,
-				size_tiles
+				size_tiles,
+				object_type
 			):
 				return top_left
 

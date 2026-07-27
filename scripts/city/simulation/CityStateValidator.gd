@@ -121,6 +121,7 @@ static func validate(
 		"assignment_version": WorldData.city_assignment_version,
 		"workplace_version": WorldData.city_workplace_version,
 		"ground_pile_version": WorldData.city_ground_pile_version,
+		"player_command_version": WorldData.city_player_command_version,
 		"haul_reservation_version": (
 			WorldData.city_haul_reservation_version
 		)
@@ -248,6 +249,17 @@ static func _validation_cache_matches_current_state() -> bool:
 	if (
 		int(_cached_result.get("ground_pile_version", -1))
 		!= WorldData.city_ground_pile_version
+	):
+		return false
+
+	if (
+		int(
+			_cached_result.get(
+				"player_command_version",
+				-1
+			)
+		)
+		!= WorldData.city_player_command_version
 	):
 		return false
 
@@ -744,6 +756,10 @@ static func _validate_city_haul_reservations(
 			"destination_reserved_amount",
 			0
 		)
+		var raw_destination_reserved_resources = reservation.get(
+			"destination_reserved_resources",
+			{}
+		)
 		var source_reserved_amount := maxi(
 			int(raw_source_reserved_amount),
 			0
@@ -752,6 +768,67 @@ static func _validate_city_haul_reservations(
 			int(raw_destination_reserved_amount),
 			0
 		)
+		var destination_reserved_resources: Dictionary = {}
+		var destination_manifest_total := 0
+
+		if not raw_destination_reserved_resources is Dictionary:
+			errors.append(
+				"Haul reservation "
+				+ str(reservation_id)
+				+ " has a non-Dictionary destination resource manifest."
+			)
+		else:
+			for raw_reserved_resource in raw_destination_reserved_resources.keys():
+				if typeof(raw_reserved_resource) != TYPE_STRING:
+					errors.append(
+						"Haul reservation "
+						+ str(reservation_id)
+						+ " has a non-string destination resource key."
+					)
+					continue
+
+				var reserved_resource: String = raw_reserved_resource
+				var raw_reserved_resource_amount = (
+					raw_destination_reserved_resources.get(
+						raw_reserved_resource,
+						0
+					)
+				)
+
+				if (
+					typeof(raw_reserved_resource_amount) != TYPE_INT
+					or int(raw_reserved_resource_amount) <= 0
+					or not WorldData.is_city_resource_type(
+						reserved_resource
+					)
+				):
+					errors.append(
+						"Haul reservation "
+						+ str(reservation_id)
+						+ " has invalid destination resource entry '"
+						+ reserved_resource
+						+ "'."
+					)
+					continue
+
+				var reserved_resource_amount: int = (
+					raw_reserved_resource_amount
+				)
+				destination_reserved_resources[reserved_resource] = (
+					reserved_resource_amount
+				)
+				destination_manifest_total += reserved_resource_amount
+
+		if destination_manifest_total != destination_reserved_amount:
+			errors.append(
+				"Haul reservation "
+				+ str(reservation_id)
+				+ " destination manifest totals "
+				+ str(destination_manifest_total)
+				+ " but reserved amount is "
+				+ str(destination_reserved_amount)
+				+ "."
+			)
 
 		maximum_reservation_id = maxi(
 			maximum_reservation_id,
@@ -857,6 +934,11 @@ static func _validate_city_haul_reservations(
 		var cargo_amount := WorldData.get_city_citizen_haul_cargo_amount(
 			citizen_id
 		)
+		var cargo_resources := (
+			WorldData.get_city_citizen_haul_cargo_resources(
+				citizen_id
+			)
+		)
 
 		if not bool(citizen.get("alive", false)):
 			errors.append(
@@ -942,21 +1024,26 @@ static func _validate_city_haul_reservations(
 				+ " reserves neither source goods nor destination capacity."
 			)
 
-		if source_reserved_amount > 0 and cargo_amount > 0:
+		var maximum_destination_reservation := (
+			cargo_amount + source_reserved_amount
+		)
+
+		if destination_reserved_amount > maximum_destination_reservation:
 			errors.append(
 				"Haul reservation "
 				+ str(reservation_id)
-				+ " reserves source goods after cargo was picked up."
+				+ " reserves more destination space than carried and claimed goods."
 			)
 
 		if (
 			source_reserved_amount > 0
-			and source_reserved_amount != destination_reserved_amount
+			and destination_reserved_amount
+			!= maximum_destination_reservation
 		):
 			errors.append(
-				"Pre-pickup haul reservation "
+				"Pickup-chain reservation "
 				+ str(reservation_id)
-				+ " has unequal source and destination amounts."
+				+ " does not reserve all carried cargo plus its next pickup."
 			)
 
 		if (
@@ -965,20 +1052,36 @@ static func _validate_city_haul_reservations(
 			!= source_reserved_amount
 		):
 			errors.append(
-				"Pre-pickup haul reservation "
+				"Pending pickup reservation "
 				+ str(reservation_id)
 				+ " disagrees with the haul's requested amount."
 			)
 
-		if (
-			cargo_amount > 0
-			and destination_reserved_amount > cargo_amount
-		):
-			errors.append(
-				"Haul reservation "
-				+ str(reservation_id)
-				+ " reserves more destination space than citizen cargo."
+		for reserved_resource in destination_reserved_resources.keys():
+			var maximum_resource_amount := maxi(
+				int(cargo_resources.get(reserved_resource, 0)),
+				0
 			)
+
+			if str(reserved_resource) == resource:
+				maximum_resource_amount += source_reserved_amount
+
+			if (
+				int(
+					destination_reserved_resources.get(
+						reserved_resource,
+						0
+					)
+				)
+				> maximum_resource_amount
+			):
+				errors.append(
+					"Haul reservation "
+					+ str(reservation_id)
+					+ " over-reserves destination space for "
+					+ str(reserved_resource)
+					+ "."
+				)
 
 		if source_reserved_amount > 0:
 			if not _city_haul_endpoint_exists(
@@ -1068,15 +1171,18 @@ static func _validate_city_haul_reservations(
 					WorldData.CONTAINER_HAUL_PURPOSE_NONE
 				)
 			)
-			var destination_policy_is_valid := (
-				WorldData.city_haul_endpoint_can_accept_resource(
+			var destination_policy_is_valid := true
+
+			for reserved_resource in destination_reserved_resources.keys():
+				if not WorldData.city_haul_endpoint_can_accept_resource(
 					destination,
-					resource,
+					str(reserved_resource),
 					destination_access_purpose,
 					false,
 					reservation_id
-				)
-			)
+				):
+					destination_policy_is_valid = false
+					break
 
 			if (
 				destination_access_purpose
@@ -2348,20 +2454,6 @@ static func _validate_city_citizen_task_state(
 							+ " carries unreserved cargo outside destination retry."
 					)
 
-				if (
-					cargo_amount > 0
-					and str(
-						cargo.get(
-							"resource_type",
-							WorldData.RESOURCE_NONE
-						)
-					) != haul_resource
-				):
-					errors.append(
-						"Citizen "
-							+ str(citizen_id)
-							+ " haul task and cargo resources disagree."
-					)
 
 				if not raw_haul_destination is Dictionary:
 					errors.append(
@@ -2383,6 +2475,70 @@ static func _validate_city_citizen_task_state(
 								+ str(citizen_id)
 								+ " haul task has invalid destination endpoint."
 						)
+
+			WorldData.CITY_CITIZEN_TASK_KIND_PLAYER_COMMAND:
+				if target_object_id <= 0:
+					errors.append(
+						"Citizen "
+						+ str(citizen_id)
+						+ " player command has invalid command ID "
+						+ str(target_object_id)
+						+ "."
+					)
+					continue
+
+				var player_command := (
+					WorldData.get_city_player_command_by_id(
+						target_object_id
+					)
+				)
+
+				if player_command.is_empty():
+					errors.append(
+						"Citizen "
+						+ str(citizen_id)
+						+ " targets missing player command "
+						+ str(target_object_id)
+						+ "."
+					)
+					continue
+
+				if (
+					task_source
+					!= WorldData.CITY_CITIZEN_TASK_SOURCE_PLAYER
+					or not player_locked
+				):
+					errors.append(
+						"Citizen "
+						+ str(citizen_id)
+						+ " has a player command without player ownership."
+					)
+
+				if int(
+					player_command.get("claimed_citizen_id", -1)
+				) != citizen_id:
+					errors.append(
+						"Citizen "
+						+ str(citizen_id)
+						+ " does not own player command claim "
+						+ str(target_object_id)
+						+ "."
+					)
+
+				if (
+					raw_target_tile
+					!= player_command.get(
+						"tile_position",
+						WorldData.INVALID_CITY_TILE_POSITION
+					)
+				):
+					errors.append(
+						"Citizen "
+						+ str(citizen_id)
+						+ " player-command target tile disagrees with command "
+						+ str(target_object_id)
+						+ "."
+					)
 
 			WorldData.CITY_CITIZEN_TASK_KIND_RETURN_HOME:
 				if target_object_id <= 0:
@@ -3957,12 +4113,15 @@ static func _validate_citizen_inventories(
 					"resource_type"
 				)
 				var raw_cargo_amount = haul_cargo.get("amount")
+				var raw_cargo_resources = haul_cargo.get("resources")
+				var manifest_total := 0
+				var manifest_resources: Dictionary = {}
 
 				if typeof(raw_cargo_resource) != TYPE_STRING:
 					errors.append(
 						"Citizen "
 							+ str(citizen_id)
-							+ " has non-string haul cargo resource."
+							+ " has non-string haul cargo primary resource."
 					)
 
 				if typeof(raw_cargo_amount) != TYPE_INT:
@@ -3984,9 +4143,58 @@ static func _validate_citizen_inventories(
 								+ " has negative haul cargo."
 						)
 
-				if (
-					typeof(raw_cargo_resource) == TYPE_STRING
-				):
+				if not raw_cargo_resources is Dictionary:
+					errors.append(
+						"Citizen "
+							+ str(citizen_id)
+							+ " has non-Dictionary haul cargo resources."
+					)
+				else:
+					for raw_manifest_resource in raw_cargo_resources.keys():
+						if typeof(raw_manifest_resource) != TYPE_STRING:
+							errors.append(
+								"Citizen "
+									+ str(citizen_id)
+									+ " has a non-string haul cargo resource key."
+							)
+							continue
+
+						var manifest_resource: String = raw_manifest_resource
+						var raw_manifest_amount = raw_cargo_resources.get(
+							raw_manifest_resource,
+							0
+						)
+
+						if (
+							typeof(raw_manifest_amount) != TYPE_INT
+							or int(raw_manifest_amount) <= 0
+							or not valid_resources.has(manifest_resource)
+						):
+							errors.append(
+								"Citizen "
+									+ str(citizen_id)
+									+ " has invalid haul cargo entry '"
+									+ manifest_resource
+									+ "'."
+							)
+							continue
+
+						var manifest_amount: int = raw_manifest_amount
+						manifest_resources[manifest_resource] = manifest_amount
+						manifest_total += manifest_amount
+
+				if manifest_total != haul_cargo_amount:
+					errors.append(
+						"Citizen "
+							+ str(citizen_id)
+							+ " haul cargo manifest totals "
+							+ str(manifest_total)
+							+ " but stored amount is "
+							+ str(haul_cargo_amount)
+							+ "."
+					)
+
+				if typeof(raw_cargo_resource) == TYPE_STRING:
 					var cargo_resource: String = raw_cargo_resource
 
 					if (
@@ -3996,21 +4204,19 @@ static func _validate_citizen_inventories(
 						errors.append(
 							"Citizen "
 								+ str(citizen_id)
-								+ " has empty haul cargo with resource '"
+								+ " has empty haul cargo with primary resource '"
 								+ cargo_resource
 								+ "'."
 						)
 
 					if (
 						haul_cargo_amount > 0
-						and not valid_resources.has(cargo_resource)
+						and not manifest_resources.has(cargo_resource)
 					):
 						errors.append(
 							"Citizen "
 								+ str(citizen_id)
-								+ " hauls invalid resource '"
-								+ cargo_resource
-								+ "'."
+								+ " haul cargo primary resource is absent from its manifest."
 						)
 
 		var total_carried_amount := (
@@ -4666,8 +4872,27 @@ static func _validate_workplace_resource_source_policy(
 			object_id,
 			"resource_source_policy",
 			policy,
-			"source_tiles_for_full_productivity"
+			"source_density_for_full_productivity_basis_points"
 		)
+
+		var raw_full_density = policy.get(
+			"source_density_for_full_productivity_basis_points",
+			0
+		)
+
+		if (
+			typeof(raw_full_density) == TYPE_INT
+			and int(raw_full_density)
+			> WorldData.PRODUCTIVITY_BASIS_POINTS_SCALE
+		):
+			errors.append(
+				"Workplace "
+					+ str(object_id)
+					+ " resource_source_policy has "
+					+ "source_density_for_full_productivity_basis_points "
+					+ str(raw_full_density)
+					+ ", which exceeds 100% density."
+			)
 		return
 
 	if mode != WorldData.WORKPLACE_RESOURCE_SOURCE_MODE_RADIUS:

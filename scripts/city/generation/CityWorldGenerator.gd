@@ -10,7 +10,33 @@ var resource_noise := FastNoiseLite.new()
 var biome_warp_noise := FastNoiseLite.new()
 var coast_noise := FastNoiseLite.new()
 var biome_edge_noise := FastNoiseLite.new()
+var tree_patch_noise := FastNoiseLite.new()
+var tree_clearing_noise := FastNoiseLite.new()
+var rock_patch_noise := FastNoiseLite.new()
 
+const TILE_HASH_MASK: int = 0x7fffffff
+const TILE_HASH_AVALANCHE_MULTIPLIER: int = 0x045d9f3b
+const TREE_SPAWN_ROLL_SALT: int = 101
+const ROCK_SPAWN_ROLL_SALT: int = 211
+
+const JUNGLE_TREE_BASE_CHANCE: float = 0.42
+const FOREST_TREE_BASE_CHANCE: float = 0.36
+const TAIGA_TREE_BASE_CHANCE: float = 0.32
+const PLAIN_TREE_BASE_CHANCE: float = 0.055
+const HILLS_TREE_BASE_CHANCE: float = 0.045
+const TUNDRA_TREE_BASE_CHANCE: float = 0.012
+const DESERT_TREE_BASE_CHANCE: float = 0.000006
+
+const HILLS_ROCK_CLUSTER_CHANCE: float = 0.045
+const MOUNTAIN_ROCK_CLUSTER_CHANCE: float = 0.110
+const ROCK_CLUSTER_START: float = 0.56
+const ROCK_CLUSTER_FULL: float = 0.82
+const PLAIN_ROCK_BASE_CHANCE: float = 0.0028
+const FOREST_ROCK_BASE_CHANCE: float = 0.0022
+const TAIGA_ROCK_BASE_CHANCE: float = 0.0024
+const JUNGLE_ROCK_BASE_CHANCE: float = 0.0020
+const TUNDRA_ROCK_BASE_CHANCE: float = 0.0026
+const DESERT_ROCK_BASE_CHANCE: float = 0.0018
 
 static func calculate_city_seed() -> int:
 	var center: Vector2i = WorldData.city_start_region_center
@@ -36,6 +62,8 @@ func generate_city_world(
 
 	city_world = WorldData.new()
 	city_world.setup(city_width, city_height, city_seed)
+	var tree_count := 0
+	var rock_count := 0
 
 	for y in range(city_world.height):
 		var row: Array = city_world.tiles[y]
@@ -46,9 +74,23 @@ func generate_city_world(
 
 			copy_city_profile_into_tile(tile, profile, x, y)
 
+			match WorldData.get_city_surface_feature(tile):
+				WorldData.CITY_SURFACE_FEATURE_TREE:
+					tree_count += 1
+
+				WorldData.CITY_SURFACE_FEATURE_ROCK:
+					rock_count += 1
+
 			row[x] = tile
 
 	city_world.mark_tile_data_changed()
+	print(
+		"City natural features generated: ",
+		tree_count,
+		" trees, ",
+		rock_count,
+		" rocks."
+	)
 
 	return city_world
 
@@ -217,6 +259,16 @@ func copy_city_profile_into_tile(
 		str(tile["terrain"])
 	)
 
+	var surface_feature := get_city_surface_feature(
+		tile,
+		profile,
+		city_x,
+		city_y
+	)
+
+	if surface_feature != WorldData.CITY_SURFACE_FEATURE_NONE:
+		tile["surface_feature"] = surface_feature
+
 
 func get_dominant_land_biome(
 	biome_weights: Dictionary,
@@ -326,6 +378,390 @@ func setup_city_noise() -> void:
 	biome_edge_noise.fractal_octaves = 3
 	biome_edge_noise.fractal_gain = 0.50
 	biome_edge_noise.fractal_lacunarity = 2.0
+
+	tree_patch_noise.seed = city_seed + 104729
+	tree_patch_noise.noise_type = FastNoiseLite.TYPE_SIMPLEX
+	tree_patch_noise.frequency = 0.018
+	tree_patch_noise.fractal_octaves = 3
+	tree_patch_noise.fractal_gain = 0.52
+	tree_patch_noise.fractal_lacunarity = 2.0
+
+	tree_clearing_noise.seed = city_seed + 117877
+	tree_clearing_noise.noise_type = FastNoiseLite.TYPE_SIMPLEX
+	tree_clearing_noise.frequency = 0.034
+	tree_clearing_noise.fractal_octaves = 2
+	tree_clearing_noise.fractal_gain = 0.50
+	tree_clearing_noise.fractal_lacunarity = 2.0
+
+	rock_patch_noise.seed = city_seed + 130363
+	rock_patch_noise.noise_type = FastNoiseLite.TYPE_SIMPLEX
+	rock_patch_noise.frequency = 0.052
+	rock_patch_noise.fractal_octaves = 3
+	rock_patch_noise.fractal_gain = 0.50
+	rock_patch_noise.fractal_lacunarity = 2.0
+
+
+static func get_deterministic_tile_unit_value(
+	seed_value: int,
+	tile_x: int,
+	tile_y: int,
+	salt: int
+) -> float:
+	var mixed_value := _positive_modulo(
+		seed_value
+		+ tile_x * 73856093
+		+ tile_y * 19349663
+		+ salt * 83492791,
+		TILE_HASH_MASK + 1
+	)
+	mixed_value = (
+		(mixed_value >> 16) ^ mixed_value
+	)
+	mixed_value = (
+		mixed_value * TILE_HASH_AVALANCHE_MULTIPLIER
+	) & TILE_HASH_MASK
+	mixed_value = (
+		(mixed_value >> 16) ^ mixed_value
+	)
+	mixed_value = (
+		mixed_value * TILE_HASH_AVALANCHE_MULTIPLIER
+	) & TILE_HASH_MASK
+	mixed_value = (
+		(mixed_value >> 16) ^ mixed_value
+	) & TILE_HASH_MASK
+
+	return float(mixed_value) / float(TILE_HASH_MASK + 1)
+
+
+static func _positive_modulo(value: int, modulus: int) -> int:
+	var result := value % modulus
+
+	if result < 0:
+		result += modulus
+
+	return result
+
+
+func get_city_surface_feature(
+	tile: Dictionary,
+	profile: Dictionary,
+	city_x: int,
+	city_y: int
+) -> String:
+	if str(tile.get("terrain", "")) != WorldData.TERRAIN_LAND:
+		return WorldData.CITY_SURFACE_FEATURE_NONE
+
+	var tree_chance := get_tree_spawn_chance(
+		tile,
+		city_x,
+		city_y
+	)
+	var tree_roll := get_deterministic_tile_unit_value(
+		city_seed,
+		city_x,
+		city_y,
+		TREE_SPAWN_ROLL_SALT
+	)
+
+	if tree_chance > 0.0 and tree_roll < tree_chance:
+		return WorldData.CITY_SURFACE_FEATURE_TREE
+
+	# Keep density reductions and clearing pockets empty rather than letting
+	# rocks replace the trees deliberately removed by forest shaping.
+	if tree_roll < get_tree_reserved_spawn_chance(
+		tile,
+		city_x,
+		city_y,
+		tree_chance
+	):
+		return WorldData.CITY_SURFACE_FEATURE_NONE
+
+	var rock_chance := get_rock_spawn_chance(
+		tile,
+		float(profile.get("mountain_weight", 0.0)),
+		city_x,
+		city_y
+	)
+	var rock_roll := get_deterministic_tile_unit_value(
+		city_seed,
+		city_x,
+		city_y,
+		ROCK_SPAWN_ROLL_SALT
+	)
+
+	if rock_chance > 0.0 and rock_roll < rock_chance:
+		return WorldData.CITY_SURFACE_FEATURE_ROCK
+
+	return WorldData.CITY_SURFACE_FEATURE_NONE
+
+
+func get_tree_spawn_chance(
+	tile: Dictionary,
+	city_x: int,
+	city_y: int
+) -> float:
+	var biome := str(tile.get("biome", ""))
+	var dense_tree_chance := get_tree_spawn_chance_without_clearings(
+		tile,
+		city_x,
+		city_y
+	)
+
+	if dense_tree_chance <= 0.0:
+		return 0.0
+
+	return clampf(
+		dense_tree_chance
+		* get_dense_biome_tree_clearing_multiplier(
+			biome,
+			city_x,
+			city_y
+		),
+		0.0,
+		0.72
+	)
+
+
+func get_tree_spawn_chance_without_clearings(
+	tile: Dictionary,
+	city_x: int,
+	city_y: int
+) -> float:
+	var biome := str(tile.get("biome", ""))
+	var base_chance := get_tree_base_spawn_chance(biome)
+
+	if base_chance <= 0.0:
+		return 0.0
+
+	var patch_value := (
+		tree_patch_noise.get_noise_2d(city_x, city_y) + 1.0
+	) * 0.5
+	var patch_multiplier := lerpf(0.70, 1.30, patch_value)
+	var climate_multiplier := get_tree_climate_multiplier(
+		tile,
+		biome
+	)
+
+	return clampf(
+		base_chance * patch_multiplier * climate_multiplier,
+		0.0,
+		0.72
+	)
+
+
+func get_dense_biome_tree_clearing_multiplier(
+	biome: String,
+	city_x: int,
+	city_y: int
+) -> float:
+	if not [
+		WorldData.BIOME_FOREST,
+		WorldData.BIOME_TAIGA,
+		WorldData.BIOME_JUNGLE,
+	].has(biome):
+		return 1.0
+
+	var clearing_value := (
+		tree_clearing_noise.get_noise_2d(city_x, city_y) + 1.0
+	) * 0.5
+	var clearing_strength := 1.0 - smoothstep(
+		0.18,
+		0.36,
+		clearing_value
+	)
+
+	return lerpf(1.0, 0.16, clearing_strength)
+
+
+func get_tree_reserved_spawn_chance(
+	tile: Dictionary,
+	city_x: int,
+	city_y: int,
+	current_tree_chance: float
+) -> float:
+	var biome := str(tile.get("biome", ""))
+	var previous_to_current_ratio := 1.0
+
+	match biome:
+		WorldData.BIOME_JUNGLE:
+			previous_to_current_ratio = 0.48 / JUNGLE_TREE_BASE_CHANCE
+
+		WorldData.BIOME_FOREST:
+			previous_to_current_ratio = 0.42 / FOREST_TREE_BASE_CHANCE
+
+		WorldData.BIOME_TAIGA:
+			previous_to_current_ratio = 0.38 / TAIGA_TREE_BASE_CHANCE
+
+	var reserved_chance := (
+		get_tree_spawn_chance_without_clearings(
+			tile,
+			city_x,
+			city_y
+		)
+		* previous_to_current_ratio
+	)
+
+	return clampf(
+		maxf(current_tree_chance, reserved_chance),
+		0.0,
+		0.72
+	)
+
+
+func get_tree_base_spawn_chance(biome: String) -> float:
+	match biome:
+		WorldData.BIOME_JUNGLE:
+			return JUNGLE_TREE_BASE_CHANCE
+
+		WorldData.BIOME_FOREST:
+			return FOREST_TREE_BASE_CHANCE
+
+		WorldData.BIOME_TAIGA:
+			return TAIGA_TREE_BASE_CHANCE
+
+		WorldData.BIOME_PLAIN:
+			return PLAIN_TREE_BASE_CHANCE
+
+		WorldData.BIOME_HILLS:
+			return HILLS_TREE_BASE_CHANCE
+
+		WorldData.BIOME_TUNDRA:
+			return TUNDRA_TREE_BASE_CHANCE
+
+		WorldData.BIOME_DESERT:
+			return DESERT_TREE_BASE_CHANCE
+
+	return 0.0
+
+
+func get_tree_climate_multiplier(
+	tile: Dictionary,
+	biome: String
+) -> float:
+	var temperature := clampf(
+		float(tile.get("temperature", 0.5)),
+		0.0,
+		1.0
+	)
+	var precipitation := clampf(
+		float(tile.get("precipitation", 0.5)),
+		0.0,
+		1.0
+	)
+	var fertility := clampf(
+		float(tile.get("fertility", 0.0)) / 100.0,
+		0.0,
+		1.0
+	)
+	var preferred_temperature := 0.52
+
+	match biome:
+		WorldData.BIOME_JUNGLE:
+			preferred_temperature = 0.82
+
+		WorldData.BIOME_TAIGA:
+			preferred_temperature = 0.26
+
+		WorldData.BIOME_TUNDRA:
+			preferred_temperature = 0.18
+
+		WorldData.BIOME_DESERT:
+			preferred_temperature = 0.78
+
+	var temperature_distance := absf(
+		temperature - preferred_temperature
+	)
+	var temperature_multiplier := clampf(
+		1.12 - temperature_distance * 0.55,
+		0.80,
+		1.12
+	)
+	var precipitation_multiplier := lerpf(
+		0.78,
+		1.18,
+		precipitation
+	)
+	var fertility_multiplier := lerpf(
+		0.88,
+		1.12,
+		fertility
+	)
+
+	return (
+		temperature_multiplier
+		* precipitation_multiplier
+		* fertility_multiplier
+	)
+
+
+func get_rock_spawn_chance(
+	tile: Dictionary,
+	mountain_weight: float,
+	city_x: int,
+	city_y: int
+) -> float:
+	var biome := str(tile.get("biome", ""))
+	var sparse_chance := get_sparse_rock_base_spawn_chance(biome)
+	var hill_chance := 0.0
+
+	if biome == WorldData.BIOME_HILLS:
+		hill_chance = HILLS_ROCK_CLUSTER_CHANCE
+
+	var mountain_proximity := smoothstep(
+		0.02,
+		0.42,
+		clampf(mountain_weight, 0.0, 1.0)
+	)
+	var mountain_chance := (
+		MOUNTAIN_ROCK_CLUSTER_CHANCE
+		* mountain_proximity
+	)
+	var clustered_chance := maxf(hill_chance, mountain_chance)
+	var patch_value := (
+		rock_patch_noise.get_noise_2d(city_x, city_y) + 1.0
+	) * 0.5
+	var sparse_multiplier := lerpf(0.78, 1.22, patch_value)
+	var cluster_strength := smoothstep(
+		ROCK_CLUSTER_START,
+		ROCK_CLUSTER_FULL,
+		patch_value
+	)
+	var elevation := clampf(
+		float(tile.get("elevation", 0.0)),
+		0.0,
+		1.0
+	)
+	var elevation_multiplier := lerpf(0.90, 1.15, elevation)
+
+	return clampf(
+		sparse_chance * sparse_multiplier
+		+ clustered_chance * cluster_strength * elevation_multiplier,
+		0.0,
+		0.14
+	)
+
+
+func get_sparse_rock_base_spawn_chance(biome: String) -> float:
+	match biome:
+		WorldData.BIOME_PLAIN:
+			return PLAIN_ROCK_BASE_CHANCE
+
+		WorldData.BIOME_FOREST:
+			return FOREST_ROCK_BASE_CHANCE
+
+		WorldData.BIOME_TAIGA:
+			return TAIGA_ROCK_BASE_CHANCE
+
+		WorldData.BIOME_JUNGLE:
+			return JUNGLE_ROCK_BASE_CHANCE
+
+		WorldData.BIOME_TUNDRA:
+			return TUNDRA_ROCK_BASE_CHANCE
+
+		WorldData.BIOME_DESERT:
+			return DESERT_ROCK_BASE_CHANCE
+
+	return 0.0
 
 
 func get_city_resource_from_profile(

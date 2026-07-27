@@ -59,6 +59,7 @@ const MAX_AUTONOMOUS_HAUL_ASSIGNMENTS_PER_TICK: int = 2
 const MAX_AUTONOMOUS_HAUL_CANDIDATES_PER_TICK: int = 32
 const MAX_AUTONOMOUS_HAUL_TASK_BUILD_ATTEMPTS_PER_TICK: int = 4
 const AUTONOMOUS_HAUL_EXACT_HEURISTIC_WEIGHT: int = 1
+const MAX_PLAYER_COMMAND_ASSIGNMENTS_PER_TICK: int = 8
 
 static var _pending_decision_ids: Array[int] = []
 static var _pending_decision_id_lookup: Dictionary = {}
@@ -95,6 +96,11 @@ static func run_tick(
 	# Newly produced output first expands the oldest compatible pre-pickup load.
 	# Only the remainder is visible to autonomous task matching below.
 	WorldData.expand_pending_city_haul_reservations()
+
+	# Player designations outrank every scheduled or autonomous activity for
+	# unemployed citizens. Invalid targets are pruned before workers claim them.
+	WorldData.prune_invalid_city_player_commands()
+	_process_player_commands()
 
 	if not _runtime_initialized:
 		_runtime_initialized = true
@@ -135,6 +141,81 @@ static func run_tick(
 	_process_bounded_idle_behaviors(
 		work_shift_is_active
 	)
+
+static func _process_player_commands() -> void:
+	if WorldData.city_player_commands.is_empty():
+		return
+
+	var assigned_count := 0
+
+	for raw_citizen in WorldData.city_citizens:
+		if assigned_count >= MAX_PLAYER_COMMAND_ASSIGNMENTS_PER_TICK:
+			return
+
+		if not raw_citizen is Dictionary:
+			continue
+
+		var citizen: Dictionary = raw_citizen
+		var citizen_id := int(citizen.get("id", -1))
+
+		if (
+			citizen_id <= 0
+			or not bool(citizen.get("alive", false))
+			or int(citizen.get("job_object_id", -1)) > 0
+		):
+			continue
+
+		var raw_current_task = citizen.get("current_task", {})
+
+		if raw_current_task is Dictionary:
+			var current_task: Dictionary = raw_current_task
+
+			if (
+				str(current_task.get("kind", ""))
+				== WorldData.CITY_CITIZEN_TASK_KIND_PLAYER_COMMAND
+			):
+				continue
+
+		var command := (
+			WorldData.get_best_assignable_city_player_command_for_citizen(
+				citizen_id
+			)
+		)
+
+		if command.is_empty():
+			return
+
+		if not CitizenTaskSystem.prepare_unemployed_citizen_for_player_command(
+			citizen_id
+		):
+			continue
+
+		var command_id := int(command.get("id", -1))
+
+		if not WorldData.claim_city_player_command(command_id, citizen_id):
+			continue
+
+		var task_request := {
+			"kind": WorldData.CITY_CITIZEN_TASK_KIND_PLAYER_COMMAND,
+			"source": WorldData.CITY_CITIZEN_TASK_SOURCE_PLAYER,
+			"priority": WorldData.CITY_PLAYER_COMMAND_TASK_PRIORITY,
+			"target_object_id": command_id,
+			"player_locked": true,
+		}
+
+		if not WorldData.assign_city_citizen_task(
+			citizen_id,
+			task_request
+		):
+			WorldData.release_city_player_command_claim(
+				command_id,
+				citizen_id
+			)
+			continue
+
+		_clear_idle_activity_runtime(citizen_id)
+		assigned_count += 1
+
 
 static func reset_runtime_state() -> void:
 	_clear_decision_queue()
@@ -1013,6 +1094,7 @@ static func _citizen_is_available_for_autonomous_hauling(
 static func _get_ground_pile_haul_opportunities() -> Array:
 	var opportunities: Array = []
 	var deliverable_resource_lookup: Dictionary = {}
+	var total_unreserved_ground_amount := 0
 
 	for raw_ground_pile in WorldData.get_city_ground_pile_snapshot():
 		if not raw_ground_pile is Dictionary:
@@ -1045,6 +1127,17 @@ static func _get_ground_pile_haul_opportunities() -> Array:
 		):
 			continue
 
+		var unreserved_amount := (
+			WorldData.get_city_haul_endpoint_unreserved_resource_amount(
+				source,
+				resource
+			)
+		)
+
+		if unreserved_amount <= 0:
+			continue
+
+		total_unreserved_ground_amount += unreserved_amount
 		opportunities.append({
 			"source": source,
 			"requester": source,
@@ -1060,7 +1153,120 @@ static func _get_ground_pile_haul_opportunities() -> Array:
 			),
 		})
 
+	# Existing ground-pile haulers should be allowed to fill their remaining
+	# physical capacity before another citizen reserves a tiny pile. This keeps
+	# dispatch proportional to the number of full loads instead of the number of
+	# piles, while still adding another hauler whenever the current workers cannot
+	# absorb all unreserved loose resources.
+	if (
+		total_unreserved_ground_amount > 0
+		and _get_active_ground_pile_chain_capacity()
+		>= total_unreserved_ground_amount
+	):
+		return []
+
 	return opportunities
+
+
+static func _get_active_ground_pile_chain_capacity() -> int:
+	var open_carry_capacity := 0
+
+	for raw_citizen in WorldData.city_citizens:
+		if not raw_citizen is Dictionary:
+			continue
+
+		var citizen: Dictionary = raw_citizen
+		var citizen_id := int(citizen.get("id", -1))
+		var current_task := WorldData.get_city_citizen_current_task(
+			citizen_id
+		)
+		var haul := WorldData.get_city_citizen_current_haul(citizen_id)
+
+		if (
+			citizen_id <= 0
+			or str(current_task.get("kind", ""))
+			!= WorldData.CITY_CITIZEN_TASK_KIND_HAUL
+			or not bool(
+				haul.get(
+					"allow_ground_pile_pickup_chaining",
+					false
+				)
+			)
+			or str(haul.get("reason", ""))
+			!= WorldData.CITY_CITIZEN_HAUL_REASON_GROUND_PILE_CLEANUP
+		):
+			continue
+
+		var haul_phase := str(
+			haul.get(
+				"phase",
+				WorldData.CITY_CITIZEN_HAUL_PHASE_NONE
+			)
+		)
+
+		if haul_phase not in [
+			WorldData.CITY_CITIZEN_HAUL_PHASE_PENDING_SOURCE,
+			WorldData.CITY_CITIZEN_HAUL_PHASE_TRAVELING_TO_SOURCE,
+			WorldData.CITY_CITIZEN_HAUL_PHASE_PICKING_UP,
+		]:
+			continue
+
+		var reservation_id := int(
+			haul.get(
+				"reservation_id",
+				WorldData.INVALID_CITY_CITIZEN_HAUL_RESERVATION_ID
+			)
+		)
+		var reservation := WorldData.get_city_haul_reservation(
+			reservation_id
+		)
+
+		if reservation.is_empty():
+			continue
+
+		open_carry_capacity += maxi(
+			WorldData.get_city_citizen_available_haul_capacity(citizen_id)
+			- maxi(
+				int(reservation.get("source_reserved_amount", 0)),
+				0
+			),
+			0
+		)
+
+	if open_carry_capacity <= 0:
+		return 0
+
+	return mini(
+		open_carry_capacity,
+		_get_total_unreserved_public_storage_space()
+	)
+
+
+static func _get_total_unreserved_public_storage_space() -> int:
+	var total_space := 0
+
+	for raw_city_object in WorldData.city_objects:
+		if not raw_city_object is Dictionary:
+			continue
+
+		var city_object: Dictionary = raw_city_object
+
+		if (
+			WorldData.get_city_object_public_storage_tier(city_object)
+			== WorldData.PUBLIC_CITY_STORAGE_TIER_NONE
+		):
+			continue
+
+		var destination := WorldData.make_city_citizen_haul_endpoint(
+			int(city_object.get("id", -1))
+		)
+		total_space += (
+			WorldData.get_city_haul_endpoint_unreserved_destination_space(
+				destination
+			)
+		)
+
+	return total_space
 
 
 static func _get_home_food_delivery_opportunities() -> Array:

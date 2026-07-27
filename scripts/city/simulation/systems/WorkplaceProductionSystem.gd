@@ -38,8 +38,8 @@ static func get_resource_source_evaluation(
 		policy.get("resource_type", WorldData.RESOURCE_NONE)
 	)
 	var reach_tiles := int(policy.get("reach_tiles", 0))
-	var source_tiles_for_full_productivity := int(
-		policy.get("source_tiles_for_full_productivity", 0)
+	var source_density_for_full_productivity_basis_points := int(
+		policy.get("source_density_for_full_productivity_basis_points", 0)
 	)
 
 	evaluation["is_configured"] = true
@@ -53,8 +53,8 @@ static func get_resource_source_evaluation(
 	# Temporary compatibility alias for the earlier diagnostic panel.
 	evaluation["radius_tiles"] = reach_tiles
 
-	evaluation["source_tiles_for_full_productivity"] = (
-		source_tiles_for_full_productivity
+	evaluation["source_density_for_full_productivity_basis_points"] = (
+		source_density_for_full_productivity_basis_points
 	)
 	evaluation["site_productivity_basis_points"] = 0
 
@@ -72,7 +72,7 @@ static func get_resource_source_evaluation(
 	if reach_tiles < 0:
 		return evaluation
 
-	if source_tiles_for_full_productivity <= 0:
+	if source_density_for_full_productivity_basis_points <= 0:
 		return evaluation
 
 	var footprint_tiles := _get_unique_footprint_tiles(
@@ -107,7 +107,7 @@ static func get_resource_source_evaluation(
 		footprint_tiles,
 		resource_type,
 		reach_tiles,
-		source_tiles_for_full_productivity
+		source_density_for_full_productivity_basis_points
 	):
 		var raw_cached_evaluation = cache_entry.get(
 			"evaluation",
@@ -144,9 +144,11 @@ static func get_resource_source_evaluation(
 	var site_productivity_basis_points := mini(
 		int(
 			round(
-				float(resource_tile_count)
+				float(density_basis_points)
 				* float(WorldData.PRODUCTIVITY_BASIS_POINTS_SCALE)
-				/ float(source_tiles_for_full_productivity)
+				/ float(
+					source_density_for_full_productivity_basis_points
+				)
 			)
 		),
 		WorldData.PRODUCTIVITY_BASIS_POINTS_SCALE
@@ -183,8 +185,8 @@ static func get_resource_source_evaluation(
 		"footprint_tiles": footprint_tiles.duplicate(),
 		"resource_type": resource_type,
 		"reach_tiles": reach_tiles,
-		"source_tiles_for_full_productivity": (
-			source_tiles_for_full_productivity
+		"source_density_for_full_productivity_basis_points": (
+			source_density_for_full_productivity_basis_points
 		),
 		"evaluation": evaluation
 	}
@@ -243,7 +245,7 @@ static func _make_empty_resource_source_evaluation(
 		"source_resource": WorldData.RESOURCE_NONE,
 		"reach_tiles": 0,
 		"radius_tiles": 0,
-		"source_tiles_for_full_productivity": 0,
+		"source_density_for_full_productivity_basis_points": 0,
 		"zone_tiles": [],
 		"candidate_tiles": [],
 		"zone_tile_lookup": {},
@@ -371,7 +373,7 @@ static func _resource_source_cache_matches(
 	footprint_tiles: Array,
 	resource_type: String,
 	reach_tiles: int,
-	source_tiles_for_full_productivity: int
+	source_density_for_full_productivity_basis_points: int
 ) -> bool:
 	if cache_entry.is_empty():
 		return false
@@ -391,11 +393,11 @@ static func _resource_source_cache_matches(
 		== reach_tiles
 		and int(
 			cache_entry.get(
-				"source_tiles_for_full_productivity",
+				"source_density_for_full_productivity_basis_points",
 				-1
 			)
 		)
-		== source_tiles_for_full_productivity
+		== source_density_for_full_productivity_basis_points
 	)
 
 static func get_estimated_output_per_hour(

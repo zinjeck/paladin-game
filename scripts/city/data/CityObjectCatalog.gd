@@ -201,7 +201,7 @@ static func setup_city_object_definitions() -> void:
 			"display_name": "House",
 			"container_type": CONTAINER_TYPE_PRIVATE_HOME_STORAGE,
 			"container_access_policy": {
-				CONTAINER_ACCESS_COUNTS_TOWARD_CITY_OWNED_TOTALS: true,
+				CONTAINER_ACCESS_COUNTS_TOWARD_CITY_OWNED_TOTALS: false,
 				CONTAINER_ACCESS_PUBLICLY_USABLE: false,
 				CONTAINER_ACCESS_HAUL_DEPOSIT_PURPOSES: [
 					CONTAINER_HAUL_PURPOSE_HOME_DELIVERY,
@@ -299,18 +299,21 @@ static func setup_city_object_definitions() -> void:
 			"workplace_kind": WORKPLACE_KIND_GATHERING,
 			"worker_capacity": 4,
 			"output_resource": CityResourceCatalogScript.RESOURCE_FISH,
+			# Fish restores one citizen-day of hunger. Three worker-hours per
+			# fish lets four fully productive workers make 12 fish during the
+			# current nine-hour shift, matching the 33% food-labor target.
 			"production_recipe": {
 				"inputs": {},
 				"outputs": {
 					CityResourceCatalogScript.RESOURCE_FISH: 1,
 				},
-				"work_units_per_batch": 60_000,
+				"work_units_per_batch": 180_000,
 			},
 			"resource_source_policy": {
 				"mode": WORKPLACE_RESOURCE_SOURCE_MODE_FOOTPRINT_REACH,
 				"resource_type": CityResourceCatalogScript.RESOURCE_FISH,
 				"reach_tiles": 8,
-				"source_tiles_for_full_productivity": 10,
+				"source_density_for_full_productivity_basis_points": 1_000,
 			},
 			"work_location_policy": {
 				"mode": WORKPLACE_WORK_LOCATION_MODE_RESOURCE_SOURCE_TILES,
