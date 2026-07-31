@@ -27,16 +27,26 @@ const HILLS_TREE_BASE_CHANCE: float = 0.045
 const TUNDRA_TREE_BASE_CHANCE: float = 0.012
 const DESERT_TREE_BASE_CHANCE: float = 0.000006
 
-const HILLS_ROCK_CLUSTER_CHANCE: float = 0.045
-const MOUNTAIN_ROCK_CLUSTER_CHANCE: float = 0.110
-const ROCK_CLUSTER_START: float = 0.56
-const ROCK_CLUSTER_FULL: float = 0.82
-const PLAIN_ROCK_BASE_CHANCE: float = 0.0028
-const FOREST_ROCK_BASE_CHANCE: float = 0.0022
-const TAIGA_ROCK_BASE_CHANCE: float = 0.0024
-const JUNGLE_ROCK_BASE_CHANCE: float = 0.0020
-const TUNDRA_ROCK_BASE_CHANCE: float = 0.0026
-const DESERT_ROCK_BASE_CHANCE: float = 0.0018
+# Rock patches use a shorter noise wavelength and a much higher inside-patch
+# occupancy than the old sparse roll. This produces visible local groups while
+# retaining occasional isolated stones between them.
+const PLAIN_ROCK_CLUSTER_CHANCE: float = 0.14
+const FOREST_ROCK_CLUSTER_CHANCE: float = 0.12
+const TAIGA_ROCK_CLUSTER_CHANCE: float = 0.14
+const JUNGLE_ROCK_CLUSTER_CHANCE: float = 0.10
+const TUNDRA_ROCK_CLUSTER_CHANCE: float = 0.16
+const DESERT_ROCK_CLUSTER_CHANCE: float = 0.15
+const HILLS_ROCK_CLUSTER_CHANCE: float = 0.34
+const MOUNTAIN_ROCK_CLUSTER_CHANCE: float = 0.48
+const ROCK_CLUSTER_START: float = 0.60
+const ROCK_CLUSTER_FULL: float = 0.78
+const ROCK_RESERVED_CLEARING_MULTIPLIER: float = 0.35
+const PLAIN_ROCK_BASE_CHANCE: float = 0.0034
+const FOREST_ROCK_BASE_CHANCE: float = 0.0028
+const TAIGA_ROCK_BASE_CHANCE: float = 0.0030
+const JUNGLE_ROCK_BASE_CHANCE: float = 0.0025
+const TUNDRA_ROCK_BASE_CHANCE: float = 0.0032
+const DESERT_ROCK_BASE_CHANCE: float = 0.0026
 
 static func calculate_city_seed() -> int:
 	var center: Vector2i = WorldData.city_start_region_center
@@ -395,8 +405,8 @@ func setup_city_noise() -> void:
 
 	rock_patch_noise.seed = city_seed + 130363
 	rock_patch_noise.noise_type = FastNoiseLite.TYPE_SIMPLEX
-	rock_patch_noise.frequency = 0.052
-	rock_patch_noise.fractal_octaves = 3
+	rock_patch_noise.frequency = 0.085
+	rock_patch_noise.fractal_octaves = 2
 	rock_patch_noise.fractal_gain = 0.50
 	rock_patch_noise.fractal_lacunarity = 2.0
 
@@ -466,22 +476,25 @@ func get_city_surface_feature(
 	if tree_chance > 0.0 and tree_roll < tree_chance:
 		return WorldData.CITY_SURFACE_FEATURE_TREE
 
-	# Keep density reductions and clearing pockets empty rather than letting
-	# rocks replace the trees deliberately removed by forest shaping.
-	if tree_roll < get_tree_reserved_spawn_chance(
-		tile,
-		city_x,
-		city_y,
-		tree_chance
-	):
-		return WorldData.CITY_SURFACE_FEATURE_NONE
-
+	var tree_reserved_spawn_chance := (
+		get_tree_reserved_spawn_chance(
+			tile,
+			city_x,
+			city_y,
+			tree_chance
+		)
+	)
 	var rock_chance := get_rock_spawn_chance(
 		tile,
 		float(profile.get("mountain_weight", 0.0)),
 		city_x,
 		city_y
 	)
+	# Forest clearings remain mostly open, but no longer exclude rock clusters
+	# absolutely. A reduced chance lets geology puncture some cleared pockets.
+	if tree_roll < tree_reserved_spawn_chance:
+		rock_chance *= ROCK_RESERVED_CLEARING_MULTIPLIER
+
 	var rock_roll := get_deterministic_tile_unit_value(
 		city_seed,
 		city_x,
@@ -702,11 +715,9 @@ func get_rock_spawn_chance(
 ) -> float:
 	var biome := str(tile.get("biome", ""))
 	var sparse_chance := get_sparse_rock_base_spawn_chance(biome)
-	var hill_chance := 0.0
-
-	if biome == WorldData.BIOME_HILLS:
-		hill_chance = HILLS_ROCK_CLUSTER_CHANCE
-
+	var biome_cluster_chance := get_rock_cluster_spawn_chance(
+		biome
+	)
 	var mountain_proximity := smoothstep(
 		0.02,
 		0.42,
@@ -716,7 +727,10 @@ func get_rock_spawn_chance(
 		MOUNTAIN_ROCK_CLUSTER_CHANCE
 		* mountain_proximity
 	)
-	var clustered_chance := maxf(hill_chance, mountain_chance)
+	var clustered_chance := maxf(
+		biome_cluster_chance,
+		mountain_chance
+	)
 	var patch_value := (
 		rock_patch_noise.get_noise_2d(city_x, city_y) + 1.0
 	) * 0.5
@@ -737,8 +751,34 @@ func get_rock_spawn_chance(
 		sparse_chance * sparse_multiplier
 		+ clustered_chance * cluster_strength * elevation_multiplier,
 		0.0,
-		0.14
+		0.55
 	)
+
+
+func get_rock_cluster_spawn_chance(biome: String) -> float:
+	match biome:
+		WorldData.BIOME_PLAIN:
+			return PLAIN_ROCK_CLUSTER_CHANCE
+
+		WorldData.BIOME_FOREST:
+			return FOREST_ROCK_CLUSTER_CHANCE
+
+		WorldData.BIOME_TAIGA:
+			return TAIGA_ROCK_CLUSTER_CHANCE
+
+		WorldData.BIOME_JUNGLE:
+			return JUNGLE_ROCK_CLUSTER_CHANCE
+
+		WorldData.BIOME_TUNDRA:
+			return TUNDRA_ROCK_CLUSTER_CHANCE
+
+		WorldData.BIOME_DESERT:
+			return DESERT_ROCK_CLUSTER_CHANCE
+
+		WorldData.BIOME_HILLS:
+			return HILLS_ROCK_CLUSTER_CHANCE
+
+	return 0.0
 
 
 func get_sparse_rock_base_spawn_chance(biome: String) -> float:

@@ -7,6 +7,12 @@ const CityStateValidatorScript = preload(
 const CityWorldGeneratorScript = preload(
 	"res://scripts/city/generation/CityWorldGenerator.gd"
 )
+const CityConstructionSystemScript = preload(
+	"res://scripts/city/simulation/systems/CityConstructionSystem.gd"
+)
+const CityNavigationSystemScript = preload(
+	"res://scripts/city/simulation/systems/CityNavigationSystem.gd"
+)
 
 var failure_count: int = 0
 var background_draw_count: int = 0
@@ -58,9 +64,11 @@ func _run_smoke_test() -> void:
 	)
 
 	_test_city_natural_features(renderer)
+	_test_ground_pile_coalescing(renderer)
 	await _test_focused_layer_invalidation(renderer)
 	_test_resource_catalog_and_bulk_totals()
 	_place_and_validate_city_fixture(renderer)
+	_test_universal_construction_core(renderer)
 
 	renderer.queue_all_city_render_layers_redraw()
 	await get_tree().process_frame
@@ -472,6 +480,167 @@ func _test_resource_catalog_and_bulk_totals() -> void:
 			city_generator.get_sparse_rock_base_spawn_chance(biome) > 0.0,
 			"Every non-hill land biome must retain sparse rock generation."
 		)
+		_expect(
+			city_generator.get_rock_cluster_spawn_chance(biome) > 0.0,
+			"Every land biome must support local rock clusters."
+		)
+
+	_expect(
+		city_generator.get_rock_cluster_spawn_chance(
+			WorldData.BIOME_HILLS
+		)
+		> city_generator.get_rock_cluster_spawn_chance(
+			WorldData.BIOME_PLAIN
+		),
+		"Hill rock clusters must remain denser than plain clusters."
+	)
+
+
+func _test_ground_pile_coalescing(
+	renderer: CityRenderer
+) -> void:
+	var test_tiles := _find_ground_pile_test_pair(
+		renderer.city_world
+	)
+
+	_expect(
+		test_tiles.size() == 2,
+		"The dev city must expose two nearby ground-pile tiles."
+	)
+
+	if test_tiles.size() != 2:
+		return
+
+	var anchor_tile: Vector2i = test_tiles[0]
+	var overflow_tile: Vector2i = test_tiles[1]
+	var first_amount := WorldData.CITY_GROUND_PILE_CAPACITY - 2
+
+	_expect(
+		WorldData.CITY_GROUND_PILE_MERGE_RADIUS_TILES == 2,
+		"Ground-pile coalescing radius must remain exactly two tiles."
+	)
+	_expect(
+		WorldData.add_resource_to_city_ground_pile(
+			anchor_tile,
+			WorldData.RESOURCE_LUMBER,
+			first_amount
+		) == first_amount,
+		"The anchor ground pile must accept its initial lumber."
+	)
+	_expect(
+		WorldData.add_resource_to_city_ground_pile(
+			overflow_tile,
+			WorldData.RESOURCE_LUMBER,
+			4
+		) == 4,
+		"A nearby lumber drop must be accepted atomically."
+	)
+
+	var lumber_piles: Array = []
+
+	for raw_ground_pile in WorldData.get_city_ground_pile_snapshot():
+		if not raw_ground_pile is Dictionary:
+			continue
+
+		var ground_pile: Dictionary = raw_ground_pile
+
+		if str(
+			ground_pile.get(
+				"resource_type",
+				WorldData.RESOURCE_NONE
+			)
+		) == WorldData.RESOURCE_LUMBER:
+			lumber_piles.append(ground_pile)
+
+	_expect(
+		lumber_piles.size() == 2,
+		"A full coalesced pile must leave one overflow pile at the new drop tile."
+	)
+
+	var found_full_anchor := false
+	var found_origin_overflow := false
+
+	for raw_ground_pile in lumber_piles:
+		var ground_pile: Dictionary = raw_ground_pile
+		var pile_tile: Vector2i = ground_pile.get(
+			"tile_position",
+			WorldData.INVALID_CITY_TILE_POSITION
+		)
+		var pile_amount := int(ground_pile.get("amount", 0))
+
+		if (
+			pile_tile == anchor_tile
+			and pile_amount == WorldData.CITY_GROUND_PILE_CAPACITY
+		):
+			found_full_anchor = true
+		elif pile_tile == overflow_tile and pile_amount == 2:
+			found_origin_overflow = true
+
+	_expect(
+		found_full_anchor,
+		"Nearby lumber must fill the original pile only to capacity."
+	)
+	_expect(
+		found_origin_overflow,
+		"Overflow lumber must remain where the new resource was collected."
+	)
+
+	for raw_ground_pile in lumber_piles:
+		var ground_pile: Dictionary = raw_ground_pile
+		var amount := int(ground_pile.get("amount", 0))
+
+		_expect(
+			WorldData.remove_resource_from_city_ground_pile(
+				int(ground_pile.get("id", -1)),
+				WorldData.RESOURCE_LUMBER,
+				amount
+			) == amount,
+			"Ground-pile fixture cleanup must remove every test unit."
+		)
+
+
+func _find_ground_pile_test_pair(
+	city_world: WorldData
+) -> Array:
+	if city_world == null:
+		return []
+
+	for y in range(city_world.height):
+		for x in range(city_world.width):
+			var anchor_tile := Vector2i(x, y)
+
+			if not WorldData.can_city_ground_pile_exist_at_tile(
+				city_world,
+				anchor_tile
+			):
+				continue
+
+			for offset_y in range(-2, 3):
+				for offset_x in range(-2, 3):
+					if offset_x == 0 and offset_y == 0:
+						continue
+
+					var candidate_tile := (
+						anchor_tile
+						+ Vector2i(offset_x, offset_y)
+					)
+
+					if (
+						WorldData.get_city_ground_pile_tile_distance_squared(
+							anchor_tile,
+							candidate_tile
+						)
+						> 4
+					):
+						continue
+
+					if WorldData.can_city_ground_pile_exist_at_tile(
+						city_world,
+						candidate_tile
+					):
+						return [anchor_tile, candidate_tile]
+
+	return []
 
 
 func _place_and_validate_city_fixture(
@@ -494,6 +663,16 @@ func _place_and_validate_city_fixture(
 	if keep_top_left == Vector2i(-1, -1):
 		return
 
+	var keep_footprint := (
+		WorldData.make_rectangle_city_object_footprint_tiles(
+			keep_top_left,
+			keep_size
+		)
+	)
+	_normalize_surface_feature_fixture(
+		renderer.city_world,
+		keep_footprint
+	)
 	var tree_test_tile := keep_top_left
 	var rock_test_tile := keep_top_left + Vector2i(1, 0)
 	renderer.city_world.get_tile(
@@ -504,9 +683,17 @@ func _place_and_validate_city_fixture(
 		rock_test_tile.x,
 		rock_test_tile.y
 	)["surface_feature"] = WorldData.CITY_SURFACE_FEATURE_ROCK
+	renderer.rebuild_city_natural_feature_multimeshes()
+	renderer.observed_city_surface_feature_change_version = (
+		renderer.city_world.city_surface_feature_change_version
+	)
+	renderer.city_world.consume_city_surface_feature_changes()
 	renderer.city_world.mark_tile_data_changed()
 	var tile_data_version_before_placement := (
 		renderer.city_world.tile_data_version
+	)
+	var surface_feature_version_before_placement := (
+		renderer.city_world.city_surface_feature_change_version
 	)
 
 	_expect(
@@ -549,8 +736,13 @@ func _place_and_validate_city_fixture(
 	)
 	_expect(
 		renderer.city_world.tile_data_version
-		== tile_data_version_before_placement + 1,
-		"One placement must publish one surface-feature tile change."
+		== tile_data_version_before_placement,
+		"Placement must not invalidate broad city tile data."
+	)
+	_expect(
+		renderer.city_world.city_surface_feature_change_version
+		== surface_feature_version_before_placement + 2,
+		"Placement must publish one incremental change per removed feature."
 	)
 
 	renderer.after_city_center_placed(keep)
@@ -588,7 +780,7 @@ func _place_and_validate_city_fixture(
 	)
 
 
-	var first_citizen := WorldData.city_citizens[0]
+	var first_citizen: Dictionary = WorldData.city_citizens[0]
 	var first_citizen_id := int(first_citizen.get("id", -1))
 	var removed_fish := WorldData.remove_resource_from_city_object_storage(
 		keep_id,
@@ -704,6 +896,767 @@ func _place_and_validate_city_fixture(
 			).is_empty(),
 			"Access-tile callers must not mutate the cached array."
 		)
+
+
+func _test_universal_construction_core(
+	renderer: CityRenderer
+) -> void:
+	_expect(
+		not WorldData.city_citizens.is_empty(),
+		"Construction coverage requires a starting citizen."
+	)
+
+	if WorldData.city_citizens.is_empty():
+		return
+
+	var citizen_id := int(WorldData.city_citizens[0].get("id", -1))
+	var keep_access_tiles: Array = []
+
+	for raw_object in WorldData.city_objects:
+		if (
+			raw_object is Dictionary
+			and str(raw_object.get("type", ""))
+			== WorldData.CITY_OBJECT_CITY_CENTER
+		):
+			keep_access_tiles = WorldData.get_city_object_access_tiles(
+				renderer.city_world,
+				raw_object
+			)
+			break
+
+	_expect(
+		not keep_access_tiles.is_empty(),
+		"Construction coverage requires reachable City Keep access."
+	)
+
+	if keep_access_tiles.is_empty():
+		return
+
+	var house_size := WorldData.get_city_object_size_for_type(
+		WorldData.CITY_OBJECT_HOUSE
+	)
+	var house_top_left := _find_reachable_construction_rectangle(
+		renderer.city_world,
+		house_size,
+		WorldData.CITY_OBJECT_HOUSE,
+		citizen_id,
+		keep_access_tiles
+	)
+
+	_expect(
+		house_top_left != WorldData.INVALID_CITY_TILE_POSITION,
+		"A construction-enabled House footprint must exist."
+	)
+
+	if house_top_left == WorldData.INVALID_CITY_TILE_POSITION:
+		return
+
+	var house_footprint := (
+		WorldData.make_rectangle_city_object_footprint_tiles(
+			house_top_left,
+			house_size
+		)
+	)
+	_normalize_surface_feature_fixture(
+		renderer.city_world,
+		house_footprint
+	)
+	var tree_tile := house_top_left
+	var rock_tile := house_top_left + Vector2i(1, 0)
+	var cleanup_tile := house_top_left + Vector2i(2, 0)
+	renderer.city_world.get_tile(
+		tree_tile.x,
+		tree_tile.y
+	)["surface_feature"] = WorldData.CITY_SURFACE_FEATURE_TREE
+	renderer.city_world.get_tile(
+		rock_tile.x,
+		rock_tile.y
+	)["surface_feature"] = WorldData.CITY_SURFACE_FEATURE_ROCK
+	renderer.city_world.get_tile(
+		cleanup_tile.x,
+		cleanup_tile.y
+	).erase("surface_feature")
+	renderer.rebuild_city_natural_feature_multimeshes()
+	renderer.observed_city_surface_feature_change_version = (
+		renderer.city_world.city_surface_feature_change_version
+	)
+	renderer.city_world.consume_city_surface_feature_changes()
+
+	var house_site := CityConstructionSystemScript.create_rectangular_site(
+		WorldData.CITY_OBJECT_HOUSE,
+		house_top_left,
+		house_size,
+		"player",
+		renderer.city_world
+	)
+	var house_site_id := int(house_site.get("id", -1))
+
+	_expect(house_site_id > 0, "House placement must create a blueprint.")
+
+	if house_site_id <= 0:
+		return
+
+	var initial_progress := (
+		CityConstructionSystemScript
+		.get_city_construction_site_progress_summary(
+			house_site_id
+		)
+	)
+	_expect(
+		int(initial_progress.get("progress_percent", -1)) == 0,
+		"A newly placed obstructed blueprint must begin at zero percent."
+	)
+	_expect(
+		float(
+			initial_progress.get(
+				"required_clearing_work_units",
+				0.0
+			)
+		) > 0.0,
+		"Construction progress must include required clearing work."
+	)
+
+	renderer.set_selected_city_construction_site(house_site_id)
+	_expect(
+		renderer.selected_city_construction_site_id == house_site_id
+		and renderer.construction_site_info_panel.visible,
+		"Selecting a blueprint must open its compact construction panel."
+	)
+	_expect(
+		renderer.construction_site_info_title_label.text
+		== "Construction Progress: 0%",
+		"The construction panel must display the calculated percentage."
+	)
+	_expect(
+		renderer.construction_site_info_body_label.text.contains(
+			"Lumber: 0/8"
+		)
+		and renderer.construction_site_info_body_label.text.contains(
+			"Stone: 0/4"
+		),
+		"The panel must list the blueprint's live data-driven recipe."
+	)
+	var panel_size_before_zoom := (
+		renderer.construction_site_info_panel.size
+	)
+	var original_camera_zoom := renderer.camera.zoom
+	renderer.camera.zoom = original_camera_zoom * 1.5
+	renderer.update_construction_site_info_panel_screen_position()
+	_expect(
+		renderer.construction_site_info_panel.size
+		== panel_size_before_zoom,
+		"Construction panel dimensions must remain screen-constant under zoom."
+	)
+	renderer.camera.zoom = original_camera_zoom
+	renderer.update_construction_site_info_panel_screen_position()
+
+	var right_click := InputEventMouseButton.new()
+	right_click.button_index = MOUSE_BUTTON_RIGHT
+	right_click.pressed = true
+	renderer._input(right_click)
+	_expect(
+		renderer.selected_city_construction_site_id < 0
+		and not renderer.construction_site_info_panel.visible,
+		"Right-click must close the construction panel."
+	)
+	renderer.set_selected_city_construction_site(house_site_id)
+
+	renderer.start_city_object_placement(
+		WorldData.CITY_OBJECT_HOUSE,
+		house_size
+	)
+	_expect(
+		renderer.is_uncommitted_city_placement_preview_active(),
+		"A cursor-attached placement ghost must suppress the separate white hover outline."
+	)
+	renderer.clear_city_object_placement()
+	_expect(
+		not renderer.is_uncommitted_city_placement_preview_active(),
+		"Committing or cancelling placement must restore ordinary world-object hovering."
+	)
+
+	for hover_tile in house_footprint:
+		_expect(
+			renderer.get_city_hover_highlight_tiles(hover_tile)
+			== house_footprint,
+			"Hovering any House blueprint tile must resolve its full footprint."
+		)
+
+	_expect(
+		WorldData.get_city_object_at_tile(house_top_left).is_empty(),
+		"A House blueprint must not be an operational city object."
+	)
+	_expect(
+		str(house_site.get("phase", ""))
+		== WorldData.CITY_CONSTRUCTION_PHASE_CLEARING,
+		"An obstructed House blueprint must begin in clearing."
+	)
+
+	var cleanup_add_result := (
+		WorldData.add_resource_to_city_ground_piles_with_result(
+			cleanup_tile,
+			WorldData.RESOURCE_COAL,
+			1
+		)
+	)
+	var cleanup_placements: Array = cleanup_add_result.get(
+		"placements",
+		[]
+	)
+
+	_expect(
+		int(cleanup_add_result.get("added_amount", 0)) == 1,
+		"An ordinary footprint pile must be creatable for cleanup coverage."
+	)
+
+	var cleanup_candidate := (
+		CityConstructionSystemScript
+		.get_best_assignable_player_work_for_citizen(citizen_id)
+	)
+	_expect(
+		not cleanup_candidate.is_empty()
+		and int(cleanup_candidate.get("construction_site_id", -1))
+		== house_site_id,
+		"Clearing must expose ordinary footprint-pile cleanup as player work."
+	)
+
+	for raw_placement in cleanup_placements:
+		if not raw_placement is Dictionary:
+			continue
+
+		WorldData.remove_resource_from_city_ground_pile(
+			int(raw_placement.get("ground_pile_id", -1)),
+			WorldData.RESOURCE_COAL,
+			int(raw_placement.get("amount", 0))
+		)
+
+	for clearing_tile in [tree_tile, rock_tile]:
+		var command := WorldData.get_city_player_command_at_tile(
+			clearing_tile
+		)
+		var command_id := int(command.get("id", -1))
+
+		_expect(
+			command_id > 0
+			and int(command.get("construction_site_id", -1))
+			== house_site_id,
+			"Each obstruction must expose a site-owned clearing command."
+		)
+
+		if command_id <= 0:
+			continue
+
+		_expect(
+			WorldData.claim_city_player_command(
+				command_id,
+				citizen_id
+			),
+			"The clearing command must be claimable."
+		)
+		_expect(
+			WorldData.repair_stale_city_player_command_claims() == 1,
+			"A claim without its matching citizen task must self-repair."
+		)
+		_expect(
+			WorldData.claim_city_player_command(
+				command_id,
+				citizen_id
+			),
+			"A repaired clearing command must become claimable again."
+		)
+		_expect(
+			WorldData.complete_city_player_command(
+				command_id,
+				citizen_id
+			),
+			"Clearing must create physical output atomically."
+		)
+
+	CityConstructionSystemScript.refresh_city_construction_site(
+		house_site_id
+	)
+	house_site = WorldData.get_city_construction_site_by_id(
+		house_site_id
+	)
+
+	_expect(
+		str(house_site.get("phase", ""))
+		== WorldData.CITY_CONSTRUCTION_PHASE_GATHERING,
+		"A cleared but under-supplied House must enter gathering."
+	)
+	_expect(
+		WorldData.get_city_construction_site_reserved_resource_amount(
+			house_site_id,
+			WorldData.RESOURCE_LUMBER
+		) == 4
+		and WorldData.get_city_construction_site_reserved_resource_amount(
+			house_site_id,
+			WorldData.RESOURCE_STONE
+		) == 4,
+		"Needed clearing output must become physical site-owned material."
+	)
+
+	var cleared_progress := (
+		CityConstructionSystemScript
+		.get_city_construction_site_progress_summary(
+			house_site_id
+		)
+	)
+	_expect(
+		int(cleared_progress.get("progress_percent", 0)) > 0,
+		"Clearing and reserved clearing output must advance total progress."
+	)
+	renderer.update_selected_entity_panel()
+	_expect(
+		renderer.construction_site_info_body_label.text.contains(
+			"Lumber: 4/8"
+		)
+		and renderer.construction_site_info_body_label.text.contains(
+			"Stone: 4/4"
+		),
+		"The open construction panel must live-update delivered materials."
+	)
+
+	for raw_ground_pile in WorldData.get_city_ground_pile_snapshot():
+		if (
+			not raw_ground_pile is Dictionary
+			or WorldData.get_city_ground_pile_construction_site_id(
+				raw_ground_pile
+			) != house_site_id
+		):
+			continue
+
+		var pile_endpoint := WorldData.make_city_ground_pile_haul_endpoint(
+			int(raw_ground_pile.get("id", -1))
+		)
+		_expect(
+			not WorldData.city_haul_endpoint_can_provide_resource(
+				pile_endpoint,
+				str(raw_ground_pile.get("resource_type", "")),
+				WorldData.CONTAINER_HAUL_PURPOSE_GROUND_PILE_CLEANUP,
+				true
+			),
+			"Ordinary hauling must ignore construction-reserved piles."
+		)
+
+	_expect(
+		WorldData.add_resource_to_city_construction_site(
+			house_site_id,
+			WorldData.RESOURCE_LUMBER,
+			4
+		) == 4,
+		"Delivered construction material must become a physical site pile."
+	)
+	CityConstructionSystemScript.refresh_city_construction_site(
+		house_site_id
+	)
+	house_site = WorldData.get_city_construction_site_by_id(
+		house_site_id
+	)
+
+	_expect(
+		str(house_site.get("phase", ""))
+		== WorldData.CITY_CONSTRUCTION_PHASE_LABOR,
+		"A fully supplied House must enter labor."
+	)
+
+	house_site["completed_labor_minutes"] = int(
+		house_site.get("required_labor_minutes", 0)
+	)
+	WorldData.update_city_construction_site(house_site)
+	var completed_house := (
+		CityConstructionSystemScript.complete_city_construction_site(
+			house_site_id
+		)
+	)
+
+	_expect(
+		str(completed_house.get("type", ""))
+		== WorldData.CITY_OBJECT_HOUSE,
+		"Completed labor must consume material and create the House."
+	)
+	renderer.update_selected_entity_panel()
+	_expect(
+		renderer.selected_city_construction_site_id < 0
+		and not renderer.construction_site_info_panel.visible,
+		"Completing a selected site must close its now-invalid panel."
+	)
+
+	for hover_tile in house_footprint:
+		_expect(
+			renderer.get_city_hover_highlight_tiles(hover_tile)
+			== house_footprint,
+			"Hovering any completed House tile must resolve its full footprint."
+		)
+
+	_expect(
+		WorldData.get_city_construction_site_by_id(
+			house_site_id
+		).is_empty(),
+		"Completed construction must release its blueprint."
+	)
+	_expect(
+		WorldData.get_city_construction_site_reserved_resource_amount(
+			house_site_id,
+			WorldData.RESOURCE_LUMBER
+		) == 0,
+		"Completed construction must consume every reserved pile."
+	)
+
+	var road_tile := _find_clear_road_construction_tile(
+		renderer.city_world
+	)
+	_expect(
+		road_tile != WorldData.INVALID_CITY_TILE_POSITION,
+		"A clear road construction tile must exist."
+	)
+
+	if road_tile == WorldData.INVALID_CITY_TILE_POSITION:
+		return
+
+	var stone_before := (
+		WorldData.get_total_city_ground_pile_resource_amount(
+			WorldData.RESOURCE_STONE
+		)
+	)
+	var road_site := CityConstructionSystemScript.create_road_site(
+		[road_tile],
+		"player",
+		renderer.city_world
+	)
+	var road_site_id := int(road_site.get("id", -1))
+
+	_expect(road_site_id > 0, "Road placement must create a blueprint.")
+	_expect(
+		not renderer.is_city_construction_site_selectable(road_site),
+		"Road blueprints must remain outside building-panel selection."
+	)
+
+	if road_site_id <= 0:
+		return
+
+	var road_progress := (
+		CityConstructionSystemScript
+		.get_city_construction_site_progress_summary(
+			road_site_id
+		)
+	)
+	_expect(
+		is_zero_approx(
+			float(
+				road_progress.get(
+					"required_clearing_work_units",
+					-1.0
+				)
+			)
+		)
+		and int(road_progress.get("progress_percent", -1)) == 0,
+		"An unobstructed site must begin at zero without phantom clearing work."
+	)
+
+	_expect(
+		WorldData.add_resource_to_city_construction_site(
+			road_site_id,
+			WorldData.RESOURCE_STONE,
+			1
+		) == 1,
+		"A road blueprint must accept its physical material."
+	)
+	_expect(
+		CityConstructionSystemScript.cancel_city_construction_site(
+			road_site_id
+		),
+		"Construction cancellation must succeed."
+	)
+	_expect(
+		WorldData.get_total_city_ground_pile_resource_amount(
+			WorldData.RESOURCE_STONE
+		) == stone_before + 1,
+		"Cancellation must preserve delivered resources in place."
+	)
+
+	for raw_ground_pile in WorldData.get_city_ground_pile_snapshot():
+		if not raw_ground_pile is Dictionary:
+			continue
+
+		_expect(
+			WorldData.get_city_ground_pile_construction_site_id(
+				raw_ground_pile
+			) != road_site_id,
+			"Cancellation must release construction pile ownership."
+		)
+
+
+func _find_clear_road_construction_tile(
+	city_world: WorldData
+) -> Vector2i:
+	if city_world == null:
+		return WorldData.INVALID_CITY_TILE_POSITION
+
+	for y in range(city_world.height):
+		for x in range(city_world.width):
+			var tile_position := Vector2i(x, y)
+
+			if (
+				WorldData.can_place_city_road_tile(
+					city_world,
+					tile_position
+				)
+				and WorldData.get_city_surface_feature(
+					city_world.get_tile(x, y)
+				) == WorldData.CITY_SURFACE_FEATURE_NONE
+				and not WorldData.has_city_ground_pile_at_tile(
+					tile_position
+				)
+				and not WorldData.has_living_city_citizen_at_tile(
+					tile_position
+				)
+			):
+				return tile_position
+
+	return WorldData.INVALID_CITY_TILE_POSITION
+
+
+func _find_reachable_construction_rectangle(
+	city_world: WorldData,
+	size_tiles: Vector2i,
+	object_type: String,
+	citizen_id: int,
+	destination_access_tiles: Array
+) -> Vector2i:
+	if city_world == null or citizen_id <= 0:
+		return WorldData.INVALID_CITY_TILE_POSITION
+
+	var citizen := WorldData.get_city_citizen_by_id(citizen_id)
+	var raw_citizen_tile = citizen.get(
+		"city_tile_position",
+		WorldData.INVALID_CITY_TILE_POSITION
+	)
+
+	if not raw_citizen_tile is Vector2i:
+		return WorldData.INVALID_CITY_TILE_POSITION
+
+	var citizen_tile: Vector2i = raw_citizen_tile
+	var maximum_radius := maxi(city_world.width, city_world.height)
+	var maximum_expanded_nodes := maxi(
+		city_world.width * city_world.height,
+		1
+	)
+	var keep_path := (
+		CityNavigationSystemScript.find_path_to_any_city_tile(
+			city_world,
+			citizen_tile,
+			destination_access_tiles,
+			maximum_expanded_nodes,
+			citizen_id,
+			1
+		)
+	)
+
+	if not bool(keep_path.get("success", false)):
+		return WorldData.INVALID_CITY_TILE_POSITION
+
+	for radius in range(maximum_radius + 1):
+		for offset_y in range(-radius, radius + 1):
+			for offset_x in range(-radius, radius + 1):
+				if (
+					radius > 0
+					and maxi(absi(offset_x), absi(offset_y))
+					!= radius
+				):
+					continue
+
+				var top_left := (
+					citizen_tile + Vector2i(offset_x, offset_y)
+				)
+
+				if (
+					not city_world.is_in_bounds(top_left.x, top_left.y)
+					or not city_world.is_in_bounds(
+						top_left.x + size_tiles.x - 1,
+						top_left.y + size_tiles.y - 1
+					)
+				):
+					continue
+
+				var footprint_tiles := (
+					WorldData.make_rectangle_city_object_footprint_tiles(
+						top_left,
+						size_tiles
+					)
+				)
+				var footprint_is_clear := true
+
+				for raw_tile in footprint_tiles:
+					if (
+						raw_tile is Vector2i
+						and (
+							not WorldData.get_city_object_at_tile(
+								raw_tile
+							).is_empty()
+							or not WorldData.get_city_construction_site_at_tile(
+								raw_tile
+							).is_empty()
+							or
+							WorldData.has_city_ground_pile_at_tile(raw_tile)
+							or WorldData.has_living_city_citizen_at_tile(
+								raw_tile
+							)
+						)
+					):
+						footprint_is_clear = false
+						break
+
+				if not footprint_is_clear:
+					continue
+
+				var cleanup_tile := (
+					top_left + Vector2i(size_tiles.x - 1, 0)
+				)
+				var corridor_tiles := _make_cardinal_fixture_path(
+					citizen_tile,
+					cleanup_tile,
+					true
+				)
+
+				if not _fixture_path_is_clear(corridor_tiles):
+					corridor_tiles = _make_cardinal_fixture_path(
+						citizen_tile,
+						cleanup_tile,
+						false
+					)
+
+				if not _fixture_path_is_clear(corridor_tiles):
+					continue
+
+				var fixture_tiles: Array = footprint_tiles.duplicate()
+
+				for corridor_tile in corridor_tiles:
+					if not fixture_tiles.has(corridor_tile):
+						fixture_tiles.append(corridor_tile)
+
+				for raw_fixture_tile in fixture_tiles:
+					if not raw_fixture_tile is Vector2i:
+						continue
+
+					var fixture_tile: Vector2i = raw_fixture_tile
+					var tile := city_world.get_tile(
+						fixture_tile.x,
+						fixture_tile.y
+					)
+					tile["terrain"] = WorldData.TERRAIN_LAND
+					tile["is_land"] = true
+					tile.erase("surface_feature")
+
+				city_world.mark_tile_data_changed()
+
+				if not WorldData.can_place_city_object_construction(
+					city_world,
+					top_left,
+					size_tiles,
+					object_type
+				):
+					continue
+
+				var source_path := (
+					CityNavigationSystemScript.find_path_to_any_city_tile(
+						city_world,
+						citizen_tile,
+						[cleanup_tile],
+						maximum_expanded_nodes,
+						citizen_id,
+						1
+					)
+				)
+
+				if not bool(source_path.get("success", false)):
+					continue
+
+				var destination_path := (
+					CityNavigationSystemScript.find_path_to_any_city_tile(
+						city_world,
+						cleanup_tile,
+						destination_access_tiles,
+						maximum_expanded_nodes,
+						citizen_id,
+						1
+					)
+				)
+
+				if bool(destination_path.get("success", false)):
+					return top_left
+
+	return WorldData.INVALID_CITY_TILE_POSITION
+
+
+func _make_cardinal_fixture_path(
+	start_tile: Vector2i,
+	destination_tile: Vector2i,
+	horizontal_first: bool
+) -> Array[Vector2i]:
+	var path: Array[Vector2i] = [start_tile]
+	var current_tile := start_tile
+
+	if horizontal_first:
+		while current_tile.x != destination_tile.x:
+			current_tile.x += (
+				1 if destination_tile.x > current_tile.x else -1
+			)
+			path.append(current_tile)
+
+		while current_tile.y != destination_tile.y:
+			current_tile.y += (
+				1 if destination_tile.y > current_tile.y else -1
+			)
+			path.append(current_tile)
+	else:
+		while current_tile.y != destination_tile.y:
+			current_tile.y += (
+				1 if destination_tile.y > current_tile.y else -1
+			)
+			path.append(current_tile)
+
+		while current_tile.x != destination_tile.x:
+			current_tile.x += (
+				1 if destination_tile.x > current_tile.x else -1
+			)
+			path.append(current_tile)
+
+	return path
+
+
+func _fixture_path_is_clear(path_tiles: Array[Vector2i]) -> bool:
+	for path_index in range(1, path_tiles.size()):
+		var tile_position := path_tiles[path_index]
+
+		if (
+			not WorldData.get_city_object_at_tile(tile_position).is_empty()
+			or not WorldData.get_city_construction_site_at_tile(
+				tile_position
+			).is_empty()
+			or WorldData.has_city_ground_pile_at_tile(tile_position)
+		):
+			return false
+
+	return true
+
+
+func _normalize_surface_feature_fixture(
+	city_world: WorldData,
+	raw_tile_positions: Array
+) -> void:
+	if city_world == null:
+		return
+
+	for raw_tile in raw_tile_positions:
+		if not raw_tile is Vector2i:
+			continue
+
+		var tile_position: Vector2i = raw_tile
+		city_world.get_tile(
+			tile_position.x,
+			tile_position.y
+		).erase("surface_feature")
 
 
 func _find_placeable_rectangle(

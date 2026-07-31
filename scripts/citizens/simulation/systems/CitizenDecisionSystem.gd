@@ -7,19 +7,29 @@ const CityNavigationSystemScript = preload(
 const CitizenHaulingSystemScript = preload(
 	"res://scripts/citizens/simulation/systems/CitizenHaulingSystem.gd"
 )
+const CityConstructionSystemScript = preload(
+	"res://scripts/city/simulation/systems/CityConstructionSystem.gd"
+)
+const CityWorkSystemScript = preload(
+	"res://scripts/city/simulation/systems/CityWorkSystem.gd"
+)
+const CityResourceMatcherScript = preload(
+	"res://scripts/city/simulation/systems/CityResourceMatcher.gd"
+)
 
 # Temporary shared schedule for the first autonomous work pass.
 # These constants are intentionally centralized so the schedule can later be
 # replaced by workplace, profession, household, or policy-driven schedules.
 const WORK_SHIFT_START_MINUTE_OF_DAY: int = 8 * 60
 const WORK_SHIFT_END_MINUTE_OF_DAY: int = 17 * 60
+const CRITICAL_FOOD_TASK_PRIORITY: int = 140
+const NORMAL_FOOD_TASK_PRIORITY: int = 85
 const SCHEDULED_WORK_TASK_PRIORITY: int = 100
 const OUTSTANDING_CARGO_HAUL_TASK_PRIORITY: int = 150
 const SCHEDULED_OUTPUT_HAUL_TASK_PRIORITY: int = 75
 const SCHEDULED_HOME_FOOD_DELIVERY_TASK_PRIORITY: int = 65
 const SCHEDULED_RETURN_HOME_TASK_PRIORITY: int = 50
 const AUTONOMOUS_GROUND_PILE_HAUL_TASK_PRIORITY: int = 90
-const AUTONOMOUS_HOME_FOOD_DELIVERY_TASK_PRIORITY: int = 80
 const AUTONOMOUS_WORKPLACE_OUTPUT_HAUL_TASK_PRIORITY: int = 70
 const SCHEDULE_PHASE_WORK_SHIFT := "work_shift"
 const SCHEDULE_PHASE_OFF_SHIFT := "off_shift"
@@ -35,6 +45,7 @@ const DEFAULT_SCHEDULE_ACTIVITY_RULES := {
 	SCHEDULE_PHASE_WORK_SHIFT: [
 		SCHEDULE_ACTIVITY_OUTSTANDING_OBLIGATION,
 		SCHEDULE_ACTIVITY_ASSIGNED_WORK,
+		SCHEDULE_ACTIVITY_ASSIGNED_HOME,
 	],
 	SCHEDULE_PHASE_OFF_SHIFT: [
 		SCHEDULE_ACTIVITY_OUTSTANDING_OBLIGATION,
@@ -60,6 +71,9 @@ const MAX_AUTONOMOUS_HAUL_CANDIDATES_PER_TICK: int = 32
 const MAX_AUTONOMOUS_HAUL_TASK_BUILD_ATTEMPTS_PER_TICK: int = 4
 const AUTONOMOUS_HAUL_EXACT_HEURISTIC_WEIGHT: int = 1
 const MAX_PLAYER_COMMAND_ASSIGNMENTS_PER_TICK: int = 8
+const MAX_FOOD_TASK_ASSIGNMENTS_PER_TICK: int = 4
+const MAX_FOOD_SOURCE_PATH_REQUESTS_PER_TICK: int = 8
+const HOME_FOOD_SOURCE_MAX_EXTRA_TILES: int = 4
 
 static var _pending_decision_ids: Array[int] = []
 static var _pending_decision_id_lookup: Dictionary = {}
@@ -72,6 +86,8 @@ static var _idle_anchor_tile_by_citizen_id: Dictionary = {}
 static var _next_idle_decision_minute_by_citizen_id: Dictionary = {}
 static var _idle_choice_sequence_by_citizen_id: Dictionary = {}
 static var _autonomous_haul_scan_cursor: int = 0
+static var _critical_food_scan_cursor: int = 0
+static var _normal_food_scan_cursor: int = 0
 
 static func run_tick(
 	_tick_index: int,
@@ -100,7 +116,11 @@ static func run_tick(
 	# Player designations outrank every scheduled or autonomous activity for
 	# unemployed citizens. Invalid targets are pruned before workers claim them.
 	WorldData.prune_invalid_city_player_commands()
+	WorldData.repair_stale_city_player_command_claims()
+	CityConstructionSystemScript.refresh_all_city_construction_sites()
+	CityWorkSystemScript.synchronize_player_work_board()
 	_process_player_commands()
+	_process_food_needs(true)
 
 	if not _runtime_initialized:
 		_runtime_initialized = true
@@ -127,6 +147,8 @@ static func run_tick(
 		_observed_assignment_version = (
 			WorldData.city_assignment_version
 		)
+		_idle_anchor_tile_by_citizen_id.clear()
+		_next_idle_decision_minute_by_citizen_id.clear()
 
 		_queue_all_eligible_scheduled_tasks(
 			schedule_phase
@@ -135,17 +157,36 @@ static func run_tick(
 	_queue_bounded_recovery_candidates(
 		schedule_phase
 	)
-	_process_decision_queue(schedule_phase)
+
+	# Resolve real schedule obligations first, but defer the two home-bound
+	# activities: pantry provisioning and return_home. This keeps assigned work
+	# and outstanding physical cargo ahead of ordinary hunger and logistics.
+	_process_decision_queue(
+		schedule_phase,
+		SCHEDULED_HOME_FOOD_DELIVERY_TASK_PRIORITY
+	)
+	_process_food_needs(false)
+
+	# Autonomous logistics then outrank the deferred home-bound schedule. A
+	# citizen who just delivered one load can therefore claim the next valid
+	# ground-pile or workplace-output trip immediately instead of walking home
+	# between loads. If no reachable haul can use remaining public container
+	# space, the final schedule pass below sends the citizen home in this tick.
 	_process_bounded_autonomous_hauling(schedule_phase)
+
+	# The assignment count is deliberately bounded, so a single decision tick
+	# may not dispatch every load the city still needs. Keep the deferred home
+	# queue intact while unreserved, deliverable logistics work remains. Further
+	# haulers are assigned on following ticks; citizens are released home only
+	# once existing haulers can absorb the remainder or public storage is full.
+	if not _has_unassigned_autonomous_haul_work():
+		_process_decision_queue(schedule_phase)
 
 	_process_bounded_idle_behaviors(
 		work_shift_is_active
 	)
 
 static func _process_player_commands() -> void:
-	if WorldData.city_player_commands.is_empty():
-		return
-
 	var assigned_count := 0
 
 	for raw_citizen in WorldData.city_citizens:
@@ -162,6 +203,7 @@ static func _process_player_commands() -> void:
 			citizen_id <= 0
 			or not bool(citizen.get("alive", false))
 			or int(citizen.get("job_object_id", -1)) > 0
+			or CitizenNeedsSystem.citizen_should_seek_food(citizen_id)
 		):
 			continue
 
@@ -171,50 +213,247 @@ static func _process_player_commands() -> void:
 			var current_task: Dictionary = raw_current_task
 
 			if (
-				str(current_task.get("kind", ""))
-				== WorldData.CITY_CITIZEN_TASK_KIND_PLAYER_COMMAND
+				str(current_task.get("source", ""))
+				== WorldData.CITY_CITIZEN_TASK_SOURCE_PLAYER
 			):
 				continue
 
-		var command := (
-			WorldData.get_best_assignable_city_player_command_for_citizen(
+		var player_work := (
+			CityWorkSystemScript.get_best_player_job_for_citizen(
 				citizen_id
 			)
 		)
 
-		if command.is_empty():
-			return
+		if player_work.is_empty():
+			continue
 
 		if not CitizenTaskSystem.prepare_unemployed_citizen_for_player_command(
 			citizen_id
 		):
 			continue
 
-		var command_id := int(command.get("id", -1))
-
-		if not WorldData.claim_city_player_command(command_id, citizen_id):
-			continue
-
-		var task_request := {
-			"kind": WorldData.CITY_CITIZEN_TASK_KIND_PLAYER_COMMAND,
-			"source": WorldData.CITY_CITIZEN_TASK_SOURCE_PLAYER,
-			"priority": WorldData.CITY_PLAYER_COMMAND_TASK_PRIORITY,
-			"target_object_id": command_id,
-			"player_locked": true,
-		}
-
-		if not WorldData.assign_city_citizen_task(
+		if not CityWorkSystemScript.assign_player_job(
 			citizen_id,
-			task_request
+			player_work
 		):
-			WorldData.release_city_player_command_claim(
-				command_id,
-				citizen_id
-			)
 			continue
 
 		_clear_idle_activity_runtime(citizen_id)
 		assigned_count += 1
+static func _process_food_needs(critical_only: bool) -> void:
+	var candidates: Array = []
+
+	for raw_citizen in WorldData.city_citizens:
+		if not raw_citizen is Dictionary:
+			continue
+
+		var citizen: Dictionary = raw_citizen
+		var citizen_id := int(citizen.get("id", -1))
+
+		if (
+			citizen_id <= 0
+			or not bool(citizen.get("alive", false))
+			or not CitizenNeedsSystem.citizen_should_seek_food(citizen_id)
+		):
+			continue
+
+		var is_critical := CitizenNeedsSystem.citizen_has_critical_food_need(
+			citizen_id
+		)
+
+		if is_critical != critical_only:
+			continue
+
+		var current_task := WorldData.get_city_citizen_current_task(citizen_id)
+		var current_task_kind := str(
+			current_task.get("kind", WorldData.CITY_CITIZEN_TASK_KIND_NONE)
+		)
+
+		if current_task_kind == WorldData.CITY_CITIZEN_TASK_KIND_ACQUIRE_FOOD:
+			continue
+
+		if (
+			not critical_only
+			and (
+				current_task_kind
+				== WorldData.CITY_CITIZEN_TASK_KIND_PLAYER_COMMAND
+				or bool(current_task.get("player_locked", false))
+			)
+		):
+			continue
+
+		if (
+			not is_critical
+			and current_task_kind != WorldData.CITY_CITIZEN_TASK_KIND_NONE
+		):
+			continue
+
+		candidates.append({
+			"citizen_id": citizen_id,
+			"hunger": WorldData.get_city_citizen_hunger(citizen_id),
+		})
+
+	candidates.sort_custom(_sort_food_need_candidates)
+
+	if candidates.is_empty():
+		return
+
+	var start_index := _take_food_scan_start_index(
+		critical_only,
+		candidates.size()
+	)
+	var assigned_count := 0
+	var path_requests_remaining := MAX_FOOD_SOURCE_PATH_REQUESTS_PER_TICK
+
+	for offset in range(candidates.size()):
+		if (
+			assigned_count >= MAX_FOOD_TASK_ASSIGNMENTS_PER_TICK
+			or path_requests_remaining <= 0
+		):
+			return
+
+		var raw_candidate = candidates[
+			(start_index + offset) % candidates.size()
+		]
+
+		if not raw_candidate is Dictionary:
+			continue
+
+		var citizen_id := int(raw_candidate.get("citizen_id", -1))
+		var citizen := WorldData.get_city_citizen_by_id(citizen_id)
+		var available_food_capacity := (
+			WorldData.get_city_citizen_personal_inventory_free_space(citizen_id)
+			if critical_only
+			else WorldData.get_city_citizen_inventory_free_space(citizen_id)
+		)
+		var food_result := _find_best_food_source_for_citizen(
+			citizen,
+			path_requests_remaining,
+			available_food_capacity
+		)
+		path_requests_remaining -= int(food_result.get("path_requests_used", 0))
+
+		if food_result.is_empty() or int(food_result.get("object_id", -1)) <= 0:
+			continue
+
+		var current_task := WorldData.get_city_citizen_current_task(citizen_id)
+
+		if (
+			critical_only
+			and str(current_task.get("kind", WorldData.CITY_CITIZEN_TASK_KIND_NONE))
+			!= WorldData.CITY_CITIZEN_TASK_KIND_NONE
+			and not CitizenTaskSystem.prepare_citizen_for_critical_food_interrupt(
+				citizen_id
+			)
+		):
+			continue
+
+		var task_request := {
+			"kind": WorldData.CITY_CITIZEN_TASK_KIND_ACQUIRE_FOOD,
+			"source": WorldData.CITY_CITIZEN_TASK_SOURCE_AUTONOMY,
+			"priority": (
+				CRITICAL_FOOD_TASK_PRIORITY
+				if critical_only
+				else NORMAL_FOOD_TASK_PRIORITY
+			),
+			"target_object_id": int(food_result.get("object_id", -1)),
+			"target_tile": food_result.get(
+				"target_tile",
+				WorldData.INVALID_CITY_TILE_POSITION
+			),
+			"food_resource_type": str(
+				food_result.get("resource_type", WorldData.RESOURCE_NONE)
+			),
+			"food_requested_amount": int(
+				food_result.get("requested_amount", 0)
+			),
+			"food_source_endpoint_kind": str(
+				food_result.get(
+					"source_kind",
+					WorldData
+					.CITY_CITIZEN_HAUL_ENDPOINT_KIND_CITY_OBJECT_CONTAINER
+				)
+			),
+			"food_source_access_purpose": (
+				WorldData.CONTAINER_DIRECT_WITHDRAWAL_PURPOSE_PERSONAL_FOOD
+			),
+			"player_locked": false,
+		}
+
+		if not WorldData.assign_city_citizen_task(citizen_id, task_request):
+			continue
+
+		WorldData.cancel_city_citizen_movement(citizen_id)
+		_clear_idle_activity_runtime(citizen_id)
+		assigned_count += 1
+
+
+static func _take_food_scan_start_index(
+	critical_only: bool,
+	candidate_count: int
+) -> int:
+	if candidate_count <= 0:
+		return 0
+
+	if critical_only:
+		var start_index := posmod(
+			_critical_food_scan_cursor,
+			candidate_count
+		)
+		_critical_food_scan_cursor = posmod(
+			start_index + 1,
+			candidate_count
+		)
+		return start_index
+
+	var start_index := posmod(
+		_normal_food_scan_cursor,
+		candidate_count
+	)
+	_normal_food_scan_cursor = posmod(
+		start_index + 1,
+		candidate_count
+	)
+	return start_index
+
+
+static func _sort_food_need_candidates(a: Dictionary, b: Dictionary) -> bool:
+	var hunger_a := int(a.get("hunger", WorldData.MAX_CITIZEN_HUNGER))
+	var hunger_b := int(b.get("hunger", WorldData.MAX_CITIZEN_HUNGER))
+
+	if hunger_a != hunger_b:
+		return hunger_a < hunger_b
+
+	return int(a.get("citizen_id", -1)) < int(b.get("citizen_id", -1))
+
+
+static func _find_best_food_source_for_citizen(
+	citizen: Dictionary,
+	maximum_path_requests: int,
+	available_food_capacity: int
+) -> Dictionary:
+	var citizen_id := int(citizen.get("id", -1))
+
+	if (
+		citizen_id <= 0
+		or maximum_path_requests <= 0
+		or available_food_capacity <= 0
+	):
+		return {}
+
+	var desired_nutrition := CitizenNeedsSystem.get_citizen_food_need_nutrition(
+		citizen_id
+	)
+
+	if desired_nutrition <= 0:
+		return {}
+
+	return CityResourceMatcherScript.find_best_survival_food_source(
+		citizen,
+		desired_nutrition,
+		available_food_capacity,
+		maximum_path_requests
+	)
 
 
 static func reset_runtime_state() -> void:
@@ -228,6 +467,8 @@ static func reset_runtime_state() -> void:
 	_next_idle_decision_minute_by_citizen_id.clear()
 	_idle_choice_sequence_by_citizen_id.clear()
 	_autonomous_haul_scan_cursor = 0
+	_critical_food_scan_cursor = 0
+	_normal_food_scan_cursor = 0
 
 
 static func is_work_shift_active() -> bool:
@@ -584,21 +825,26 @@ static func _get_outstanding_obligation_task_request(
 			})
 		)
 
-	# Off-shift workers keep taking workplace-output trips until the buffer is
-	# empty or no reachable public storage has room, then return home. Existing
-	# cargo remains an obligation at any time.
-	if is_work_shift_active():
+	# A carried load is the atomic obligation above. Once it is settled, normal
+	# hunger (31--50) outranks every new scheduled or logistical activity.
+	if CitizenNeedsSystem.citizen_should_seek_food(citizen_id):
+		return {}
+
+	# Employed citizens work through the shift. Unemployed residents may still
+	# provision their own household before settling into home-centered idling.
+	if (
+		is_work_shift_active()
+		and int(citizen.get("job_object_id", -1)) > 0
+	):
 		return {}
 
 	var home_id := int(citizen.get("home_object_id", -1))
 	var home := WorldData.get_city_object_by_id(home_id)
-
-	if (
+	var has_satisfied_home_arrival := (
 		home_id > 0
 		and not home.is_empty()
 		and _citizen_has_satisfied_home_arrival(citizen, home)
-	):
-		return {}
+	)
 
 	var workplace_id := int(
 		citizen.get("job_object_id", -1)
@@ -614,7 +860,8 @@ static func _get_outstanding_obligation_task_request(
 	)
 
 	if (
-		remaining_carry_capacity > 0
+		not has_satisfied_home_arrival
+		and remaining_carry_capacity > 0
 		and workplace_id > 0
 		and not workplace.is_empty()
 		and WorldData.city_object_is_workplace(workplace)
@@ -688,6 +935,7 @@ static func _get_scheduled_home_food_delivery_task_request(
 
 	if (
 		citizen_id <= 0
+		or CitizenNeedsSystem.citizen_should_seek_food(citizen_id)
 		or home_id <= 0
 		or not raw_current_tile is Vector2i
 		or not WorldData.city_object_is_household_home(home)
@@ -720,17 +968,11 @@ static func _get_scheduled_home_food_delivery_task_request(
 			continue
 
 		var source_result := (
-			CitizenHaulingSystemScript
-			.find_nearest_eligible_public_storage_source({
-				"city_world": WorldData.official_city_world,
-				"start_tile": current_tile,
-				"citizen_id": citizen_id,
-				"resource_type": resource,
-				"source_access_purpose": (
-					WorldData.CONTAINER_HAUL_PURPOSE_HOME_DELIVERY
-				),
-				"requested_amount": requested_amount,
-			})
+			CityResourceMatcherScript.find_best_household_food_source(
+				citizen,
+				resource,
+				requested_amount
+			)
 		)
 
 		if source_result.is_empty():
@@ -761,7 +1003,12 @@ static func _get_scheduled_home_food_delivery_task_request(
 				),
 				"requester": destination,
 				"source_access_purpose": (
-					WorldData.CONTAINER_HAUL_PURPOSE_HOME_DELIVERY
+					str(
+						source_result.get(
+							"source_access_purpose",
+							WorldData.CONTAINER_HAUL_PURPOSE_HOME_DELIVERY
+						)
+					)
 				),
 				"destination_access_purpose": (
 					WorldData.CONTAINER_HAUL_PURPOSE_HOME_DELIVERY
@@ -784,7 +1031,12 @@ static func _get_scheduled_home_food_delivery_task_request(
 static func _get_assigned_work_task_request(
 	citizen: Dictionary
 ) -> Dictionary:
-	if not _citizen_needs_scheduled_work_task(citizen):
+	if (
+		not _citizen_needs_scheduled_work_task(citizen)
+		or CitizenNeedsSystem.citizen_should_seek_food(
+			int(citizen.get("id", -1))
+		)
+	):
 		return {}
 
 	return {
@@ -803,7 +1055,12 @@ static func _get_assigned_work_task_request(
 static func _get_assigned_home_task_request(
 	citizen: Dictionary
 ) -> Dictionary:
-	if not _citizen_needs_scheduled_return_home_task(citizen):
+	if (
+		not _citizen_needs_scheduled_return_home_task(citizen)
+		or CitizenNeedsSystem.citizen_should_seek_food(
+			int(citizen.get("id", -1))
+		)
+	):
 		return {}
 
 	return {
@@ -830,9 +1087,13 @@ static func _queue_citizen_id(citizen_id: int) -> void:
 
 
 static func _process_decision_queue(
-	schedule_phase: String
+	schedule_phase: String,
+	minimum_priority_exclusive: int = (
+		WorldData.CITY_CITIZEN_TASK_PRIORITY_NONE
+	)
 ) -> void:
 	var processed_count := 0
+	var deferred_citizen_ids: Array[int] = []
 
 	while (
 		processed_count < MAX_DECISIONS_PER_TICK
@@ -860,6 +1121,18 @@ static func _process_decision_queue(
 		if task_request.is_empty():
 			continue
 
+		if (
+			int(
+				task_request.get(
+					"priority",
+					WorldData.CITY_CITIZEN_TASK_PRIORITY_NONE
+				)
+			)
+			<= minimum_priority_exclusive
+		):
+			deferred_citizen_ids.append(citizen_id)
+			continue
+
 		var task_was_assigned := (
 			WorldData.assign_city_citizen_task(
 				citizen_id,
@@ -879,6 +1152,11 @@ static func _process_decision_queue(
 			WorldData.cancel_city_citizen_movement(
 				citizen_id
 			)
+
+	for citizen_id in deferred_citizen_ids:
+		_queue_citizen_id(citizen_id)
+
+
 static func _clear_schedule_sourced_tasks() -> void:
 	_clear_decision_queue()
 
@@ -956,13 +1234,6 @@ static func _process_bounded_autonomous_hauling(
 			assigned_count += 1
 			continue
 
-		if _try_assign_best_autonomous_home_food_haul(
-			city_world,
-			candidates
-		):
-			assigned_count += 1
-			continue
-
 		if _try_assign_best_autonomous_haul(
 			city_world,
 			candidates,
@@ -972,36 +1243,6 @@ static func _process_bounded_autonomous_hauling(
 			continue
 
 		return
-
-
-static func _try_assign_best_autonomous_home_food_haul(
-	city_world: WorldData,
-	candidates: Array
-) -> bool:
-	var all_opportunities := _get_home_food_delivery_opportunities()
-
-	# Storage source tiers are absolute. A reachable Stockpile source must be
-	# exhausted before the City Keep can supply a household, even if the Keep is
-	# closer to an idle hauler.
-	for storage_tier in WorldData.get_public_city_storage_tiers():
-		var tier_opportunities: Array = []
-
-		for raw_opportunity in all_opportunities:
-			if (
-				raw_opportunity is Dictionary
-				and int(raw_opportunity.get("source_tier", -1))
-				== storage_tier
-			):
-				tier_opportunities.append(raw_opportunity)
-
-		if _try_assign_best_autonomous_haul(
-			city_world,
-			candidates,
-			tier_opportunities
-		):
-			return true
-
-	return false
 
 
 static func _get_bounded_autonomous_haul_candidates(
@@ -1078,17 +1319,42 @@ static func _citizen_is_available_for_autonomous_hauling(
 
 	if (
 		citizen_id <= 0
+		or CitizenNeedsSystem.citizen_should_seek_food(citizen_id)
 		or WorldData.get_city_citizen_haul_cargo_amount(citizen_id) > 0
 		or not citizen.get("city_tile_position") is Vector2i
 	):
 		return false
 
-	# Scheduled obligations still outrank autonomous work. This is mainly the
-	# off-shift return-home rule for housed unemployed citizens.
-	return _get_next_scheduled_task_request(
+	# Real obligations still outrank autonomous work, but low-priority
+	# home-bound plans do not. The autonomous matcher runs before the deferred
+	# home queue, so allowing these candidates is what lets an unemployed
+	# citizen take the next valid load immediately after completing the previous
+	# one. The home queue is released only after no additional hauler is needed.
+	var scheduled_task_request := _get_next_scheduled_task_request(
 		citizen,
 		schedule_phase
-	).is_empty()
+	)
+
+	if scheduled_task_request.is_empty():
+		return true
+
+	return int(
+		scheduled_task_request.get(
+			"priority",
+			WorldData.CITY_CITIZEN_TASK_PRIORITY_NONE
+		)
+	) < AUTONOMOUS_WORKPLACE_OUTPUT_HAUL_TASK_PRIORITY
+
+
+static func _has_unassigned_autonomous_haul_work() -> bool:
+	# These opportunity builders already account for source reservations,
+	# resource-specific destination capacity, public-storage tiers, and the open
+	# carrying capacity of active ground-pile pickup chains. A non-empty result
+	# therefore means another unemployed hauler is still useful.
+	if not _get_ground_pile_haul_opportunities().is_empty():
+		return true
+
+	return not _get_workplace_output_haul_opportunities().is_empty()
 
 
 static func _get_ground_pile_haul_opportunities() -> Array:
@@ -1267,113 +1533,6 @@ static func _get_total_unreserved_public_storage_space() -> int:
 		)
 
 	return total_space
-
-
-static func _get_home_food_delivery_opportunities() -> Array:
-	var opportunities: Array = []
-
-	for raw_home in WorldData.city_objects:
-		if not raw_home is Dictionary:
-			continue
-
-		var home: Dictionary = raw_home
-
-		if (
-			not WorldData.city_object_is_household_home(home)
-			or WorldData.get_city_home_unfulfilled_food_nutrition(home)
-			<= 0
-		):
-			continue
-
-		var home_id := int(home.get("id", -1))
-		var destination := WorldData.make_city_citizen_haul_endpoint(
-			home_id
-		)
-
-		for resource in WorldData.get_city_food_resource_types():
-			var demanded_amount := (
-				WorldData.get_city_home_requested_food_units(
-					home,
-					resource
-				)
-			)
-
-			if (
-				demanded_amount <= 0
-				or not WorldData.city_haul_endpoint_can_accept_resource(
-					destination,
-					resource,
-					WorldData.CONTAINER_HAUL_PURPOSE_HOME_DELIVERY,
-					true
-				)
-			):
-				continue
-
-			for raw_source_object in WorldData.city_objects:
-				if not raw_source_object is Dictionary:
-					continue
-
-				var source_object: Dictionary = raw_source_object
-				var source_tier := (
-					WorldData.get_city_object_public_storage_tier(
-						source_object
-					)
-				)
-
-				if source_tier == WorldData.PUBLIC_CITY_STORAGE_TIER_NONE:
-					continue
-
-				var source := WorldData.make_city_citizen_haul_endpoint(
-					int(source_object.get("id", -1))
-				)
-
-				if not WorldData.city_haul_endpoint_can_provide_resource(
-					source,
-					resource,
-					WorldData.CONTAINER_HAUL_PURPOSE_HOME_DELIVERY,
-					true
-				):
-					continue
-
-				var requested_amount := mini(
-					demanded_amount,
-					mini(
-						WorldData.get_city_haul_endpoint_unreserved_resource_amount(
-							source,
-							resource
-						),
-						WorldData.get_city_haul_endpoint_unreserved_destination_space(
-							destination
-						)
-					)
-				)
-
-				if requested_amount <= 0:
-					continue
-
-				opportunities.append({
-					"source": source,
-					"destination": destination,
-					"requester": destination,
-					"resource_type": resource,
-					"requested_amount": requested_amount,
-					"reason": (
-						WorldData
-						.CITY_CITIZEN_HAUL_REASON_AUTONOMOUS_HOME_FOOD_DELIVERY
-					),
-					"source_access_purpose": (
-						WorldData.CONTAINER_HAUL_PURPOSE_HOME_DELIVERY
-					),
-					"destination_access_purpose": (
-						WorldData.CONTAINER_HAUL_PURPOSE_HOME_DELIVERY
-					),
-					"source_tier": source_tier,
-					"task_priority": (
-						AUTONOMOUS_HOME_FOOD_DELIVERY_TASK_PRIORITY
-					),
-				})
-
-	return opportunities
 
 
 static func _get_workplace_output_haul_opportunities() -> Array:
@@ -1889,14 +2048,12 @@ static func _process_bounded_idle_behaviors(
 			== WorldData.CITY_CITIZEN_MOVEMENT_STATE_BLOCKED
 		):
 			WorldData.cancel_city_citizen_movement(citizen_id)
-			_idle_anchor_tile_by_citizen_id[citizen_id] = (
-				current_tile
-			)
+			_idle_anchor_tile_by_citizen_id.erase(citizen_id)
 			_schedule_next_idle_decision(citizen_id)
 			continue
 
 		var anchor_tile := _get_idle_anchor_tile(
-			citizen_id,
+			citizen,
 			current_tile
 		)
 
@@ -2068,9 +2225,16 @@ static func _idle_choice_is_to_remain_still(
 
 
 static func _get_idle_anchor_tile(
-	citizen_id: int,
+	citizen: Dictionary,
 	current_tile: Vector2i
 ) -> Vector2i:
+	var citizen_id := int(citizen.get("id", -1))
+	var life_anchor := _get_citizen_life_anchor_tile(citizen)
+
+	if life_anchor != WorldData.INVALID_CITY_TILE_POSITION:
+		_idle_anchor_tile_by_citizen_id[citizen_id] = life_anchor
+		return life_anchor
+
 	var raw_anchor_tile = _idle_anchor_tile_by_citizen_id.get(
 		citizen_id,
 		WorldData.INVALID_CITY_TILE_POSITION
@@ -2088,6 +2252,56 @@ static func _get_idle_anchor_tile(
 
 	_idle_anchor_tile_by_citizen_id[citizen_id] = current_tile
 	return current_tile
+
+
+static func _get_citizen_life_anchor_tile(citizen: Dictionary) -> Vector2i:
+	var citizen_id := int(citizen.get("id", -1))
+	var home := WorldData.get_city_object_by_id(
+		int(citizen.get("home_object_id", -1))
+	)
+
+	if (
+		WorldData.city_object_is_household_home(home)
+		and WorldData.get_city_object_resident_ids(home).has(citizen_id)
+	):
+		var home_tiles := WorldData.get_city_object_footprint_tiles(home)
+		var resident_ids := WorldData.get_city_object_resident_ids(home)
+		resident_ids.sort()
+		var resident_index := resident_ids.find(citizen_id)
+
+		if not home_tiles.is_empty() and resident_index >= 0:
+			var raw_home_anchor = home_tiles[
+				resident_index % home_tiles.size()
+			]
+
+			if raw_home_anchor is Vector2i:
+				return raw_home_anchor
+
+	# Homeless citizens retain a civic center instead of anchoring to a random
+	# roadside tile. City Keep access tiles remain legal without an interior task.
+	for raw_city_object in WorldData.city_objects:
+		if not raw_city_object is Dictionary:
+			continue
+
+		var city_object: Dictionary = raw_city_object
+
+		if str(city_object.get("type", "")) != WorldData.CITY_OBJECT_CITY_CENTER:
+			continue
+
+		var access_tiles := WorldData.get_city_object_access_tiles(
+			WorldData.official_city_world,
+			city_object
+		)
+
+		if not access_tiles.is_empty():
+			var raw_civic_anchor = access_tiles[
+				posmod(citizen_id, access_tiles.size())
+			]
+
+			if raw_civic_anchor is Vector2i:
+				return raw_civic_anchor
+
+	return WorldData.INVALID_CITY_TILE_POSITION
 
 
 static func _try_assign_idle_wander(

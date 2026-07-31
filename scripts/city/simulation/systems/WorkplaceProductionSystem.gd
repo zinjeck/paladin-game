@@ -1207,7 +1207,7 @@ static func _store_recipe_outputs_in_ground_pile(
 	):
 		return false
 
-	var added_resources: Dictionary = {}
+	var added_placements_by_resource: Dictionary = {}
 
 	for raw_resource in outputs:
 		var resource := str(raw_resource)
@@ -1215,24 +1215,28 @@ static func _store_recipe_outputs_in_ground_pile(
 			int(outputs.get(raw_resource, 0))
 			* batch_count
 		)
-		var added_amount := (
-			WorldData.add_resource_to_city_ground_pile(
+		var add_result := (
+			WorldData.add_resource_to_city_ground_piles_with_result(
 				tile_position,
 				resource,
 				requested_amount
 			)
 		)
+		var added_amount := int(
+			add_result.get("added_amount", 0)
+		)
 
 		if added_amount != requested_amount:
 			_rollback_ground_pile_resources(
-				tile_position,
-				added_resources
+				added_placements_by_resource
 			)
 			return false
 
-		added_resources[resource] = added_amount
+		added_placements_by_resource[resource] = (
+			add_result.get("placements", [])
+		)
 
-	return not added_resources.is_empty()
+	return not added_placements_by_resource.is_empty()
 
 
 static func _rollback_recipe_outputs_from_city_object(
@@ -1262,54 +1266,23 @@ static func _rollback_recipe_outputs_from_city_object(
 
 
 static func _rollback_ground_pile_resources(
-	tile_position: Vector2i,
-	resources: Dictionary
+	placements_by_resource: Dictionary
 ) -> void:
-	for raw_resource in resources:
+	for raw_resource in placements_by_resource:
 		var resource := str(raw_resource)
-		var requested_amount := maxi(
-			int(resources.get(raw_resource, 0)),
-			0
+		var placements = placements_by_resource.get(
+			raw_resource,
+			[]
 		)
 
-		if requested_amount <= 0:
-			continue
-
-		var ground_piles := (
-			WorldData.get_city_ground_piles_at_tile(
-				tile_position
+		if not WorldData.rollback_city_ground_pile_additions(
+			resource,
+			placements
+		):
+			push_error(
+				"Failed to roll back ground-pile output after "
+				+ "a multi-output transfer failure."
 			)
-		)
-
-		for raw_ground_pile in ground_piles:
-			if not raw_ground_pile is Dictionary:
-				continue
-
-			var ground_pile: Dictionary = raw_ground_pile
-
-			if str(
-				ground_pile.get(
-					"resource_type",
-					WorldData.RESOURCE_NONE
-				)
-			) != resource:
-				continue
-
-			var removed_amount := (
-				WorldData.remove_resource_from_city_ground_pile(
-					int(ground_pile.get("id", -1)),
-					resource,
-					requested_amount
-				)
-			)
-
-			if removed_amount != requested_amount:
-				push_error(
-					"Failed to roll back ground-pile output after "
-					+ "a multi-output transfer failure."
-				)
-
-			break
 
 
 static func _write_workplace_state(

@@ -44,7 +44,12 @@ const CITY_SURFACE_FEATURE_ROCK := "rock"
 const CITY_FOOD_HUNGER_RESTORE_BY_RESOURCE := (
 	CityResourceCatalogScript.CITY_FOOD_HUNGER_RESTORE_BY_RESOURCE
 )
-const HOUSEHOLD_FOOD_TARGET_DAYS := 1
+# Homes keep a convenience pantry, while public storage retains an equal
+# half-day emergency floor. Integer ratios avoid simulation drift from floats.
+const HOUSEHOLD_FOOD_TARGET_DAY_NUMERATOR: int = 1
+const HOUSEHOLD_FOOD_TARGET_DAY_DENOMINATOR: int = 2
+const PUBLIC_FOOD_RESERVE_TARGET_DAY_NUMERATOR: int = 1
+const PUBLIC_FOOD_RESERVE_TARGET_DAY_DENOMINATOR: int = 2
 
 var width: int
 var height: int
@@ -105,9 +110,23 @@ static var city_object_index_by_id: Dictionary = {}
 static var city_occupied_tiles: Dictionary = {}
 static var next_city_object_id: int = 1
 
+# Construction sites reserve placement footprints without becoming operational
+# city objects. Their physical materials remain authoritative ground piles.
+static var city_construction_sites: Array = []
+static var city_construction_site_index_by_id: Dictionary = {}
+static var city_construction_site_id_by_tile: Dictionary = {}
+static var next_city_construction_site_id: int = 1
+
 # Ground piles are nonblocking logistics entities, not city objects. Keeping
 # them in a separate registry lets several resource piles share a tile without
 # claiming building occupancy or changing navigation.
+#
+# Nearby drops of the same resource coalesce into one bounded pile. Once that
+# pile is full, overflow starts a new pile at the tile where the new resource
+# physically entered the world.
+const CITY_GROUND_PILE_CAPACITY: int = 20
+const CITY_GROUND_PILE_MERGE_RADIUS_TILES: int = 2
+const CITY_GROUND_DROP_RESERVATION_CAPACITY: int = 1_000_000
 static var city_ground_piles: Array = []
 static var city_ground_pile_index_by_id: Dictionary = {}
 static var next_city_ground_pile_id: int = 1
@@ -120,6 +139,15 @@ static var city_player_command_index_by_id: Dictionary = {}
 static var city_player_command_id_by_tile: Dictionary = {}
 static var next_city_player_command_id: int = 1
 static var next_city_player_command_group_id: int = 1
+
+# Player-issued projects are normalized into persistent parent work orders.
+# The existing command, construction, and haul registries remain authoritative
+# for physical execution while this registry owns scheduling identity,
+# priority, progress/fairness history, generated-job diagnostics, and unified
+# cancellation identity.
+static var city_work_orders: Dictionary = {}
+static var city_work_order_id_by_source_key: Dictionary = {}
+static var next_city_work_order_id: int = 1
 
 # One atomic reservation binds a citizen to source goods and matching shared
 # capacity at one destination. Aggregate lookups keep availability checks O(1)
@@ -160,7 +188,9 @@ static var city_assignment_version: int = 0
 static var city_workplace_version: int = 0
 static var city_ground_pile_version: int = 0
 static var city_player_command_version: int = 0
+static var city_work_order_version: int = 0
 static var city_haul_reservation_version: int = 0
+static var city_construction_version: int = 0
 static var city_citizen_male_name_pool: Array[String] = (
 	CityCitizensScript.city_citizen_male_name_pool
 )
@@ -201,6 +231,9 @@ const CITIZEN_FOOD_CARRY_TRIGGER_HUNGER := (
 const CITIZEN_EAT_TRIGGER_HUNGER := (
 	CityCitizensScript.CITIZEN_EAT_TRIGGER_HUNGER
 )
+const CITIZEN_CRITICAL_FOOD_SEEK_TRIGGER_HUNGER := (
+	CityCitizensScript.CITIZEN_CRITICAL_FOOD_SEEK_TRIGGER_HUNGER
+)
 const CITIZEN_EAT_TARGET_HUNGER := (
 	CityCitizensScript.CITIZEN_EAT_TARGET_HUNGER
 )
@@ -219,8 +252,14 @@ const CITY_CITIZEN_TASK_KIND_WORK: String = (
 const CITY_CITIZEN_TASK_KIND_HAUL: String = (
 	CityCitizensScript.CITY_CITIZEN_TASK_KIND_HAUL
 )
+const CITY_CITIZEN_TASK_KIND_ACQUIRE_FOOD: String = (
+	CityCitizensScript.CITY_CITIZEN_TASK_KIND_ACQUIRE_FOOD
+)
 const CITY_CITIZEN_TASK_KIND_PLAYER_COMMAND: String = (
 	CityCitizensScript.CITY_CITIZEN_TASK_KIND_PLAYER_COMMAND
+)
+const CITY_CITIZEN_TASK_KIND_CONSTRUCTION: String = (
+	CityCitizensScript.CITY_CITIZEN_TASK_KIND_CONSTRUCTION
 )
 const CITY_CITIZEN_TASK_KIND_RETURN_HOME: String = (
 	CityCitizensScript.CITY_CITIZEN_TASK_KIND_RETURN_HOME
@@ -274,6 +313,20 @@ const CITY_PLAYER_COMMAND_TASK_PRIORITY: int = 1000
 const CITY_PLAYER_COMMAND_WORK_DURATION_MINUTES: int = 6
 const CITY_PLAYER_COMMAND_RESOURCE_YIELD: int = 4
 const CITY_PLAYER_COMMAND_BLOCKED_RETRY_DELAY_MINUTES: int = 30
+const CITY_CONSTRUCTION_PHASE_CLEARING := "clearing"
+const CITY_CONSTRUCTION_PHASE_GATHERING := "gathering"
+const CITY_CONSTRUCTION_PHASE_LABOR := "labor"
+const CITY_CONSTRUCTION_TARGET_NEW := "new"
+const CITY_CONSTRUCTION_TARGET_MODIFICATION := "modification"
+const CITY_CONSTRUCTION_TASK_PRIORITY: int = (
+	CITY_PLAYER_COMMAND_TASK_PRIORITY
+)
+const CITY_CONSTRUCTION_FAIRNESS_BONUS_PER_MINUTE: int = 100
+const CITY_CONSTRUCTION_MAX_FAIRNESS_BONUS: int = 20_000
+# A construction labor task contributes at most this many continuous world
+# minutes before releasing its concrete claim and returning to the parent-order
+# scheduler. This is the shared safe boundary for fairness and hunger policy.
+const CITY_CONSTRUCTION_LABOR_ATOMIC_MINUTES: int = 30
 const CITY_CITIZEN_HAUL_ENDPOINT_KIND_NONE: String = (
 	CityCitizensScript.CITY_CITIZEN_HAUL_ENDPOINT_KIND_NONE
 )
@@ -283,6 +336,13 @@ const CITY_CITIZEN_HAUL_ENDPOINT_KIND_CITY_OBJECT_CONTAINER: String = (
 )
 const CITY_CITIZEN_HAUL_ENDPOINT_KIND_GROUND_PILE: String = (
 	CityCitizensScript.CITY_CITIZEN_HAUL_ENDPOINT_KIND_GROUND_PILE
+)
+const CITY_CITIZEN_HAUL_ENDPOINT_KIND_GROUND_TILE: String = (
+	CityCitizensScript.CITY_CITIZEN_HAUL_ENDPOINT_KIND_GROUND_TILE
+)
+const CITY_CITIZEN_HAUL_ENDPOINT_KIND_CONSTRUCTION_SITE: String = (
+	CityCitizensScript
+	.CITY_CITIZEN_HAUL_ENDPOINT_KIND_CONSTRUCTION_SITE
 )
 const CITY_CITIZEN_HAUL_REASON_NONE: String = (
 	CityCitizensScript.CITY_CITIZEN_HAUL_REASON_NONE
@@ -308,6 +368,9 @@ const CITY_CITIZEN_HAUL_REASON_AUTONOMOUS_HOME_FOOD_DELIVERY: String = (
 )
 const CITY_CITIZEN_HAUL_REASON_OUTSTANDING_CARGO: String = (
 	CityCitizensScript.CITY_CITIZEN_HAUL_REASON_OUTSTANDING_CARGO
+)
+const CITY_CITIZEN_HAUL_REASON_CONSTRUCTION_DELIVERY: String = (
+	CityCitizensScript.CITY_CITIZEN_HAUL_REASON_CONSTRUCTION_DELIVERY
 )
 const INVALID_CITY_CITIZEN_HAUL_RESERVATION_ID: int = (
 	CityCitizensScript.INVALID_CITY_CITIZEN_HAUL_RESERVATION_ID
@@ -468,6 +531,12 @@ const CONTAINER_HAUL_PURPOSE_PUBLIC_STORAGE := CityObjectCatalogScript.CONTAINER
 const CONTAINER_HAUL_PURPOSE_HOME_DELIVERY := CityObjectCatalogScript.CONTAINER_HAUL_PURPOSE_HOME_DELIVERY
 const CONTAINER_HAUL_PURPOSE_WORKPLACE_OUTPUT := CityObjectCatalogScript.CONTAINER_HAUL_PURPOSE_WORKPLACE_OUTPUT
 const CONTAINER_HAUL_PURPOSE_GROUND_PILE_CLEANUP := CityObjectCatalogScript.CONTAINER_HAUL_PURPOSE_GROUND_PILE_CLEANUP
+const CONTAINER_HAUL_PURPOSE_CONSTRUCTION: String = (
+	CityObjectCatalogScript.CONTAINER_HAUL_PURPOSE_CONSTRUCTION
+)
+const CONTAINER_HAUL_PURPOSE_HOUSEHOLD_FOOD_SOURCE: String = (
+	CityObjectCatalogScript.CONTAINER_HAUL_PURPOSE_HOUSEHOLD_FOOD_SOURCE
+)
 const CONTAINER_DIRECT_WITHDRAWAL_PURPOSE_NONE := CityObjectCatalogScript.CONTAINER_DIRECT_WITHDRAWAL_PURPOSE_NONE
 const CONTAINER_DIRECT_WITHDRAWAL_PURPOSE_PERSONAL_FOOD := CityObjectCatalogScript.CONTAINER_DIRECT_WITHDRAWAL_PURPOSE_PERSONAL_FOOD
 
@@ -525,6 +594,24 @@ static func get_city_object_production_recipe(
 	return _get_city_object_definition_dictionary(
 		city_object,
 		"production_recipe"
+	)
+
+
+static func get_city_object_construction_materials(
+	object_type: String
+) -> Dictionary:
+	return (
+		CityObjectCatalogScript
+		.get_city_object_construction_materials(object_type)
+	)
+
+
+static func city_object_type_uses_construction(
+	object_type: String
+) -> bool:
+	return (
+		CityObjectCatalogScript
+		.city_object_type_uses_construction(object_type)
 	)
 
 
@@ -1153,10 +1240,12 @@ static func clear_city_surface_features_at_tiles(
 			continue
 
 		tile.erase("surface_feature")
+		city_world.mark_city_surface_feature_changed(
+			tile_position,
+			surface_feature,
+			CITY_SURFACE_FEATURE_NONE
+		)
 		cleared_count += 1
-
-	if cleared_count > 0:
-		city_world.mark_tile_data_changed()
 
 	return cleared_count
 
@@ -1209,6 +1298,43 @@ static func get_city_player_command_resource_type(
 
 static func _mark_city_player_commands_changed() -> void:
 	city_player_command_version += 1
+
+
+static func mark_city_work_orders_changed() -> void:
+	city_work_order_version += 1
+
+
+static func get_city_work_order_by_id(order_id: int) -> Dictionary:
+	if order_id <= 0 or not city_work_orders.has(order_id):
+		return {}
+
+	var raw_order = city_work_orders.get(order_id, {})
+
+	if not raw_order is Dictionary:
+		return {}
+
+	return raw_order.duplicate(true)
+
+
+static func get_city_work_order_snapshot() -> Array:
+	var snapshot: Array = []
+	var order_ids: Array = city_work_orders.keys()
+	order_ids.sort()
+
+	for raw_order_id in order_ids:
+		var order := get_city_work_order_by_id(int(raw_order_id))
+
+		if not order.is_empty():
+			snapshot.append(order)
+
+	return snapshot
+
+
+static func reset_city_work_order_state() -> void:
+	city_work_orders.clear()
+	city_work_order_id_by_source_key.clear()
+	next_city_work_order_id = 1
+	mark_city_work_orders_changed()
 
 
 static func rebuild_city_player_command_index() -> void:
@@ -1365,6 +1491,8 @@ static func add_city_player_command_targets(
 				CITY_PLAYER_COMMAND_WORK_DURATION_MINUTES
 			),
 			"resource_yield": CITY_PLAYER_COMMAND_RESOURCE_YIELD,
+			"construction_site_id": -1,
+			"created_by_construction": false,
 		}
 
 		city_player_commands.append(command)
@@ -1375,6 +1503,107 @@ static func add_city_player_command_targets(
 
 	_mark_city_player_commands_changed()
 	return clean_tiles.size()
+
+
+static func ensure_city_construction_clearing_command(
+	site_id: int,
+	command_type: String,
+	tile_position: Vector2i
+) -> int:
+	var site := get_city_construction_site_by_id(site_id)
+
+	if (
+		site.is_empty()
+		or not site.get("footprint_tiles", []).has(tile_position)
+		or not can_designate_city_player_command_at_tile(
+			command_type,
+			tile_position
+		)
+		and get_city_player_command_at_tile(tile_position).is_empty()
+	):
+		return -1
+
+	var existing_command := get_city_player_command_at_tile(
+		tile_position
+	)
+
+	if not existing_command.is_empty():
+		if (
+			str(existing_command.get("type", ""))
+			!= command_type
+			or int(
+				existing_command.get(
+					"construction_site_id",
+					-1
+				)
+			) not in [-1, site_id]
+		):
+			return -1
+
+		var command_id := int(existing_command.get("id", -1))
+		var command_index := get_city_player_command_index_by_id(
+			command_id
+		)
+
+		if command_index < 0:
+			return -1
+
+		existing_command["construction_site_id"] = site_id
+		existing_command["created_by_construction"] = bool(
+			existing_command.get(
+				"created_by_construction",
+				false
+			)
+		)
+		city_player_commands[command_index] = existing_command
+		_mark_city_player_commands_changed()
+		return command_id
+
+	if add_city_player_command_targets(
+		command_type,
+		[tile_position]
+	) != 1:
+		return -1
+
+	var command := get_city_player_command_at_tile(tile_position)
+	var command_id := int(command.get("id", -1))
+	var command_index := get_city_player_command_index_by_id(command_id)
+
+	if command_index < 0:
+		return -1
+
+	command["construction_site_id"] = site_id
+	command["created_by_construction"] = true
+	city_player_commands[command_index] = command
+	_mark_city_player_commands_changed()
+	return command_id
+
+
+static func detach_city_player_command_from_construction(
+	command_id: int,
+	site_id: int
+) -> bool:
+	var command_index := get_city_player_command_index_by_id(command_id)
+
+	if command_index < 0:
+		return false
+
+	var command: Dictionary = city_player_commands[command_index]
+
+	if int(command.get("construction_site_id", -1)) != site_id:
+		return false
+
+	command["construction_site_id"] = -1
+	command["created_by_construction"] = false
+	city_player_commands[command_index] = command
+	_mark_city_player_commands_changed()
+	return true
+
+
+static func city_player_command_is_for_construction(
+	command: Dictionary
+) -> bool:
+	return int(command.get("construction_site_id", -1)) > 0
 
 
 static func _remove_city_player_command_record(
@@ -1516,6 +1745,68 @@ static func prune_invalid_city_player_commands() -> int:
 	return removed_count
 
 
+static func repair_stale_city_player_command_claims() -> int:
+	var repaired_count := 0
+
+	for command_index in range(city_player_commands.size()):
+		var raw_command = city_player_commands[command_index]
+
+		if not raw_command is Dictionary:
+			continue
+
+		var command: Dictionary = raw_command
+		var command_id := int(command.get("id", -1))
+		var claimed_citizen_id := int(
+			command.get("claimed_citizen_id", -1)
+		)
+		var status := str(command.get("status", ""))
+		var claim_is_live := false
+
+		if (
+			command_id > 0
+			and claimed_citizen_id > 0
+			and status == CITY_PLAYER_COMMAND_STATUS_CLAIMED
+		):
+			var citizen := get_city_citizen_by_id(claimed_citizen_id)
+			var current_task := get_city_citizen_current_task(
+				claimed_citizen_id
+			)
+
+			claim_is_live = (
+				not citizen.is_empty()
+				and bool(citizen.get("alive", false))
+				and int(citizen.get("job_object_id", -1)) <= 0
+				and str(current_task.get("kind", ""))
+				== CITY_CITIZEN_TASK_KIND_PLAYER_COMMAND
+				and str(current_task.get("source", ""))
+				== CITY_CITIZEN_TASK_SOURCE_PLAYER
+				and int(current_task.get("target_object_id", -1))
+				== command_id
+			)
+
+		if claim_is_live:
+			continue
+
+		var has_stale_claim := (
+			claimed_citizen_id > 0
+			or status == CITY_PLAYER_COMMAND_STATUS_CLAIMED
+		)
+
+		if not has_stale_claim:
+			continue
+
+		command["claimed_citizen_id"] = -1
+		command["status"] = CITY_PLAYER_COMMAND_STATUS_PENDING
+		command["next_retry_world_minute"] = -1
+		city_player_commands[command_index] = command
+		repaired_count += 1
+
+	if repaired_count > 0:
+		_mark_city_player_commands_changed()
+
+	return repaired_count
+
+
 static func city_player_command_is_assignable(
 	command: Dictionary
 ) -> bool:
@@ -1535,6 +1826,38 @@ static func city_player_command_is_assignable(
 		and int(command.get("next_retry_world_minute", -1))
 		<= SimulationClock.absolute_world_minutes
 	)
+
+
+static func get_city_player_command_work_tiles(
+	command: Dictionary,
+	citizen_id: int
+) -> Array[Vector2i]:
+	var work_tiles: Array[Vector2i] = []
+	var raw_command_tile = command.get(
+		"tile_position",
+		INVALID_CITY_TILE_POSITION
+	)
+
+	if official_city_world == null or not raw_command_tile is Vector2i:
+		return work_tiles
+
+	var command_tile: Vector2i = raw_command_tile
+
+	for offset_y in range(-1, 2):
+		for offset_x in range(-1, 2):
+			var candidate_tile := (
+				command_tile + Vector2i(offset_x, offset_y)
+			)
+
+			if is_city_tile_walkable_for_citizen(
+				official_city_world,
+				candidate_tile,
+				citizen_id
+			):
+				work_tiles.append(candidate_tile)
+
+	work_tiles.sort_custom(_sort_city_tiles_y_then_x)
+	return work_tiles
 
 
 static func get_best_assignable_city_player_command_for_citizen(
@@ -1577,18 +1900,32 @@ static func get_best_assignable_city_player_command_for_citizen(
 			diagonal_steps * 14_142
 			+ straight_steps * 10_000
 		)
+		var command_age_minutes := maxi(
+			SimulationClock.absolute_world_minutes
+			- int(command.get("issued_world_minute", 0)),
+			0
+		)
+		var fairness_bonus := mini(
+			command_age_minutes
+			* CITY_CONSTRUCTION_FAIRNESS_BONUS_PER_MINUTE,
+			CITY_CONSTRUCTION_MAX_FAIRNESS_BONUS
+		)
+		var selection_score := estimated_cost - fairness_bonus
 		var command_id := int(command.get("id", -1))
 
 		if (
 			best_command.is_empty()
-			or estimated_cost < best_cost
+			or selection_score < best_cost
 			or (
-				estimated_cost == best_cost
+				selection_score == best_cost
 				and command_id < best_command_id
 			)
 		):
 			best_command = command.duplicate(true)
-			best_cost = estimated_cost
+			best_command["player_work_kind"] = "command"
+			best_command["estimated_path_cost"] = estimated_cost
+			best_command["selection_score"] = selection_score
+			best_cost = selection_score
 			best_command_id = command_id
 
 	return best_command
@@ -1694,13 +2031,65 @@ static func complete_city_player_command(
 	# If physical output cannot be created, restore the feature atomically.
 	tile.erase("surface_feature")
 
-	var added_amount := add_resource_to_city_ground_pile(
-		tile_position,
-		resource,
-		resource_yield
+	var construction_site_id := int(
+		command.get("construction_site_id", -1)
 	)
+	var reserved_amount := 0
 
-	if added_amount != resource_yield:
+	if (
+		construction_site_id > 0
+		and not get_city_construction_site_by_id(
+			construction_site_id
+		).is_empty()
+	):
+		reserved_amount = mini(
+			resource_yield,
+			get_city_construction_site_unreserved_resource_space(
+				construction_site_id,
+				resource
+			)
+		)
+
+	var reserved_result := {
+		"added_amount": 0,
+		"placements": [],
+	}
+
+	if reserved_amount > 0:
+		reserved_result = add_resource_to_city_ground_piles_with_result(
+			tile_position,
+			resource,
+			reserved_amount,
+			construction_site_id
+		)
+
+	var ordinary_amount := resource_yield - reserved_amount
+	var ordinary_result := {
+		"added_amount": 0,
+		"placements": [],
+	}
+
+	if ordinary_amount > 0:
+		ordinary_result = add_resource_to_city_ground_piles_with_result(
+			tile_position,
+			resource,
+			ordinary_amount
+		)
+
+	if (
+		int(reserved_result.get("added_amount", 0))
+		!= reserved_amount
+		or int(ordinary_result.get("added_amount", 0))
+		!= ordinary_amount
+	):
+		rollback_city_ground_pile_additions(
+			resource,
+			ordinary_result.get("placements", [])
+		)
+		rollback_city_ground_pile_additions(
+			resource,
+			reserved_result.get("placements", [])
+		)
 		tile["surface_feature"] = expected_feature
 		return false
 
@@ -1753,16 +2142,176 @@ static func city_object_is_household_home(
 	)
 
 
-static func get_city_home_one_day_food_target_nutrition(
+static func get_city_home_food_target_nutrition(
 	home: Dictionary
 ) -> int:
 	if not city_object_is_household_home(home):
 		return 0
 
-	return (
-		get_city_object_resident_count(home)
-		* CITIZEN_HUNGER_LOSS_PER_DAY
-		* HOUSEHOLD_FOOD_TARGET_DAYS
+	return ceili(
+		float(
+			get_city_object_resident_count(home)
+			* CITIZEN_HUNGER_LOSS_PER_DAY
+			* HOUSEHOLD_FOOD_TARGET_DAY_NUMERATOR
+		)
+		/ float(HOUSEHOLD_FOOD_TARGET_DAY_DENOMINATOR)
+	)
+
+
+# Compatibility name retained for existing UI/debug callers. The policy is now
+# a half-day pantry target rather than a full private day of food.
+static func get_city_home_one_day_food_target_nutrition(
+	home: Dictionary
+) -> int:
+	return get_city_home_food_target_nutrition(home)
+
+
+static func get_living_city_citizen_count() -> int:
+	var living_count := 0
+
+	for raw_citizen in city_citizens:
+		if not raw_citizen is Dictionary:
+			continue
+
+		var citizen: Dictionary = raw_citizen
+
+		if bool(citizen.get("alive", false)):
+			living_count += 1
+
+	return living_count
+
+
+static func get_city_public_food_reserve_target_nutrition() -> int:
+	return ceili(
+		float(
+			get_living_city_citizen_count()
+			* CITIZEN_HUNGER_LOSS_PER_DAY
+			* PUBLIC_FOOD_RESERVE_TARGET_DAY_NUMERATOR
+		)
+		/ float(PUBLIC_FOOD_RESERVE_TARGET_DAY_DENOMINATOR)
+	)
+
+
+static func get_city_food_task_reserved_source_amount(
+	object_id: int,
+	resource: String,
+	excluding_citizen_id: int = -1
+) -> int:
+	return get_city_food_task_reserved_endpoint_amount(
+		CITY_CITIZEN_HAUL_ENDPOINT_KIND_CITY_OBJECT_CONTAINER,
+		object_id,
+		resource,
+		excluding_citizen_id
+	)
+
+
+static func get_city_food_task_reserved_endpoint_amount(
+	endpoint_kind: String,
+	endpoint_id: int,
+	resource: String,
+	excluding_citizen_id: int = -1
+) -> int:
+	if (
+		endpoint_id <= 0
+		or get_city_food_hunger_restore(resource) <= 0
+		or not [
+			CITY_CITIZEN_HAUL_ENDPOINT_KIND_CITY_OBJECT_CONTAINER,
+			CITY_CITIZEN_HAUL_ENDPOINT_KIND_GROUND_PILE,
+		].has(endpoint_kind)
+	):
+		return 0
+
+	var reserved_amount := 0
+
+	for raw_citizen in city_citizens:
+		if not raw_citizen is Dictionary:
+			continue
+
+		var citizen: Dictionary = raw_citizen
+		var citizen_id := int(citizen.get("id", -1))
+		var raw_task = citizen.get("current_task", {})
+
+		if citizen_id == excluding_citizen_id or not raw_task is Dictionary:
+			continue
+
+		var task: Dictionary = raw_task
+		var task_endpoint_kind := str(
+			task.get(
+				"food_source_endpoint_kind",
+				CITY_CITIZEN_HAUL_ENDPOINT_KIND_CITY_OBJECT_CONTAINER
+			)
+		)
+
+		if (
+			str(task.get("kind", CITY_CITIZEN_TASK_KIND_NONE))
+			!= CITY_CITIZEN_TASK_KIND_ACQUIRE_FOOD
+			or task_endpoint_kind != endpoint_kind
+			or int(task.get("target_object_id", -1)) != endpoint_id
+			or str(task.get("food_resource_type", RESOURCE_NONE)) != resource
+		):
+			continue
+
+		reserved_amount += maxi(
+			int(task.get("food_requested_amount", 0)),
+			0
+		)
+
+	return reserved_amount
+
+
+static func get_city_object_unreserved_food_amount(
+	city_object: Dictionary,
+	resource: String,
+	excluding_citizen_id: int = -1
+) -> int:
+	if city_object.is_empty() or get_city_food_hunger_restore(resource) <= 0:
+		return 0
+
+	var object_id := int(city_object.get("id", -1))
+	var endpoint := make_city_citizen_haul_endpoint(object_id)
+
+	return maxi(
+		get_city_object_stored_resource_amount(city_object, resource)
+		- get_city_haul_endpoint_source_reserved_amount(endpoint, resource)
+		- get_city_food_task_reserved_source_amount(
+			object_id,
+			resource,
+			excluding_citizen_id
+		),
+		0
+	)
+
+
+static func get_city_public_unreserved_food_nutrition() -> int:
+	var total_nutrition := 0
+
+	for raw_city_object in city_objects:
+		if not raw_city_object is Dictionary:
+			continue
+
+		var city_object: Dictionary = raw_city_object
+
+		if (
+			get_city_object_public_storage_tier(city_object)
+			== PUBLIC_CITY_STORAGE_TIER_NONE
+			or not city_object_container_is_publicly_usable(city_object)
+		):
+			continue
+
+		for resource in get_city_food_resource_types():
+			total_nutrition += (
+				get_city_object_unreserved_food_amount(city_object, resource)
+				* get_city_food_hunger_restore(resource)
+			)
+
+	return total_nutrition
+
+
+static func get_city_public_food_surplus_nutrition() -> int:
+	return maxi(
+		get_city_public_unreserved_food_nutrition()
+		- get_city_public_food_reserve_target_nutrition(),
+		0
 	)
 
 
@@ -1842,7 +2391,7 @@ static func get_city_home_unfulfilled_food_nutrition(
 	)
 ) -> int:
 	return maxi(
-		get_city_home_one_day_food_target_nutrition(home)
+		get_city_home_food_target_nutrition(home)
 		- get_city_home_stored_food_nutrition(home)
 		- get_city_home_incoming_food_nutrition(
 			home,
@@ -1874,9 +2423,10 @@ static func get_city_home_requested_food_units(
 	if unfulfilled_nutrition <= 0:
 		return 0
 
-	return ceili(
+	var pantry_requested_units := ceili(
 		float(unfulfilled_nutrition) / float(hunger_restore)
 	)
+	return pantry_requested_units
 
 
 static func get_city_home_food_supply_status(
@@ -1884,7 +2434,7 @@ static func get_city_home_food_supply_status(
 ) -> Dictionary:
 	return {
 		"target_nutrition": (
-			get_city_home_one_day_food_target_nutrition(home)
+			get_city_home_food_target_nutrition(home)
 		),
 		"stored_nutrition": get_city_home_stored_food_nutrition(home),
 		"incoming_nutrition": get_city_home_incoming_food_nutrition(home),
@@ -2118,6 +2668,11 @@ static func _mark_city_ground_piles_changed() -> void:
 static func _mark_city_haul_reservations_changed() -> void:
 	city_haul_reservation_version += 1
 	city_citizen_task_version += 1
+
+
+static func mark_city_construction_changed() -> void:
+	city_construction_version += 1
+
 
 static func rebuild_city_object_index() -> void:
 	city_object_index_by_id.clear()
@@ -2638,6 +3193,973 @@ static func get_city_object_by_id(object_id: int) -> Dictionary:
 
 	return raw_city_object
 
+
+static func rebuild_city_construction_site_index() -> void:
+	city_construction_site_index_by_id.clear()
+	city_construction_site_id_by_tile.clear()
+
+	for site_index in range(city_construction_sites.size()):
+		var raw_site = city_construction_sites[site_index]
+
+		if not raw_site is Dictionary:
+			continue
+
+		var site: Dictionary = raw_site
+		var site_id := int(site.get("id", -1))
+
+		if site_id <= 0:
+			continue
+
+		city_construction_site_index_by_id[site_id] = site_index
+
+		for raw_tile in site.get("footprint_tiles", []):
+			if raw_tile is Vector2i:
+				city_construction_site_id_by_tile[raw_tile] = site_id
+
+
+static func get_city_construction_site_index_by_id(
+	site_id: int
+) -> int:
+	if site_id <= 0:
+		return -1
+
+	if not city_construction_site_index_by_id.has(site_id):
+		return -1
+
+	var site_index := int(
+		city_construction_site_index_by_id[site_id]
+	)
+
+	if site_index < 0 or site_index >= city_construction_sites.size():
+		return -1
+
+	var raw_site = city_construction_sites[site_index]
+
+	if (
+		not raw_site is Dictionary
+		or int(raw_site.get("id", -1)) != site_id
+	):
+		return -1
+
+	return site_index
+
+
+static func get_city_construction_site_by_id(
+	site_id: int
+) -> Dictionary:
+	var site_index := get_city_construction_site_index_by_id(site_id)
+
+	if site_index < 0:
+		return {}
+
+	return city_construction_sites[site_index].duplicate(true)
+
+
+static func get_city_construction_site_snapshot() -> Array:
+	return city_construction_sites.duplicate(true)
+
+
+static func get_city_construction_site_at_tile(
+	tile_position: Vector2i
+) -> Dictionary:
+	if not city_construction_site_id_by_tile.has(tile_position):
+		return {}
+
+	return get_city_construction_site_by_id(
+		int(city_construction_site_id_by_tile[tile_position])
+	)
+
+
+static func can_place_city_construction_footprint(
+	city_world: WorldData,
+	raw_footprint_tiles: Array,
+	require_external_access: bool = false,
+	allowed_occupied_object_id: int = -1
+) -> bool:
+	if city_world == null or raw_footprint_tiles.is_empty():
+		return false
+
+	var clean_tiles: Array[Vector2i] = []
+	var tile_lookup: Dictionary = {}
+
+	for raw_tile in raw_footprint_tiles:
+		if not raw_tile is Vector2i:
+			return false
+
+		var tile_position: Vector2i = raw_tile
+
+		if tile_lookup.has(tile_position):
+			continue
+
+		if not city_world.is_in_bounds(tile_position.x, tile_position.y):
+			return false
+
+		if city_construction_site_id_by_tile.has(tile_position):
+			return false
+
+		if (
+			city_occupied_tiles.has(tile_position)
+			and int(
+				city_occupied_tiles.get(tile_position, -1)
+			) != allowed_occupied_object_id
+		):
+			return false
+
+		var tile := city_world.get_tile(
+			tile_position.x,
+			tile_position.y
+		)
+		var terrain := str(tile.get("terrain", TERRAIN_WATER))
+
+		if (
+			terrain == TERRAIN_WATER
+			or terrain == TERRAIN_MOUNTAIN
+			or not bool(tile.get("is_land", false))
+		):
+			return false
+
+		tile_lookup[tile_position] = true
+		clean_tiles.append(tile_position)
+
+	if not require_external_access:
+		return true
+
+	for footprint_tile in clean_tiles:
+		for offset in CITY_CARDINAL_TILE_OFFSETS:
+			var candidate_tile: Vector2i = (
+				footprint_tile + Vector2i(offset)
+			)
+
+			if tile_lookup.has(candidate_tile):
+				continue
+
+			if is_city_tile_walkable_for_citizen(
+				city_world,
+				candidate_tile
+			):
+				return true
+
+	return false
+
+
+static func create_city_construction_site(
+	values: Dictionary
+) -> Dictionary:
+	var raw_footprint_tiles = values.get("footprint_tiles", [])
+
+	if not raw_footprint_tiles is Array:
+		return {}
+
+	var footprint_tiles: Array[Vector2i] = []
+	var footprint_lookup: Dictionary = {}
+
+	for raw_tile in raw_footprint_tiles:
+		if not raw_tile is Vector2i:
+			continue
+
+		var tile_position: Vector2i = raw_tile
+
+		if footprint_lookup.has(tile_position):
+			continue
+
+		footprint_lookup[tile_position] = true
+		footprint_tiles.append(tile_position)
+
+	footprint_tiles.sort_custom(_sort_city_tiles_y_then_x)
+
+	var target_kind := str(
+		values.get(
+			"target_kind",
+			CITY_CONSTRUCTION_TARGET_NEW
+		)
+	)
+	var target_object_id := int(
+		values.get("target_object_id", -1)
+	)
+	var allowed_occupied_object_id := -1
+
+	if target_kind == CITY_CONSTRUCTION_TARGET_MODIFICATION:
+		var target_object := get_city_object_by_id(
+			target_object_id
+		)
+
+		if target_object.is_empty():
+			return {}
+
+		allowed_occupied_object_id = target_object_id
+	elif target_kind != CITY_CONSTRUCTION_TARGET_NEW:
+		return {}
+
+	if not can_place_city_construction_footprint(
+		official_city_world,
+		footprint_tiles,
+		bool(values.get("require_external_access", false)),
+		allowed_occupied_object_id
+	):
+		return {}
+
+	var object_type := str(values.get("object_type", ""))
+
+	if not city_object_type_uses_construction(object_type):
+		return {}
+
+	if (
+		target_kind == CITY_CONSTRUCTION_TARGET_MODIFICATION
+		and str(
+			get_city_object_by_id(target_object_id).get(
+				"type",
+				""
+			)
+		) != object_type
+	):
+		return {}
+
+	var raw_recipe = values.get("material_recipe", {})
+
+	if not raw_recipe is Dictionary:
+		return {}
+
+	var material_recipe: Dictionary = {}
+
+	for resource in get_city_resource_types():
+		var amount := maxi(int(raw_recipe.get(resource, 0)), 0)
+
+		if amount > 0:
+			material_recipe[resource] = amount
+
+	var required_labor_minutes := maxi(
+		int(values.get("required_labor_minutes", 0)),
+		1
+	)
+	var work_positions: Array[Vector2i] = []
+	var work_position_lookup: Dictionary = {}
+	var raw_work_positions = values.get("work_positions", [])
+
+	if raw_work_positions is Array:
+		for raw_work_position in raw_work_positions:
+			if not raw_work_position is Vector2i:
+				continue
+
+			var work_position: Vector2i = raw_work_position
+
+			if work_position_lookup.has(work_position):
+				continue
+
+			work_position_lookup[work_position] = true
+			work_positions.append(work_position)
+
+	work_positions.sort_custom(_sort_city_tiles_y_then_x)
+
+	if work_positions.is_empty():
+		return {}
+
+	var site_id := next_city_construction_site_id
+	var site := {
+		"id": site_id,
+		"target_kind": target_kind,
+		"target_object_id": target_object_id,
+		"object_type": object_type,
+		"shape_mode": str(
+			values.get(
+				"shape_mode",
+				CITY_OBJECT_SHAPE_RECTANGLE
+			)
+		),
+		"top_left": values.get(
+			"top_left",
+			INVALID_CITY_TILE_POSITION
+		),
+		"size": values.get("size", Vector2i.ZERO),
+		"tiles": footprint_tiles.duplicate(),
+		"footprint_tiles": footprint_tiles.duplicate(),
+		"owner": str(values.get("owner", "player")),
+		"phase": CITY_CONSTRUCTION_PHASE_CLEARING,
+		"material_recipe": material_recipe,
+		"required_clearing_work_units": -1.0,
+		"required_labor_minutes": required_labor_minutes,
+		"completed_labor_minutes": 0,
+		"maximum_workers": maxi(
+			int(values.get("maximum_workers", 1)),
+			1
+		),
+		"work_positions": work_positions,
+		"issued_world_minute": (
+			SimulationClock.absolute_world_minutes
+		),
+	}
+
+	next_city_construction_site_id += 1
+	city_construction_sites.append(site)
+	city_construction_site_index_by_id[site_id] = (
+		city_construction_sites.size() - 1
+	)
+
+	for tile_position in footprint_tiles:
+		city_construction_site_id_by_tile[tile_position] = site_id
+
+	mark_city_construction_changed()
+	return site.duplicate(true)
+
+
+static func update_city_construction_site(
+	site: Dictionary
+) -> bool:
+	var site_id := int(site.get("id", -1))
+	var site_index := get_city_construction_site_index_by_id(site_id)
+
+	if site_index < 0:
+		return false
+
+	var current_site: Dictionary = city_construction_sites[site_index]
+	var raw_updated_footprint = site.get("footprint_tiles", [])
+
+	if not raw_updated_footprint is Array:
+		return false
+
+	var updated_footprint: Array[Vector2i] = []
+	var updated_footprint_lookup: Dictionary = {}
+
+	for raw_tile in raw_updated_footprint:
+		if not raw_tile is Vector2i:
+			return false
+
+		var tile_position: Vector2i = raw_tile
+
+		if updated_footprint_lookup.has(tile_position):
+			continue
+
+		updated_footprint_lookup[tile_position] = true
+		updated_footprint.append(tile_position)
+
+	updated_footprint.sort_custom(_sort_city_tiles_y_then_x)
+
+	if updated_footprint.is_empty():
+		return false
+
+	var current_footprint: Array = current_site.get(
+		"footprint_tiles",
+		[]
+	)
+	var footprint_changed := current_footprint != updated_footprint
+
+	if (
+		footprint_changed
+		and not _can_update_city_construction_site_footprint(
+			site_id,
+			site,
+			updated_footprint
+		)
+	):
+		return false
+
+	site["footprint_tiles"] = updated_footprint.duplicate()
+	site["tiles"] = updated_footprint.duplicate()
+
+	if current_site == site:
+		return true
+
+	if footprint_changed:
+		for raw_tile in current_footprint:
+			if (
+				raw_tile is Vector2i
+				and int(
+					city_construction_site_id_by_tile.get(
+						raw_tile,
+						-1
+					)
+				) == site_id
+			):
+				city_construction_site_id_by_tile.erase(raw_tile)
+
+		for tile_position in updated_footprint:
+			city_construction_site_id_by_tile[tile_position] = site_id
+
+	city_construction_sites[site_index] = site.duplicate(true)
+	mark_city_construction_changed()
+	return true
+
+
+static func _can_update_city_construction_site_footprint(
+	site_id: int,
+	site: Dictionary,
+	updated_footprint: Array[Vector2i]
+) -> bool:
+	if official_city_world == null:
+		return false
+
+	var target_kind := str(
+		site.get(
+			"target_kind",
+			CITY_CONSTRUCTION_TARGET_NEW
+		)
+	)
+	var target_object_id := int(
+		site.get("target_object_id", -1)
+	)
+
+	if target_kind not in [
+		CITY_CONSTRUCTION_TARGET_NEW,
+		CITY_CONSTRUCTION_TARGET_MODIFICATION,
+	]:
+		return false
+
+	for tile_position in updated_footprint:
+		if not official_city_world.is_in_bounds(
+			tile_position.x,
+			tile_position.y
+		):
+			return false
+
+		var other_site_id := int(
+			city_construction_site_id_by_tile.get(
+				tile_position,
+				-1
+			)
+		)
+
+		if other_site_id > 0 and other_site_id != site_id:
+			return false
+
+		if city_occupied_tiles.has(tile_position):
+			var occupied_object_id := int(
+				city_occupied_tiles.get(tile_position, -1)
+			)
+
+			if (
+				target_kind != CITY_CONSTRUCTION_TARGET_MODIFICATION
+				or target_object_id <= 0
+				or occupied_object_id != target_object_id
+			):
+				return false
+
+		var tile: Dictionary = official_city_world.get_tile(
+			tile_position.x,
+			tile_position.y
+		)
+		var terrain := str(tile.get("terrain", TERRAIN_WATER))
+
+		if (
+			terrain == TERRAIN_WATER
+			or terrain == TERRAIN_MOUNTAIN
+			or not bool(tile.get("is_land", false))
+		):
+			return false
+
+	for raw_ground_pile in city_ground_piles:
+		if (
+			raw_ground_pile is Dictionary
+			and get_city_ground_pile_construction_site_id(
+				raw_ground_pile
+			) == site_id
+			and not updated_footprint.has(
+				raw_ground_pile.get(
+					"tile_position",
+					INVALID_CITY_TILE_POSITION
+				)
+			)
+		):
+			return false
+
+	return true
+
+
+static func remove_city_construction_site_record(
+	site_id: int
+) -> bool:
+	var site_index := get_city_construction_site_index_by_id(site_id)
+
+	if site_index < 0:
+		return false
+
+	var site: Dictionary = city_construction_sites[site_index]
+
+	for raw_tile in site.get("footprint_tiles", []):
+		if (
+			raw_tile is Vector2i
+			and int(
+				city_construction_site_id_by_tile.get(
+					raw_tile,
+					-1
+				)
+			) == site_id
+		):
+			city_construction_site_id_by_tile.erase(raw_tile)
+
+	city_construction_sites.remove_at(site_index)
+	rebuild_city_construction_site_index()
+	mark_city_construction_changed()
+	return true
+
+
+static func reset_city_construction_state() -> void:
+	city_construction_sites.clear()
+	city_construction_site_index_by_id.clear()
+	city_construction_site_id_by_tile.clear()
+	next_city_construction_site_id = 1
+	mark_city_construction_changed()
+
+
+static func make_city_construction_site_haul_endpoint(
+	site_id: int
+) -> Dictionary:
+	if site_id <= 0:
+		return CityCitizensScript.make_city_citizen_haul_endpoint()
+
+	return CityCitizensScript.make_city_citizen_haul_endpoint({
+		"kind": CITY_CITIZEN_HAUL_ENDPOINT_KIND_CONSTRUCTION_SITE,
+		"id": site_id,
+	})
+
+
+static func get_city_construction_site_work_positions(
+	site: Dictionary
+) -> Array[Vector2i]:
+	var positions: Array[Vector2i] = []
+	var raw_positions = site.get("work_positions", [])
+
+	if not raw_positions is Array:
+		return positions
+
+	for raw_position in raw_positions:
+		if raw_position is Vector2i:
+			positions.append(raw_position)
+
+	return positions
+
+
+static func get_city_construction_site_access_tiles(
+	city_world: WorldData,
+	site: Dictionary,
+	citizen_id: int = -1
+) -> Array[Vector2i]:
+	var access_tiles: Array[Vector2i] = []
+
+	if city_world == null or site.is_empty():
+		return access_tiles
+
+	for raw_tile in site.get("footprint_tiles", []):
+		if (
+			raw_tile is Vector2i
+			and is_city_tile_walkable_for_citizen(
+				city_world,
+				raw_tile,
+				citizen_id
+			)
+		):
+			access_tiles.append(raw_tile)
+
+	access_tiles.sort_custom(_sort_city_tiles_y_then_x)
+	return access_tiles
+
+
+static func get_city_ground_pile_construction_site_id(
+	ground_pile: Dictionary
+) -> int:
+	return maxi(
+		int(ground_pile.get("construction_site_id", -1)),
+		-1
+	)
+
+
+static func city_ground_pile_is_construction_reserved(
+	ground_pile: Dictionary
+) -> bool:
+	return get_city_ground_pile_construction_site_id(ground_pile) > 0
+
+
+static func get_city_construction_site_reserved_resource_amount(
+	site_id: int,
+	resource: String
+) -> int:
+	var total_amount := 0
+
+	for raw_ground_pile in city_ground_piles:
+		if not raw_ground_pile is Dictionary:
+			continue
+
+		var ground_pile: Dictionary = raw_ground_pile
+
+		if (
+			get_city_ground_pile_construction_site_id(ground_pile)
+			!= site_id
+		):
+			continue
+
+		total_amount += get_city_ground_pile_resource_amount(
+			ground_pile,
+			resource
+		)
+
+	return total_amount
+
+
+static func get_city_construction_site_remaining_resource_amount(
+	site_id: int,
+	resource: String
+) -> int:
+	var site := get_city_construction_site_by_id(site_id)
+
+	if site.is_empty():
+		return 0
+
+	var raw_recipe = site.get("material_recipe", {})
+
+	if not raw_recipe is Dictionary:
+		return 0
+
+	return maxi(
+		int(raw_recipe.get(resource, 0))
+		- get_city_construction_site_reserved_resource_amount(
+			site_id,
+			resource
+		),
+		0
+	)
+
+
+static func get_city_construction_site_destination_reserved_resource_amount(
+	site_id: int,
+	resource: String,
+	excluding_reservation_id: int = (
+		INVALID_CITY_CITIZEN_HAUL_RESERVATION_ID
+	)
+) -> int:
+	var site_endpoint := make_city_construction_site_haul_endpoint(
+		site_id
+	)
+	var reserved_amount := 0
+
+	for raw_reservation_id in city_haul_reservations.keys():
+		var reservation_id := int(raw_reservation_id)
+
+		if reservation_id == excluding_reservation_id:
+			continue
+
+		var reservation := get_city_haul_reservation(reservation_id)
+
+		if (
+			reservation.is_empty()
+			or not city_citizen_haul_endpoints_match(
+				reservation.get("destination", {}),
+				site_endpoint
+			)
+		):
+			continue
+
+		reserved_amount += (
+			get_city_haul_reservation_destination_resource_amount(
+				reservation_id,
+				resource
+			)
+		)
+
+	return reserved_amount
+
+
+static func get_city_construction_site_unreserved_resource_space(
+	site_id: int,
+	resource: String,
+	excluding_reservation_id: int = (
+		INVALID_CITY_CITIZEN_HAUL_RESERVATION_ID
+	)
+) -> int:
+	return maxi(
+		get_city_construction_site_remaining_resource_amount(
+			site_id,
+			resource
+		)
+		- get_city_construction_site_destination_reserved_resource_amount(
+			site_id,
+			resource,
+			excluding_reservation_id
+		),
+		0
+	)
+
+
+static func get_city_construction_site_unreserved_total_space(
+	site_id: int,
+	excluding_reservation_id: int = (
+		INVALID_CITY_CITIZEN_HAUL_RESERVATION_ID
+	)
+) -> int:
+	var total_space := 0
+
+	for resource in get_city_resource_types():
+		total_space += get_city_construction_site_unreserved_resource_space(
+			site_id,
+			resource,
+			excluding_reservation_id
+		)
+
+	return total_space
+
+
+static func city_construction_site_has_all_materials(
+	site_id: int
+) -> bool:
+	var site := get_city_construction_site_by_id(site_id)
+
+	if site.is_empty():
+		return false
+
+	for resource in get_city_resource_types():
+		if (
+			get_city_construction_site_remaining_resource_amount(
+				site_id,
+				resource
+			) > 0
+		):
+			return false
+
+	return true
+
+
+static func _get_city_construction_material_deposit_tile(
+	site: Dictionary
+) -> Vector2i:
+	for raw_tile in site.get("footprint_tiles", []):
+		if (
+			raw_tile is Vector2i
+			and can_city_ground_pile_exist_at_tile(
+				official_city_world,
+				raw_tile
+			)
+		):
+			return raw_tile
+
+	return INVALID_CITY_TILE_POSITION
+
+
+static func add_resource_to_city_construction_site(
+	site_id: int,
+	resource: String,
+	requested_amount: int
+) -> int:
+	var site := get_city_construction_site_by_id(site_id)
+
+	if (
+		site.is_empty()
+		or requested_amount <= 0
+		or str(site.get("phase", ""))
+		!= CITY_CONSTRUCTION_PHASE_GATHERING
+	):
+		return 0
+
+	var accepted_amount := mini(
+		requested_amount,
+		get_city_construction_site_remaining_resource_amount(
+			site_id,
+			resource
+		)
+	)
+	var deposit_tile := _get_city_construction_material_deposit_tile(
+		site
+	)
+
+	if accepted_amount <= 0 or deposit_tile == INVALID_CITY_TILE_POSITION:
+		return 0
+
+	var add_result := add_resource_to_city_ground_piles_with_result(
+		deposit_tile,
+		resource,
+		accepted_amount,
+		site_id
+	)
+	return int(add_result.get("added_amount", 0))
+
+
+static func remove_resource_from_city_construction_site(
+	site_id: int,
+	resource: String,
+	requested_amount: int
+) -> int:
+	if requested_amount <= 0:
+		return 0
+
+	var remaining_amount := requested_amount
+	var pile_ids: Array[int] = []
+
+	for raw_ground_pile in city_ground_piles:
+		if not raw_ground_pile is Dictionary:
+			continue
+
+		var ground_pile: Dictionary = raw_ground_pile
+
+		if (
+			get_city_ground_pile_construction_site_id(ground_pile)
+			!= site_id
+			or get_city_ground_pile_resource_amount(
+				ground_pile,
+				resource
+			) <= 0
+		):
+			continue
+
+		pile_ids.append(int(ground_pile.get("id", -1)))
+
+	pile_ids.sort()
+
+	for pile_id in pile_ids:
+		if remaining_amount <= 0:
+			break
+
+		var ground_pile := get_city_ground_pile_by_id(pile_id)
+		var removed_amount := remove_resource_from_city_ground_pile(
+			pile_id,
+			resource,
+			mini(
+				remaining_amount,
+				get_city_ground_pile_resource_amount(
+					ground_pile,
+					resource
+				)
+			)
+		)
+		remaining_amount -= removed_amount
+
+	return requested_amount - remaining_amount
+
+
+static func release_city_construction_site_materials(
+	site_id: int
+) -> int:
+	var released_amount := 0
+	var changed := false
+
+	for pile_index in range(city_ground_piles.size()):
+		var raw_ground_pile = city_ground_piles[pile_index]
+
+		if not raw_ground_pile is Dictionary:
+			continue
+
+		var ground_pile: Dictionary = raw_ground_pile
+
+		if (
+			get_city_ground_pile_construction_site_id(ground_pile)
+			!= site_id
+		):
+			continue
+
+		released_amount += maxi(
+			int(ground_pile.get("amount", 0)),
+			0
+		)
+		ground_pile.erase("construction_site_id")
+		city_ground_piles[pile_index] = ground_pile
+		changed = true
+
+	if changed:
+		_coalesce_ordinary_city_ground_piles()
+		_mark_city_ground_piles_changed()
+
+	return released_amount
+
+
+static func _coalesce_ordinary_city_ground_piles() -> void:
+	var merge_radius_squared := (
+		CITY_GROUND_PILE_MERGE_RADIUS_TILES
+		* CITY_GROUND_PILE_MERGE_RADIUS_TILES
+	)
+	var merged_any := true
+
+	while merged_any:
+		merged_any = false
+		var pile_ids: Array[int] = []
+
+		for raw_ground_pile in city_ground_piles:
+			if (
+				raw_ground_pile is Dictionary
+				and not city_ground_pile_is_construction_reserved(
+					raw_ground_pile
+				)
+			):
+				pile_ids.append(int(raw_ground_pile.get("id", -1)))
+
+		pile_ids.sort()
+
+		for source_order_index in range(1, pile_ids.size()):
+			var source_id := pile_ids[source_order_index]
+			var source_index := get_city_ground_pile_index_by_id(
+				source_id
+			)
+
+			if source_index < 0:
+				continue
+
+			var source: Dictionary = city_ground_piles[source_index]
+			var source_resource := str(
+				source.get("resource_type", RESOURCE_NONE)
+			)
+			var raw_source_tile = source.get(
+				"tile_position",
+				INVALID_CITY_TILE_POSITION
+			)
+
+			if not raw_source_tile is Vector2i:
+				continue
+
+			for target_order_index in range(source_order_index):
+				var target_id := pile_ids[target_order_index]
+				var target_index := get_city_ground_pile_index_by_id(
+					target_id
+				)
+
+				if target_index < 0:
+					continue
+
+				var target: Dictionary = city_ground_piles[target_index]
+				var raw_target_tile = target.get(
+					"tile_position",
+					INVALID_CITY_TILE_POSITION
+				)
+
+				if (
+					not raw_target_tile is Vector2i
+					or str(
+						target.get("resource_type", RESOURCE_NONE)
+					) != source_resource
+					or city_ground_pile_is_construction_reserved(
+						target
+					)
+					or get_city_ground_pile_tile_distance_squared(
+						raw_source_tile,
+						raw_target_tile
+					) > merge_radius_squared
+				):
+					continue
+
+				var moved_amount := mini(
+					maxi(int(source.get("amount", 0)), 0),
+					get_city_ground_pile_free_space(target)
+				)
+
+				if moved_amount <= 0:
+					continue
+
+				target["amount"] = (
+					maxi(int(target.get("amount", 0)), 0)
+					+ moved_amount
+				)
+				source["amount"] = (
+					maxi(int(source.get("amount", 0)), 0)
+					- moved_amount
+				)
+				city_ground_piles[target_index] = target
+
+				if int(source.get("amount", 0)) > 0:
+					city_ground_piles[source_index] = source
+				else:
+					city_ground_piles.remove_at(source_index)
+					rebuild_city_ground_pile_index()
+
+				merged_any = true
+				break
+
+			if merged_any:
+				break
+
+
 static func reset_city_citizen_state() -> void:
 	reset_city_haul_reservation_state()
 	city_citizens.clear()
@@ -2688,25 +4210,54 @@ static func make_city_ground_pile_haul_endpoint(
 	})
 
 
+static func make_city_ground_tile_haul_endpoint(
+	tile_position: Vector2i,
+	excluded_ground_pile_ids: Array[int] = []
+) -> Dictionary:
+	if (
+		tile_position == INVALID_CITY_TILE_POSITION
+		or not can_city_ground_pile_exist_at_tile(
+			official_city_world,
+			tile_position
+		)
+	):
+		return CityCitizensScript.make_city_citizen_haul_endpoint()
+
+	return CityCitizensScript.make_city_citizen_haul_endpoint({
+		"kind": CITY_CITIZEN_HAUL_ENDPOINT_KIND_GROUND_TILE,
+		"id": -1,
+		"tile_position": tile_position,
+		"excluded_ground_pile_ids": excluded_ground_pile_ids,
+	})
+
+
 static func city_citizen_haul_endpoints_match(
 	endpoint_a: Dictionary,
 	endpoint_b: Dictionary
 ) -> bool:
-	return (
-		str(
+	var kind_a := str(
 			endpoint_a.get(
 				"kind",
 				CITY_CITIZEN_HAUL_ENDPOINT_KIND_NONE
 			)
 		)
-		== str(
+	var kind_b := str(
 			endpoint_b.get(
 				"kind",
 				CITY_CITIZEN_HAUL_ENDPOINT_KIND_NONE
 			)
 		)
-		and int(endpoint_a.get("id", -1))
-		== int(endpoint_b.get("id", -1))
+
+	if kind_a != kind_b:
+		return false
+
+	if kind_a == CITY_CITIZEN_HAUL_ENDPOINT_KIND_GROUND_TILE:
+		return endpoint_a.get("tile_position") == endpoint_b.get(
+			"tile_position"
+		)
+
+	return int(endpoint_a.get("id", -1)) == int(
+		endpoint_b.get("id", -1)
 	)
 
 
@@ -2857,22 +4408,40 @@ static func can_city_ground_pile_exist_at_tile(
 	)
 
 
-static func add_resource_to_city_ground_pile(
+static func get_city_ground_pile_free_space(
+	ground_pile: Dictionary
+) -> int:
+	if ground_pile.is_empty():
+		return 0
+
+	return maxi(
+		CITY_GROUND_PILE_CAPACITY
+		- maxi(int(ground_pile.get("amount", 0)), 0),
+		0
+	)
+
+
+static func get_city_ground_pile_tile_distance_squared(
+	first_tile: Vector2i,
+	second_tile: Vector2i
+) -> int:
+	var offset := first_tile - second_tile
+	return offset.x * offset.x + offset.y * offset.y
+
+
+static func _find_city_ground_pile_merge_target_index(
 	tile_position: Vector2i,
 	resource: String,
-	amount_delta: int
+	construction_site_id: int = -1,
+	excluded_ground_pile_ids: Array[int] = []
 ) -> int:
-	if amount_delta <= 0:
-		return 0
-
-	if not is_city_resource_type(resource):
-		return 0
-
-	if not can_city_ground_pile_exist_at_tile(
-		official_city_world,
-		tile_position
-	):
-		return 0
+	var best_index := -1
+	var merge_radius_squared := (
+		CITY_GROUND_PILE_MERGE_RADIUS_TILES
+		* CITY_GROUND_PILE_MERGE_RADIUS_TILES
+	)
+	var best_distance_squared := merge_radius_squared + 1
+	var best_id := 2147483647
 
 	for pile_index in range(city_ground_piles.size()):
 		var raw_ground_pile = city_ground_piles[pile_index]
@@ -2881,42 +4450,212 @@ static func add_resource_to_city_ground_pile(
 			continue
 
 		var ground_pile: Dictionary = raw_ground_pile
+		var ground_pile_id := int(ground_pile.get("id", -1))
 
 		if (
-			ground_pile.get(
-				"tile_position",
-				INVALID_CITY_TILE_POSITION
-			)
-			!= tile_position
-			or str(
+			excluded_ground_pile_ids.has(ground_pile_id)
+			or
+			str(
 				ground_pile.get("resource_type", RESOURCE_NONE)
 			)
 			!= resource
+			or get_city_ground_pile_construction_site_id(
+				ground_pile
+			) != construction_site_id
+			or get_city_ground_pile_free_space(ground_pile) <= 0
 		):
 			continue
 
-		ground_pile["amount"] = (
-			maxi(int(ground_pile.get("amount", 0)), 0)
-			+ amount_delta
+		var raw_pile_tile = ground_pile.get(
+			"tile_position",
+			INVALID_CITY_TILE_POSITION
 		)
-		city_ground_piles[pile_index] = ground_pile
-		_mark_city_ground_piles_changed()
-		return amount_delta
 
-	var ground_pile := {
-		"id": next_city_ground_pile_id,
-		"tile_position": tile_position,
-		"resource_type": resource,
-		"amount": amount_delta,
+		if not raw_pile_tile is Vector2i:
+			continue
+
+		var pile_tile: Vector2i = raw_pile_tile
+		var distance_squared := (
+			get_city_ground_pile_tile_distance_squared(
+				tile_position,
+				pile_tile
+			)
+		)
+
+		if distance_squared > merge_radius_squared:
+			continue
+
+		if (
+			distance_squared < best_distance_squared
+			or (
+				distance_squared == best_distance_squared
+				and ground_pile_id < best_id
+			)
+		):
+			best_index = pile_index
+			best_distance_squared = distance_squared
+			best_id = ground_pile_id
+
+	return best_index
+
+
+static func add_resource_to_city_ground_piles_with_result(
+	tile_position: Vector2i,
+	resource: String,
+	amount_delta: int,
+	construction_site_id: int = -1,
+	excluded_ground_pile_ids: Array[int] = []
+) -> Dictionary:
+	var result := {
+		"added_amount": 0,
+		"placements": [],
 	}
 
-	next_city_ground_pile_id += 1
-	city_ground_piles.append(ground_pile)
-	city_ground_pile_index_by_id[int(ground_pile["id"])] = (
-		city_ground_piles.size() - 1
+	if amount_delta <= 0:
+		return result
+
+	if not is_city_resource_type(resource):
+		return result
+
+	if (
+		construction_site_id > 0
+		and get_city_construction_site_by_id(
+			construction_site_id
+		).is_empty()
+	):
+		return result
+
+	if not can_city_ground_pile_exist_at_tile(
+		official_city_world,
+		tile_position
+	):
+		return result
+
+	var remaining_amount := amount_delta
+	var placements: Array = []
+	var merge_target_index := (
+		_find_city_ground_pile_merge_target_index(
+			tile_position,
+			resource,
+			construction_site_id,
+			excluded_ground_pile_ids
+		)
 	)
+
+	if merge_target_index >= 0:
+		var merge_target: Dictionary = (
+			city_ground_piles[merge_target_index]
+		)
+		var merged_amount := mini(
+			remaining_amount,
+			get_city_ground_pile_free_space(merge_target)
+		)
+
+		if merged_amount > 0:
+			merge_target["amount"] = (
+				maxi(int(merge_target.get("amount", 0)), 0)
+				+ merged_amount
+			)
+			city_ground_piles[merge_target_index] = merge_target
+			placements.append({
+				"ground_pile_id": int(
+					merge_target.get("id", -1)
+				),
+				"amount": merged_amount,
+			})
+			remaining_amount -= merged_amount
+
+	while remaining_amount > 0:
+		var pile_amount := mini(
+			remaining_amount,
+			CITY_GROUND_PILE_CAPACITY
+		)
+		var ground_pile := {
+			"id": next_city_ground_pile_id,
+			"tile_position": tile_position,
+			"resource_type": resource,
+			"amount": pile_amount,
+		}
+
+		if construction_site_id > 0:
+			ground_pile["construction_site_id"] = (
+				construction_site_id
+			)
+
+		next_city_ground_pile_id += 1
+		city_ground_piles.append(ground_pile)
+		city_ground_pile_index_by_id[int(ground_pile["id"])] = (
+			city_ground_piles.size() - 1
+		)
+		placements.append({
+			"ground_pile_id": int(ground_pile["id"]),
+			"amount": pile_amount,
+		})
+		remaining_amount -= pile_amount
+
+	result["added_amount"] = amount_delta
+	result["placements"] = placements
 	_mark_city_ground_piles_changed()
-	return amount_delta
+	return result
+
+
+static func add_resource_to_city_ground_pile(
+	tile_position: Vector2i,
+	resource: String,
+	amount_delta: int,
+	construction_site_id: int = -1
+) -> int:
+	var result := add_resource_to_city_ground_piles_with_result(
+		tile_position,
+		resource,
+		amount_delta,
+		construction_site_id
+	)
+	return int(result.get("added_amount", 0))
+
+
+static func rollback_city_ground_pile_additions(
+	resource: String,
+	raw_placements
+) -> bool:
+	if not is_city_resource_type(resource):
+		return false
+
+	if not raw_placements is Array:
+		return false
+
+	var placements: Array = raw_placements
+
+	for placement_index in range(
+		placements.size() - 1,
+		-1,
+		-1
+	):
+		var raw_placement = placements[placement_index]
+
+		if not raw_placement is Dictionary:
+			return false
+
+		var placement: Dictionary = raw_placement
+		var ground_pile_id := int(
+			placement.get("ground_pile_id", -1)
+		)
+		var amount := maxi(
+			int(placement.get("amount", 0)),
+			0
+		)
+
+		if ground_pile_id <= 0 or amount <= 0:
+			return false
+
+		if remove_resource_from_city_ground_pile(
+			ground_pile_id,
+			resource,
+			amount
+		) != amount:
+			return false
+
+	return true
 
 
 static func get_city_ground_pile_resource_amount(
@@ -3031,6 +4770,83 @@ static func remove_resource_from_city_ground_pile(
 	return removed_amount
 
 
+static func reserve_city_ground_pile_for_construction(
+	ground_pile_id: int,
+	site_id: int,
+	requested_amount: int
+) -> int:
+	var site := get_city_construction_site_by_id(site_id)
+	var pile_index := get_city_ground_pile_index_by_id(ground_pile_id)
+
+	if site.is_empty() or pile_index < 0 or requested_amount <= 0:
+		return 0
+
+	var ground_pile: Dictionary = city_ground_piles[pile_index]
+
+	if city_ground_pile_is_construction_reserved(ground_pile):
+		return 0
+
+	var raw_tile_position = ground_pile.get(
+		"tile_position",
+		INVALID_CITY_TILE_POSITION
+	)
+
+	if (
+		not raw_tile_position is Vector2i
+		or not site.get("footprint_tiles", []).has(raw_tile_position)
+	):
+		return 0
+
+	var resource := str(
+		ground_pile.get("resource_type", RESOURCE_NONE)
+	)
+	var current_amount := get_city_ground_pile_resource_amount(
+		ground_pile,
+		resource
+	)
+	var endpoint := make_city_ground_pile_haul_endpoint(
+		ground_pile_id
+	)
+	var source_reserved_amount := (
+		get_city_haul_endpoint_source_reserved_amount(
+			endpoint,
+			resource
+		)
+	)
+	var reservable_amount := mini(
+		requested_amount,
+		maxi(current_amount - source_reserved_amount, 0)
+	)
+
+	if reservable_amount <= 0:
+		return 0
+
+	if reservable_amount == current_amount:
+		ground_pile["construction_site_id"] = site_id
+		city_ground_piles[pile_index] = ground_pile
+		_mark_city_ground_piles_changed()
+		return reservable_amount
+
+	ground_pile["amount"] = current_amount - reservable_amount
+	city_ground_piles[pile_index] = ground_pile
+
+	var add_result := add_resource_to_city_ground_piles_with_result(
+		raw_tile_position,
+		resource,
+		reservable_amount,
+		site_id
+	)
+
+	if int(add_result.get("added_amount", 0)) != reservable_amount:
+		ground_pile["amount"] = current_amount
+		city_ground_piles[pile_index] = ground_pile
+		_mark_city_ground_piles_changed()
+		return 0
+
+	_mark_city_ground_piles_changed()
+	return reservable_amount
+
+
 static func get_total_city_ground_pile_resource_amount(
 	resource: String
 ) -> int:
@@ -3100,13 +4916,27 @@ static func get_total_physical_city_resource_amount(
 static func _get_city_haul_endpoint_key(
 	endpoint: Dictionary
 ) -> String:
-	return (
-		str(
-			endpoint.get(
-				"kind",
-				CITY_CITIZEN_HAUL_ENDPOINT_KIND_NONE
-			)
+	var endpoint_kind := str(
+		endpoint.get("kind", CITY_CITIZEN_HAUL_ENDPOINT_KIND_NONE)
+	)
+
+	if endpoint_kind == CITY_CITIZEN_HAUL_ENDPOINT_KIND_GROUND_TILE:
+		var raw_tile = endpoint.get(
+			"tile_position",
+			INVALID_CITY_TILE_POSITION
 		)
+
+		if raw_tile is Vector2i:
+			return (
+				endpoint_kind
+				+ ":"
+				+ str(raw_tile.x)
+				+ ","
+				+ str(raw_tile.y)
+			)
+
+	return (
+		endpoint_kind
 		+ ":"
 		+ str(int(endpoint.get("id", -1)))
 	)
@@ -3201,6 +5031,276 @@ static func get_city_haul_reservation_snapshot() -> Array:
 		reservation_snapshot.append(reservation)
 
 	return reservation_snapshot
+
+
+static func city_haul_reservation_is_soft(
+	reservation_id: int
+) -> bool:
+	var reservation := get_city_haul_reservation(reservation_id)
+
+	if reservation.is_empty():
+		return false
+
+	var citizen_id := int(reservation.get("citizen_id", -1))
+
+	# A reservation remains transferable until its owner has physically picked
+	# up any cargo. Source claims and travel plans are promises; cargo in hand is
+	# the hard commitment boundary.
+	return (
+		citizen_id > 0
+		and get_city_citizen_haul_cargo_amount(citizen_id) <= 0
+		and int(reservation.get("source_reserved_amount", 0)) > 0
+		and int(reservation.get("destination_reserved_amount", 0)) > 0
+	)
+
+
+static func get_city_soft_haul_reservation_ids_for_destination_resource(
+	destination: Dictionary,
+	resource: String,
+	excluding_citizen_id: int = -1
+) -> Array[int]:
+	var reservation_ids: Array[int] = []
+
+	if not is_city_resource_type(resource):
+		return reservation_ids
+
+	for raw_reservation_id in city_haul_reservations.keys():
+		var reservation_id := int(raw_reservation_id)
+
+		if not city_haul_reservation_is_soft(reservation_id):
+			continue
+
+		var reservation := get_city_haul_reservation(reservation_id)
+
+		if (
+			int(reservation.get("citizen_id", -1)) == excluding_citizen_id
+			or not city_citizen_haul_endpoints_match(
+				reservation.get("destination", {}),
+				destination
+			)
+			or get_city_haul_reservation_destination_resource_amount(
+				reservation_id,
+				resource
+			) <= 0
+		):
+			continue
+
+		reservation_ids.append(reservation_id)
+
+	# Newer, still-unpicked assignments yield first. Older soft claims retain a
+	# small fairness advantage without becoming stronger than physical cargo.
+	reservation_ids.sort()
+	reservation_ids.reverse()
+	return reservation_ids
+
+
+static func get_city_soft_haul_destination_reserved_resource_amount(
+	destination: Dictionary,
+	resource: String,
+	excluding_citizen_id: int = -1
+) -> int:
+	var reserved_amount := 0
+
+	for reservation_id in (
+		get_city_soft_haul_reservation_ids_for_destination_resource(
+			destination,
+			resource,
+			excluding_citizen_id
+		)
+	):
+		reserved_amount += (
+			get_city_haul_reservation_destination_resource_amount(
+				reservation_id,
+				resource
+			)
+		)
+
+	return reserved_amount
+
+
+static func release_soft_city_haul_reservation_for_reassignment(
+	reservation_id: int
+) -> bool:
+	if not city_haul_reservation_is_soft(reservation_id):
+		return false
+
+	var reservation := get_city_haul_reservation(reservation_id)
+	var citizen_id := int(reservation.get("citizen_id", -1))
+	var current_task := get_city_citizen_current_task(citizen_id)
+	var current_haul := get_city_citizen_current_haul(citizen_id)
+	var task_source := str(
+		current_task.get(
+			"source",
+			CITY_CITIZEN_TASK_SOURCE_AUTONOMY
+		)
+	)
+	var owns_task := (
+		str(current_task.get("kind", ""))
+		== CITY_CITIZEN_TASK_KIND_HAUL
+		and int(current_haul.get("reservation_id", -1)) == reservation_id
+	)
+
+	if not release_city_haul_reservation(reservation_id):
+		return false
+
+	if owns_task:
+		cancel_city_citizen_movement(citizen_id)
+		clear_city_citizen_task(citizen_id, task_source)
+
+	return true
+
+
+static func reduce_soft_city_haul_reservation_for_reassignment(
+	reservation_id: int,
+	resource: String,
+	requested_amount: int
+) -> int:
+	if (
+		requested_amount <= 0
+		or not is_city_resource_type(resource)
+		or not city_haul_reservation_is_soft(reservation_id)
+	):
+		return 0
+
+	var reservation := get_city_haul_reservation(reservation_id)
+	var reserved_resource := str(
+		reservation.get("resource_type", RESOURCE_NONE)
+	)
+	var source_reserved_amount := maxi(
+		int(reservation.get("source_reserved_amount", 0)),
+		0
+	)
+	var destination_resources := (
+		get_city_haul_reservation_destination_resources(reservation_id)
+	)
+	var destination_resource_amount := maxi(
+		int(destination_resources.get(resource, 0)),
+		0
+	)
+	var released_amount := mini(
+		requested_amount,
+		mini(source_reserved_amount, destination_resource_amount)
+	)
+
+	if reserved_resource != resource or released_amount <= 0:
+		return 0
+
+	if released_amount >= source_reserved_amount:
+		return (
+			source_reserved_amount
+			if release_soft_city_haul_reservation_for_reassignment(
+				reservation_id
+			)
+			else 0
+		)
+
+	var citizen_id := int(reservation.get("citizen_id", -1))
+	var source: Dictionary = reservation.get("source", {})
+	var destination: Dictionary = reservation.get("destination", {})
+	var remaining_source_amount := source_reserved_amount - released_amount
+	var remaining_destination_resource_amount := (
+		destination_resource_amount - released_amount
+	)
+
+	if remaining_destination_resource_amount > 0:
+		destination_resources[resource] = (
+			remaining_destination_resource_amount
+		)
+	else:
+		destination_resources.erase(resource)
+
+	reservation["source_reserved_amount"] = remaining_source_amount
+	reservation["destination_reserved_resources"] = destination_resources
+	reservation["destination_reserved_amount"] = (
+		_get_city_haul_resource_manifest_total(destination_resources)
+	)
+	reservation["last_reduced_world_minute"] = (
+		SimulationClock.absolute_world_minutes
+	)
+	city_haul_reservations[reservation_id] = reservation
+	_change_city_haul_reserved_source_amount(
+		source,
+		resource,
+		-released_amount
+	)
+	_change_city_haul_reserved_destination_amount(
+		destination,
+		-released_amount
+	)
+
+	var current_haul := get_city_citizen_current_haul(citizen_id)
+
+	if int(current_haul.get("reservation_id", -1)) == reservation_id:
+		current_haul["requested_amount"] = remaining_source_amount
+		set_city_citizen_current_haul(citizen_id, current_haul)
+
+	_mark_city_haul_reservations_changed()
+	return released_amount
+
+
+static func preempt_soft_city_haul_reservations_for_destination_resource(
+	destination: Dictionary,
+	resource: String,
+	requested_amount: int,
+	excluding_citizen_id: int = -1
+) -> Dictionary:
+	var released_amount := 0
+	var released_reservation_ids: Array[int] = []
+	var reduced_reservation_ids: Array[int] = []
+	var target_amount := maxi(requested_amount, 0)
+
+	if target_amount <= 0 or not is_city_resource_type(resource):
+		return {
+			"released_amount": 0,
+			"released_reservation_ids": released_reservation_ids,
+			"reduced_reservation_ids": reduced_reservation_ids,
+		}
+
+	for reservation_id in (
+		get_city_soft_haul_reservation_ids_for_destination_resource(
+			destination,
+			resource,
+			excluding_citizen_id
+		)
+	):
+		var amount_still_needed := target_amount - released_amount
+
+		if amount_still_needed <= 0:
+			break
+
+		var original_reserved_amount := (
+			get_city_haul_reservation_destination_resource_amount(
+				reservation_id,
+				resource
+			)
+		)
+
+		if original_reserved_amount <= 0:
+			continue
+
+		var released_from_reservation := (
+			reduce_soft_city_haul_reservation_for_reassignment(
+				reservation_id,
+				resource,
+				amount_still_needed
+			)
+		)
+
+		if released_from_reservation <= 0:
+			continue
+
+		released_amount += released_from_reservation
+
+		if get_city_haul_reservation(reservation_id).is_empty():
+			released_reservation_ids.append(reservation_id)
+		else:
+			reduced_reservation_ids.append(reservation_id)
+
+	return {
+		"released_amount": released_amount,
+		"released_reservation_ids": released_reservation_ids,
+		"reduced_reservation_ids": reduced_reservation_ids,
+	}
 
 
 static func get_city_haul_reservation_id_for_citizen(
@@ -3338,15 +5438,31 @@ static func get_city_haul_endpoint_unreserved_resource_amount(
 	resource: String,
 	excluding_reservation_id: int = (
 		INVALID_CITY_CITIZEN_HAUL_RESERVATION_ID
-	)
+	),
+	excluding_food_citizen_id: int = -1
 ) -> int:
+	var food_task_reserved_amount := (
+		get_city_food_task_reserved_endpoint_amount(
+			str(
+				endpoint.get(
+					"kind",
+					CITY_CITIZEN_HAUL_ENDPOINT_KIND_NONE
+				)
+			),
+			int(endpoint.get("id", -1)),
+			resource,
+			excluding_food_citizen_id
+		)
+	)
+
 	return maxi(
 		get_city_haul_endpoint_resource_amount(endpoint, resource)
 		- get_city_haul_endpoint_source_reserved_amount(
 			endpoint,
 			resource,
 			excluding_reservation_id
-		),
+		)
+		- food_task_reserved_amount,
 		0
 	)
 
@@ -3357,20 +5473,51 @@ static func get_city_haul_endpoint_unreserved_destination_space(
 		INVALID_CITY_CITIZEN_HAUL_RESERVATION_ID
 	)
 ) -> int:
-	if (
-		str(
-			endpoint.get(
-				"kind",
-				CITY_CITIZEN_HAUL_ENDPOINT_KIND_NONE
-			)
+	var endpoint_kind := str(
+		endpoint.get(
+			"kind",
+			CITY_CITIZEN_HAUL_ENDPOINT_KIND_NONE
 		)
+	)
+	var endpoint_id := int(endpoint.get("id", -1))
+
+	if endpoint_kind == CITY_CITIZEN_HAUL_ENDPOINT_KIND_CONSTRUCTION_SITE:
+		return get_city_construction_site_unreserved_total_space(
+			endpoint_id,
+			excluding_reservation_id
+		)
+
+	if endpoint_kind == CITY_CITIZEN_HAUL_ENDPOINT_KIND_GROUND_TILE:
+		var raw_tile = endpoint.get(
+			"tile_position",
+			INVALID_CITY_TILE_POSITION
+		)
+
+		if (
+			not raw_tile is Vector2i
+			or not can_city_ground_pile_exist_at_tile(
+				official_city_world,
+				raw_tile
+			)
+		):
+			return 0
+
+		return maxi(
+			CITY_GROUND_DROP_RESERVATION_CAPACITY
+			- get_city_haul_endpoint_destination_reserved_amount(
+				endpoint,
+				excluding_reservation_id
+			),
+			0
+		)
+
+	if (
+		endpoint_kind
 		!= CITY_CITIZEN_HAUL_ENDPOINT_KIND_CITY_OBJECT_CONTAINER
 	):
 		return 0
 
-	var city_object := get_city_object_by_id(
-		int(endpoint.get("id", -1))
-	)
+	var city_object := get_city_object_by_id(endpoint_id)
 
 	if city_object.is_empty():
 		return 0
@@ -3382,6 +5529,34 @@ static func get_city_haul_endpoint_unreserved_destination_space(
 			excluding_reservation_id
 		),
 		0
+	)
+
+
+static func get_city_haul_endpoint_unreserved_destination_resource_space(
+	endpoint: Dictionary,
+	resource: String,
+	excluding_reservation_id: int = (
+		INVALID_CITY_CITIZEN_HAUL_RESERVATION_ID
+	)
+) -> int:
+	if (
+		str(
+			endpoint.get(
+				"kind",
+				CITY_CITIZEN_HAUL_ENDPOINT_KIND_NONE
+			)
+		)
+		== CITY_CITIZEN_HAUL_ENDPOINT_KIND_CONSTRUCTION_SITE
+	):
+		return get_city_construction_site_unreserved_resource_space(
+			int(endpoint.get("id", -1)),
+			resource,
+			excluding_reservation_id
+		)
+
+	return get_city_haul_endpoint_unreserved_destination_space(
+		endpoint,
+		excluding_reservation_id
 	)
 
 
@@ -3415,11 +5590,21 @@ static func city_haul_endpoint_can_provide_resource(
 				return false
 
 		CITY_CITIZEN_HAUL_ENDPOINT_KIND_GROUND_PILE:
+			var ground_pile := get_city_ground_pile_by_id(
+				endpoint_id
+			)
+
 			if (
-				withdrawal_purpose
-				!= CONTAINER_HAUL_PURPOSE_GROUND_PILE_CLEANUP
+				not [
+					CONTAINER_HAUL_PURPOSE_GROUND_PILE_CLEANUP,
+					CONTAINER_HAUL_PURPOSE_CONSTRUCTION,
+					CONTAINER_HAUL_PURPOSE_HOUSEHOLD_FOOD_SOURCE,
+				].has(withdrawal_purpose)
+				or city_ground_pile_is_construction_reserved(
+					ground_pile
+				)
 				or get_city_ground_pile_resource_amount(
-					get_city_ground_pile_by_id(endpoint_id),
+					ground_pile,
 					resource
 				) <= 0
 			):
@@ -3447,19 +5632,67 @@ static func city_haul_endpoint_can_accept_resource(
 		INVALID_CITY_CITIZEN_HAUL_RESERVATION_ID
 	)
 ) -> bool:
-	if (
-		str(
-			endpoint.get(
-				"kind",
-				CITY_CITIZEN_HAUL_ENDPOINT_KIND_NONE
-			)
+	var endpoint_kind := str(
+		endpoint.get(
+			"kind",
+			CITY_CITIZEN_HAUL_ENDPOINT_KIND_NONE
 		)
+	)
+	var endpoint_id := int(endpoint.get("id", -1))
+
+	if endpoint_kind == CITY_CITIZEN_HAUL_ENDPOINT_KIND_GROUND_TILE:
+		var raw_tile = endpoint.get(
+			"tile_position",
+			INVALID_CITY_TILE_POSITION
+		)
+
+		if (
+			deposit_purpose
+			!= CONTAINER_HAUL_PURPOSE_GROUND_PILE_CLEANUP
+			or not raw_tile is Vector2i
+			or not can_city_ground_pile_exist_at_tile(
+				official_city_world,
+				raw_tile
+			)
+		):
+			return false
+
+		return (
+			not require_unreserved_space
+			or get_city_haul_endpoint_unreserved_destination_space(
+				endpoint,
+				excluding_reservation_id
+			) > 0
+		)
+
+	if endpoint_kind == CITY_CITIZEN_HAUL_ENDPOINT_KIND_CONSTRUCTION_SITE:
+		var site := get_city_construction_site_by_id(endpoint_id)
+
+		if (
+			site.is_empty()
+			or deposit_purpose != CONTAINER_HAUL_PURPOSE_CONSTRUCTION
+			or str(site.get("phase", ""))
+			!= CITY_CONSTRUCTION_PHASE_GATHERING
+		):
+			return false
+
+		return (
+			not require_unreserved_space
+			or get_city_construction_site_unreserved_resource_space(
+				endpoint_id,
+				resource,
+				excluding_reservation_id
+			) > 0
+		)
+
+	if (
+		endpoint_kind
 		!= CITY_CITIZEN_HAUL_ENDPOINT_KIND_CITY_OBJECT_CONTAINER
 	):
 		return false
 
 	var city_object := get_city_object_by_id(
-		int(endpoint.get("id", -1))
+		endpoint_id
 	)
 
 	if not city_object_can_accept_haul_resource(
@@ -3659,6 +5892,39 @@ static func create_city_haul_reservation(
 			)
 		)
 
+		if (
+			str(
+				destination.get(
+					"kind",
+					CITY_CITIZEN_HAUL_ENDPOINT_KIND_NONE
+				)
+			)
+			== CITY_CITIZEN_HAUL_ENDPOINT_KIND_CONSTRUCTION_SITE
+		):
+			for cargo_resource in destination_resources.keys():
+				var resource_space := (
+					get_city_haul_endpoint_unreserved_destination_resource_space(
+						destination,
+						str(cargo_resource)
+					)
+				)
+				var capped_amount := mini(
+					int(
+						destination_resources.get(
+							cargo_resource,
+							0
+						)
+					),
+					resource_space
+				)
+
+				if capped_amount > 0:
+					destination_resources[cargo_resource] = (
+						capped_amount
+					)
+				else:
+					destination_resources.erase(cargo_resource)
+
 		for cargo_resource in destination_resources.keys():
 			if not city_haul_endpoint_can_accept_resource(
 				destination,
@@ -3693,7 +5959,13 @@ static func create_city_haul_reservation(
 						source,
 						resource
 					),
-					destination_space
+					mini(
+						destination_space,
+						get_city_haul_endpoint_unreserved_destination_resource_space(
+							destination,
+							resource
+						)
+					)
 				)
 			)
 		)
@@ -3972,16 +6244,23 @@ static func retarget_city_haul_reservation_source(
 		mini(
 			get_city_citizen_available_haul_capacity(citizen_id),
 			mini(
-				get_city_haul_endpoint_unreserved_resource_amount(
-					normalized_source,
-					resource
-				),
+			get_city_haul_endpoint_unreserved_resource_amount(
+				normalized_source,
+				resource
+			),
+			mini(
 				get_city_haul_endpoint_unreserved_destination_space(
 					destination,
+					reservation_id
+				),
+				get_city_haul_endpoint_unreserved_destination_resource_space(
+					destination,
+					resource,
 					reservation_id
 				)
 			)
 		)
+	)
 	)
 
 	if reserved_amount <= 0:
@@ -4191,6 +6470,121 @@ static func release_city_haul_destination_reservation(
 	return true
 
 
+static func retarget_city_haul_destination_reservation(
+	reservation_id: int,
+	destination: Dictionary,
+	requested_amount: int,
+	destination_access_purpose: String
+) -> int:
+	var reservation := get_city_haul_reservation(reservation_id)
+
+	if (
+		reservation.is_empty()
+		or requested_amount <= 0
+		or destination_access_purpose
+		== CONTAINER_HAUL_PURPOSE_NONE
+		or int(reservation.get("source_reserved_amount", 0)) > 0
+	):
+		return 0
+
+	var citizen_id := int(reservation.get("citizen_id", -1))
+
+	# Destination reassignment is a safe-boundary operation for physical cargo.
+	# Pre-pickup claims use the separate soft-reservation transfer path.
+	if get_city_citizen_haul_cargo_amount(citizen_id) <= 0:
+		return 0
+
+	var normalized_destination := (
+		CityCitizensScript.make_city_citizen_haul_endpoint(
+			destination
+		)
+	)
+
+	if not CityCitizensScript.is_valid_city_citizen_haul_endpoint(
+		normalized_destination
+	):
+		return 0
+
+	var old_destination: Dictionary = reservation.get(
+		"destination",
+		CityCitizensScript.make_city_citizen_haul_endpoint()
+	)
+	var old_destination_amount := maxi(
+		int(reservation.get("destination_reserved_amount", 0)),
+		0
+	)
+	var old_destination_resources := (
+		get_city_haul_reservation_destination_resources(
+			reservation_id
+		)
+	)
+	var old_destination_access_purpose := str(
+		reservation.get(
+			"destination_access_purpose",
+			CONTAINER_HAUL_PURPOSE_NONE
+		)
+	)
+
+	if old_destination_amount > 0:
+		_change_city_haul_reserved_destination_amount(
+			old_destination,
+			-old_destination_amount
+		)
+
+	reservation["destination"] = (
+		CityCitizensScript.make_city_citizen_haul_endpoint()
+	)
+	reservation["destination_reserved_amount"] = 0
+	reservation["destination_reserved_resources"] = {}
+	reservation["destination_access_purpose"] = (
+		destination_access_purpose
+	)
+	city_haul_reservations[reservation_id] = reservation
+
+	var reserved_amount := reserve_city_haul_destination(
+		reservation_id,
+		normalized_destination,
+		requested_amount
+	)
+
+	if reserved_amount > 0:
+		var retargeted_reservation := get_city_haul_reservation(
+			reservation_id
+		)
+		retargeted_reservation["last_retargeted_world_minute"] = (
+			SimulationClock.absolute_world_minutes
+		)
+		city_haul_reservations[reservation_id] = (
+			retargeted_reservation
+		)
+		_mark_city_haul_reservations_changed()
+		return reserved_amount
+
+	# Retargeting is atomic from the caller's perspective. If the new demand
+	# vanished between scoring and reservation, restore the prior hard claim.
+	reservation = get_city_haul_reservation(reservation_id)
+	reservation["destination"] = old_destination
+	reservation["destination_reserved_amount"] = (
+		old_destination_amount
+	)
+	reservation["destination_reserved_resources"] = (
+		old_destination_resources
+	)
+	reservation["destination_access_purpose"] = (
+		old_destination_access_purpose
+	)
+	city_haul_reservations[reservation_id] = reservation
+
+	if old_destination_amount > 0:
+		_change_city_haul_reserved_destination_amount(
+			old_destination,
+			old_destination_amount
+		)
+
+	_mark_city_haul_reservations_changed()
+	return 0
+
+
 static func reserve_city_haul_destination(
 	reservation_id: int,
 	destination: Dictionary,
@@ -4247,6 +6641,33 @@ static func reserve_city_haul_destination(
 			reservation_id
 		):
 			return 0
+
+	if (
+		str(
+			normalized_destination.get(
+				"kind",
+				CITY_CITIZEN_HAUL_ENDPOINT_KIND_NONE
+			)
+		)
+		== CITY_CITIZEN_HAUL_ENDPOINT_KIND_CONSTRUCTION_SITE
+	):
+		for resource in resources_to_reserve.keys():
+			var resource_space := (
+				get_city_haul_endpoint_unreserved_destination_resource_space(
+					normalized_destination,
+					str(resource),
+					reservation_id
+				)
+			)
+			var capped_amount := mini(
+				int(resources_to_reserve.get(resource, 0)),
+				resource_space
+			)
+
+			if capped_amount > 0:
+				resources_to_reserve[resource] = capped_amount
+			else:
+				resources_to_reserve.erase(resource)
 
 	var reservable_total := mini(
 		_get_city_haul_resource_manifest_total(resources_to_reserve),
@@ -4699,6 +7120,21 @@ static func get_city_citizen_inventory_used_capacity(
 ) -> int:
 	return get_resource_container_total_amount(
 		get_city_citizen_inventory(citizen_id)
+	)
+
+
+static func get_city_citizen_personal_inventory_free_space(
+	citizen_id: int
+) -> int:
+	var citizen := get_city_citizen_by_id(citizen_id)
+
+	if citizen.is_empty():
+		return 0
+
+	return maxi(
+		maxi(int(citizen.get("carry_capacity", 0)), 0)
+		- get_city_citizen_inventory_used_capacity(citizen_id),
+		0
 	)
 
 
@@ -5350,9 +7786,17 @@ static func ensure_city_citizen_task_state() -> int:
 			not CityCitizensScript
 			.has_complete_city_citizen_task_state(citizen)
 		):
-			CityCitizensScript.reset_city_citizen_task_state(
-				citizen
-			)
+			var raw_current_task = citizen.get("current_task", {})
+
+			if raw_current_task is Dictionary:
+				citizen["current_task"] = (
+					CityCitizensScript.make_city_citizen_task(
+						raw_current_task
+					)
+				)
+			else:
+				CityCitizensScript.reset_city_citizen_task_state(citizen)
+
 			citizen_was_migrated = true
 
 		if (
@@ -5439,6 +7883,8 @@ static func assign_city_citizen_task(
 	var raw_target_object_id = task_values.get(
 		"target_object_id"
 	)
+	var raw_work_order_id = task_values.get("work_order_id", -1)
+	var raw_job_id = task_values.get("job_id", "")
 	var raw_player_locked = task_values.get(
 		"player_locked",
 		false
@@ -5456,6 +7902,12 @@ static func assign_city_citizen_task(
 	if typeof(raw_target_object_id) != TYPE_INT:
 		return false
 
+	if typeof(raw_work_order_id) != TYPE_INT:
+		return false
+
+	if typeof(raw_job_id) != TYPE_STRING:
+		return false
+
 	if typeof(raw_player_locked) != TYPE_BOOL:
 		return false
 
@@ -5463,6 +7915,8 @@ static func assign_city_citizen_task(
 	var task_source: String = raw_task_source
 	var task_priority: int = raw_task_priority
 	var target_object_id: int = raw_target_object_id
+	var work_order_id: int = raw_work_order_id
+	var job_id: String = raw_job_id
 	var player_locked: bool = raw_player_locked
 
 	if (
@@ -5490,13 +7944,15 @@ static func assign_city_citizen_task(
 		return false
 
 	# Employment is already a standing player directive. Direct commands and
-	# autonomous logistics are available only while the citizen is unemployed.
+	# autonomous logistics require unemployment, but biological food seeking is
+	# allowed to interrupt employed citizens at critical hunger.
 	if (
 		(
 			task_source == CITY_CITIZEN_TASK_SOURCE_PLAYER
 			or task_source == CITY_CITIZEN_TASK_SOURCE_AUTONOMY
 		)
 		and int(citizen.get("job_object_id", -1)) > 0
+		and task_kind != CITY_CITIZEN_TASK_KIND_ACQUIRE_FOOD
 	):
 		return false
 
@@ -5504,6 +7960,14 @@ static func assign_city_citizen_task(
 	var assigned_haul := CityCitizensScript.make_city_citizen_haul()
 	var assigned_haul_reservation: Dictionary = {}
 	var assigned_target_tile: Vector2i = INVALID_CITY_TILE_POSITION
+	var assigned_food_resource := RESOURCE_NONE
+	var assigned_food_requested_amount := 0
+	var assigned_food_endpoint_kind := (
+		CITY_CITIZEN_HAUL_ENDPOINT_KIND_NONE
+	)
+	var assigned_food_access_purpose := (
+		CONTAINER_DIRECT_WITHDRAWAL_PURPOSE_NONE
+	)
 	var haul_cargo := get_city_citizen_haul_cargo(citizen_id)
 	var haul_cargo_amount := maxi(
 		int(haul_cargo.get("amount", 0)),
@@ -5552,6 +8016,97 @@ static func assign_city_citizen_task(
 			):
 				return false
 
+		CITY_CITIZEN_TASK_KIND_ACQUIRE_FOOD:
+			var food_resource := str(
+				task_values.get("food_resource_type", RESOURCE_NONE)
+			)
+			var food_endpoint_kind := str(
+				task_values.get(
+					"food_source_endpoint_kind",
+					CITY_CITIZEN_HAUL_ENDPOINT_KIND_CITY_OBJECT_CONTAINER
+				)
+			)
+			var food_endpoint := {
+				"kind": food_endpoint_kind,
+				"id": target_object_id,
+			}
+			var food_requested_amount := maxi(
+				int(task_values.get("food_requested_amount", 0)),
+				0
+			)
+			var food_access_purpose := str(
+				task_values.get(
+					"food_source_access_purpose",
+					CONTAINER_DIRECT_WITHDRAWAL_PURPOSE_NONE
+				)
+			)
+			var raw_food_target_tile = task_values.get(
+				"target_tile",
+				INVALID_CITY_TILE_POSITION
+			)
+
+			var hunger_restore := get_city_food_hunger_restore(food_resource)
+			var personal_food_nutrition := (
+				get_food_nutrition_in_resource_container(
+					get_city_citizen_inventory(citizen_id)
+				)
+			)
+			var desired_nutrition := maxi(
+				CITIZEN_EAT_TARGET_HUNGER
+				- get_city_citizen_hunger(citizen_id)
+				- personal_food_nutrition,
+				0
+			)
+
+			if (
+				hunger_restore <= 0
+				or food_requested_amount <= 0
+				or desired_nutrition <= 0
+				or food_access_purpose
+				!= CONTAINER_DIRECT_WITHDRAWAL_PURPOSE_PERSONAL_FOOD
+				or not raw_food_target_tile is Vector2i
+				or not CityCitizensScript.is_valid_city_citizen_haul_endpoint(
+					food_endpoint
+				)
+				or not get_city_citizen_food_endpoint_target_tiles(
+					citizen_id,
+					food_endpoint
+				).has(raw_food_target_tile)
+				or not city_citizen_can_withdraw_food_from_endpoint(
+					citizen_id,
+					food_endpoint,
+					food_resource
+				)
+			):
+				return false
+
+			assigned_food_requested_amount = mini(
+				food_requested_amount,
+				mini(
+					get_city_food_endpoint_unreserved_amount(
+						citizen_id,
+						food_endpoint,
+						food_resource,
+						citizen_id
+					),
+					mini(
+						get_city_citizen_inventory_free_space(citizen_id),
+						ceili(
+							float(desired_nutrition)
+							/ float(hunger_restore)
+						)
+					)
+				)
+			)
+
+			if assigned_food_requested_amount <= 0:
+				return false
+
+			assigned_target_tile = raw_food_target_tile
+			assigned_food_resource = food_resource
+			assigned_food_endpoint_kind = food_endpoint_kind
+			assigned_food_access_purpose = food_access_purpose
+
 		CITY_CITIZEN_TASK_KIND_PLAYER_COMMAND:
 			var command := get_city_player_command_by_id(
 				target_object_id
@@ -5559,7 +8114,6 @@ static func assign_city_citizen_task(
 
 			if (
 				task_source != CITY_CITIZEN_TASK_SOURCE_PLAYER
-				or not player_locked
 				or command.is_empty()
 				or int(command.get("claimed_citizen_id", -1))
 				!= citizen_id
@@ -5576,6 +8130,32 @@ static func assign_city_citizen_task(
 				return false
 
 			assigned_target_tile = raw_command_tile
+
+		CITY_CITIZEN_TASK_KIND_CONSTRUCTION:
+			var construction_site := (
+				get_city_construction_site_by_id(
+					target_object_id
+				)
+			)
+			var raw_construction_target_tile = task_values.get(
+				"target_tile",
+				INVALID_CITY_TILE_POSITION
+			)
+
+			if (
+				task_source != CITY_CITIZEN_TASK_SOURCE_PLAYER
+				or player_locked
+				or construction_site.is_empty()
+				or str(construction_site.get("phase", ""))
+				!= CITY_CONSTRUCTION_PHASE_LABOR
+				or not raw_construction_target_tile is Vector2i
+				or not get_city_construction_site_work_positions(
+					construction_site
+				).has(raw_construction_target_tile)
+			):
+				return false
+
+			assigned_target_tile = raw_construction_target_tile
 
 		CITY_CITIZEN_TASK_KIND_HAUL:
 			var raw_haul = task_values.get("haul", {})
@@ -5821,11 +8401,17 @@ static func assign_city_citizen_task(
 			"phase": CITY_CITIZEN_TASK_PHASE_PENDING,
 			"priority": task_priority,
 			"target_object_id": target_object_id,
+			"work_order_id": work_order_id,
+			"job_id": job_id,
 			"start_world_minute": (
 				SimulationClock.absolute_world_minutes
 			),
 			"target_tile": assigned_target_tile,
-			"player_locked": player_locked
+			"player_locked": player_locked,
+			"food_resource_type": assigned_food_resource,
+			"food_requested_amount": assigned_food_requested_amount,
+			"food_source_endpoint_kind": assigned_food_endpoint_kind,
+			"food_source_access_purpose": assigned_food_access_purpose
 		})
 	)
 
@@ -7597,6 +10183,7 @@ static func reset_player_city_state() -> void:
 	city_resource_amounts.clear()
 	city_owned_resource_amount_cache.clear()
 	city_owned_resource_amount_cache_container_version = -1
+	reset_city_work_order_state()
 	reset_city_player_command_state()
 	reset_city_object_state()
 	reset_city_citizen_state()
@@ -7621,6 +10208,7 @@ static func reset_city_haul_reservation_state() -> void:
 static func reset_city_object_state() -> void:
 	reset_city_haul_reservation_state()
 	reset_city_ground_pile_state()
+	reset_city_construction_state()
 	city_object_access_tile_cache.clear()
 	city_objects.clear()
 	city_object_index_by_id.clear()
@@ -7667,6 +10255,9 @@ static func can_place_city_object(
 			if city_occupied_tiles.has(tile_position):
 				return false
 
+			if city_construction_site_id_by_tile.has(tile_position):
+				return false
+
 			# Ground piles stay outside the blocking-object registry so citizens
 			# can walk across them. Placement still waits until loose resources
 			# have been secured instead of silently building over them.
@@ -7697,6 +10288,29 @@ static func can_place_city_object(
 		return false
 
 	return true
+
+
+static func can_place_city_object_construction(
+	city_world: WorldData,
+	top_left: Vector2i,
+	size_tiles: Vector2i,
+	object_type: String
+) -> bool:
+	if (
+		not city_object_type_uses_construction(object_type)
+		or size_tiles.x <= 0
+		or size_tiles.y <= 0
+	):
+		return false
+
+	return can_place_city_construction_footprint(
+		city_world,
+		make_rectangle_city_object_footprint_tiles(
+			top_left,
+			size_tiles
+		),
+		true
+	)
 
 
 static func city_object_placement_has_walkable_access_tile(
@@ -8812,7 +11426,274 @@ static func city_citizen_can_directly_withdraw_resource(
 		CONTAINER_TYPE_PUBLIC_CITY_STORAGE:
 			return city_object_container_is_publicly_usable(city_object)
 
+		CONTAINER_TYPE_WORKPLACE_STORAGE:
+			return (
+				withdrawal_purpose
+				== CONTAINER_DIRECT_WITHDRAWAL_PURPOSE_PERSONAL_FOOD
+				and city_object_is_workplace(city_object)
+				and get_city_object_output_resources(city_object).has(resource)
+			)
+
 	return false
+
+
+static func get_city_citizen_direct_withdrawal_target_tiles(
+	citizen_id: int,
+	city_object: Dictionary,
+	withdrawal_purpose: String
+) -> Array:
+	var target_tiles: Array = []
+	var citizen := get_city_citizen_by_id(citizen_id)
+
+	if (
+		citizen.is_empty()
+		or not bool(citizen.get("alive", false))
+		or city_object.is_empty()
+		or not city_object_allows_direct_resource_withdrawal(
+			city_object,
+			withdrawal_purpose
+		)
+	):
+		return target_tiles
+
+	match get_city_object_container_type(city_object):
+		CONTAINER_TYPE_PRIVATE_HOME_STORAGE:
+			if (
+				int(citizen.get("home_object_id", -1))
+				== int(city_object.get("id", -1))
+				and get_city_object_resident_ids(city_object).has(citizen_id)
+			):
+				return get_city_object_footprint_tiles(city_object)
+
+		CONTAINER_TYPE_PUBLIC_CITY_STORAGE:
+			if city_object_container_is_publicly_usable(city_object):
+				return get_city_object_access_tiles(
+					official_city_world,
+					city_object
+				)
+
+		CONTAINER_TYPE_WORKPLACE_STORAGE:
+			if (
+				withdrawal_purpose
+				== CONTAINER_DIRECT_WITHDRAWAL_PURPOSE_PERSONAL_FOOD
+				and city_object_is_workplace(city_object)
+			):
+				return get_city_object_access_tiles(
+					official_city_world,
+					city_object
+				)
+
+	return target_tiles
+
+
+static func city_citizen_can_withdraw_food_from_endpoint(
+	citizen_id: int,
+	endpoint: Dictionary,
+	resource: String
+) -> bool:
+	if get_city_food_hunger_restore(resource) <= 0:
+		return false
+
+	var endpoint_kind := str(
+		endpoint.get("kind", CITY_CITIZEN_HAUL_ENDPOINT_KIND_NONE)
+	)
+	var endpoint_id := int(endpoint.get("id", -1))
+
+	match endpoint_kind:
+		CITY_CITIZEN_HAUL_ENDPOINT_KIND_CITY_OBJECT_CONTAINER:
+			return city_citizen_can_directly_withdraw_resource(
+				citizen_id,
+				get_city_object_by_id(endpoint_id),
+				resource,
+				CONTAINER_DIRECT_WITHDRAWAL_PURPOSE_PERSONAL_FOOD
+			)
+
+		CITY_CITIZEN_HAUL_ENDPOINT_KIND_GROUND_PILE:
+			var citizen := get_city_citizen_by_id(citizen_id)
+			var ground_pile := get_city_ground_pile_by_id(endpoint_id)
+			return (
+				not citizen.is_empty()
+				and bool(citizen.get("alive", false))
+				and not ground_pile.is_empty()
+				and not city_ground_pile_is_construction_reserved(ground_pile)
+				and get_city_ground_pile_resource_amount(
+					ground_pile,
+					resource
+				) > 0
+			)
+
+	return false
+
+
+static func get_city_citizen_food_endpoint_target_tiles(
+	citizen_id: int,
+	endpoint: Dictionary
+) -> Array:
+	match str(
+		endpoint.get("kind", CITY_CITIZEN_HAUL_ENDPOINT_KIND_NONE)
+	):
+		CITY_CITIZEN_HAUL_ENDPOINT_KIND_CITY_OBJECT_CONTAINER:
+			return get_city_citizen_direct_withdrawal_target_tiles(
+				citizen_id,
+				get_city_object_by_id(int(endpoint.get("id", -1))),
+				CONTAINER_DIRECT_WITHDRAWAL_PURPOSE_PERSONAL_FOOD
+			)
+
+		CITY_CITIZEN_HAUL_ENDPOINT_KIND_GROUND_PILE:
+			var ground_pile := get_city_ground_pile_by_id(
+				int(endpoint.get("id", -1))
+			)
+			var raw_tile = ground_pile.get(
+				"tile_position",
+				INVALID_CITY_TILE_POSITION
+			)
+
+			if (
+				not city_ground_pile_is_construction_reserved(ground_pile)
+				and raw_tile is Vector2i
+				and is_city_tile_walkable_for_citizen(
+					official_city_world,
+					raw_tile,
+					citizen_id
+				)
+			):
+				return [raw_tile]
+
+	return []
+
+
+static func get_city_food_endpoint_unreserved_amount(
+	citizen_id: int,
+	endpoint: Dictionary,
+	resource: String,
+	excluding_citizen_id: int = -1
+) -> int:
+	if not city_citizen_can_withdraw_food_from_endpoint(
+		citizen_id,
+		endpoint,
+		resource
+	):
+		return 0
+
+	return get_city_haul_endpoint_unreserved_resource_amount(
+		endpoint,
+		resource,
+		INVALID_CITY_CITIZEN_HAUL_RESERVATION_ID,
+		excluding_citizen_id
+	)
+
+
+static func transfer_city_food_endpoint_to_citizen_inventory(
+	citizen_id: int,
+	endpoint: Dictionary,
+	resource: String,
+	requested_amount: int
+) -> int:
+	if (
+		requested_amount <= 0
+		or not city_citizen_can_withdraw_food_from_endpoint(
+			citizen_id,
+			endpoint,
+			resource
+		)
+	):
+		return 0
+
+	var transfer_amount := mini(
+		requested_amount,
+		mini(
+			get_city_haul_endpoint_unreserved_resource_amount(
+				endpoint,
+				resource,
+				INVALID_CITY_CITIZEN_HAUL_RESERVATION_ID,
+				citizen_id
+			),
+			get_city_citizen_inventory_free_space(citizen_id)
+		)
+	)
+
+	if transfer_amount <= 0:
+		return 0
+
+	var endpoint_kind := str(
+		endpoint.get("kind", CITY_CITIZEN_HAUL_ENDPOINT_KIND_NONE)
+	)
+	var endpoint_id := int(endpoint.get("id", -1))
+	var removed_amount := 0
+	var original_ground_tile := INVALID_CITY_TILE_POSITION
+
+	if endpoint_kind == CITY_CITIZEN_HAUL_ENDPOINT_KIND_GROUND_PILE:
+		var original_ground_pile := get_city_ground_pile_by_id(endpoint_id)
+		var raw_original_ground_tile = original_ground_pile.get(
+			"tile_position",
+			INVALID_CITY_TILE_POSITION
+		)
+
+		if raw_original_ground_tile is Vector2i:
+			original_ground_tile = raw_original_ground_tile
+
+	match endpoint_kind:
+		CITY_CITIZEN_HAUL_ENDPOINT_KIND_CITY_OBJECT_CONTAINER:
+			removed_amount = remove_resource_from_city_object_storage(
+				endpoint_id,
+				resource,
+				transfer_amount
+			)
+
+		CITY_CITIZEN_HAUL_ENDPOINT_KIND_GROUND_PILE:
+			removed_amount = remove_resource_from_city_ground_pile(
+				endpoint_id,
+				resource,
+				transfer_amount
+			)
+
+	if removed_amount <= 0:
+		return 0
+
+	var accepted_amount := add_resource_to_city_citizen_inventory(
+		citizen_id,
+		resource,
+		removed_amount
+	)
+
+	if accepted_amount == removed_amount:
+		return accepted_amount
+
+	if accepted_amount > 0:
+		remove_resource_from_city_citizen_inventory(
+			citizen_id,
+			resource,
+			accepted_amount
+		)
+
+	var rollback_amount := 0
+
+	match endpoint_kind:
+		CITY_CITIZEN_HAUL_ENDPOINT_KIND_CITY_OBJECT_CONTAINER:
+			rollback_amount = add_resource_to_city_object_storage(
+				endpoint_id,
+				resource,
+				removed_amount
+			)
+
+		CITY_CITIZEN_HAUL_ENDPOINT_KIND_GROUND_PILE:
+			if original_ground_tile != INVALID_CITY_TILE_POSITION:
+				rollback_amount = int(
+					add_resource_to_city_ground_piles_with_result(
+						original_ground_tile,
+						resource,
+						removed_amount
+					).get("added_amount", 0)
+				)
+
+	if rollback_amount != removed_amount:
+		push_error(
+			"Atomic food-endpoint transfer rollback failed for "
+			+ resource
+			+ "."
+		)
+
+	return 0
 
 
 static func transfer_city_object_resource_to_citizen_inventory(
@@ -8820,7 +11701,8 @@ static func transfer_city_object_resource_to_citizen_inventory(
 	object_id: int,
 	resource: String,
 	requested_amount: int,
-	withdrawal_purpose: String
+	withdrawal_purpose: String,
+	excluding_food_task_citizen_id: int = -1
 ) -> int:
 	if requested_amount <= 0:
 		return 0
@@ -8836,13 +11718,11 @@ static func transfer_city_object_resource_to_citizen_inventory(
 		return 0
 
 	var source_endpoint := make_city_citizen_haul_endpoint(object_id)
-	var available_amount := maxi(
-		get_city_object_stored_resource_amount(city_object, resource)
-		- get_city_haul_endpoint_source_reserved_amount(
-			source_endpoint,
-			resource
-		),
-		0
+	var available_amount := get_city_haul_endpoint_unreserved_resource_amount(
+		source_endpoint,
+		resource,
+		INVALID_CITY_CITIZEN_HAUL_RESERVATION_ID,
+		excluding_food_task_citizen_id
 	)
 	var transfer_amount := mini(
 		requested_amount,
@@ -9338,30 +12218,13 @@ static func has_city_object_type(object_type: String) -> bool:
 	return false
 
 static func can_place_city_road_tile(city_world: WorldData, tile_position: Vector2i) -> bool:
-	if city_world == null:
-		return false
-
-	if tile_position.x < 0 or tile_position.y < 0:
-		return false
-
-	if tile_position.x >= city_world.width or tile_position.y >= city_world.height:
-		return false
-
-	if city_occupied_tiles.has(tile_position):
-		return false
-
-	if has_city_ground_pile_at_tile(tile_position):
-		return false
-
-	var tile: Dictionary = city_world.get_tile(tile_position.x, tile_position.y)
-
-	if tile["terrain"] == TERRAIN_WATER:
-		return false
-
-	if tile["terrain"] == TERRAIN_MOUNTAIN:
-		return false
-
-	return true
+	return (
+		city_object_type_uses_construction(CITY_OBJECT_ROAD)
+		and can_place_city_construction_footprint(
+			city_world,
+			[tile_position]
+		)
+	)
 
 static func add_city_road_object(
 	tile_positions: Array,
@@ -10046,7 +12909,7 @@ static func assign_city_citizen_job(
 		current_job_id < 0
 		and not (
 			CitizenTaskSystem
-			.prepare_unemployed_citizen_for_player_command(citizen_id)
+			.prepare_unemployed_citizen_for_priority_interrupt(citizen_id)
 		)
 	):
 		return false

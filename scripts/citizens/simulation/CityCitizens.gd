@@ -16,6 +16,7 @@ const CITIZEN_HUNGER_LOSS_PER_DAY := 40
 const CITIZEN_HUNGER_DECAY_DENOMINATOR_MINUTES := 24 * 60
 const CITIZEN_FOOD_CARRY_TRIGGER_HUNGER := 70
 const CITIZEN_EAT_TRIGGER_HUNGER := 50
+const CITIZEN_CRITICAL_FOOD_SEEK_TRIGGER_HUNGER := 30
 const CITIZEN_EAT_TARGET_HUNGER := 90
 const CITY_CITIZEN_STATE_IDLE := "idle"
 const INVALID_CITY_TILE_POSITION := Vector2i(-1, -1)
@@ -24,7 +25,9 @@ const INVALID_CITY_TILE_POSITION := Vector2i(-1, -1)
 const CITY_CITIZEN_TASK_KIND_NONE := "none"
 const CITY_CITIZEN_TASK_KIND_WORK := "work"
 const CITY_CITIZEN_TASK_KIND_HAUL := "haul"
+const CITY_CITIZEN_TASK_KIND_ACQUIRE_FOOD := "acquire_food"
 const CITY_CITIZEN_TASK_KIND_PLAYER_COMMAND := "player_command"
+const CITY_CITIZEN_TASK_KIND_CONSTRUCTION := "construction"
 const CITY_CITIZEN_TASK_KIND_RETURN_HOME := "return_home"
 
 const CITY_CITIZEN_TASK_SOURCE_NONE := "none"
@@ -50,6 +53,10 @@ const CITY_CITIZEN_HAUL_ENDPOINT_KIND_CITY_OBJECT_CONTAINER := (
 	"city_object_container"
 )
 const CITY_CITIZEN_HAUL_ENDPOINT_KIND_GROUND_PILE := "ground_pile"
+const CITY_CITIZEN_HAUL_ENDPOINT_KIND_GROUND_TILE := "ground_tile"
+const CITY_CITIZEN_HAUL_ENDPOINT_KIND_CONSTRUCTION_SITE := (
+	"construction_site"
+)
 const CITY_CITIZEN_HAUL_REASON_NONE := "none"
 const CITY_CITIZEN_HAUL_REASON_WORKPLACE_OUTPUT_BEFORE_HOME := (
 	"workplace_output_before_home"
@@ -68,6 +75,9 @@ const CITY_CITIZEN_HAUL_REASON_AUTONOMOUS_HOME_FOOD_DELIVERY := (
 )
 const CITY_CITIZEN_HAUL_REASON_OUTSTANDING_CARGO := (
 	"outstanding_cargo"
+)
+const CITY_CITIZEN_HAUL_REASON_CONSTRUCTION_DELIVERY := (
+	"construction_delivery"
 )
 const INVALID_CITY_CITIZEN_HAUL_RESERVATION_ID: int = -1
 const CITY_CITIZEN_HAUL_PHASE_NONE := "none"
@@ -204,7 +214,9 @@ static func get_city_citizen_task_kind_types() -> Array[String]:
 		CITY_CITIZEN_TASK_KIND_NONE,
 		CITY_CITIZEN_TASK_KIND_WORK,
 		CITY_CITIZEN_TASK_KIND_HAUL,
+		CITY_CITIZEN_TASK_KIND_ACQUIRE_FOOD,
 		CITY_CITIZEN_TASK_KIND_PLAYER_COMMAND,
+		CITY_CITIZEN_TASK_KIND_CONSTRUCTION,
 		CITY_CITIZEN_TASK_KIND_RETURN_HOME
 	]
 
@@ -277,6 +289,10 @@ static func make_city_citizen_task(
 		"target_object_id": int(
 			values.get("target_object_id", -1)
 		),
+		"work_order_id": int(
+			values.get("work_order_id", -1)
+		),
+		"job_id": str(values.get("job_id", "")),
 		"start_world_minute": int(
 			values.get(
 				"start_world_minute",
@@ -303,6 +319,22 @@ static func make_city_citizen_task(
 		),
 		"player_locked": bool(
 			values.get("player_locked", false)
+		),
+		"food_resource_type": str(
+			values.get("food_resource_type", "none")
+		),
+		"food_requested_amount": maxi(
+			int(values.get("food_requested_amount", 0)),
+			0
+		),
+		"food_source_endpoint_kind": str(
+			values.get(
+				"food_source_endpoint_kind",
+				CITY_CITIZEN_HAUL_ENDPOINT_KIND_NONE
+			)
+		),
+		"food_source_access_purpose": str(
+			values.get("food_source_access_purpose", "none")
 		)
 	}
 
@@ -326,12 +358,18 @@ static func has_complete_city_citizen_task_state(
 		and current_task.has("phase")
 		and current_task.has("priority")
 		and current_task.has("target_object_id")
+		and current_task.has("work_order_id")
+		and current_task.has("job_id")
 		and current_task.has("start_world_minute")
 		and current_task.has("target_tile")
 		and current_task.has("previous_target_tile")
 		and current_task.has("next_action_world_minute")
 		and current_task.has("relocation_count")
 		and current_task.has("player_locked")
+		and current_task.has("food_resource_type")
+		and current_task.has("food_requested_amount")
+		and current_task.has("food_source_endpoint_kind")
+		and current_task.has("food_source_access_purpose")
 	)
 
 
@@ -366,6 +404,17 @@ static func is_valid_city_citizen_haul_phase(
 static func make_city_citizen_haul_endpoint(
 	values: Dictionary = {}
 ) -> Dictionary:
+	var excluded_ground_pile_ids: Array[int] = []
+	var raw_excluded_ids = values.get("excluded_ground_pile_ids", [])
+
+	if raw_excluded_ids is Array:
+		for raw_id in raw_excluded_ids:
+			var excluded_id := int(raw_id)
+
+			if excluded_id > 0 and not excluded_ground_pile_ids.has(excluded_id):
+				excluded_ground_pile_ids.append(excluded_id)
+
+	excluded_ground_pile_ids.sort()
 	return {
 		"kind": str(
 			values.get(
@@ -374,6 +423,11 @@ static func make_city_citizen_haul_endpoint(
 			)
 		),
 		"id": int(values.get("id", -1)),
+		"tile_position": values.get(
+			"tile_position",
+			INVALID_CITY_TILE_POSITION
+		),
+		"excluded_ground_pile_ids": excluded_ground_pile_ids,
 	}
 
 
@@ -392,12 +446,21 @@ static func is_valid_city_citizen_haul_endpoint(
 	if endpoint_kind == CITY_CITIZEN_HAUL_ENDPOINT_KIND_NONE:
 		return allow_none and endpoint_id == -1
 
+	if endpoint_kind == CITY_CITIZEN_HAUL_ENDPOINT_KIND_GROUND_TILE:
+		return (
+			endpoint_id == -1
+			and endpoint.get("tile_position") is Vector2i
+			and endpoint.get("tile_position") != INVALID_CITY_TILE_POSITION
+		)
+
 	return (
 		(
 			endpoint_kind
 			== CITY_CITIZEN_HAUL_ENDPOINT_KIND_CITY_OBJECT_CONTAINER
 			or endpoint_kind
 			== CITY_CITIZEN_HAUL_ENDPOINT_KIND_GROUND_PILE
+			or endpoint_kind
+			== CITY_CITIZEN_HAUL_ENDPOINT_KIND_CONSTRUCTION_SITE
 		)
 		and endpoint_id > 0
 	)

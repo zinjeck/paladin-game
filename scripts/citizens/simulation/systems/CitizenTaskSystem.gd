@@ -10,11 +10,11 @@ const CityActivityLocationResolverScript = preload(
 const CitizenHaulingSystemScript = preload(
 	"res://scripts/citizens/simulation/systems/CitizenHaulingSystem.gd"
 )
-const MAX_TASK_PATH_REQUESTS_PER_TICK: int = 1
-const MAX_PLAYER_COMMAND_PATH_EXPANDED_NODES: int = 10_000
-const MAX_WORK_PATH_EXPANDED_NODES: int = 10_000
+const CityConstructionSystemScript = preload(
+	"res://scripts/city/simulation/systems/CityConstructionSystem.gd"
+)
+const MAX_TASK_PATH_REQUESTS_PER_TICK: int = 4
 const BLOCKED_WORK_TASK_RETRY_DELAY_MINUTES: int = 30
-const MAX_RETURN_HOME_PATH_EXPANDED_NODES: int = 10_000
 const BLOCKED_RETURN_HOME_TASK_RETRY_DELAY_MINUTES: int = 30
 const WORK_ACTIVITY_DWELL_REQUIRED_KEYS := [
 	"citizen_id",
@@ -61,8 +61,19 @@ static func run_tick(
 	var path_requests_remaining := (
 		MAX_TASK_PATH_REQUESTS_PER_TICK
 	)
+	var ordered_active_task_ids: Array[int] = []
+	var task_count := active_task_ids.size()
+	var start_index := posmod(tick_index, task_count)
 
-	for citizen_id in active_task_ids:
+	# The path budget remains bounded, but the starting citizen rotates every
+	# tick. This prevents higher-ID citizens from being starved indefinitely by
+	# earlier tasks that repeatedly consume the shared path request budget.
+	for offset in range(task_count):
+		ordered_active_task_ids.append(
+			active_task_ids[(start_index + offset) % task_count]
+		)
+
+	for citizen_id in ordered_active_task_ids:
 		var citizen := WorldData.get_city_citizen_by_id(
 			citizen_id
 		)
@@ -79,6 +90,30 @@ static func run_tick(
 				citizen_id
 			)
 		)
+		var normal_food_handoff_after_step := false
+
+		if _citizen_should_seek_normal_food(citizen_id):
+			_disable_additional_haul_pickups_for_food(
+				citizen_id,
+				current_task
+			)
+
+			if _task_is_at_normal_food_safe_boundary(
+				citizen_id,
+				current_task
+			):
+				_release_task_for_normal_food(
+					citizen_id,
+					current_task
+				)
+				continue
+
+			normal_food_handoff_after_step = (
+				_task_reaches_normal_food_safe_boundary_after_step(
+					citizen_id,
+					current_task
+				)
+			)
 
 		match str(current_task.get("kind", "")):
 			WorldData.CITY_CITIZEN_TASK_KIND_PLAYER_COMMAND:
@@ -104,6 +139,17 @@ static func run_tick(
 					)
 				)
 
+			WorldData.CITY_CITIZEN_TASK_KIND_ACQUIRE_FOOD:
+				path_requests_remaining = (
+					_advance_acquire_food_task(
+						city_world,
+						citizen_id,
+						citizen,
+						current_task,
+						path_requests_remaining
+					)
+				)
+
 			WorldData.CITY_CITIZEN_TASK_KIND_HAUL:
 				path_requests_remaining = (
 					CitizenHaulingSystemScript.advance_haul_task(
@@ -112,6 +158,18 @@ static func run_tick(
 						citizen,
 						current_task,
 						path_requests_remaining
+					)
+				)
+
+			WorldData.CITY_CITIZEN_TASK_KIND_CONSTRUCTION:
+				path_requests_remaining = (
+					CityConstructionSystemScript.advance_labor_task(
+						city_world,
+						citizen_id,
+						citizen,
+						current_task,
+						path_requests_remaining,
+						minutes_advanced
 					)
 				)
 
@@ -132,11 +190,398 @@ static func run_tick(
 			_:
 				_clear_invalid_task(citizen_id)
 
+		if normal_food_handoff_after_step:
+			_release_task_for_normal_food(
+				citizen_id,
+				current_task
+			)
 
-# Future player-command gateways should call this before assigning a player
-# task. Employment is an absolute immunity check. An unemployed hauler drops
-# physical cargo first; every other current autonomous task is safely cleared.
-static func prepare_unemployed_citizen_for_player_command(
+
+# Ordinary hunger waits for the current indivisible action, then yields the
+# citizen without dropping physical cargo. The decision pass can assign food
+# on its next tick. Critical hunger keeps its separate immediate gateway below.
+static func _citizen_should_seek_normal_food(citizen_id: int) -> bool:
+	return (
+		CitizenNeedsSystem.citizen_should_seek_food(citizen_id)
+		and not CitizenNeedsSystem.citizen_has_critical_food_need(citizen_id)
+	)
+
+
+static func _task_is_at_normal_food_safe_boundary(
+	citizen_id: int,
+	current_task: Dictionary
+) -> bool:
+	if WorldData.get_city_citizen_haul_cargo_amount(citizen_id) > 0:
+		return false
+
+	var task_kind := str(
+		current_task.get("kind", WorldData.CITY_CITIZEN_TASK_KIND_NONE)
+	)
+	var task_phase := str(
+		current_task.get("phase", WorldData.CITY_CITIZEN_TASK_PHASE_NONE)
+	)
+
+	match task_kind:
+		WorldData.CITY_CITIZEN_TASK_KIND_ACQUIRE_FOOD:
+			return false
+
+		WorldData.CITY_CITIZEN_TASK_KIND_HAUL:
+			var haul := WorldData.get_city_citizen_current_haul(citizen_id)
+			return (
+				str(
+					haul.get(
+						"phase",
+						WorldData.CITY_CITIZEN_HAUL_PHASE_NONE
+					)
+				)
+				!= WorldData.CITY_CITIZEN_HAUL_PHASE_PICKING_UP
+			)
+
+		WorldData.CITY_CITIZEN_TASK_KIND_PLAYER_COMMAND:
+			return task_phase != WorldData.CITY_CITIZEN_TASK_PHASE_PERFORMING
+
+		WorldData.CITY_CITIZEN_TASK_KIND_WORK:
+			return task_phase != WorldData.CITY_CITIZEN_TASK_PHASE_PERFORMING
+
+		WorldData.CITY_CITIZEN_TASK_KIND_CONSTRUCTION:
+			return task_phase != WorldData.CITY_CITIZEN_TASK_PHASE_PERFORMING
+
+		WorldData.CITY_CITIZEN_TASK_KIND_RETURN_HOME:
+			return true
+
+	return false
+
+
+static func _task_reaches_normal_food_safe_boundary_after_step(
+	citizen_id: int,
+	current_task: Dictionary
+) -> bool:
+	var task_kind := str(
+		current_task.get("kind", WorldData.CITY_CITIZEN_TASK_KIND_NONE)
+	)
+
+	if task_kind == WorldData.CITY_CITIZEN_TASK_KIND_HAUL:
+		return (
+			str(
+				WorldData.get_city_citizen_current_haul(citizen_id).get(
+					"phase",
+					WorldData.CITY_CITIZEN_HAUL_PHASE_NONE
+				)
+			)
+			== WorldData.CITY_CITIZEN_HAUL_PHASE_PICKING_UP
+		)
+
+	if (
+		task_kind != WorldData.CITY_CITIZEN_TASK_KIND_PLAYER_COMMAND
+		and task_kind != WorldData.CITY_CITIZEN_TASK_KIND_WORK
+		and task_kind != WorldData.CITY_CITIZEN_TASK_KIND_CONSTRUCTION
+	):
+		return false
+
+	if (
+		str(current_task.get("phase", ""))
+		!= WorldData.CITY_CITIZEN_TASK_PHASE_PERFORMING
+	):
+		return false
+
+	var boundary_world_minute := int(
+		current_task.get(
+			"next_action_world_minute",
+			WorldData.INVALID_CITY_CITIZEN_TASK_ACTION_WORLD_MINUTE
+		)
+	)
+
+	# Stationary workplace attendance has no longer-running timer; one task
+	# pass is its atomic unit. Timed command, construction, and roaming-work
+	# actions become interruptible only when their recorded boundary is due.
+	return (
+		boundary_world_minute
+		== WorldData.INVALID_CITY_CITIZEN_TASK_ACTION_WORLD_MINUTE
+		or SimulationClock.absolute_world_minutes >= boundary_world_minute
+	)
+
+
+static func _disable_additional_haul_pickups_for_food(
+	citizen_id: int,
+	current_task: Dictionary
+) -> void:
+	if (
+		str(current_task.get("kind", ""))
+		!= WorldData.CITY_CITIZEN_TASK_KIND_HAUL
+	):
+		return
+
+	var haul := WorldData.get_city_citizen_current_haul(citizen_id)
+
+	if not bool(haul.get("allow_ground_pile_pickup_chaining", false)):
+		return
+
+	# Hunger may arrive during the visible pickup pass. Preserve that pickup,
+	# but prevent it from expanding into another stop before delivery.
+	haul["allow_ground_pile_pickup_chaining"] = false
+	WorldData.set_city_citizen_current_haul(citizen_id, haul)
+
+
+static func _release_task_for_normal_food(
+	citizen_id: int,
+	expected_task: Dictionary
+) -> bool:
+	if WorldData.get_city_citizen_haul_cargo_amount(citizen_id) > 0:
+		return false
+
+	var current_task := WorldData.get_city_citizen_current_task(citizen_id)
+	var expected_kind := str(expected_task.get("kind", ""))
+
+	if (
+		str(current_task.get("kind", "")) != expected_kind
+		or int(current_task.get("target_object_id", -1))
+		!= int(expected_task.get("target_object_id", -1))
+	):
+		return false
+
+	var task_source := str(
+		current_task.get(
+			"source",
+			WorldData.CITY_CITIZEN_TASK_SOURCE_AUTONOMY
+		)
+	)
+	var released := false
+
+	if expected_kind == WorldData.CITY_CITIZEN_TASK_KIND_HAUL:
+		released = (
+			CitizenHaulingSystemScript
+			.drop_citizen_haul_cargo_for_priority_interrupt(
+				WorldData.official_city_world,
+				citizen_id,
+				task_source
+			)
+		)
+	else:
+		released = WorldData.clear_city_citizen_task(
+			citizen_id,
+			task_source
+		)
+
+	if released:
+		WorldData.cancel_city_citizen_movement(citizen_id)
+
+	return released
+
+# Critical hunger is category-independent. It may release an ordinary command
+# claim, interrupt construction, or exceptionally spill in-flight cargo through
+# the existing atomic no-loss gateway.
+static func prepare_citizen_for_critical_food_interrupt(
+	citizen_id: int
+) -> bool:
+	var citizen := WorldData.get_city_citizen_by_id(citizen_id)
+
+	if citizen.is_empty() or not bool(citizen.get("alive", false)):
+		return false
+
+	var current_task := WorldData.get_city_citizen_current_task(citizen_id)
+	var current_task_kind := str(
+		current_task.get("kind", WorldData.CITY_CITIZEN_TASK_KIND_NONE)
+	)
+
+	if current_task_kind == WorldData.CITY_CITIZEN_TASK_KIND_PLAYER_COMMAND:
+		var command_id := int(current_task.get("target_object_id", -1))
+
+		WorldData.release_city_player_command_claim(
+			command_id,
+			citizen_id
+		)
+		WorldData.cancel_city_citizen_movement(citizen_id)
+		return WorldData.clear_city_citizen_task(
+			citizen_id,
+			WorldData.CITY_CITIZEN_TASK_SOURCE_PLAYER
+		)
+
+	if (
+		CityConstructionSystemScript
+		.citizen_task_is_interruptible_construction(citizen_id)
+	):
+		return (
+			CityConstructionSystemScript
+			.interrupt_citizen_construction_for_food(citizen_id)
+		)
+
+	return CitizenHaulingSystemScript.drop_citizen_haul_cargo_for_priority_interrupt(
+		WorldData.official_city_world,
+		citizen_id,
+		WorldData.CITY_CITIZEN_TASK_SOURCE_AUTONOMY
+	)
+
+
+static func _advance_acquire_food_task(
+	city_world: WorldData,
+	citizen_id: int,
+	citizen: Dictionary,
+	current_task: Dictionary,
+	path_requests_remaining: int
+) -> int:
+	var source_endpoint_id := int(current_task.get("target_object_id", -1))
+	var source_endpoint_kind := str(
+		current_task.get(
+			"food_source_endpoint_kind",
+			WorldData.CITY_CITIZEN_HAUL_ENDPOINT_KIND_CITY_OBJECT_CONTAINER
+		)
+	)
+	var source_endpoint := {
+		"kind": source_endpoint_kind,
+		"id": source_endpoint_id,
+	}
+	var resource := str(
+		current_task.get("food_resource_type", WorldData.RESOURCE_NONE)
+	)
+	var requested_amount := maxi(
+		int(current_task.get("food_requested_amount", 0)),
+		0
+	)
+	var access_purpose := str(
+		current_task.get(
+			"food_source_access_purpose",
+			WorldData.CONTAINER_DIRECT_WITHDRAWAL_PURPOSE_NONE
+		)
+	)
+	var raw_target_tile = current_task.get(
+		"target_tile",
+		WorldData.INVALID_CITY_TILE_POSITION
+	)
+	var raw_current_tile = citizen.get(
+		"city_tile_position",
+		WorldData.INVALID_CITY_TILE_POSITION
+	)
+
+	if (
+		WorldData.get_city_food_hunger_restore(resource) <= 0
+		or requested_amount <= 0
+		or access_purpose
+		!= WorldData.CONTAINER_DIRECT_WITHDRAWAL_PURPOSE_PERSONAL_FOOD
+		or not raw_target_tile is Vector2i
+		or not raw_current_tile is Vector2i
+		or not CityCitizens.is_valid_city_citizen_haul_endpoint(
+			source_endpoint
+		)
+		or not WorldData.get_city_citizen_food_endpoint_target_tiles(
+			citizen_id,
+			source_endpoint
+		).has(raw_target_tile)
+		or not WorldData.city_citizen_can_withdraw_food_from_endpoint(
+			citizen_id,
+			source_endpoint,
+			resource
+		)
+	):
+		_clear_invalid_task(citizen_id)
+		return path_requests_remaining
+
+	if CitizenNeedsSystem.get_citizen_food_need_nutrition(citizen_id) <= 0:
+		_complete_acquire_food_task(citizen_id)
+		return path_requests_remaining
+
+	var target_tile: Vector2i = raw_target_tile
+	var current_tile: Vector2i = raw_current_tile
+	var movement_state := str(
+		citizen.get(
+			"movement_state",
+			WorldData.CITY_CITIZEN_MOVEMENT_STATE_IDLE
+		)
+	)
+
+	if current_tile == target_tile:
+		var desired_nutrition := CitizenNeedsSystem.get_citizen_food_need_nutrition(
+			citizen_id
+		)
+		var hunger_restore := WorldData.get_city_food_hunger_restore(resource)
+		var exact_requested_units := mini(
+			requested_amount,
+			ceili(float(desired_nutrition) / float(hunger_restore))
+		)
+		var transferred_amount := (
+			WorldData.transfer_city_food_endpoint_to_citizen_inventory(
+				citizen_id,
+				source_endpoint,
+				resource,
+				exact_requested_units
+			)
+		)
+
+		if transferred_amount > 0:
+			CitizenNeedsSystem.eat_personal_food_if_hungry(citizen_id)
+
+		_complete_acquire_food_task(citizen_id)
+		return path_requests_remaining
+
+	if movement_state == WorldData.CITY_CITIZEN_MOVEMENT_STATE_MOVING:
+		return path_requests_remaining
+
+	if movement_state == WorldData.CITY_CITIZEN_MOVEMENT_STATE_BLOCKED:
+		_clear_invalid_task(citizen_id)
+		return path_requests_remaining
+
+	if path_requests_remaining <= 0:
+		return path_requests_remaining
+
+	path_requests_remaining -= 1
+	var path_result := CityNavigationSystemScript.find_path_to_any_city_tile(
+		city_world,
+		current_tile,
+		[target_tile],
+		_get_city_wide_path_expansion_limit(city_world),
+		citizen_id,
+		1
+	)
+
+	if not bool(path_result.get("success", false)):
+		_clear_invalid_task(citizen_id)
+		return path_requests_remaining
+
+	var raw_path = path_result.get("path", [])
+	var raw_destination_tile = path_result.get(
+		"destination_tile",
+		WorldData.INVALID_CITY_TILE_POSITION
+	)
+
+	if (
+		not raw_path is Array
+		or not raw_destination_tile is Vector2i
+		or raw_destination_tile != target_tile
+	):
+		_clear_invalid_task(citizen_id)
+		return path_requests_remaining
+
+	if raw_path.size() <= 1:
+		_clear_invalid_task(citizen_id)
+		return path_requests_remaining
+
+	if not WorldData.assign_city_citizen_movement_order(citizen_id, raw_path):
+		_clear_invalid_task(citizen_id)
+		return path_requests_remaining
+
+	WorldData.set_city_citizen_task_phase(
+		citizen_id,
+		WorldData.CITY_CITIZEN_TASK_PHASE_TRAVELING
+	)
+	return path_requests_remaining
+
+
+static func _complete_acquire_food_task(citizen_id: int) -> void:
+	var current_task := WorldData.get_city_citizen_current_task(citizen_id)
+	var task_source := str(
+		current_task.get(
+			"source",
+			WorldData.CITY_CITIZEN_TASK_SOURCE_AUTONOMY
+		)
+	)
+
+	WorldData.cancel_city_citizen_movement(citizen_id)
+	WorldData.clear_city_citizen_task(citizen_id, task_source)
+
+
+# Normal player work may preempt an unemployed citizen before pickup. Once the
+# citizen carries cargo, the current short delivery is the safe boundary and is
+# allowed to finish; an ordinary player order never causes a cargo spill.
+static func prepare_unemployed_citizen_for_priority_interrupt(
 	citizen_id: int
 ) -> bool:
 	var citizen := WorldData.get_city_citizen_by_id(citizen_id)
@@ -148,198 +593,36 @@ static func prepare_unemployed_citizen_for_player_command(
 	):
 		return false
 
-	var cargo_resources := (
-		WorldData.get_city_citizen_haul_cargo_resources(
-			citizen_id
-		)
-	)
-	var cargo_amount := (
-		WorldData.get_city_citizen_haul_cargo_amount(citizen_id)
-	)
+	# Do not let the player-order pass reclaim a citizen who just yielded at a
+	# normal food boundary. The later food pass gets the first opportunity.
+	if _citizen_should_seek_normal_food(citizen_id):
+		return false
 
-	if cargo_amount > 0:
-		var city_world: WorldData = WorldData.official_city_world
-		var raw_current_tile = citizen.get(
-			"city_tile_position",
-			WorldData.INVALID_CITY_TILE_POSITION
-		)
+	var current_task := WorldData.get_city_citizen_current_task(citizen_id)
 
-		if city_world == null or not raw_current_tile is Vector2i:
-			return false
-
-		var drop_tile := _find_nearest_valid_ground_pile_drop_tile(
-			city_world,
-			citizen_id,
-			raw_current_tile
-		)
-
-		if drop_tile == WorldData.INVALID_CITY_TILE_POSITION:
-			return false
-
-		var added_resources: Dictionary = {}
-		var resource_names: Array = cargo_resources.keys()
-		resource_names.sort()
-
-		for raw_resource in resource_names:
-			var resource := str(raw_resource)
-			var amount := maxi(
-				int(cargo_resources.get(resource, 0)),
-				0
-			)
-
-			if amount <= 0:
-				continue
-
-			var added_amount := (
-				WorldData.add_resource_to_city_ground_pile(
-					drop_tile,
-					resource,
-					amount
-				)
-			)
-
-			if added_amount != amount:
-				for rollback_resource in added_resources.keys():
-					_rollback_interrupted_cargo_ground_pile(
-						drop_tile,
-						str(rollback_resource),
-						int(
-							added_resources.get(
-								rollback_resource,
-								0
-							)
-						)
-					)
-				return false
-
-			added_resources[resource] = added_amount
-
-		if WorldData.set_city_citizen_haul_cargo_resources(
-			citizen_id,
-			{}
-		) != 0:
-			for rollback_resource in added_resources.keys():
-				_rollback_interrupted_cargo_ground_pile(
-					drop_tile,
-					str(rollback_resource),
-					int(
-						added_resources.get(
-							rollback_resource,
-							0
-						)
-					)
-				)
-			return false
-
-	WorldData.release_city_haul_reservation_for_citizen(citizen_id)
-	WorldData.clear_city_citizen_task(
-		citizen_id,
-		WorldData.CITY_CITIZEN_TASK_SOURCE_PLAYER
-	)
-	WorldData.cancel_city_citizen_movement(citizen_id)
-	return true
-
-
-static func _find_nearest_valid_ground_pile_drop_tile(
-	city_world: WorldData,
-	citizen_id: int,
-	origin_tile: Vector2i
-) -> Vector2i:
-	if WorldData.can_city_ground_pile_exist_at_tile(
-		city_world,
-		origin_tile
+	if (
+		str(current_task.get("kind", ""))
+		== WorldData.CITY_CITIZEN_TASK_KIND_ACQUIRE_FOOD
+		or WorldData.get_city_citizen_haul_cargo_amount(citizen_id) > 0
 	):
-		return origin_tile
+		return false
 
-	var maximum_radius := maxi(city_world.width, city_world.height)
-	var city_wide_expansion_limit := maxi(
-		city_world.width * city_world.height,
-		1
+	return (
+		CitizenHaulingSystemScript
+		.drop_citizen_haul_cargo_for_priority_interrupt(
+			WorldData.official_city_world,
+			citizen_id,
+			WorldData.CITY_CITIZEN_TASK_SOURCE_PLAYER
+		)
 	)
 
-	for radius in range(1, maximum_radius + 1):
-		var candidate_tiles: Array = []
 
-		for offset_y in range(-radius, radius + 1):
-			var offset_x_magnitude := radius - absi(offset_y)
-			var candidate_x_offsets := [offset_x_magnitude]
+# Compatibility gateway for the existing player-command decision path.
+static func prepare_unemployed_citizen_for_player_command(
+	citizen_id: int
+) -> bool:
+	return prepare_unemployed_citizen_for_priority_interrupt(citizen_id)
 
-			if offset_x_magnitude > 0:
-				candidate_x_offsets.append(-offset_x_magnitude)
-
-			for offset_x in candidate_x_offsets:
-				var candidate_tile := (
-					origin_tile + Vector2i(offset_x, offset_y)
-				)
-
-				if not WorldData.can_city_ground_pile_exist_at_tile(
-					city_world,
-					candidate_tile
-				):
-					continue
-
-				candidate_tiles.append(candidate_tile)
-
-		if candidate_tiles.is_empty():
-			continue
-
-		var path_result := (
-			CityNavigationSystemScript.find_path_to_any_city_tile(
-				city_world,
-				origin_tile,
-				candidate_tiles,
-				city_wide_expansion_limit,
-				citizen_id,
-				1
-			)
-		)
-
-		if not bool(path_result.get("success", false)):
-			continue
-
-		var raw_destination_tile = path_result.get(
-			"destination_tile",
-			WorldData.INVALID_CITY_TILE_POSITION
-		)
-
-		if raw_destination_tile is Vector2i:
-			return raw_destination_tile
-
-	return WorldData.INVALID_CITY_TILE_POSITION
-
-
-static func _rollback_interrupted_cargo_ground_pile(
-	tile_position: Vector2i,
-	resource: String,
-	amount: int
-) -> void:
-	for raw_ground_pile in WorldData.get_city_ground_piles_at_tile(
-		tile_position
-	):
-		if not raw_ground_pile is Dictionary:
-			continue
-
-		var ground_pile: Dictionary = raw_ground_pile
-
-		if str(
-			ground_pile.get("resource_type", WorldData.RESOURCE_NONE)
-		) != resource:
-			continue
-
-		var removed_amount := WorldData.remove_resource_from_city_ground_pile(
-			int(ground_pile.get("id", -1)),
-			resource,
-			amount
-		)
-
-		if removed_amount != amount:
-			push_error(
-				"Interrupted cargo ground-pile rollback failed for "
-				+ resource
-				+ "."
-			)
-
-		return
 
 static func _advance_player_command_task(
 	city_world: WorldData,
@@ -363,7 +646,7 @@ static func _advance_player_command_task(
 		WorldData.cancel_city_player_command(command_id)
 		return path_requests_remaining
 
-	var raw_target_tile = command.get(
+	var raw_command_tile = command.get(
 		"tile_position",
 		WorldData.INVALID_CITY_TILE_POSITION
 	)
@@ -372,7 +655,7 @@ static func _advance_player_command_task(
 		WorldData.INVALID_CITY_TILE_POSITION
 	)
 
-	if not raw_target_tile is Vector2i or not raw_current_tile is Vector2i:
+	if not raw_command_tile is Vector2i or not raw_current_tile is Vector2i:
 		_release_player_command_task(
 			citizen_id,
 			command_id,
@@ -380,8 +663,33 @@ static func _advance_player_command_task(
 		)
 		return path_requests_remaining
 
-	var target_tile: Vector2i = raw_target_tile
 	var current_tile: Vector2i = raw_current_tile
+	var work_tiles := _get_player_command_work_tiles(
+		city_world,
+		command,
+		citizen_id
+	)
+
+	if work_tiles.is_empty():
+		_release_player_command_task(
+			citizen_id,
+			command_id,
+			true
+		)
+		return path_requests_remaining
+
+	var raw_task_target_tile = current_task.get(
+		"target_tile",
+		WorldData.INVALID_CITY_TILE_POSITION
+	)
+	var target_tile: Vector2i = raw_command_tile
+
+	if (
+		raw_task_target_tile is Vector2i
+		and work_tiles.has(raw_task_target_tile)
+	):
+		target_tile = raw_task_target_tile
+
 	var task_phase := str(
 		current_task.get(
 			"phase",
@@ -397,10 +705,10 @@ static func _advance_player_command_task(
 
 	match task_phase:
 		WorldData.CITY_CITIZEN_TASK_PHASE_PENDING:
-			if current_tile == target_tile:
+			if work_tiles.has(current_tile):
 				if not _begin_player_command_work(
 					citizen_id,
-					target_tile,
+					current_tile,
 					command
 				):
 					_release_player_command_task(
@@ -422,8 +730,8 @@ static func _advance_player_command_task(
 				CityNavigationSystemScript.find_path_to_any_city_tile(
 					city_world,
 					current_tile,
-					[target_tile],
-					MAX_PLAYER_COMMAND_PATH_EXPANDED_NODES,
+					work_tiles,
+					_get_city_wide_path_expansion_limit(city_world),
 					citizen_id,
 					1
 				)
@@ -438,9 +746,23 @@ static func _advance_player_command_task(
 				return path_requests_remaining
 
 			var raw_path = path_result.get("path", [])
+			var raw_destination_tile = path_result.get(
+				"destination_tile",
+				WorldData.INVALID_CITY_TILE_POSITION
+			)
 
 			if (
 				not raw_path is Array
+				or not raw_destination_tile is Vector2i
+				or not work_tiles.has(raw_destination_tile)
+				or not WorldData.set_city_citizen_task_activity_state({
+					"citizen_id": citizen_id,
+					"target_tile": raw_destination_tile,
+					"next_action_world_minute": (
+						WorldData
+						.INVALID_CITY_CITIZEN_TASK_ACTION_WORLD_MINUTE
+					),
+				})
 				or not WorldData.assign_city_citizen_movement_order(
 					citizen_id,
 					raw_path
@@ -459,7 +781,10 @@ static func _advance_player_command_task(
 			)
 
 		WorldData.CITY_CITIZEN_TASK_PHASE_TRAVELING:
-			if current_tile == target_tile:
+			if (
+				work_tiles.has(current_tile)
+				and current_tile == target_tile
+			):
 				if not _begin_player_command_work(
 					citizen_id,
 					target_tile,
@@ -540,6 +865,17 @@ static func _advance_player_command_task(
 			_clear_invalid_task(citizen_id)
 
 	return path_requests_remaining
+
+
+static func _get_player_command_work_tiles(
+	_city_world: WorldData,
+	command: Dictionary,
+	citizen_id: int
+) -> Array[Vector2i]:
+	return WorldData.get_city_player_command_work_tiles(
+		command,
+		citizen_id
+	)
 
 
 static func _begin_player_command_work(
@@ -770,7 +1106,7 @@ static func _advance_work_task(
 					city_world,
 					current_tile,
 					preferred_activity_tiles,
-					MAX_WORK_PATH_EXPANDED_NODES,
+					_get_city_wide_path_expansion_limit(city_world),
 					citizen_id
 				)
 			)
@@ -1013,7 +1349,7 @@ static func _advance_work_task(
 					city_world,
 					current_tile,
 					[new_target_tile],
-					MAX_WORK_PATH_EXPANDED_NODES,
+					_get_city_wide_path_expansion_limit(city_world),
 					citizen_id
 				)
 			)
@@ -1262,7 +1598,7 @@ static func _advance_return_home_task(
 			city_world,
 			current_tile,
 			[assigned_home_tile],
-			MAX_RETURN_HOME_PATH_EXPANDED_NODES,
+			_get_city_wide_path_expansion_limit(city_world),
 			citizen_id
 		)
 	)
@@ -1771,3 +2107,12 @@ static func _clear_invalid_task(citizen_id: int) -> void:
 		WorldData.CITY_CITIZEN_TASK_SOURCE_PLAYER
 	)
 	WorldData.cancel_city_citizen_movement(citizen_id)
+
+
+static func _get_city_wide_path_expansion_limit(
+	city_world: WorldData
+) -> int:
+	if city_world == null:
+		return 1
+
+	return maxi(city_world.width * city_world.height, 1)

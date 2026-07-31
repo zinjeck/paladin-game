@@ -122,6 +122,10 @@ const CONTAINER_HAUL_PURPOSE_PUBLIC_STORAGE := "public_storage"
 const CONTAINER_HAUL_PURPOSE_HOME_DELIVERY := "home_delivery"
 const CONTAINER_HAUL_PURPOSE_WORKPLACE_OUTPUT := "workplace_output"
 const CONTAINER_HAUL_PURPOSE_GROUND_PILE_CLEANUP := "ground_pile_cleanup"
+const CONTAINER_HAUL_PURPOSE_CONSTRUCTION := "construction"
+const CONTAINER_HAUL_PURPOSE_HOUSEHOLD_FOOD_SOURCE := (
+	"household_food_source"
+)
 const CONTAINER_DIRECT_WITHDRAWAL_PURPOSE_NONE := "none"
 const CONTAINER_DIRECT_WITHDRAWAL_PURPOSE_PERSONAL_FOOD := "personal_food"
 
@@ -167,6 +171,8 @@ static func setup_city_object_definitions() -> void:
 				],
 				CONTAINER_ACCESS_HAUL_WITHDRAWAL_PURPOSES: [
 					CONTAINER_HAUL_PURPOSE_HOME_DELIVERY,
+					CONTAINER_HAUL_PURPOSE_HOUSEHOLD_FOOD_SOURCE,
+					CONTAINER_HAUL_PURPOSE_CONSTRUCTION,
 				],
 				CONTAINER_ACCESS_DIRECT_WITHDRAWAL_PURPOSES: [
 					CONTAINER_DIRECT_WITHDRAWAL_PURPOSE_PERSONAL_FOOD,
@@ -229,6 +235,13 @@ static func setup_city_object_definitions() -> void:
 			"requires_no_city": false,
 			"repeat_after_place": true,
 			"placement_effect": CITY_OBJECT_PLACEMENT_EFFECT_NONE,
+			"construction_enabled": true,
+			"construction_materials": {
+				CityResourceCatalogScript.RESOURCE_LUMBER: 8,
+				CityResourceCatalogScript.RESOURCE_STONE: 4,
+			},
+			"construction_labor_minutes": 180,
+			"construction_max_workers": 4,
 			"frame_color": Color(0.32, 0.30, 0.24, 0.95),
 			"fill_color": Color(0.86, 0.84, 0.76, 0.55),
 			"frame_thickness": 0.30,
@@ -249,6 +262,8 @@ static func setup_city_object_definitions() -> void:
 				],
 				CONTAINER_ACCESS_HAUL_WITHDRAWAL_PURPOSES: [
 					CONTAINER_HAUL_PURPOSE_HOME_DELIVERY,
+					CONTAINER_HAUL_PURPOSE_HOUSEHOLD_FOOD_SOURCE,
+					CONTAINER_HAUL_PURPOSE_CONSTRUCTION,
 				],
 				CONTAINER_ACCESS_DIRECT_WITHDRAWAL_PURPOSES: [
 					CONTAINER_DIRECT_WITHDRAWAL_PURPOSE_PERSONAL_FOOD,
@@ -260,6 +275,13 @@ static func setup_city_object_definitions() -> void:
 			"requires_no_city": false,
 			"repeat_after_place": true,
 			"placement_effect": CITY_OBJECT_PLACEMENT_EFFECT_NONE,
+			"construction_enabled": true,
+			"construction_materials": {
+				CityResourceCatalogScript.RESOURCE_LUMBER: 6,
+				CityResourceCatalogScript.RESOURCE_STONE: 2,
+			},
+			"construction_labor_minutes": 120,
+			"construction_max_workers": 4,
 			"frame_color": Color(0.46, 0.30, 0.12, 0.95),
 			"fill_color": Color(0.82, 0.64, 0.32, 0.55),
 			"frame_thickness": 0.30,
@@ -282,8 +304,11 @@ static func setup_city_object_definitions() -> void:
 				CONTAINER_ACCESS_HAUL_DEPOSIT_PURPOSES: [],
 				CONTAINER_ACCESS_HAUL_WITHDRAWAL_PURPOSES: [
 					CONTAINER_HAUL_PURPOSE_WORKPLACE_OUTPUT,
+					CONTAINER_HAUL_PURPOSE_HOUSEHOLD_FOOD_SOURCE,
 				],
-				CONTAINER_ACCESS_DIRECT_WITHDRAWAL_PURPOSES: [],
+				CONTAINER_ACCESS_DIRECT_WITHDRAWAL_PURPOSES: [
+					CONTAINER_DIRECT_WITHDRAWAL_PURPOSE_PERSONAL_FOOD,
+				],
 			},
 			"shape_mode": CITY_OBJECT_SHAPE_RECTANGLE,
 			"size": Vector2i(3, 3),
@@ -292,6 +317,13 @@ static func setup_city_object_definitions() -> void:
 			"requires_no_city": false,
 			"repeat_after_place": true,
 			"placement_effect": CITY_OBJECT_PLACEMENT_EFFECT_NONE,
+			"construction_enabled": true,
+			"construction_materials": {
+				CityResourceCatalogScript.RESOURCE_LUMBER: 10,
+				CityResourceCatalogScript.RESOURCE_STONE: 4,
+			},
+			"construction_labor_minutes": 240,
+			"construction_max_workers": 4,
 			"frame_color": Color(0.06, 0.34, 0.40, 0.95),
 			"fill_color": Color(0.18, 0.62, 0.70, 0.48),
 			"frame_thickness": 0.30,
@@ -348,6 +380,30 @@ static func setup_city_object_definitions() -> void:
 		})
 	)
 
+	_city_object_definitions[CITY_OBJECT_ROAD] = (
+		make_city_object_definition({
+			"type": CITY_OBJECT_ROAD,
+			"display_name": "Road",
+			"shape_mode": CITY_OBJECT_SHAPE_TILE_AREA,
+			"size": Vector2i.ONE,
+			"requires_city": true,
+			"requires_no_city": false,
+			"repeat_after_place": true,
+			"placement_effect": CITY_OBJECT_PLACEMENT_EFFECT_NONE,
+			"construction_enabled": true,
+			"construction_materials": {
+				CityResourceCatalogScript.RESOURCE_STONE: 1,
+			},
+			"construction_materials_per_tile": true,
+			"construction_labor_minutes": 12,
+			"construction_labor_per_tile": true,
+			"construction_max_workers": 4,
+			"frame_color": Color(0.20, 0.20, 0.20, 0.95),
+			"fill_color": Color(0.42, 0.42, 0.42, 0.55),
+			"frame_thickness": 0.08,
+		})
+	)
+
 	for raw_object_type in _city_object_definitions.keys():
 		var object_type := str(raw_object_type)
 		var definition: Dictionary = _city_object_definitions[
@@ -387,6 +443,9 @@ static func make_city_object_definition(values: Dictionary) -> Dictionary:
 		values,
 		"production_recipe"
 	)
+	var construction_materials := _normalize_construction_materials(
+		_copy_dictionary_field(values, "construction_materials")
+	)
 
 	# Workplace storage is an output buffer. Its compatibility is derived from
 	# recipe outputs so multi-output recipes cannot leave a stale list behind.
@@ -419,6 +478,24 @@ static func make_city_object_definition(values: Dictionary) -> Dictionary:
 				"placement_effect",
 				CITY_OBJECT_PLACEMENT_EFFECT_NONE
 			)
+		),
+		"construction_enabled": bool(
+			values.get("construction_enabled", false)
+		),
+		"construction_materials": construction_materials,
+		"construction_materials_per_tile": bool(
+			values.get("construction_materials_per_tile", false)
+		),
+		"construction_labor_minutes": maxi(
+			int(values.get("construction_labor_minutes", 0)),
+			0
+		),
+		"construction_labor_per_tile": bool(
+			values.get("construction_labor_per_tile", false)
+		),
+		"construction_max_workers": maxi(
+			int(values.get("construction_max_workers", 1)),
+			1
 		),
 		"frame_color": values.get(
 			"frame_color",
@@ -485,6 +562,20 @@ static func make_city_object_definition(values: Dictionary) -> Dictionary:
 			"overflow_policy"
 		),
 	}
+
+
+static func _normalize_construction_materials(
+	raw_materials: Dictionary
+) -> Dictionary:
+	var materials: Dictionary = {}
+
+	for resource in CityResourceCatalogScript.get_city_resource_types():
+		var amount := maxi(int(raw_materials.get(resource, 0)), 0)
+
+		if amount > 0:
+			materials[resource] = amount
+
+	return materials
 
 
 static func _get_recipe_output_resource_types(
@@ -590,6 +681,33 @@ static func get_city_object_production_recipe(
 	return _get_city_object_definition_dictionary(
 		city_object,
 		"production_recipe"
+	)
+
+
+static func get_city_object_construction_materials(
+	object_type: String
+) -> Dictionary:
+	var definition := get_city_object_definition(object_type)
+
+	if definition.is_empty():
+		return {}
+
+	var raw_materials = definition.get("construction_materials", {})
+
+	if not raw_materials is Dictionary:
+		return {}
+
+	return raw_materials.duplicate(true)
+
+
+static func city_object_type_uses_construction(
+	object_type: String
+) -> bool:
+	var definition := get_city_object_definition(object_type)
+
+	return (
+		not definition.is_empty()
+		and bool(definition.get("construction_enabled", false))
 	)
 
 

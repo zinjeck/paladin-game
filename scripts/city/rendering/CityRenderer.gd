@@ -22,6 +22,12 @@ const CityWorkplaceZoneOverlayCacheScript = preload(
 const CityWorldGeneratorScript = preload(
 	"res://scripts/city/generation/CityWorldGenerator.gd"
 )
+const CityConstructionSystemScript = preload(
+	"res://scripts/city/simulation/systems/CityConstructionSystem.gd"
+)
+const CityWorkSystemScript = preload(
+	"res://scripts/city/simulation/systems/CityWorkSystem.gd"
+)
 @export_file("*.tscn") var world_scene_path: String = ""
 @export var local_tiles_per_world_tile: int = 64
 @export var city_tile_size: int = 2
@@ -111,6 +117,7 @@ var hovered_city_tile: Vector2i = Vector2i(-1, -1)
 const CITY_SELECTION_KIND_NONE := "none"
 const CITY_SELECTION_KIND_OBJECT := "object"
 const CITY_SELECTION_KIND_CITIZEN := "citizen"
+const CITY_SELECTION_KIND_CONSTRUCTION_SITE := "construction_site"
 
 var selected_city_entity_kind: String = (
 	CITY_SELECTION_KIND_NONE
@@ -139,6 +146,16 @@ var selected_city_citizen_id: int:
 
 		return -1
 
+var selected_city_construction_site_id: int:
+	get:
+		if (
+			selected_city_entity_kind
+			== CITY_SELECTION_KIND_CONSTRUCTION_SITE
+		):
+			return selected_city_entity_id
+
+		return -1
+
 var observed_city_object_version: int = -1
 var observed_city_container_version: int = -1
 var observed_city_public_storage_version: int = -1
@@ -150,6 +167,7 @@ var observed_city_citizen_task_version: int = -1
 var observed_city_ground_pile_version: int = -1
 var observed_city_player_command_version: int = -1
 var observed_city_haul_reservation_version: int = -1
+var observed_city_construction_version: int = -1
 var city_citizen_movement_presentation = (
 	CityCitizenMovementPresentationScript.new()
 )
@@ -185,6 +203,9 @@ var workplace_details_body_label: Label
 var workplace_details_open: bool = false
 var workplace_details_object_id: int = -1
 var workplace_details_button_body_line_count: int = 0
+var construction_site_info_panel: Panel
+var construction_site_info_title_label: Label
+var construction_site_info_body_label: Label
 var object_selection_box_panel: Panel
 var is_object_selection_dragging: bool = false
 var object_selection_drag_start_screen: Vector2 = Vector2.ZERO
@@ -200,6 +221,11 @@ const DEBUG_CITY_OBJECT_NAME_PADDING: Vector2 = Vector2(4.0, 2.0)
 const DEBUG_CITY_OBJECT_NAME_MAX_WIDTH_RATIO: float = 0.82
 const DEBUG_CITY_OBJECT_NAME_MAX_HEIGHT_RATIO: float = 0.45
 const OBJECT_SELECTION_DRAG_THRESHOLD_PIXELS: float = 4.0
+const CONSTRUCTION_SITE_INFO_PANEL_WIDTH: float = 252.0
+const CONSTRUCTION_SITE_INFO_PANEL_HEADER_HEIGHT: float = 60.0
+const CONSTRUCTION_SITE_INFO_PANEL_RESOURCE_ROW_HEIGHT: float = 26.0
+const CONSTRUCTION_SITE_INFO_PANEL_BOTTOM_PADDING: float = 14.0
+const CONSTRUCTION_SITE_INFO_PANEL_SIDE_GAP: float = 10.0
 const SELECTED_OBJECT_BORDER_TILE_FRACTION: float = 0.02
 const CURSOR_LOOK_FILL_COLOR: Color = Color(1.0, 1.0, 1.0, 0.08)
 const CURSOR_LOOK_BORDER_COLOR: Color = Color(1.0, 1.0, 1.0, 0.58)
@@ -210,8 +236,13 @@ const CITY_CITIZEN_MARKER_COLOR: Color = (
 )
 const CITY_CITIZEN_MARKER_TILE_SCALE: float = 0.5
 const CITY_HAUL_CARGO_MARKER_CITIZEN_SCALE: float = 0.5
-const CITY_GROUND_PILE_MARKER_TILE_SCALE: float = 0.42
+const CITY_GROUND_PILE_MARKER_TILE_SCALE: float = 0.16
 const CITY_GROUND_PILE_BORDER_COLOR := Color(0.08, 0.08, 0.08, 0.95)
+const CITY_CONSTRUCTION_PILE_BORDER_COLOR := Color(1.0, 0.72, 0.08, 1.0)
+const CITY_CONSTRUCTION_CLEARING_COLOR := Color(1.0, 0.48, 0.08, 0.9)
+const CITY_CONSTRUCTION_GATHERING_COLOR := Color(0.12, 0.78, 1.0, 0.9)
+const CITY_CONSTRUCTION_LABOR_COLOR := Color(0.25, 1.0, 0.48, 0.9)
+const CITY_CONSTRUCTION_BLUEPRINT_FILL := Color(0.2, 0.65, 1.0, 0.18)
 const CITY_PLAYER_COMMAND_DARKEN_COLOR := Color(0.0, 0.0, 0.0, 0.72)
 const CITY_PLAYER_COMMAND_HIGHLIGHT_FILL := Color(1.0, 0.78, 0.12, 0.28)
 const CITY_PLAYER_COMMAND_HIGHLIGHT_BORDER := Color(1.0, 0.88, 0.28, 0.95)
@@ -328,6 +359,9 @@ func _process(delta: float) -> void:
 	if is_road_dragging:
 		update_road_drag_selection()
 
+	if selected_city_construction_site_id > 0:
+		update_construction_site_info_panel_screen_position()
+
 	var city_objects_changed := false
 	var city_containers_changed := false
 	var public_storage_changed := false
@@ -338,6 +372,7 @@ func _process(delta: float) -> void:
 	var city_ground_piles_changed := false
 	var city_player_commands_changed := false
 	var city_haul_reservations_changed := false
+	var city_construction_changed := false
 	var city_assignments_changed := false
 	var city_workplaces_changed := false
 	var city_tile_data_changed := false
@@ -453,6 +488,15 @@ func _process(delta: float) -> void:
 		city_haul_reservations_changed = true
 
 	if (
+		observed_city_construction_version
+		!= WorldData.city_construction_version
+	):
+		observed_city_construction_version = (
+			WorldData.city_construction_version
+		)
+		city_construction_changed = true
+
+	if (
 		observed_city_assignment_version
 		!= WorldData.city_assignment_version
 	):
@@ -524,6 +568,7 @@ func _process(delta: float) -> void:
 		or city_ground_piles_changed
 		or city_player_commands_changed
 		or city_haul_reservations_changed
+		or city_construction_changed
 		or city_assignments_changed
 		or city_workplaces_changed
 		or city_tile_data_changed
@@ -535,6 +580,7 @@ func _process(delta: float) -> void:
 		city_objects_changed
 		or city_tile_data_changed
 		or city_ground_piles_changed
+		or city_construction_changed
 		or city_surface_features_changed
 	):
 		queue_city_background_layer_redraw()
@@ -552,6 +598,7 @@ func _process(delta: float) -> void:
 		city_objects_changed
 		or city_tile_data_changed
 		or city_player_commands_changed
+		or city_construction_changed
 		or city_surface_features_changed
 	):
 		queue_city_interaction_layer_redraw()
@@ -568,6 +615,7 @@ func _process(delta: float) -> void:
 		or city_ground_piles_changed
 		or city_player_commands_changed
 		or city_haul_reservations_changed
+		or city_construction_changed
 		or city_surface_features_changed
 	):
 		update_debug_panel_text()
@@ -655,6 +703,11 @@ func _input(event: InputEvent) -> void:
 			if has_active_city_object_placement():
 				cancel_active_city_object_placement()
 				close_all_city_object_menus()
+				get_viewport().set_input_as_handled()
+				return
+
+			if selected_city_construction_site_id > 0:
+				clear_selected_city_entity()
 				get_viewport().set_input_as_handled()
 				return
 
@@ -933,6 +986,7 @@ func create_city_ui() -> void:
 	create_resource_bar()
 	create_city_maps_menu()
 	create_object_info_panel()
+	create_construction_site_info_panel()
 	create_object_selection_box_visual()
 	create_city_player_command_selection_box_visual()
 	create_back_button()
@@ -1107,6 +1161,7 @@ func create_city_player_command_menu() -> void:
 	city_command_cancel_task_button = Button.new()
 	city_command_cancel_task_button.text = "Cancel\nTask"
 	city_command_cancel_task_button.focus_mode = Control.FOCUS_NONE
+	city_command_cancel_task_button.toggle_mode = true
 	city_command_cancel_task_button.custom_minimum_size = Vector2(58.0, 58.0)
 	city_command_cancel_task_button.add_theme_font_size_override(
 		"font_size",
@@ -1122,6 +1177,7 @@ func create_city_player_command_menu() -> void:
 	city_command_chop_trees_button = Button.new()
 	city_command_chop_trees_button.text = "Chop\nTrees"
 	city_command_chop_trees_button.focus_mode = Control.FOCUS_NONE
+	city_command_chop_trees_button.toggle_mode = true
 	city_command_chop_trees_button.custom_minimum_size = Vector2(58.0, 58.0)
 	city_command_chop_trees_button.add_theme_font_size_override("font_size", 12)
 	city_command_chop_trees_button.mouse_filter = Control.MOUSE_FILTER_STOP
@@ -1136,6 +1192,7 @@ func create_city_player_command_menu() -> void:
 	city_command_collect_rocks_button = Button.new()
 	city_command_collect_rocks_button.text = "Collect\nRocks"
 	city_command_collect_rocks_button.focus_mode = Control.FOCUS_NONE
+	city_command_collect_rocks_button.toggle_mode = true
 	city_command_collect_rocks_button.custom_minimum_size = Vector2(58.0, 58.0)
 	city_command_collect_rocks_button.add_theme_font_size_override("font_size", 12)
 	city_command_collect_rocks_button.mouse_filter = Control.MOUSE_FILTER_STOP
@@ -1255,38 +1312,21 @@ func is_city_player_command_tool_active() -> bool:
 
 
 func update_city_player_command_button_visuals() -> void:
-	var normal_style := create_flat_ui_style(
-		Color(0.16, 0.16, 0.16, 0.96),
-		Color(0.5, 0.5, 0.5, 1.0),
-		1
-	)
-	var selected_style := create_flat_ui_style(
-		Color(0.12, 0.28, 0.32, 0.98),
-		Color(0.0, 0.85, 1.0, 1.0),
-		2
-	)
-	var cancel_selected_style := create_flat_ui_style(
-		Color(0.34, 0.10, 0.10, 0.98),
-		Color(1.0, 0.22, 0.22, 1.0),
-		2
-	)
-
 	if city_command_cancel_task_button != null:
-		city_command_cancel_task_button.add_theme_stylebox_override(
-			"normal",
-			cancel_selected_style if is_city_player_command_cancel_mode_active else normal_style
+		city_command_cancel_task_button.set_pressed_no_signal(
+			is_city_player_command_cancel_mode_active
 		)
 
 	if city_command_chop_trees_button != null:
-		city_command_chop_trees_button.add_theme_stylebox_override(
-			"normal",
-			selected_style if active_city_player_command_type == WorldData.CITY_PLAYER_COMMAND_TYPE_CHOP_TREE else normal_style
+		city_command_chop_trees_button.set_pressed_no_signal(
+			active_city_player_command_type
+			== WorldData.CITY_PLAYER_COMMAND_TYPE_CHOP_TREE
 		)
 
 	if city_command_collect_rocks_button != null:
-		city_command_collect_rocks_button.add_theme_stylebox_override(
-			"normal",
-			selected_style if active_city_player_command_type == WorldData.CITY_PLAYER_COMMAND_TYPE_COLLECT_ROCK else normal_style
+		city_command_collect_rocks_button.set_pressed_no_signal(
+			active_city_player_command_type
+			== WorldData.CITY_PLAYER_COMMAND_TYPE_COLLECT_ROCK
 		)
 
 
@@ -1300,7 +1340,7 @@ func layout_city_player_command_menu(viewport_size: Vector2) -> void:
 		return
 
 	var button_size := Vector2(58.0, 58.0)
-	var gap := 4.0
+	var gap := 6.0
 	var centered_x := (
 		bottom_button_six.position.x
 		+ bottom_button_six.size.x * 0.5
@@ -1755,6 +1795,7 @@ func update_city_ui_layout() -> void:
 	layout_build_option_button(viewport_size)
 	layout_resource_bar(viewport_size)
 	layout_object_info_panel(viewport_size)
+	update_construction_site_info_panel_screen_position()
 	layout_city_maps_menu(viewport_size)
 	layout_back_button(viewport_size)
 func close_city_object_menu(object_type: String) -> void:
@@ -1959,6 +2000,66 @@ func create_object_info_panel() -> void:
 	object_info_panel.add_child(object_info_body_label)
 	create_object_info_storage_rows()
 	create_workplace_details_ui()
+
+
+func create_construction_site_info_panel() -> void:
+	construction_site_info_panel = Panel.new()
+	construction_site_info_panel.visible = false
+	construction_site_info_panel.mouse_filter = (
+		Control.MOUSE_FILTER_STOP
+	)
+
+	var panel_style := create_flat_ui_style(
+		Color(0.16, 0.16, 0.16, 0.94),
+		Color(0.42, 0.42, 0.42, 1.0),
+		1
+	)
+
+	construction_site_info_panel.add_theme_stylebox_override(
+		"panel",
+		panel_style
+	)
+	ui_root.add_child(construction_site_info_panel)
+
+	construction_site_info_title_label = Label.new()
+	construction_site_info_title_label.text = (
+		"Construction Progress: 0%"
+	)
+	construction_site_info_title_label.mouse_filter = (
+		Control.MOUSE_FILTER_IGNORE
+	)
+	construction_site_info_title_label.add_theme_color_override(
+		"font_color",
+		Color(0.88, 0.96, 1.0, 1.0)
+	)
+	construction_site_info_title_label.add_theme_font_size_override(
+		"font_size",
+		16
+	)
+	construction_site_info_panel.add_child(
+		construction_site_info_title_label
+	)
+
+	construction_site_info_body_label = Label.new()
+	construction_site_info_body_label.text = ""
+	construction_site_info_body_label.mouse_filter = (
+		Control.MOUSE_FILTER_IGNORE
+	)
+	construction_site_info_body_label.add_theme_color_override(
+		"font_color",
+		Color(0.82, 0.82, 0.82, 1.0)
+	)
+	construction_site_info_body_label.add_theme_font_size_override(
+		"font_size",
+		14
+	)
+	construction_site_info_body_label.add_theme_constant_override(
+		"line_spacing",
+		4
+	)
+	construction_site_info_panel.add_child(
+		construction_site_info_body_label
+	)
 
 func create_object_info_storage_rows() -> void:
 	object_info_storage_title_label = Label.new()
@@ -2179,6 +2280,136 @@ func layout_workplace_details_panel(
 			panel_width - 28.0,
 			panel_height - 70.0
 		)
+
+
+func layout_construction_site_info_panel_content(
+	resource_row_count: int
+) -> void:
+	if construction_site_info_panel == null:
+		return
+
+	var safe_row_count := maxi(resource_row_count, 1)
+	var panel_height := (
+		CONSTRUCTION_SITE_INFO_PANEL_HEADER_HEIGHT
+		+ float(safe_row_count)
+		* CONSTRUCTION_SITE_INFO_PANEL_RESOURCE_ROW_HEIGHT
+		+ CONSTRUCTION_SITE_INFO_PANEL_BOTTOM_PADDING
+	)
+
+	construction_site_info_panel.size = Vector2(
+		CONSTRUCTION_SITE_INFO_PANEL_WIDTH,
+		panel_height
+	)
+
+	if construction_site_info_title_label != null:
+		construction_site_info_title_label.position = Vector2(
+			12.0,
+			8.0
+		)
+		construction_site_info_title_label.size = Vector2(
+			CONSTRUCTION_SITE_INFO_PANEL_WIDTH - 24.0,
+			32.0
+		)
+
+	if construction_site_info_body_label != null:
+		construction_site_info_body_label.position = Vector2(
+			20.0,
+			CONSTRUCTION_SITE_INFO_PANEL_HEADER_HEIGHT
+		)
+		construction_site_info_body_label.size = Vector2(
+			CONSTRUCTION_SITE_INFO_PANEL_WIDTH - 40.0,
+			float(safe_row_count)
+			* CONSTRUCTION_SITE_INFO_PANEL_RESOURCE_ROW_HEIGHT
+		)
+
+
+func update_construction_site_info_panel_screen_position() -> void:
+	if (
+		construction_site_info_panel == null
+		or not construction_site_info_panel.visible
+		or selected_city_construction_site_id <= 0
+	):
+		return
+
+	var site := WorldData.get_city_construction_site_by_id(
+		selected_city_construction_site_id
+	)
+
+	if site.is_empty():
+		return
+
+	var site_world_rect := get_city_construction_site_world_rect(site)
+
+	if (
+		site_world_rect.size.x <= 0.0
+		or site_world_rect.size.y <= 0.0
+	):
+		return
+
+	# Keep the panel truly attached to the site's right side. It is allowed to
+	# travel off-screen with the site instead of turning into an edge-clamped HUD.
+	var canvas_transform := get_global_transform_with_canvas()
+	var right_middle_screen := canvas_transform * Vector2(
+		site_world_rect.end.x,
+		site_world_rect.position.y
+		+ site_world_rect.size.y * 0.5
+	)
+	var panel_size := construction_site_info_panel.size
+	construction_site_info_panel.position = Vector2(
+		right_middle_screen.x
+		+ CONSTRUCTION_SITE_INFO_PANEL_SIDE_GAP,
+		right_middle_screen.y - panel_size.y
+	)
+
+
+func get_city_construction_site_world_rect(
+	site: Dictionary
+) -> Rect2:
+	var footprint_tiles = site.get("footprint_tiles", [])
+
+	if not footprint_tiles is Array or footprint_tiles.is_empty():
+		return Rect2()
+
+	var minimum_tile := Vector2i(
+		2147483647,
+		2147483647
+	)
+	var maximum_tile := Vector2i(
+		-2147483648,
+		-2147483648
+	)
+	var found_tile := false
+
+	for raw_tile in footprint_tiles:
+		if not raw_tile is Vector2i:
+			continue
+
+		var tile_position: Vector2i = raw_tile
+		minimum_tile.x = mini(minimum_tile.x, tile_position.x)
+		minimum_tile.y = mini(minimum_tile.y, tile_position.y)
+		maximum_tile.x = maxi(maximum_tile.x, tile_position.x)
+		maximum_tile.y = maxi(maximum_tile.y, tile_position.y)
+		found_tile = true
+
+	if not found_tile:
+		return Rect2()
+
+	return Rect2(
+		Vector2(
+			float(minimum_tile.x * city_tile_size),
+			float(minimum_tile.y * city_tile_size)
+		),
+		Vector2(
+			float(
+				(maximum_tile.x - minimum_tile.x + 1)
+				* city_tile_size
+			),
+			float(
+				(maximum_tile.y - minimum_tile.y + 1)
+				* city_tile_size
+			)
+		)
+	)
 
 func layout_object_info_storage_rows(panel_width: float) -> void:
 	if object_info_storage_title_label != null:
@@ -2584,6 +2815,25 @@ func get_haul_endpoint_display_text(
 
 	if (
 		endpoint_kind
+		== WorldData.CITY_CITIZEN_HAUL_ENDPOINT_KIND_CONSTRUCTION_SITE
+	):
+		var site := WorldData.get_city_construction_site_by_id(
+			endpoint_id
+		)
+
+		if site.is_empty():
+			return "missing construction site #" + str(endpoint_id)
+
+		return (
+			WorldData.get_city_object_display_name_for_type(
+				str(site.get("object_type", ""))
+			)
+			+ " Blueprint #"
+			+ str(endpoint_id)
+		)
+
+	if (
+		endpoint_kind
 		!= WorldData
 		.CITY_CITIZEN_HAUL_ENDPOINT_KIND_CITY_OBJECT_CONTAINER
 	):
@@ -2776,9 +3026,99 @@ func on_workplace_details_button_pressed() -> void:
 	workplace_details_open = not workplace_details_open
 	update_selected_entity_panel()
 
+
+func hide_construction_site_info_panel() -> void:
+	if construction_site_info_panel != null:
+		construction_site_info_panel.visible = false
+
+
+func update_selected_city_construction_site_panel() -> void:
+	object_info_panel.visible = false
+	hide_object_info_storage_display()
+	hide_workplace_details_ui()
+
+	var site := WorldData.get_city_construction_site_by_id(
+		selected_city_construction_site_id
+	)
+
+	if not is_city_construction_site_selectable(site):
+		hide_construction_site_info_panel()
+		clear_selected_city_entity()
+		return
+
+	var progress_summary := (
+		CityConstructionSystemScript
+		.get_city_construction_site_progress_summary(
+			selected_city_construction_site_id
+		)
+	)
+
+	if progress_summary.is_empty():
+		hide_construction_site_info_panel()
+		clear_selected_city_entity()
+		return
+
+	construction_site_info_title_label.text = (
+		"Construction Progress: "
+		+ str(
+			int(progress_summary.get("progress_percent", 0))
+		)
+		+ "%"
+	)
+
+	var resource_lines: Array[String] = []
+	var material_recipe = site.get("material_recipe", {})
+
+	if material_recipe is Dictionary:
+		for resource in WorldData.get_city_resource_types():
+			var required_amount := maxi(
+				int(material_recipe.get(resource, 0)),
+				0
+			)
+
+			if required_amount <= 0:
+				continue
+
+			var delivered_amount := mini(
+				WorldData.get_city_construction_site_reserved_resource_amount(
+					selected_city_construction_site_id,
+					resource
+				),
+				required_amount
+			)
+			resource_lines.append(
+				resource.capitalize()
+				+ ": "
+				+ str(delivered_amount)
+				+ "/"
+				+ str(required_amount)
+			)
+
+	if resource_lines.is_empty():
+		resource_lines.append("No materials required")
+
+	construction_site_info_body_label.text = "\n".join(
+		resource_lines
+	)
+	layout_construction_site_info_panel_content(
+		resource_lines.size()
+	)
+	construction_site_info_panel.visible = true
+	construction_site_info_panel.move_to_front()
+	update_construction_site_info_panel_screen_position()
+
 func update_selected_entity_panel() -> void:
 	if object_info_panel == null:
 		return
+
+	if (
+		selected_city_entity_kind
+		== CITY_SELECTION_KIND_CONSTRUCTION_SITE
+	):
+		update_selected_city_construction_site_panel()
+		return
+
+	hide_construction_site_info_panel()
 
 	if (
 		selected_city_entity_kind
@@ -3352,8 +3692,7 @@ func finish_city_player_command_drag(screen_position: Vector2) -> void:
 	refresh_city_player_command_drag_preview()
 
 	if city_player_command_drag_removing:
-		WorldData.remove_city_player_commands_at_tiles(
-			WorldData.CITY_PLAYER_COMMAND_TYPE_NONE,
+		CityWorkSystemScript.cancel_player_targets_at_tiles(
 			city_player_command_drag_preview_tiles
 		)
 	else:
@@ -3383,17 +3722,16 @@ func refresh_city_player_command_drag_preview() -> void:
 	if not is_city_player_command_dragging or city_world == null:
 		return
 
-	for tile_position in get_city_tiles_in_player_command_drag_rect():
-		if city_player_command_drag_removing:
-			var command := WorldData.get_city_player_command_at_tile(
-				tile_position
-			)
+	var drag_tiles := get_city_tiles_in_player_command_drag_rect()
 
-			if not command.is_empty():
-				city_player_command_drag_preview_tiles.append(
-					tile_position
-				)
-		elif WorldData.can_designate_city_player_command_at_tile(
+	if city_player_command_drag_removing:
+		city_player_command_drag_preview_tiles = (
+			CityWorkSystemScript.get_cancel_preview_tiles(drag_tiles)
+		)
+		return
+
+	for tile_position in drag_tiles:
+		if WorldData.can_designate_city_player_command_at_tile(
 			active_city_player_command_type,
 			tile_position
 		):
@@ -3698,6 +4036,7 @@ func cancel_road_placement() -> void:
 
 	print("Road placement canceled.")
 
+
 func confirm_active_city_object_placement() -> void:
 	if city_world == null:
 		return
@@ -3713,25 +4052,52 @@ func confirm_active_city_object_placement() -> void:
 	var size_tiles: Vector2i = preview_object["size"]
 	var object_owner: String = str(preview_object.get("owner", "player"))
 	var repeat_after_place: bool = bool(active_city_object_placement.get("repeat_after_place", false))
+	var uses_construction := (
+		WorldData.city_object_type_uses_construction(object_type)
+	)
 
-	if not WorldData.can_place_city_object(
+	var can_place := WorldData.can_place_city_object(
 		city_world,
 		top_left,
 		size_tiles,
 		object_type
-	):
+	)
+
+	if uses_construction:
+		can_place = WorldData.can_place_city_object_construction(
+			city_world,
+			top_left,
+			size_tiles,
+			object_type
+		)
+
+	if not can_place:
 		print("Cannot place object here.")
 		return
 
-	var placed_object := WorldData.add_city_object(
-		object_type,
-		top_left,
-		size_tiles,
-		object_owner,
-		city_world
-	)
+	var placement_result: Dictionary = {}
 
-	after_city_object_placed(placed_object)
+	if uses_construction:
+		placement_result = CityConstructionSystemScript.create_rectangular_site(
+			object_type,
+			top_left,
+			size_tiles,
+			object_owner,
+			city_world
+		)
+	else:
+		placement_result = WorldData.add_city_object(
+			object_type,
+			top_left,
+			size_tiles,
+			object_owner,
+			city_world
+		)
+		after_city_object_placed(placement_result)
+
+	if placement_result.is_empty():
+		print("Could not place object here.")
+		return
 
 	if not repeat_after_place:
 		clear_city_object_placement()
@@ -3741,7 +4107,10 @@ func confirm_active_city_object_placement() -> void:
 	update_build_button_state()
 	update_debug_panel_text()
 
-	print("Placed city object: ", placed_object)
+	if uses_construction:
+		print("Queued construction blueprint: ", placement_result)
+	else:
+		print("Placed city object: ", placement_result)
 
 	queue_city_background_layer_redraw()
 	queue_city_interaction_layer_redraw()
@@ -3903,11 +4272,6 @@ func select_city_entity_under_mouse() -> void:
 		clear_selected_city_entity()
 		return
 
-	if WorldData.debug_mode_enabled:
-		set_debug_selected_city_tile(
-			tile_position
-		)
-
 	var mouse_world_position := (
 		get_global_mouse_position()
 	)
@@ -3946,6 +4310,18 @@ func select_city_entity_under_mouse() -> void:
 		)
 		return
 
+	var construction_site := (
+		WorldData.get_city_construction_site_at_tile(
+			tile_position
+		)
+	)
+
+	if is_city_construction_site_selectable(construction_site):
+		set_selected_city_construction_site(
+			int(construction_site.get("id", -1))
+		)
+		return
+
 	var city_object := (
 		WorldData.get_city_object_at_tile(
 			tile_position
@@ -3954,6 +4330,10 @@ func select_city_entity_under_mouse() -> void:
 
 	if not is_city_object_selectable(city_object):
 		clear_selected_city_entity()
+
+		if WorldData.debug_mode_enabled:
+			set_debug_selected_city_tile(tile_position)
+
 		return
 
 	set_selected_city_object(
@@ -4037,6 +4417,9 @@ func set_debug_selected_city_tile(
 	):
 		return
 
+	if has_selected_city_entity():
+		clear_selected_city_entity()
+
 	if debug_selected_city_tile == tile_position:
 		return
 
@@ -4093,9 +4476,30 @@ func set_selected_city_entity(
 		if not bool(citizen.get("alive", false)):
 			clear_selected_city_entity()
 			return
+	elif (
+		selection_kind
+		== CITY_SELECTION_KIND_CONSTRUCTION_SITE
+	):
+		var construction_site := (
+			WorldData.get_city_construction_site_by_id(
+				entity_id
+			)
+		)
+
+		if not is_city_construction_site_selectable(
+			construction_site
+		):
+			clear_selected_city_entity()
+			return
 	else:
 		clear_selected_city_entity()
 		return
+
+	if (
+		WorldData.debug_mode_enabled
+		and has_debug_selected_city_tile()
+	):
+		clear_debug_selected_city_tile()
 
 	if (
 		selected_city_entity_kind == selection_kind
@@ -4103,12 +4507,6 @@ func set_selected_city_entity(
 	):
 		update_selected_entity_panel()
 		return
-
-	if (
-		WorldData.debug_mode_enabled
-		and has_debug_selected_city_tile()
-	):
-		clear_debug_navigation_result()
 
 	selected_city_entity_kind = selection_kind
 	selected_city_entity_id = entity_id
@@ -4134,6 +4532,15 @@ func set_selected_city_citizen(
 	set_selected_city_entity(
 		CITY_SELECTION_KIND_CITIZEN,
 		citizen_id
+	)
+
+
+func set_selected_city_construction_site(
+	site_id: int
+) -> void:
+	set_selected_city_entity(
+		CITY_SELECTION_KIND_CONSTRUCTION_SITE,
+		site_id
 	)
 
 
@@ -4165,6 +4572,18 @@ func is_city_object_selectable(city_object: Dictionary) -> bool:
 		return false
 
 	return true
+
+
+func is_city_construction_site_selectable(
+	construction_site: Dictionary
+) -> bool:
+	if construction_site.is_empty():
+		return false
+
+	return (
+		str(construction_site.get("object_type", ""))
+		!= WorldData.CITY_OBJECT_ROAD
+	)
 
 func get_city_object_by_id(object_id) -> Dictionary:
 	if object_id == null:
@@ -4306,20 +4725,20 @@ func confirm_road_preview() -> void:
 		return
 
 	var placed_tile_count := road_preview_tiles.size()
-	var road_object := WorldData.add_city_road_object(
+	var construction_site := CityConstructionSystemScript.create_road_site(
 		road_preview_tiles,
 		"player",
 		city_world
 	)
 
-	if road_object.is_empty():
+	if construction_site.is_empty():
 		print("No valid road tiles could be placed.")
 		road_preview_tiles.clear()
 		road_preview_lookup.clear()
 		queue_city_interaction_layer_redraw()
 		return
 
-	print("Placed road with ", placed_tile_count, " tiles.")
+	print("Queued road blueprint with ", placed_tile_count, " tiles.")
 
 	is_road_placement_active = true
 	is_road_dragging = false
@@ -4898,6 +5317,7 @@ func draw_city_background_layer(draw_target: CanvasItem) -> void:
 	draw_active_workplace_zone_background(draw_target)
 	draw_city_objects(draw_target)
 	draw_city_roads(draw_target)
+	draw_city_construction_sites(draw_target)
 	draw_debug_navigation_path(draw_target)
 	draw_city_ground_piles(draw_target)
 
@@ -4918,9 +5338,9 @@ func draw_city_interaction_layer(draw_target: CanvasItem) -> void:
 	draw_city_player_command_overlay(draw_target)
 	draw_debug_selected_city_tile_highlight(draw_target)
 	draw_selected_city_object_highlight(draw_target)
-	draw_hovered_city_tile_highlight(draw_target)
 	draw_city_object_debug_names(draw_target)
 	draw_active_city_object_placement_preview(draw_target)
+	draw_hovered_city_tile_highlight(draw_target)
 	draw_road_preview(draw_target)
 
 
@@ -4929,7 +5349,46 @@ func draw_city_player_command_overlay(draw_target: CanvasItem) -> void:
 		return
 
 	if is_city_player_command_cancel_mode_active:
-		for tile_position in city_player_command_drag_preview_tiles:
+		# Every active natural-resource target remains visible while the
+		# destructive tool is armed. Construction previews keep their normal
+		# phase rendering underneath this interaction-layer overlay.
+		for raw_command in WorldData.get_city_player_command_snapshot():
+			if not raw_command is Dictionary:
+				continue
+
+			var raw_command_tile = raw_command.get(
+				"tile_position",
+				WorldData.INVALID_CITY_TILE_POSITION
+			)
+
+			if not raw_command_tile is Vector2i:
+				continue
+
+			var command_tile_rect := get_city_tile_world_rect(
+				raw_command_tile
+			)
+			draw_target.draw_rect(
+				command_tile_rect,
+				CITY_PLAYER_COMMAND_REMOVE_PREVIEW_FILL,
+				true
+			)
+			draw_inner_box_border(
+				draw_target,
+				command_tile_rect,
+				CITY_PLAYER_COMMAND_REMOVE_PREVIEW_BORDER,
+				float(city_tile_size) * 0.08
+			)
+
+		var cancel_preview_tiles := city_player_command_drag_preview_tiles
+
+		if not is_city_player_command_dragging:
+			cancel_preview_tiles = (
+				CityWorkSystemScript.get_cancel_preview_tiles(
+					[hovered_city_tile]
+				)
+			)
+
+		for tile_position in cancel_preview_tiles:
 			var cancel_tile_rect := get_city_tile_world_rect(tile_position)
 			draw_target.draw_rect(
 				cancel_tile_rect,
@@ -5309,10 +5768,10 @@ func draw_city_ground_piles(draw_target: CanvasItem) -> void:
 
 	var next_slot_by_tile: Dictionary = {}
 	var multiple_pile_offsets := [
-		Vector2(-0.17, -0.17),
-		Vector2(0.17, -0.17),
-		Vector2(-0.17, 0.17),
-		Vector2(0.17, 0.17),
+		Vector2(-0.075, -0.075),
+		Vector2(0.075, -0.075),
+		Vector2(-0.075, 0.075),
+		Vector2(0.075, 0.075),
 	]
 
 	for raw_ground_pile in ground_piles:
@@ -5342,7 +5801,7 @@ func draw_city_ground_piles(draw_target: CanvasItem) -> void:
 		var center_offset := Vector2.ZERO
 
 		if pile_count > 1:
-			marker_scale = 0.27
+			marker_scale = 0.11
 			center_offset = multiple_pile_offsets[
 				posmod(slot_index, multiple_pile_offsets.size())
 			]
@@ -5352,26 +5811,37 @@ func draw_city_ground_piles(draw_target: CanvasItem) -> void:
 			(float(tile_position.y) + 0.5) * float(city_tile_size)
 		)
 		tile_center += center_offset * float(city_tile_size)
+		# marker_scale is the complete marker size, including its border.
+		# Keeping the border inside the rectangle prevents a smaller resource
+		# center from accidentally leaving the overall ground pile unchanged.
 		var marker_side := float(city_tile_size) * marker_scale
 		var marker_rect := Rect2(
 			tile_center - Vector2.ONE * marker_side * 0.5,
 			Vector2.ONE * marker_side
 		)
-		var border_width := maxf(
-			float(city_tile_size) * 0.045,
-			0.5
-		)
+		var border_width := maxf(marker_side * 0.16, 0.5)
+		var resource_rect := marker_rect.grow(-border_width)
+		var border_color := CITY_GROUND_PILE_BORDER_COLOR
+
+		if (
+			WorldData.get_city_ground_pile_construction_site_id(
+				ground_pile
+			)
+			> 0
+		):
+			border_color = CITY_CONSTRUCTION_PILE_BORDER_COLOR
 
 		draw_target.draw_rect(
-			marker_rect.grow(border_width),
-			CITY_GROUND_PILE_BORDER_COLOR,
-			true
-		)
-		draw_target.draw_rect(
 			marker_rect,
-			get_resource_color(resource),
+			border_color,
 			true
 		)
+		if resource_rect.size.x > 0.0 and resource_rect.size.y > 0.0:
+			draw_target.draw_rect(
+				resource_rect,
+				get_resource_color(resource),
+				true
+			)
 
 
 func draw_debug_navigation_path(draw_target: CanvasItem) -> void:
@@ -5697,6 +6167,70 @@ func draw_city_objects(draw_target: CanvasItem) -> void:
 			true
 		)
 
+
+func draw_city_construction_sites(draw_target: CanvasItem) -> void:
+	for raw_site in WorldData.get_city_construction_site_snapshot():
+		if not raw_site is Dictionary:
+			continue
+
+		var site: Dictionary = raw_site
+		var phase_color := _get_city_construction_phase_color(
+			str(site.get("phase", ""))
+		)
+		var object_type := str(site.get("object_type", ""))
+		var footprint_tiles = site.get("footprint_tiles", [])
+
+		if not footprint_tiles is Array:
+			continue
+
+		if object_type != WorldData.CITY_OBJECT_ROAD:
+			var preview_object := {
+				"type": object_type,
+				"top_left": site.get(
+					"top_left",
+					WorldData.INVALID_CITY_TILE_POSITION
+				),
+				"size": site.get("size", Vector2i.ZERO),
+			}
+			draw_city_object_visual(
+				draw_target,
+				preview_object,
+				0.32,
+				true
+			)
+
+		for raw_tile in footprint_tiles:
+			if not raw_tile is Vector2i:
+				continue
+
+			var tile_rect := get_city_tile_world_rect(raw_tile)
+			draw_target.draw_rect(
+				tile_rect,
+				CITY_CONSTRUCTION_BLUEPRINT_FILL,
+				true
+			)
+			draw_inner_box_border(
+				draw_target,
+				tile_rect,
+				phase_color,
+				float(city_tile_size) * 0.06
+			)
+
+
+func _get_city_construction_phase_color(phase: String) -> Color:
+	match phase:
+		WorldData.CITY_CONSTRUCTION_PHASE_CLEARING:
+			return CITY_CONSTRUCTION_CLEARING_COLOR
+
+		WorldData.CITY_CONSTRUCTION_PHASE_GATHERING:
+			return CITY_CONSTRUCTION_GATHERING_COLOR
+
+		WorldData.CITY_CONSTRUCTION_PHASE_LABOR:
+			return CITY_CONSTRUCTION_LABOR_COLOR
+
+	return CURSOR_LOOK_BORDER_COLOR
+
+
 func start_city_object_placement(
 	object_type: String,
 	size_tiles: Vector2i,
@@ -5717,6 +6251,13 @@ func clear_city_object_placement() -> void:
 
 func has_active_city_object_placement() -> bool:
 	return not active_city_object_placement.is_empty()
+
+
+func is_uncommitted_city_placement_preview_active() -> bool:
+	return (
+		has_active_city_object_placement()
+		or is_road_placement_active
+	)
 
 
 #region Workplace zone painting and cache
@@ -5843,6 +6384,14 @@ func draw_active_city_object_placement_preview(
 		size_tiles,
 		object_type
 	)
+
+	if WorldData.city_object_type_uses_construction(object_type):
+		can_place = WorldData.can_place_city_object_construction(
+			city_world,
+			top_left,
+			size_tiles,
+			object_type
+		)
 
 	var has_workplace_zone := (
 		workplace_zone_overlay_cache.has_cached_zone(
@@ -6127,9 +6676,180 @@ func draw_road_preview(draw_target: CanvasItem) -> void:
 			border_width
 		)
 
+func get_city_hover_highlight_tiles(
+	tile_position: Vector2i
+) -> Array[Vector2i]:
+	var fallback_tiles: Array[Vector2i] = []
+
+	if city_world == null:
+		return fallback_tiles
+
+	if not city_world.is_in_bounds(
+		tile_position.x,
+		tile_position.y
+	):
+		return fallback_tiles
+
+	fallback_tiles.append(tile_position)
+
+	# Construction sites take precedence over completed objects. This matters
+	# for future expansion blueprints that may overlap their parent building.
+	var construction_site := (
+		WorldData.get_city_construction_site_at_tile(
+			tile_position
+		)
+	)
+
+	if not construction_site.is_empty():
+		if (
+			str(construction_site.get("object_type", ""))
+			== WorldData.CITY_OBJECT_ROAD
+		):
+			return fallback_tiles
+
+		var construction_tiles := (
+			normalize_city_hover_footprint_tiles(
+				construction_site.get("footprint_tiles", [])
+			)
+		)
+
+		if not construction_tiles.is_empty():
+			return construction_tiles
+
+	var city_object := WorldData.get_city_object_at_tile(
+		tile_position
+	)
+
+	# Roads deliberately retain the original one-tile cursor behavior.
+	if not is_city_object_selectable(city_object):
+		return fallback_tiles
+
+	var object_tiles := normalize_city_hover_footprint_tiles(
+		WorldData.get_city_object_footprint_tiles(city_object)
+	)
+
+	if object_tiles.is_empty():
+		return fallback_tiles
+
+	return object_tiles
+
+
+func normalize_city_hover_footprint_tiles(
+	raw_tiles: Array
+) -> Array[Vector2i]:
+	var tile_lookup: Dictionary = {}
+
+	for raw_tile in raw_tiles:
+		if not raw_tile is Vector2i:
+			continue
+
+		var tile_position: Vector2i = raw_tile
+
+		if city_world != null and not city_world.is_in_bounds(
+			tile_position.x,
+			tile_position.y
+		):
+			continue
+
+		tile_lookup[tile_position] = true
+
+	var footprint_tiles: Array[Vector2i] = []
+
+	for raw_tile in tile_lookup.keys():
+		if raw_tile is Vector2i:
+			footprint_tiles.append(raw_tile)
+
+	footprint_tiles.sort_custom(_sort_city_hover_tiles_y_then_x)
+	return footprint_tiles
+
+
+func _sort_city_hover_tiles_y_then_x(
+	a: Vector2i,
+	b: Vector2i
+) -> bool:
+	if a.y == b.y:
+		return a.x < b.x
+
+	return a.y < b.y
+
+
+func draw_city_hover_footprint_border(
+	draw_target: CanvasItem,
+	footprint_tiles: Array[Vector2i],
+	border_color: Color,
+	border_width: float
+) -> void:
+	if footprint_tiles.is_empty():
+		return
+
+	var footprint_lookup: Dictionary = {}
+
+	for tile_position in footprint_tiles:
+		footprint_lookup[tile_position] = true
+
+	var safe_width := minf(
+		border_width,
+		float(city_tile_size) * 0.5
+	)
+
+	for tile_position in footprint_tiles:
+		var tile_rect := get_city_tile_world_rect(tile_position)
+
+		if not footprint_lookup.has(tile_position + Vector2i.UP):
+			draw_target.draw_rect(
+				Rect2(
+					tile_rect.position,
+					Vector2(tile_rect.size.x, safe_width)
+				),
+				border_color,
+				true
+			)
+
+		if not footprint_lookup.has(tile_position + Vector2i.DOWN):
+			draw_target.draw_rect(
+				Rect2(
+					Vector2(
+						tile_rect.position.x,
+						tile_rect.end.y - safe_width
+					),
+					Vector2(tile_rect.size.x, safe_width)
+				),
+				border_color,
+				true
+			)
+
+		if not footprint_lookup.has(tile_position + Vector2i.LEFT):
+			draw_target.draw_rect(
+				Rect2(
+					tile_rect.position,
+					Vector2(safe_width, tile_rect.size.y)
+				),
+				border_color,
+				true
+			)
+
+		if not footprint_lookup.has(tile_position + Vector2i.RIGHT):
+			draw_target.draw_rect(
+				Rect2(
+					Vector2(
+						tile_rect.end.x - safe_width,
+						tile_rect.position.y
+					),
+					Vector2(safe_width, tile_rect.size.y)
+				),
+				border_color,
+				true
+			)
+
+
 func draw_hovered_city_tile_highlight(
 	draw_target: CanvasItem
 ) -> void:
+	# A placement ghost is not yet a world entity. Its own validity preview is
+	# the only cursor feedback until the player commits it.
+	if is_uncommitted_city_placement_preview_active():
+		return
+
 	if is_city_player_command_mode_active():
 		return
 
@@ -6150,18 +6870,14 @@ func draw_hovered_city_tile_highlight(
 	if has_selected_city_entity():
 		return
 
-	var rect := Rect2(
-		float(hovered_city_tile.x * city_tile_size),
-		float(hovered_city_tile.y * city_tile_size),
-		float(city_tile_size),
-		float(city_tile_size)
+	var highlight_tiles := get_city_hover_highlight_tiles(
+		hovered_city_tile
 	)
-
 	var border_width: float = float(city_tile_size) * 0.08
 
-	draw_inner_box_border(
+	draw_city_hover_footprint_border(
 		draw_target,
-		rect,
+		highlight_tiles,
 		CURSOR_LOOK_BORDER_COLOR,
 		border_width
 	)
@@ -6807,6 +7523,27 @@ func get_citizen_debug_task_text(citizen: Dictionary) -> String:
 		current_task.get("target_object_id", -1)
 	)
 
+	if task_kind == WorldData.CITY_CITIZEN_TASK_KIND_ACQUIRE_FOOD:
+		var food_resource := str(
+			current_task.get(
+				"food_resource_type",
+				WorldData.RESOURCE_NONE
+			)
+		)
+		var food_amount := maxi(
+			int(current_task.get("food_requested_amount", 0)),
+			0
+		)
+
+		if food_amount > 0 and food_resource != WorldData.RESOURCE_NONE:
+			task_text += (
+				" ["
+				+ str(food_amount)
+				+ " "
+				+ food_resource.capitalize()
+				+ "]"
+			)
+
 	if task_kind == WorldData.CITY_CITIZEN_TASK_KIND_HAUL:
 		var raw_current_haul = citizen.get("current_haul", {})
 
@@ -6819,6 +7556,34 @@ func get_citizen_debug_task_text(citizen: Dictionary) -> String:
 			)
 
 		return task_text
+
+	if (
+		task_kind
+		== WorldData.CITY_CITIZEN_TASK_KIND_CONSTRUCTION
+		and target_object_id > 0
+	):
+		var construction_site := (
+			WorldData.get_city_construction_site_by_id(
+				target_object_id
+			)
+		)
+
+		if construction_site.is_empty():
+			return (
+				task_text
+				+ " -> missing construction site #"
+				+ str(target_object_id)
+			)
+
+		return (
+			task_text
+			+ " -> "
+			+ WorldData.get_city_object_display_name_for_type(
+				str(construction_site.get("object_type", ""))
+			)
+			+ " Blueprint #"
+			+ str(target_object_id)
+		)
 
 	if target_object_id > 0:
 		var target_object := get_city_object_by_id(

@@ -2,6 +2,20 @@ extends RefCounted
 
 const MAX_REPORTED_PROBLEMS: int = 24
 
+const CITY_WORK_ORDER_TYPE_COMMAND_GROUP := "command_group"
+const CITY_WORK_ORDER_TYPE_CONSTRUCTION_SITE := "construction_site"
+const CITY_WORK_ORDER_STATE_ACTIVE := "active"
+const CITY_WORK_ORDER_STATE_BLOCKED := "blocked"
+const CITY_WORK_ORDER_STATE_CANCELLED := "cancelled"
+const CITY_WORK_ORDER_PRIORITY_LOW: int = 0
+const CITY_WORK_ORDER_PRIORITY_URGENT: int = 3
+const CITY_WORK_ORDER_PHASE_COMMANDS := "commands"
+const CITY_WORK_JOB_STATE_ACTIONABLE := "actionable"
+const CITY_WORK_JOB_STATE_ACTIVE := "active"
+const CITY_WORK_JOB_STATE_BLOCKED := "blocked"
+const CITY_WORK_JOB_KIND_CLEARING_RELOCATION := "clearing_relocation"
+const CITY_WORK_JOB_KIND_CONSTRUCTION_DELIVERY := "construction_delivery"
+
 static var _cached_result: Dictionary = {}
 
 
@@ -22,7 +36,16 @@ static func validate(
 
 	var object_lookup := _validate_city_object_index(errors)
 	var citizen_lookup := _validate_city_citizen_index(errors)
-	var ground_pile_lookup := _validate_city_ground_pile_state(errors)
+	var construction_site_lookup := (
+		_validate_city_construction_state(
+			errors,
+			object_lookup
+		)
+	)
+	var ground_pile_lookup := _validate_city_ground_pile_state(
+		errors,
+		construction_site_lookup
+	)
 
 	_validate_city_foundation_state(
 		errors,
@@ -47,6 +70,11 @@ static func validate(
 	_validate_city_citizen_need_state(
 		errors,
 		citizen_lookup
+	)
+	var checked_work_order_count := _validate_city_work_orders(
+		errors,
+		citizen_lookup,
+		construction_site_lookup
 	)
 	_validate_city_citizen_task_state(
 		errors,
@@ -105,6 +133,8 @@ static func validate(
 		"checked_inventories": checked_inventory_count,
 		"checked_ground_piles": ground_pile_lookup.size(),
 		"checked_haul_reservations": checked_haul_reservation_count,
+		"checked_work_orders": checked_work_order_count,
+		"checked_construction_sites": construction_site_lookup.size(),
 		"duration_usec": validation_duration_usec,
 		"object_version": WorldData.city_object_version,
 		"container_version": WorldData.city_container_version,
@@ -122,9 +152,11 @@ static func validate(
 		"workplace_version": WorldData.city_workplace_version,
 		"ground_pile_version": WorldData.city_ground_pile_version,
 		"player_command_version": WorldData.city_player_command_version,
+		"work_order_version": WorldData.city_work_order_version,
 		"haul_reservation_version": (
 			WorldData.city_haul_reservation_version
-		)
+		),
+		"construction_version": WorldData.city_construction_version,
 	}
 
 	_cached_result = result
@@ -176,6 +208,12 @@ static func get_summary_text() -> String:
 		+ " ground piles | "
 		+ str(result.get("checked_haul_reservations", 0))
 		+ " reservations"
+		+ " | "
+		+ str(result.get("checked_work_orders", 0))
+		+ " work orders"
+		+ " | "
+		+ str(result.get("checked_construction_sites", 0))
+		+ " construction sites"
 		+ "\n"
 		+ "Validation Cost: "
 		+ "%.3f ms" % duration_msec
@@ -266,11 +304,28 @@ static func _validation_cache_matches_current_state() -> bool:
 	if (
 		int(
 			_cached_result.get(
+				"work_order_version",
+				-1
+			)
+		)
+		!= WorldData.city_work_order_version
+	):
+		return false
+
+	if (
+		int(
+			_cached_result.get(
 				"haul_reservation_version",
 				-1
 			)
 		)
 		!= WorldData.city_haul_reservation_version
+	):
+		return false
+
+	if (
+		int(_cached_result.get("construction_version", -1))
+		!= WorldData.city_construction_version
 	):
 		return false
 
@@ -562,11 +617,285 @@ static func _validate_city_citizen_index(
 
 	return citizen_lookup
 
+static func _validate_city_construction_state(
+	errors: Array[String],
+	object_lookup: Dictionary
+) -> Dictionary:
+	var site_lookup: Dictionary = {}
+	var expected_tile_lookup: Dictionary = {}
+	var maximum_site_id := 0
+	var valid_phases := [
+		WorldData.CITY_CONSTRUCTION_PHASE_CLEARING,
+		WorldData.CITY_CONSTRUCTION_PHASE_GATHERING,
+		WorldData.CITY_CONSTRUCTION_PHASE_LABOR,
+	]
+	var valid_target_kinds := [
+		WorldData.CITY_CONSTRUCTION_TARGET_NEW,
+		WorldData.CITY_CONSTRUCTION_TARGET_MODIFICATION,
+	]
+
+	for site_index in range(WorldData.city_construction_sites.size()):
+		var raw_site = WorldData.city_construction_sites[site_index]
+
+		if not raw_site is Dictionary:
+			errors.append(
+				"city_construction_sites["
+				+ str(site_index)
+				+ "] is not a Dictionary."
+			)
+			continue
+
+		var site: Dictionary = raw_site
+		var site_id := int(site.get("id", -1))
+		var object_type := str(site.get("object_type", ""))
+		var phase := str(site.get("phase", ""))
+		var target_kind := str(site.get("target_kind", ""))
+		var target_object_id := int(
+			site.get("target_object_id", -1)
+		)
+		var raw_footprint = site.get("footprint_tiles", [])
+		var raw_recipe = site.get("material_recipe", {})
+		var raw_work_positions = site.get("work_positions", [])
+
+		if site_id <= 0 or site_lookup.has(site_id):
+			errors.append(
+				"Construction site at index "
+				+ str(site_index)
+				+ " has an invalid or duplicate ID "
+				+ str(site_id)
+				+ "."
+			)
+			continue
+
+		site_lookup[site_id] = site_index
+		maximum_site_id = maxi(maximum_site_id, site_id)
+
+		if (
+			int(
+				WorldData.city_construction_site_index_by_id.get(
+					site_id,
+					-1
+				)
+			)
+			!= site_index
+		):
+			errors.append(
+				"Construction site index lookup disagrees for ID "
+				+ str(site_id)
+				+ "."
+			)
+
+		if not WorldData.city_object_type_uses_construction(object_type):
+			errors.append(
+				"Construction site "
+				+ str(site_id)
+				+ " has non-constructible target '"
+				+ object_type
+				+ "'."
+			)
+
+		if target_kind not in valid_target_kinds:
+			errors.append(
+				"Construction site "
+				+ str(site_id)
+				+ " has invalid target kind '"
+				+ target_kind
+				+ "'."
+			)
+		elif target_kind == WorldData.CITY_CONSTRUCTION_TARGET_NEW:
+			if target_object_id != -1:
+				errors.append(
+					"New construction site "
+					+ str(site_id)
+					+ " unexpectedly targets object "
+					+ str(target_object_id)
+					+ "."
+				)
+		else:
+			var target_object := WorldData.get_city_object_by_id(
+				target_object_id
+			)
+
+			if (
+				not object_lookup.has(target_object_id)
+				or target_object.is_empty()
+				or str(target_object.get("type", "")) != object_type
+			):
+				errors.append(
+					"Modification site "
+					+ str(site_id)
+					+ " targets a missing or incompatible object."
+				)
+
+		if phase not in valid_phases:
+			errors.append(
+				"Construction site "
+				+ str(site_id)
+				+ " has invalid phase '"
+				+ phase
+				+ "'."
+			)
+
+		if not raw_footprint is Array or raw_footprint.is_empty():
+			errors.append(
+				"Construction site "
+				+ str(site_id)
+				+ " has no valid footprint."
+			)
+		else:
+			var local_tile_lookup: Dictionary = {}
+
+			for raw_tile in raw_footprint:
+				if not raw_tile is Vector2i:
+					errors.append(
+						"Construction site "
+						+ str(site_id)
+						+ " has a non-Vector2i footprint tile."
+					)
+					continue
+
+				var tile_position: Vector2i = raw_tile
+
+				if local_tile_lookup.has(tile_position):
+					errors.append(
+						"Construction site "
+						+ str(site_id)
+						+ " repeats footprint tile "
+						+ str(tile_position)
+						+ "."
+					)
+					continue
+
+				local_tile_lookup[tile_position] = true
+
+				if expected_tile_lookup.has(tile_position):
+					errors.append(
+						"Construction sites "
+						+ str(expected_tile_lookup[tile_position])
+						+ " and "
+						+ str(site_id)
+						+ " overlap at "
+						+ str(tile_position)
+						+ "."
+					)
+				else:
+					expected_tile_lookup[tile_position] = site_id
+
+				if (
+					WorldData.official_city_world != null
+					and not WorldData.official_city_world.is_in_bounds(
+						tile_position.x,
+						tile_position.y
+					)
+				):
+					errors.append(
+						"Construction site "
+						+ str(site_id)
+						+ " is out of bounds at "
+						+ str(tile_position)
+						+ "."
+					)
+
+				if WorldData.city_occupied_tiles.has(tile_position):
+					var completed_object_id := int(
+						WorldData.city_occupied_tiles.get(
+							tile_position,
+							-1
+						)
+					)
+
+					if (
+						object_lookup.has(completed_object_id)
+						and not (
+							target_kind
+							== WorldData
+							.CITY_CONSTRUCTION_TARGET_MODIFICATION
+							and completed_object_id
+							== target_object_id
+						)
+					):
+						errors.append(
+							"Construction site "
+							+ str(site_id)
+							+ " overlaps completed object "
+							+ str(completed_object_id)
+							+ "."
+						)
+
+		if not raw_recipe is Dictionary:
+			errors.append(
+				"Construction site "
+				+ str(site_id)
+				+ " has a non-Dictionary material recipe."
+			)
+		else:
+			for raw_resource in raw_recipe.keys():
+				if (
+					typeof(raw_resource) != TYPE_STRING
+					or not WorldData.is_city_resource_type(
+						str(raw_resource)
+					)
+					or typeof(raw_recipe[raw_resource]) != TYPE_INT
+					or int(raw_recipe[raw_resource]) <= 0
+				):
+					errors.append(
+						"Construction site "
+						+ str(site_id)
+						+ " has an invalid recipe entry."
+					)
+
+		var required_labor := int(
+			site.get("required_labor_minutes", 0)
+		)
+		var completed_labor := int(
+			site.get("completed_labor_minutes", -1)
+		)
+
+		if (
+			required_labor <= 0
+			or completed_labor < 0
+			or completed_labor > required_labor
+		):
+			errors.append(
+				"Construction site "
+				+ str(site_id)
+				+ " has invalid labor progress."
+			)
+
+		if not raw_work_positions is Array or raw_work_positions.is_empty():
+			errors.append(
+				"Construction site "
+				+ str(site_id)
+				+ " has no work positions."
+			)
+
+	if (
+		WorldData.city_construction_site_index_by_id.size()
+		!= site_lookup.size()
+	):
+		errors.append(
+			"Construction site registry and ID lookup have different sizes."
+		)
+
+	if WorldData.city_construction_site_id_by_tile != expected_tile_lookup:
+		errors.append(
+			"Construction site footprint lookup does not match site state."
+		)
+
+	if WorldData.next_city_construction_site_id <= maximum_site_id:
+		errors.append(
+			"next_city_construction_site_id must exceed every site ID."
+		)
+
+	return site_lookup
+
+
 static func _validate_city_ground_pile_state(
-	errors: Array[String]
+	errors: Array[String],
+	construction_site_lookup: Dictionary
 ) -> Dictionary:
 	var ground_pile_lookup: Dictionary = {}
-	var tile_resource_lookup: Dictionary = {}
+	var nonfull_pile_id_by_resource_tile: Dictionary = {}
 	var maximum_ground_pile_id := 0
 
 	for pile_index in range(WorldData.city_ground_piles.size()):
@@ -590,6 +919,11 @@ static func _validate_city_ground_pile_state(
 			ground_pile.get("resource_type", WorldData.RESOURCE_NONE)
 		)
 		var raw_amount = ground_pile.get("amount")
+		var construction_site_id := (
+			WorldData.get_city_ground_pile_construction_site_id(
+				ground_pile
+			)
+		)
 
 		if ground_pile_id <= 0:
 			errors.append(
@@ -623,26 +957,6 @@ static func _validate_city_ground_pile_state(
 			)
 		else:
 			var tile_position: Vector2i = raw_tile_position
-			var tile_resource_key := (
-				str(tile_position) + ":" + resource
-			)
-
-			if tile_resource_lookup.has(tile_resource_key):
-				errors.append(
-					"Ground piles "
-					+ str(tile_resource_lookup[tile_resource_key])
-					+ " and "
-					+ str(ground_pile_id)
-					+ " should have merged on tile "
-					+ str(tile_position)
-					+ " for "
-					+ resource
-					+ "."
-				)
-			else:
-				tile_resource_lookup[tile_resource_key] = (
-					ground_pile_id
-				)
 
 			if (
 				WorldData.official_city_world != null
@@ -668,6 +982,37 @@ static func _validate_city_ground_pile_state(
 				+ "'."
 			)
 
+		if construction_site_id > 0:
+			var construction_site := (
+				WorldData.get_city_construction_site_by_id(
+					construction_site_id
+				)
+			)
+
+			if (
+				not construction_site_lookup.has(construction_site_id)
+				or construction_site.is_empty()
+			):
+				errors.append(
+					"Ground pile "
+					+ str(ground_pile_id)
+					+ " belongs to missing construction site "
+					+ str(construction_site_id)
+					+ "."
+				)
+			elif (
+				raw_tile_position is Vector2i
+				and not construction_site.get(
+					"footprint_tiles",
+					[]
+				).has(raw_tile_position)
+			):
+				errors.append(
+					"Ground pile "
+					+ str(ground_pile_id)
+					+ " is outside its construction footprint."
+				)
+
 		if typeof(raw_amount) != TYPE_INT or int(raw_amount) <= 0:
 			errors.append(
 				"Ground pile "
@@ -676,6 +1021,83 @@ static func _validate_city_ground_pile_state(
 				+ str(raw_amount)
 				+ "."
 			)
+		elif int(raw_amount) > WorldData.CITY_GROUND_PILE_CAPACITY:
+			errors.append(
+				"Ground pile "
+				+ str(ground_pile_id)
+				+ " exceeds capacity "
+				+ str(WorldData.CITY_GROUND_PILE_CAPACITY)
+				+ "."
+			)
+		elif (
+			raw_tile_position is Vector2i
+			and WorldData.is_city_resource_type(resource)
+			and int(raw_amount) < WorldData.CITY_GROUND_PILE_CAPACITY
+		):
+			var tile_position: Vector2i = raw_tile_position
+			var nearby_nonfull_pile_id := -1
+			var merge_radius := (
+				WorldData.CITY_GROUND_PILE_MERGE_RADIUS_TILES
+			)
+			var merge_radius_squared := merge_radius * merge_radius
+
+			for offset_y in range(-merge_radius, merge_radius + 1):
+				for offset_x in range(-merge_radius, merge_radius + 1):
+					if (
+						offset_x * offset_x + offset_y * offset_y
+						> merge_radius_squared
+					):
+						continue
+
+					var nearby_tile := (
+						tile_position
+						+ Vector2i(offset_x, offset_y)
+					)
+					var nearby_key := (
+						resource
+						+ ":"
+						+ str(construction_site_id)
+						+ ":"
+						+ str(nearby_tile)
+					)
+
+					if nonfull_pile_id_by_resource_tile.has(
+						nearby_key
+					):
+						nearby_nonfull_pile_id = int(
+							nonfull_pile_id_by_resource_tile[
+								nearby_key
+							]
+						)
+						break
+
+				if nearby_nonfull_pile_id > 0:
+					break
+
+			if nearby_nonfull_pile_id > 0:
+				errors.append(
+					"Non-full ground piles "
+					+ str(nearby_nonfull_pile_id)
+					+ " and "
+					+ str(ground_pile_id)
+					+ " should have coalesced within radius "
+					+ str(merge_radius)
+					+ " for "
+					+ resource
+					+ "."
+				)
+
+			var pile_key := (
+				resource
+				+ ":"
+				+ str(construction_site_id)
+				+ ":"
+				+ str(tile_position)
+			)
+			nonfull_pile_id_by_resource_tile[pile_key] = (
+				ground_pile_id
+			)
+
 
 		if int(
 			WorldData.city_ground_pile_index_by_id.get(
@@ -703,6 +1125,599 @@ static func _validate_city_ground_pile_state(
 		)
 
 	return ground_pile_lookup
+
+
+static func _validate_city_work_orders(
+	errors: Array[String],
+	citizen_lookup: Dictionary,
+	construction_site_lookup: Dictionary
+) -> int:
+	var expected_source_lookup: Dictionary = {}
+	var maximum_order_id := 0
+	var required_order_fields: Array[String] = [
+		"id",
+		"source_key",
+		"order_type",
+		"source_id",
+		"creation_sequence",
+		"created_world_minute",
+		"priority_rank",
+		"state",
+		"phase",
+		"jobs",
+		"active_worker_count",
+		"active_citizen_ids",
+		"useful_parallel_capacity",
+		"blocked_reason",
+		"last_progress_world_minute",
+		"last_attention_world_minute",
+		"progress_signature",
+	]
+
+	for raw_order_id in WorldData.city_work_orders.keys():
+		if typeof(raw_order_id) != TYPE_INT:
+			errors.append(
+				"Work-order registry contains a non-integer key."
+			)
+			continue
+
+		var order_id: int = raw_order_id
+		maximum_order_id = maxi(maximum_order_id, order_id)
+		var raw_order = WorldData.city_work_orders.get(order_id, {})
+
+		if not raw_order is Dictionary:
+			errors.append(
+				"Work order "
+				+ str(order_id)
+				+ " is not a Dictionary."
+			)
+			continue
+
+		var order: Dictionary = raw_order
+		var missing_field := false
+
+		for field_name in required_order_fields:
+			if order.has(field_name):
+				continue
+
+			errors.append(
+				"Work order "
+				+ str(order_id)
+				+ " is missing '"
+				+ field_name
+				+ "'."
+			)
+			missing_field = true
+
+		if missing_field:
+			continue
+
+		var raw_stored_id = order.get("id")
+		var raw_source_key = order.get("source_key")
+		var raw_order_type = order.get("order_type")
+		var raw_source_id = order.get("source_id")
+		var raw_creation_sequence = order.get("creation_sequence")
+		var raw_created_minute = order.get("created_world_minute")
+		var raw_priority_rank = order.get("priority_rank")
+		var raw_state = order.get("state")
+		var raw_phase = order.get("phase")
+		var raw_jobs = order.get("jobs")
+		var raw_active_worker_count = order.get("active_worker_count")
+		var raw_active_citizen_ids = order.get("active_citizen_ids")
+		var raw_useful_capacity = order.get("useful_parallel_capacity")
+		var raw_blocked_reason = order.get("blocked_reason")
+		var raw_last_progress_minute = order.get(
+			"last_progress_world_minute"
+		)
+		var raw_last_attention_minute = order.get(
+			"last_attention_world_minute"
+		)
+		var raw_progress_signature = order.get("progress_signature")
+		var order_types_are_valid := true
+
+		for integer_field in [
+			raw_stored_id,
+			raw_source_id,
+			raw_creation_sequence,
+			raw_created_minute,
+			raw_priority_rank,
+			raw_active_worker_count,
+			raw_useful_capacity,
+			raw_last_progress_minute,
+			raw_last_attention_minute,
+		]:
+			if typeof(integer_field) != TYPE_INT:
+				order_types_are_valid = false
+				break
+
+		if not order_types_are_valid:
+			errors.append(
+				"Work order "
+				+ str(order_id)
+				+ " has a non-integer identifier, priority, count, or minute."
+			)
+
+		if (
+			typeof(raw_source_key) != TYPE_STRING
+			or typeof(raw_order_type) != TYPE_STRING
+			or typeof(raw_state) != TYPE_STRING
+			or typeof(raw_phase) != TYPE_STRING
+			or typeof(raw_blocked_reason) != TYPE_STRING
+			or typeof(raw_progress_signature) != TYPE_STRING
+		):
+			errors.append(
+				"Work order "
+				+ str(order_id)
+				+ " has a non-string source, type, state, reason, or signature."
+			)
+			order_types_are_valid = false
+
+		if not raw_jobs is Array:
+			errors.append(
+				"Work order "
+				+ str(order_id)
+				+ " has a non-Array jobs field."
+			)
+			order_types_are_valid = false
+
+		if not raw_active_citizen_ids is Array:
+			errors.append(
+				"Work order "
+				+ str(order_id)
+				+ " has a non-Array active-citizen field."
+			)
+			order_types_are_valid = false
+
+		if not order_types_are_valid:
+			continue
+
+		var stored_id: int = raw_stored_id
+		var source_key: String = raw_source_key
+		var order_type: String = raw_order_type
+		var source_id: int = raw_source_id
+		var creation_sequence: int = raw_creation_sequence
+		var created_minute: int = raw_created_minute
+		var priority_rank: int = raw_priority_rank
+		var state: String = raw_state
+		var phase: String = raw_phase
+		var jobs: Array = raw_jobs
+		var active_worker_count: int = raw_active_worker_count
+		var active_citizen_ids: Array = raw_active_citizen_ids
+		var useful_capacity: int = raw_useful_capacity
+		var blocked_reason: String = raw_blocked_reason
+		var last_progress_minute: int = raw_last_progress_minute
+		var last_attention_minute: int = raw_last_attention_minute
+
+		if order_id <= 0 or stored_id != order_id:
+			errors.append(
+				"Work-order key/ID mismatch for "
+				+ str(order_id)
+				+ "."
+			)
+
+		if creation_sequence <= 0 or creation_sequence != order_id:
+			errors.append(
+				"Work order "
+				+ str(order_id)
+				+ " has an invalid deterministic creation sequence."
+			)
+
+		if source_id <= 0 or source_key.is_empty():
+			errors.append(
+				"Work order "
+				+ str(order_id)
+				+ " has an invalid source identity."
+			)
+		else:
+			var expected_source_key := order_type + ":" + str(source_id)
+
+			if source_key != expected_source_key:
+				errors.append(
+					"Work order "
+					+ str(order_id)
+					+ " source key does not match its type and source ID."
+				)
+
+			if expected_source_lookup.has(source_key):
+				errors.append(
+					"Multiple work orders use source key '"
+					+ source_key
+					+ "'."
+				)
+			else:
+				expected_source_lookup[source_key] = order_id
+
+		if order_type not in [
+			CITY_WORK_ORDER_TYPE_COMMAND_GROUP,
+			CITY_WORK_ORDER_TYPE_CONSTRUCTION_SITE,
+		]:
+			errors.append(
+				"Work order "
+				+ str(order_id)
+				+ " has invalid type '"
+				+ order_type
+				+ "'."
+			)
+		elif not _city_work_order_source_exists(
+			order_type,
+			source_id,
+			construction_site_lookup
+		):
+			errors.append(
+				"Work order "
+				+ str(order_id)
+				+ " references a missing or incompatible source record."
+			)
+		elif (
+			order_type == CITY_WORK_ORDER_TYPE_COMMAND_GROUP
+			and phase != CITY_WORK_ORDER_PHASE_COMMANDS
+		):
+			errors.append(
+				"Command-group work order "
+				+ str(order_id)
+				+ " has invalid phase '"
+				+ phase
+				+ "'."
+			)
+		elif order_type == CITY_WORK_ORDER_TYPE_CONSTRUCTION_SITE:
+			var source_site := WorldData.get_city_construction_site_by_id(
+				source_id
+			)
+
+			if (
+				not source_site.is_empty()
+				and phase != str(source_site.get("phase", ""))
+			):
+				errors.append(
+					"Construction work order "
+					+ str(order_id)
+					+ " phase disagrees with its site."
+				)
+
+		if (
+			priority_rank < CITY_WORK_ORDER_PRIORITY_LOW
+			or priority_rank > CITY_WORK_ORDER_PRIORITY_URGENT
+		):
+			errors.append(
+				"Work order "
+				+ str(order_id)
+				+ " has an out-of-range priority."
+			)
+
+		if state not in [
+			CITY_WORK_ORDER_STATE_ACTIVE,
+			CITY_WORK_ORDER_STATE_BLOCKED,
+			CITY_WORK_ORDER_STATE_CANCELLED,
+		]:
+			errors.append(
+				"Work order "
+				+ str(order_id)
+				+ " has invalid state '"
+				+ state
+				+ "'."
+			)
+		elif (
+			(state == CITY_WORK_ORDER_STATE_ACTIVE)
+			!= blocked_reason.is_empty()
+		):
+			errors.append(
+				"Work order "
+				+ str(order_id)
+				+ " state and blocked reason disagree."
+			)
+
+		if (
+			created_minute < 0
+			or last_progress_minute < created_minute
+			or last_attention_minute < created_minute
+		):
+			errors.append(
+				"Work order "
+				+ str(order_id)
+				+ " has invalid progress or attention chronology."
+			)
+
+		if (
+			active_worker_count < 0
+			or active_worker_count > citizen_lookup.size()
+			or useful_capacity <= 0
+		):
+			errors.append(
+				"Work order "
+				+ str(order_id)
+				+ " has invalid worker accounting."
+			)
+
+		var previous_active_citizen_id := 0
+
+		for raw_active_citizen_id in active_citizen_ids:
+			if typeof(raw_active_citizen_id) != TYPE_INT:
+				errors.append(
+					"Work order "
+					+ str(order_id)
+					+ " has a non-integer active citizen ID."
+				)
+				continue
+
+			var active_citizen_id: int = raw_active_citizen_id
+
+			if (
+				active_citizen_id <= previous_active_citizen_id
+				or not citizen_lookup.has(active_citizen_id)
+			):
+				errors.append(
+					"Work order "
+					+ str(order_id)
+					+ " has invalid, duplicate, or unsorted active citizens."
+				)
+
+			previous_active_citizen_id = active_citizen_id
+
+		if active_worker_count != active_citizen_ids.size():
+			errors.append(
+				"Work order "
+				+ str(order_id)
+				+ " active worker count disagrees with its citizen IDs."
+			)
+
+		_validate_city_work_order_jobs(
+			errors,
+			order_id,
+			jobs,
+			citizen_lookup,
+			active_citizen_ids
+		)
+
+	for raw_source_key in WorldData.city_work_order_id_by_source_key.keys():
+		var raw_lookup_order_id = (
+			WorldData.city_work_order_id_by_source_key.get(raw_source_key)
+		)
+
+		if (
+			typeof(raw_source_key) != TYPE_STRING
+			or typeof(raw_lookup_order_id) != TYPE_INT
+		):
+			errors.append(
+				"Work-order source lookup contains an invalid key or ID."
+			)
+
+	if WorldData.city_work_order_id_by_source_key != expected_source_lookup:
+		errors.append(
+			"Work-order source lookup is not a bijection with the registry."
+		)
+
+	if WorldData.next_city_work_order_id <= maximum_order_id:
+		errors.append(
+			"next_city_work_order_id must exceed every work-order ID."
+		)
+
+	return WorldData.city_work_orders.size()
+
+
+static func _city_work_order_source_exists(
+	order_type: String,
+	source_id: int,
+	construction_site_lookup: Dictionary
+) -> bool:
+	if order_type == CITY_WORK_ORDER_TYPE_COMMAND_GROUP:
+		for raw_command in WorldData.city_player_commands:
+			if (
+				raw_command is Dictionary
+				and int(raw_command.get("group_id", -1)) == source_id
+				and int(raw_command.get("construction_site_id", -1)) <= 0
+			):
+				return true
+
+		return false
+
+	if order_type == CITY_WORK_ORDER_TYPE_CONSTRUCTION_SITE:
+		return construction_site_lookup.has(source_id)
+
+	return false
+
+
+static func _validate_city_work_order_jobs(
+	errors: Array[String],
+	order_id: int,
+	jobs: Array,
+	citizen_lookup: Dictionary,
+	order_active_citizen_ids: Array
+) -> void:
+	var job_ids: Dictionary = {}
+
+	for job_index in range(jobs.size()):
+		var raw_job = jobs[job_index]
+
+		if not raw_job is Dictionary:
+			errors.append(
+				"Work order "
+				+ str(order_id)
+				+ " has a non-Dictionary job at index "
+				+ str(job_index)
+				+ "."
+			)
+			continue
+
+		var job: Dictionary = raw_job
+		var raw_job_id = job.get("id")
+		var raw_job_kind = job.get("kind")
+		var raw_job_state = job.get("state")
+		var raw_actionable = job.get("actionable")
+		var raw_blocked_reason = job.get("blocked_reason")
+		var raw_claimed_citizen_id = job.get("claimed_citizen_id")
+		var raw_active_citizen_ids = job.get("active_citizen_ids")
+
+		if (
+			typeof(raw_job_id) != TYPE_STRING
+			or str(raw_job_id).is_empty()
+			or typeof(raw_job_kind) != TYPE_STRING
+			or str(raw_job_kind).is_empty()
+			or typeof(raw_job_state) != TYPE_STRING
+			or typeof(raw_actionable) != TYPE_BOOL
+			or typeof(raw_blocked_reason) != TYPE_STRING
+			or typeof(raw_claimed_citizen_id) != TYPE_INT
+			or not raw_active_citizen_ids is Array
+		):
+			errors.append(
+				"Work order "
+				+ str(order_id)
+				+ " has malformed job data at index "
+				+ str(job_index)
+				+ "."
+			)
+			continue
+
+		var job_id: String = raw_job_id
+		var job_kind: String = raw_job_kind
+		var job_state: String = raw_job_state
+		var actionable: bool = raw_actionable
+		var blocked_reason: String = raw_blocked_reason
+		var claimed_citizen_id: int = raw_claimed_citizen_id
+		var active_citizen_ids: Array = raw_active_citizen_ids
+
+		if job_ids.has(job_id):
+			errors.append(
+				"Work order "
+				+ str(order_id)
+				+ " contains duplicate job ID '"
+				+ job_id
+				+ "'."
+			)
+		else:
+			job_ids[job_id] = true
+
+		if (
+			claimed_citizen_id == 0
+			or claimed_citizen_id < -1
+			or (
+				claimed_citizen_id > 0
+				and not citizen_lookup.has(claimed_citizen_id)
+			)
+		):
+			errors.append(
+				"Work order "
+				+ str(order_id)
+				+ " job '"
+				+ job_id
+				+ " has an invalid citizen claim."
+			)
+
+		var previous_active_citizen_id := 0
+
+		for raw_active_citizen_id in active_citizen_ids:
+			if typeof(raw_active_citizen_id) != TYPE_INT:
+				errors.append(
+					"Work order "
+					+ str(order_id)
+					+ " job '"
+					+ job_id
+					+ "' has a non-integer active citizen ID."
+				)
+				continue
+
+			var active_citizen_id: int = raw_active_citizen_id
+
+			if (
+				active_citizen_id <= previous_active_citizen_id
+				or not citizen_lookup.has(active_citizen_id)
+				or not order_active_citizen_ids.has(active_citizen_id)
+			):
+				errors.append(
+					"Work order "
+					+ str(order_id)
+					+ " job '"
+					+ job_id
+					+ "' has invalid, duplicate, or unsorted active citizens."
+				)
+
+			previous_active_citizen_id = active_citizen_id
+
+		var expected_job_state := CITY_WORK_JOB_STATE_BLOCKED
+
+		if not active_citizen_ids.is_empty():
+			expected_job_state = CITY_WORK_JOB_STATE_ACTIVE
+		elif actionable:
+			expected_job_state = CITY_WORK_JOB_STATE_ACTIONABLE
+
+		if (
+			job_state not in [
+				CITY_WORK_JOB_STATE_ACTIONABLE,
+				CITY_WORK_JOB_STATE_ACTIVE,
+				CITY_WORK_JOB_STATE_BLOCKED,
+			]
+			or job_state != expected_job_state
+		):
+			errors.append(
+				"Work order "
+				+ str(order_id)
+				+ " job '"
+				+ job_id
+				+ "' has inconsistent runtime state."
+			)
+
+		if (
+			(job_state in [
+				CITY_WORK_JOB_STATE_ACTIONABLE,
+				CITY_WORK_JOB_STATE_ACTIVE,
+			]) != blocked_reason.is_empty()
+		):
+			errors.append(
+				"Work order "
+				+ str(order_id)
+				+ " job '"
+				+ job_id
+				+ "' state and blocked reason disagree."
+			)
+
+		if (
+			active_citizen_ids.is_empty()
+			and claimed_citizen_id > 0
+		) or (
+			not active_citizen_ids.is_empty()
+			and claimed_citizen_id != int(active_citizen_ids[0])
+		):
+			errors.append(
+				"Work order "
+				+ str(order_id)
+				+ " job '"
+				+ job_id
+				+ " claim disagrees with its active citizens."
+			)
+
+		for reservation_field in [
+			"source_reserved_amount",
+			"destination_reserved_amount",
+		]:
+			var field_is_required := job_kind in [
+				CITY_WORK_JOB_KIND_CLEARING_RELOCATION,
+				CITY_WORK_JOB_KIND_CONSTRUCTION_DELIVERY,
+			]
+
+			if not job.has(reservation_field):
+				if field_is_required:
+					errors.append(
+						"Work order "
+						+ str(order_id)
+						+ " job '"
+						+ job_id
+						+ "' lacks reservation diagnostics."
+					)
+
+				continue
+
+			var raw_reserved_amount = job.get(reservation_field)
+
+			if (
+				typeof(raw_reserved_amount) != TYPE_INT
+				or int(raw_reserved_amount) < 0
+			):
+				errors.append(
+					"Work order "
+					+ str(order_id)
+					+ " job '"
+					+ job_id
+					+ "' has invalid reservation diagnostics."
+				)
 
 
 static func _validate_city_haul_reservations(
@@ -902,9 +1917,16 @@ static func _validate_city_haul_reservations(
 		var destination: Dictionary = raw_destination
 		var source_is_valid := (
 			CityCitizens.is_valid_city_citizen_haul_endpoint(source)
+			and _city_haul_endpoint_schema_is_valid(source)
+			and str(source.get("kind", ""))
+			!= WorldData.CITY_CITIZEN_HAUL_ENDPOINT_KIND_GROUND_TILE
 		)
 		var destination_is_valid := (
 			CityCitizens.is_valid_city_citizen_haul_endpoint(
+				destination,
+				destination_reserved_amount <= 0
+			)
+			and _city_haul_endpoint_schema_is_valid(
 				destination,
 				destination_reserved_amount <= 0
 			)
@@ -1124,23 +2146,14 @@ static func _validate_city_haul_reservations(
 			source_resource_by_key[source_key] = resource
 
 		if destination_reserved_amount > 0:
-			if (
-				str(
-					destination.get(
-						"kind",
-						WorldData.CITY_CITIZEN_HAUL_ENDPOINT_KIND_NONE
-					)
-				)
-				!= WorldData
-				.CITY_CITIZEN_HAUL_ENDPOINT_KIND_CITY_OBJECT_CONTAINER
-				or WorldData.get_city_object_by_id(
-					int(destination.get("id", -1))
-				).is_empty()
+			if not _city_haul_endpoint_exists(
+				destination,
+				ground_pile_lookup
 			):
 				errors.append(
 					"Haul reservation "
 					+ str(reservation_id)
-					+ " reserves missing or non-object destination capacity."
+					+ " reserves missing destination capacity."
 				)
 
 			var raw_current_destination = current_haul.get(
@@ -1163,6 +2176,12 @@ static func _validate_city_haul_reservations(
 
 			var destination_object := WorldData.get_city_object_by_id(
 				int(destination.get("id", -1))
+			)
+			var destination_kind := str(
+				destination.get(
+					"kind",
+					WorldData.CITY_CITIZEN_HAUL_ENDPOINT_KIND_NONE
+				)
 			)
 
 			var destination_access_purpose := str(
@@ -1199,6 +2218,14 @@ static func _validate_city_haul_reservations(
 				and not WorldData.city_object_is_household_home(
 					destination_object
 				)
+			):
+				destination_policy_is_valid = false
+			elif (
+				destination_kind
+				== WorldData
+				.CITY_CITIZEN_HAUL_ENDPOINT_KIND_CONSTRUCTION_SITE
+				and destination_access_purpose
+				!= WorldData.CONTAINER_HAUL_PURPOSE_CONSTRUCTION
 			):
 				destination_policy_is_valid = false
 
@@ -1249,6 +2276,12 @@ static func _validate_city_haul_reservations(
 		var destination: Dictionary = (
 			destination_endpoint_by_key[destination_key]
 		)
+		var destination_kind := str(
+			destination.get(
+				"kind",
+				WorldData.CITY_CITIZEN_HAUL_ENDPOINT_KIND_NONE
+			)
+		)
 		var city_object := WorldData.get_city_object_by_id(
 			int(destination.get("id", -1))
 		)
@@ -1257,6 +2290,41 @@ static func _validate_city_haul_reservations(
 		)
 
 		if (
+			destination_kind
+			== WorldData
+			.CITY_CITIZEN_HAUL_ENDPOINT_KIND_CONSTRUCTION_SITE
+		):
+			var site_id := int(destination.get("id", -1))
+			var remaining_capacity := 0
+
+			for resource in WorldData.get_city_resource_types():
+				remaining_capacity += (
+					WorldData
+					.get_city_construction_site_remaining_resource_amount(
+						site_id,
+						resource
+					)
+				)
+
+			if reserved_amount > remaining_capacity:
+				errors.append(
+					"Destination reservations exceed remaining construction "
+					+ "requirements at "
+					+ str(destination)
+					+ "."
+				)
+		elif (
+			destination_kind
+			== WorldData.CITY_CITIZEN_HAUL_ENDPOINT_KIND_GROUND_TILE
+			and reserved_amount
+			> WorldData.CITY_GROUND_DROP_RESERVATION_CAPACITY
+		):
+			errors.append(
+				"Destination reservations exceed ground-drop capacity at "
+				+ str(destination)
+				+ "."
+			)
+		elif (
 			not city_object.is_empty()
 			and reserved_amount
 			> WorldData.get_city_object_storage_free_space(city_object)
@@ -1319,19 +2387,122 @@ static func _city_haul_endpoint_exists(
 				int(endpoint.get("id", -1))
 			)
 
+		WorldData.CITY_CITIZEN_HAUL_ENDPOINT_KIND_GROUND_TILE:
+			var raw_tile = endpoint.get(
+				"tile_position",
+				WorldData.INVALID_CITY_TILE_POSITION
+			)
+			return (
+				raw_tile is Vector2i
+				and WorldData.official_city_world != null
+				and WorldData.can_city_ground_pile_exist_at_tile(
+					WorldData.official_city_world,
+					raw_tile
+				)
+			)
+
+		WorldData.CITY_CITIZEN_HAUL_ENDPOINT_KIND_CONSTRUCTION_SITE:
+			return not WorldData.get_city_construction_site_by_id(
+				int(endpoint.get("id", -1))
+			).is_empty()
+
 	return false
+
+
+static func _city_haul_endpoint_schema_is_valid(
+	endpoint: Dictionary,
+	allow_none: bool = false
+) -> bool:
+	for field_name in [
+		"kind",
+		"id",
+		"tile_position",
+		"excluded_ground_pile_ids",
+	]:
+		if not endpoint.has(field_name):
+			return false
+
+	var raw_kind = endpoint.get("kind")
+	var raw_id = endpoint.get("id")
+	var raw_tile = endpoint.get("tile_position")
+	var raw_excluded_ids = endpoint.get("excluded_ground_pile_ids")
+
+	if (
+		typeof(raw_kind) != TYPE_STRING
+		or typeof(raw_id) != TYPE_INT
+		or not raw_tile is Vector2i
+		or not raw_excluded_ids is Array
+	):
+		return false
+
+	var endpoint_kind: String = raw_kind
+	var endpoint_id: int = raw_id
+	var tile: Vector2i = raw_tile
+	var previous_excluded_id := 0
+
+	for raw_excluded_id in raw_excluded_ids:
+		if (
+			typeof(raw_excluded_id) != TYPE_INT
+			or int(raw_excluded_id) <= previous_excluded_id
+		):
+			return false
+
+		previous_excluded_id = int(raw_excluded_id)
+
+	if endpoint_kind == WorldData.CITY_CITIZEN_HAUL_ENDPOINT_KIND_NONE:
+		return (
+			allow_none
+			and endpoint_id == -1
+			and tile == WorldData.INVALID_CITY_TILE_POSITION
+			and raw_excluded_ids.is_empty()
+		)
+
+	if (
+		endpoint_kind
+		== WorldData.CITY_CITIZEN_HAUL_ENDPOINT_KIND_GROUND_TILE
+	):
+		return (
+			endpoint_id == -1
+			and tile != WorldData.INVALID_CITY_TILE_POSITION
+		)
+
+	return (
+		endpoint_id > 0
+		and tile == WorldData.INVALID_CITY_TILE_POSITION
+		and raw_excluded_ids.is_empty()
+	)
 
 
 static func _get_validation_endpoint_key(
 	endpoint: Dictionary
 ) -> String:
-	return (
-		str(
-			endpoint.get(
-				"kind",
-				WorldData.CITY_CITIZEN_HAUL_ENDPOINT_KIND_NONE
-			)
+	var endpoint_kind := str(
+		endpoint.get(
+			"kind",
+			WorldData.CITY_CITIZEN_HAUL_ENDPOINT_KIND_NONE
 		)
+	)
+
+	if (
+		endpoint_kind
+		== WorldData.CITY_CITIZEN_HAUL_ENDPOINT_KIND_GROUND_TILE
+	):
+		var raw_tile = endpoint.get(
+			"tile_position",
+			WorldData.INVALID_CITY_TILE_POSITION
+		)
+
+		if raw_tile is Vector2i:
+			return (
+				endpoint_kind
+				+ ":"
+				+ str(raw_tile.x)
+				+ ","
+				+ str(raw_tile.y)
+			)
+
+	return (
+		endpoint_kind
 		+ ":"
 		+ str(int(endpoint.get("id", -1)))
 	)
@@ -1868,12 +3039,18 @@ static func _validate_city_citizen_task_state(
 		"phase",
 		"priority",
 		"target_object_id",
+		"work_order_id",
+		"job_id",
 		"start_world_minute",
 		"target_tile",
 		"previous_target_tile",
 		"next_action_world_minute",
 		"relocation_count",
-		"player_locked"
+		"player_locked",
+		"food_resource_type",
+		"food_requested_amount",
+		"food_source_endpoint_kind",
+		"food_source_access_purpose"
 	]
 	var expected_active_task_ids: Array[int] = []
 
@@ -1930,6 +3107,8 @@ static func _validate_city_citizen_task_state(
 		var raw_target_object_id = current_task.get(
 			"target_object_id"
 		)
+		var raw_work_order_id = current_task.get("work_order_id")
+		var raw_job_id = current_task.get("job_id")
 		var raw_start_world_minute = current_task.get(
 			"start_world_minute"
 		)
@@ -1947,6 +3126,18 @@ static func _validate_city_citizen_task_state(
 		)
 		var raw_player_locked = current_task.get(
 			"player_locked"
+		)
+		var raw_food_resource_type = current_task.get(
+			"food_resource_type"
+		)
+		var raw_food_requested_amount = current_task.get(
+			"food_requested_amount"
+		)
+		var raw_food_source_endpoint_kind = current_task.get(
+			"food_source_endpoint_kind"
+		)
+		var raw_food_source_access_purpose = current_task.get(
+			"food_source_access_purpose"
 		)
 		var task_types_are_valid := true
 
@@ -1987,6 +3178,22 @@ static func _validate_city_citizen_task_state(
 				"Citizen "
 				+ str(citizen_id)
 				+ " has a non-integer task target object ID."
+			)
+			task_types_are_valid = false
+
+		if typeof(raw_work_order_id) != TYPE_INT:
+			errors.append(
+				"Citizen "
+					+ str(citizen_id)
+					+ " has a non-integer work-order ID."
+			)
+			task_types_are_valid = false
+
+		if typeof(raw_job_id) != TYPE_STRING:
+			errors.append(
+				"Citizen "
+					+ str(citizen_id)
+					+ " has a non-string job ID."
 			)
 			task_types_are_valid = false
 
@@ -2035,6 +3242,38 @@ static func _validate_city_citizen_task_state(
 			)
 			task_types_are_valid = false
 
+		if typeof(raw_food_resource_type) != TYPE_STRING:
+			errors.append(
+				"Citizen "
+				+ str(citizen_id)
+				+ " has a non-string food task resource."
+			)
+			task_types_are_valid = false
+
+		if typeof(raw_food_requested_amount) != TYPE_INT:
+			errors.append(
+				"Citizen "
+				+ str(citizen_id)
+				+ " has a non-integer food task amount."
+			)
+			task_types_are_valid = false
+
+		if typeof(raw_food_source_endpoint_kind) != TYPE_STRING:
+			errors.append(
+				"Citizen "
+					+ str(citizen_id)
+					+ " has a non-string food source endpoint kind."
+			)
+			task_types_are_valid = false
+
+		if typeof(raw_food_source_access_purpose) != TYPE_STRING:
+			errors.append(
+				"Citizen "
+				+ str(citizen_id)
+				+ " has a non-string food source access purpose."
+			)
+			task_types_are_valid = false
+
 		if not task_types_are_valid:
 			continue
 
@@ -2043,6 +3282,8 @@ static func _validate_city_citizen_task_state(
 		var task_phase: String = raw_task_phase
 		var task_priority: int = raw_task_priority
 		var target_object_id: int = raw_target_object_id
+		var work_order_id: int = raw_work_order_id
+		var job_id: String = raw_job_id
 		var start_world_minute: int = raw_start_world_minute
 		var player_locked: bool = raw_player_locked
 		var task_values_are_valid := true
@@ -2087,6 +3328,13 @@ static func _validate_city_citizen_task_state(
 			continue
 
 		if task_kind == WorldData.CITY_CITIZEN_TASK_KIND_NONE:
+			if work_order_id != -1 or not job_id.is_empty():
+				errors.append(
+					"Citizen "
+					+ str(citizen_id)
+					+ " has no task but retains a work-order reference."
+				)
+
 			if task_source != WorldData.CITY_CITIZEN_TASK_SOURCE_NONE:
 				errors.append(
 					"Citizen "
@@ -2213,6 +3461,7 @@ static func _validate_city_citizen_task_state(
 				== WorldData.CITY_CITIZEN_TASK_SOURCE_AUTONOMY
 			)
 			and int(citizen.get("job_object_id", -1)) > 0
+			and task_kind != WorldData.CITY_CITIZEN_TASK_KIND_ACQUIRE_FOOD
 		):
 			errors.append(
 				"Employed citizen "
@@ -2220,6 +3469,50 @@ static func _validate_city_citizen_task_state(
 				+ " has ineligible task source '"
 				+ task_source
 				+ "'."
+			)
+
+		var task_requires_work_order := (
+			task_kind == WorldData.CITY_CITIZEN_TASK_KIND_PLAYER_COMMAND
+			or task_kind == WorldData.CITY_CITIZEN_TASK_KIND_CONSTRUCTION
+			or (
+				task_kind == WorldData.CITY_CITIZEN_TASK_KIND_HAUL
+				and task_source
+				== WorldData.CITY_CITIZEN_TASK_SOURCE_PLAYER
+			)
+		)
+
+		if work_order_id < -1 or work_order_id == 0:
+			errors.append(
+				"Citizen "
+				+ str(citizen_id)
+				+ " has invalid work-order reference "
+				+ str(work_order_id)
+				+ "."
+			)
+		elif work_order_id < 0:
+			if not job_id.is_empty():
+				errors.append(
+					"Citizen "
+					+ str(citizen_id)
+					+ " has a job ID without a work order."
+				)
+
+			if task_requires_work_order:
+				errors.append(
+					"Citizen "
+					+ str(citizen_id)
+					+ " has unified player work without a work order."
+				)
+		else:
+			_validate_city_task_work_order_reference(
+				errors,
+				citizen_id,
+				citizen,
+				task_kind,
+				task_source,
+				target_object_id,
+				work_order_id,
+				job_id
 			)
 
 		match task_kind:
@@ -2289,6 +3582,99 @@ static func _validate_city_citizen_task_state(
 							+ "physically attending workplace "
 							+ str(target_object_id)
 							+ "."
+					)
+
+			WorldData.CITY_CITIZEN_TASK_KIND_ACQUIRE_FOOD:
+				var food_endpoint_kind: String = raw_food_source_endpoint_kind
+				var food_endpoint := (
+					CityCitizens.make_city_citizen_haul_endpoint({
+					"kind": food_endpoint_kind,
+					"id": target_object_id,
+					})
+				)
+
+				if (
+					target_object_id <= 0
+					or food_endpoint_kind not in [
+						WorldData
+						.CITY_CITIZEN_HAUL_ENDPOINT_KIND_CITY_OBJECT_CONTAINER,
+						WorldData.CITY_CITIZEN_HAUL_ENDPOINT_KIND_GROUND_PILE,
+					]
+					or not CityCitizens.is_valid_city_citizen_haul_endpoint(
+						food_endpoint
+					)
+					or not _city_haul_endpoint_schema_is_valid(food_endpoint)
+				):
+					errors.append(
+						"Citizen "
+						+ str(citizen_id)
+						+ " food task targets invalid endpoint "
+						+ str(target_object_id)
+						+ "."
+					)
+					continue
+
+				var food_resource: String = raw_food_resource_type
+				var food_requested_amount: int = raw_food_requested_amount
+				var food_access_purpose: String = raw_food_source_access_purpose
+
+				if WorldData.get_city_food_hunger_restore(food_resource) <= 0:
+					errors.append(
+						"Citizen "
+						+ str(citizen_id)
+						+ " food task has non-food resource '"
+						+ food_resource
+						+ "'."
+					)
+
+				if food_requested_amount <= 0:
+					errors.append(
+						"Citizen "
+						+ str(citizen_id)
+						+ " food task has no requested amount."
+					)
+
+				if (
+					food_access_purpose
+					!= WorldData.CONTAINER_DIRECT_WITHDRAWAL_PURPOSE_PERSONAL_FOOD
+				):
+					errors.append(
+						"Citizen "
+						+ str(citizen_id)
+						+ " food task has invalid source access purpose '"
+						+ food_access_purpose
+						+ "'."
+					)
+
+				var raw_food_target_tile = current_task.get(
+					"target_tile",
+					WorldData.INVALID_CITY_TILE_POSITION
+				)
+
+				if (
+					not raw_food_target_tile is Vector2i
+					or not WorldData.get_city_citizen_food_endpoint_target_tiles(
+						citizen_id,
+						food_endpoint
+					).has(raw_food_target_tile)
+				):
+					errors.append(
+						"Citizen "
+						+ str(citizen_id)
+						+ " food task has an invalid withdrawal target tile."
+					)
+
+				if not WorldData.city_citizen_can_withdraw_food_from_endpoint(
+					citizen_id,
+					food_endpoint,
+					food_resource
+				):
+					errors.append(
+						"Citizen "
+						+ str(citizen_id)
+						+ " cannot withdraw its reserved food from endpoint "
+						+ str(target_object_id)
+						+ "."
 					)
 
 			WorldData.CITY_CITIZEN_TASK_KIND_HAUL:
@@ -2397,8 +3783,16 @@ static func _validate_city_citizen_task_state(
 				else:
 					var haul_source: Dictionary = raw_haul_source
 
-					if not CityCitizens.is_valid_city_citizen_haul_endpoint(
-						haul_source
+					if (
+						not CityCitizens.is_valid_city_citizen_haul_endpoint(
+							haul_source
+						)
+						or not _city_haul_endpoint_schema_is_valid(
+							haul_source
+						)
+						or str(haul_source.get("kind", ""))
+						== WorldData
+						.CITY_CITIZEN_HAUL_ENDPOINT_KIND_GROUND_TILE
 					):
 						errors.append(
 							"Citizen "
@@ -2418,8 +3812,13 @@ static func _validate_city_citizen_task_state(
 							+ str(citizen_id)
 							+ " haul task has invalid requester data."
 					)
-				elif not CityCitizens.is_valid_city_citizen_haul_endpoint(
-					raw_haul_requester
+				elif (
+					not CityCitizens.is_valid_city_citizen_haul_endpoint(
+						raw_haul_requester
+					)
+					or not _city_haul_endpoint_schema_is_valid(
+						raw_haul_requester
+					)
 				):
 					errors.append(
 						"Citizen "
@@ -2466,15 +3865,88 @@ static func _validate_city_citizen_task_state(
 						raw_haul_destination
 					)
 
-					if not CityCitizens.is_valid_city_citizen_haul_endpoint(
-						haul_destination,
-						cargo_amount > 0
+					if (
+						not CityCitizens.is_valid_city_citizen_haul_endpoint(
+							haul_destination,
+							cargo_amount > 0
+						)
+						or not _city_haul_endpoint_schema_is_valid(
+							haul_destination,
+							cargo_amount > 0
+						)
 					):
 						errors.append(
 							"Citizen "
 								+ str(citizen_id)
 								+ " haul task has invalid destination endpoint."
 						)
+					elif (
+						str(haul_destination.get("kind", ""))
+						== WorldData
+						.CITY_CITIZEN_HAUL_ENDPOINT_KIND_GROUND_TILE
+						and haul.get(
+							"destination_tile",
+							WorldData.INVALID_CITY_TILE_POSITION
+						) != haul_destination.get(
+							"tile_position",
+							WorldData.INVALID_CITY_TILE_POSITION
+						)
+					):
+						errors.append(
+							"Citizen "
+							+ str(citizen_id)
+							+ " ground-drop endpoint and destination tile disagree."
+						)
+
+			WorldData.CITY_CITIZEN_TASK_KIND_CONSTRUCTION:
+				var construction_site := (
+					WorldData.get_city_construction_site_by_id(
+						target_object_id
+					)
+				)
+
+				if construction_site.is_empty():
+					errors.append(
+						"Citizen "
+						+ str(citizen_id)
+						+ " targets missing construction site "
+						+ str(target_object_id)
+						+ "."
+					)
+					continue
+
+				if (
+					task_source
+					!= WorldData.CITY_CITIZEN_TASK_SOURCE_PLAYER
+					or player_locked
+				):
+					errors.append(
+						"Citizen "
+						+ str(citizen_id)
+						+ " has invalid construction task ownership."
+					)
+
+				if (
+					str(construction_site.get("phase", ""))
+					!= WorldData.CITY_CONSTRUCTION_PHASE_LABOR
+				):
+					errors.append(
+						"Citizen "
+						+ str(citizen_id)
+						+ " performs labor outside a site's labor phase."
+					)
+
+				if (
+					not construction_site.get(
+						"work_positions",
+						[]
+					).has(raw_target_tile)
+				):
+					errors.append(
+						"Citizen "
+						+ str(citizen_id)
+						+ " has an invalid construction work position."
+					)
 
 			WorldData.CITY_CITIZEN_TASK_KIND_PLAYER_COMMAND:
 				if target_object_id <= 0:
@@ -2506,7 +3978,6 @@ static func _validate_city_citizen_task_state(
 				if (
 					task_source
 					!= WorldData.CITY_CITIZEN_TASK_SOURCE_PLAYER
-					or not player_locked
 				):
 					errors.append(
 						"Citizen "
@@ -2526,16 +3997,15 @@ static func _validate_city_citizen_task_state(
 					)
 
 				if (
-					raw_target_tile
-					!= player_command.get(
-						"tile_position",
-						WorldData.INVALID_CITY_TILE_POSITION
-					)
+					not WorldData.get_city_player_command_work_tiles(
+						player_command,
+						citizen_id
+					).has(raw_target_tile)
 				):
 					errors.append(
 						"Citizen "
-						+ str(citizen_id)
-						+ " player-command target tile disagrees with command "
+							+ str(citizen_id)
+							+ " has an invalid work tile for command "
 						+ str(target_object_id)
 						+ "."
 					)
@@ -2691,6 +4161,103 @@ static func _validate_city_citizen_task_state(
 		errors.append(
 			"Active task registry array and lookup have different sizes."
 		)
+
+
+static func _validate_city_task_work_order_reference(
+	errors: Array[String],
+	citizen_id: int,
+	citizen: Dictionary,
+	task_kind: String,
+	task_source: String,
+	target_object_id: int,
+	work_order_id: int,
+	job_id: String
+) -> void:
+	var order := WorldData.get_city_work_order_by_id(work_order_id)
+
+	if order.is_empty():
+		errors.append(
+			"Citizen "
+			+ str(citizen_id)
+			+ " references missing work order "
+			+ str(work_order_id)
+			+ "."
+		)
+		return
+
+	if job_id.is_empty():
+		errors.append(
+			"Citizen "
+			+ str(citizen_id)
+			+ " references work order "
+			+ str(work_order_id)
+			+ " without a job ID."
+		)
+
+	if (
+		task_source != WorldData.CITY_CITIZEN_TASK_SOURCE_PLAYER
+		or str(order.get("state", ""))
+		== CITY_WORK_ORDER_STATE_CANCELLED
+	):
+		errors.append(
+			"Citizen "
+			+ str(citizen_id)
+			+ " has an inactive or non-player work-order task."
+		)
+
+	var order_type := str(order.get("order_type", ""))
+	var source_id := int(order.get("source_id", -1))
+	var source_matches_task := false
+
+	if order_type == CITY_WORK_ORDER_TYPE_COMMAND_GROUP:
+		var command := WorldData.get_city_player_command_by_id(
+			target_object_id
+		)
+		source_matches_task = (
+			task_kind == WorldData.CITY_CITIZEN_TASK_KIND_PLAYER_COMMAND
+			and not command.is_empty()
+			and int(command.get("group_id", -1)) == source_id
+			and int(command.get("construction_site_id", -1)) <= 0
+		)
+	elif order_type == CITY_WORK_ORDER_TYPE_CONSTRUCTION_SITE:
+		match task_kind:
+			WorldData.CITY_CITIZEN_TASK_KIND_PLAYER_COMMAND:
+				var command := WorldData.get_city_player_command_by_id(
+					target_object_id
+				)
+				source_matches_task = (
+					not command.is_empty()
+					and int(command.get("construction_site_id", -1))
+					== source_id
+				)
+
+			WorldData.CITY_CITIZEN_TASK_KIND_CONSTRUCTION:
+				source_matches_task = target_object_id == source_id
+
+			WorldData.CITY_CITIZEN_TASK_KIND_HAUL:
+				var raw_haul = citizen.get("current_haul", {})
+
+				if raw_haul is Dictionary:
+					var raw_requester = raw_haul.get("requester", {})
+
+					if raw_requester is Dictionary:
+						source_matches_task = (
+							str(raw_requester.get("kind", ""))
+							== WorldData
+							.CITY_CITIZEN_HAUL_ENDPOINT_KIND_CONSTRUCTION_SITE
+							and int(raw_requester.get("id", -1))
+							== source_id
+						)
+
+	if not source_matches_task:
+		errors.append(
+			"Citizen "
+			+ str(citizen_id)
+			+ " task does not belong to referenced work order "
+			+ str(work_order_id)
+			+ "."
+		)
+
 
 static func _validate_city_citizen_movement_state(
 	errors: Array[String],

@@ -36,6 +36,50 @@ static func run_tick(
 		_take_personal_food_at_current_legal_source(citizen_id)
 		_eat_personal_food_if_hungry(citizen_id)
 
+static func get_citizen_food_need_nutrition(citizen_id: int) -> int:
+	var citizen := WorldData.get_city_citizen_by_id(citizen_id)
+
+	if citizen.is_empty() or not bool(citizen.get("alive", false)):
+		return 0
+
+	var personal_food_nutrition := WorldData.get_food_nutrition_in_resource_container(
+		WorldData.get_city_citizen_inventory(citizen_id)
+	)
+
+	return maxi(
+		WorldData.CITIZEN_EAT_TARGET_HUNGER
+		- WorldData.get_city_citizen_hunger(citizen_id)
+		- personal_food_nutrition,
+		0
+	)
+
+
+static func citizen_should_seek_food(citizen_id: int) -> bool:
+	var hunger := WorldData.get_city_citizen_hunger(citizen_id)
+	var available_food_capacity := (
+		WorldData.get_city_citizen_personal_inventory_free_space(citizen_id)
+		if hunger <= WorldData.CITIZEN_CRITICAL_FOOD_SEEK_TRIGGER_HUNGER
+		else WorldData.get_city_citizen_inventory_free_space(citizen_id)
+	)
+
+	return (
+		hunger <= WorldData.CITIZEN_EAT_TRIGGER_HUNGER
+		and get_citizen_food_need_nutrition(citizen_id) > 0
+		and available_food_capacity > 0
+	)
+
+
+static func citizen_has_critical_food_need(citizen_id: int) -> bool:
+	return (
+		WorldData.get_city_citizen_hunger(citizen_id)
+		<= WorldData.CITIZEN_CRITICAL_FOOD_SEEK_TRIGGER_HUNGER
+		and get_citizen_food_need_nutrition(citizen_id) > 0
+	)
+
+
+static func eat_personal_food_if_hungry(citizen_id: int) -> void:
+	_eat_personal_food_if_hungry(citizen_id)
+
 
 static func _advance_citizen_hunger(
 	citizen_id: int,
@@ -101,14 +145,13 @@ static func _take_personal_food_at_current_legal_source(
 	if desired_nutrition <= 0:
 		return
 
-	var source_objects := _get_legal_food_sources_at_citizen(citizen)
+	var source_endpoints := _get_legal_food_source_endpoints_at_citizen(citizen)
 
-	for raw_source_object in source_objects:
-		if not raw_source_object is Dictionary:
+	for raw_source_endpoint in source_endpoints:
+		if not raw_source_endpoint is Dictionary:
 			continue
 
-		var source_object: Dictionary = raw_source_object
-		var source_object_id := int(source_object.get("id", -1))
+		var source_endpoint: Dictionary = raw_source_endpoint
 
 		for resource in WorldData.get_city_food_resource_types():
 			var hunger_restore := WorldData.get_city_food_hunger_restore(resource)
@@ -120,12 +163,11 @@ static func _take_personal_food_at_current_legal_source(
 				float(desired_nutrition) / float(hunger_restore)
 			)
 			var transferred_units := (
-				WorldData.transfer_city_object_resource_to_citizen_inventory(
+				WorldData.transfer_city_food_endpoint_to_citizen_inventory(
 					citizen_id,
-					source_object_id,
+					source_endpoint,
 					resource,
-					requested_units,
-					WorldData.CONTAINER_DIRECT_WITHDRAWAL_PURPOSE_PERSONAL_FOOD
+					requested_units
 				)
 			)
 
@@ -146,7 +188,7 @@ static func _take_personal_food_at_current_legal_source(
 				return
 
 
-static func _get_legal_food_sources_at_citizen(
+static func _get_legal_food_source_endpoints_at_citizen(
 	citizen: Dictionary
 ) -> Array:
 	var sources: Array = []
@@ -169,11 +211,15 @@ static func _get_legal_food_sources_at_citizen(
 		WorldData.city_object_is_household_home(home)
 		and WorldData.get_city_object_footprint_tiles(home).has(citizen_tile)
 	):
-		sources.append(home)
+		sources.append(WorldData.make_city_citizen_haul_endpoint(home_id))
 
-	# Public containers are a fallback only when the citizen is already at one;
-	# this needs pass does not create a separate food-fetch navigation task.
-	for storage_tier in WorldData.get_public_city_storage_tiers():
+	# Deliberate travel is owned by the decision system. At the current tile,
+	# however, every legal survival source participates in the same endpoint
+	# policy, including workplace output and ordinary food piles.
+	for storage_tier in (
+		WorldData.get_public_city_storage_tiers()
+		+ [WorldData.PUBLIC_CITY_STORAGE_TIER_NONE]
+	):
 		for raw_city_object in WorldData.city_objects:
 			if not raw_city_object is Dictionary:
 				continue
@@ -181,8 +227,16 @@ static func _get_legal_food_sources_at_citizen(
 			var city_object: Dictionary = raw_city_object
 
 			if (
-				WorldData.get_city_object_public_storage_tier(city_object)
-				!= storage_tier
+				(
+					storage_tier != WorldData.PUBLIC_CITY_STORAGE_TIER_NONE
+					and WorldData.get_city_object_public_storage_tier(city_object)
+					!= storage_tier
+				)
+				or (
+					storage_tier == WorldData.PUBLIC_CITY_STORAGE_TIER_NONE
+					and WorldData.get_city_object_container_type(city_object)
+					!= WorldData.CONTAINER_TYPE_WORKPLACE_STORAGE
+				)
 				or not WorldData.city_object_allows_direct_resource_withdrawal(
 					city_object,
 					WorldData.CONTAINER_DIRECT_WITHDRAWAL_PURPOSE_PERSONAL_FOOD
@@ -190,18 +244,36 @@ static func _get_legal_food_sources_at_citizen(
 			):
 				continue
 
-			var interaction_tiles := WorldData.get_city_object_access_tiles(
-				WorldData.official_city_world,
-				city_object
+			var interaction_tiles := (
+				WorldData.get_city_citizen_direct_withdrawal_target_tiles(
+					citizen_id,
+					city_object,
+					WorldData.CONTAINER_DIRECT_WITHDRAWAL_PURPOSE_PERSONAL_FOOD
+				)
 			)
 
-			if (
-				WorldData.get_city_object_footprint_tiles(city_object).has(
-					citizen_tile
+			if interaction_tiles.has(citizen_tile):
+				sources.append(
+					WorldData.make_city_citizen_haul_endpoint(
+						int(city_object.get("id", -1))
+					)
 				)
-				or interaction_tiles.has(citizen_tile)
-			):
-				sources.append(city_object)
+
+	for raw_pile in WorldData.get_city_ground_pile_snapshot():
+		if not raw_pile is Dictionary:
+			continue
+
+		var pile: Dictionary = raw_pile
+		var endpoint := WorldData.make_city_ground_pile_haul_endpoint(
+			int(pile.get("id", -1))
+		)
+
+		if (
+			pile.get("tile_position", WorldData.INVALID_CITY_TILE_POSITION)
+			== citizen_tile
+			and not WorldData.city_ground_pile_is_construction_reserved(pile)
+		):
+			sources.append(endpoint)
 
 	return sources
 
