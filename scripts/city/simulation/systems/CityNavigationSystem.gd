@@ -37,16 +37,22 @@ const NEIGHBOR_OFFSETS := [
 	Vector2i(1, 1)
 ]
 
-static func find_path_to_any_city_tile(
-	city_world: WorldData,
-	start_tile: Vector2i,
-	raw_destination_tiles: Array,
-	max_expanded_nodes: int = (
-		DEFAULT_MAX_EXPANDED_NODES
-	),
-	citizen_id: int = -1,
-	heuristic_weight: int = HEURISTIC_WEIGHT
-) -> Dictionary:
+static func find_path_to_any_city_tile(values: Dictionary) -> Dictionary:
+	var city_world: WorldData = values.get("city_world")
+	var start_tile: Vector2i = values.get(
+		"start_tile",
+		WorldData.INVALID_CITY_TILE_POSITION
+	)
+	var raw_destination_tiles: Array = values.get("destination_tiles", [])
+	var max_expanded_nodes := maxi(
+		int(values.get("max_expanded_nodes", DEFAULT_MAX_EXPANDED_NODES)),
+		1
+	)
+	var citizen_id := int(values.get("citizen_id", -1))
+	var heuristic_weight := maxi(
+		int(values.get("heuristic_weight", HEURISTIC_WEIGHT)),
+		1
+	)
 	var search_start_usec := Time.get_ticks_usec()
 
 	var result := {
@@ -135,13 +141,13 @@ static func find_path_to_any_city_tile(
 		1
 	)
 
-	_push_open_heap_entry(
-		open_heap,
-		start_tile,
-		0,
-		start_heuristic,
-		safe_heuristic_weight
-	)
+	_push_open_heap_entry({
+		"open_heap": open_heap,
+		"tile_position": start_tile,
+		"travel_cost": 0,
+		"heuristic": start_heuristic,
+		"heuristic_weight": safe_heuristic_weight
+	})
 
 	var expanded_node_count := 0
 	var safe_max_expanded_nodes := maxi(
@@ -290,13 +296,13 @@ static func find_path_to_any_city_tile(
 				)
 			)
 
-			_push_open_heap_entry(
-				open_heap,
-				neighbor_tile,
-				proposed_travel_cost,
-				neighbor_heuristic,
-				safe_heuristic_weight
-			)
+			_push_open_heap_entry({
+				"open_heap": open_heap,
+				"tile_position": neighbor_tile,
+				"travel_cost": proposed_travel_cost,
+				"heuristic": neighbor_heuristic,
+				"heuristic_weight": safe_heuristic_weight
+			})
 
 	result["status"] = PATH_STATUS_UNREACHABLE
 	result["expanded_node_count"] = (
@@ -387,13 +393,15 @@ static func _get_minimum_octile_distance(
 	return minimum_distance
 
 
-static func _push_open_heap_entry(
-	open_heap: Array,
-	tile_position: Vector2i,
-	travel_cost: int,
-	heuristic: int,
-	heuristic_weight: int
-) -> void:
+static func _push_open_heap_entry(values: Dictionary) -> void:
+	var open_heap: Array = values.get("open_heap", [])
+	var tile_position: Vector2i = values.get(
+		"tile_position",
+		WorldData.INVALID_CITY_TILE_POSITION
+	)
+	var travel_cost := int(values.get("travel_cost", 0))
+	var heuristic := int(values.get("heuristic", 0))
+	var heuristic_weight := int(values.get("heuristic_weight", HEURISTIC_WEIGHT))
 	var entry := [
 		tile_position,
 		travel_cost + heuristic * heuristic_weight,

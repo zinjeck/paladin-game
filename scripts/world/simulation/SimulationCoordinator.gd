@@ -1,22 +1,28 @@
 extends Node
 
+const SIMULATION_SYSTEM_CITIZEN_DECISIONS := "citizen_decisions"
+const SIMULATION_SYSTEM_CITIZEN_NEEDS := "citizen_needs"
+const SIMULATION_SYSTEM_CITIZEN_MOVEMENT := "citizen_movement"
+const SIMULATION_SYSTEM_CITIZEN_TASKS := "citizen_tasks"
+const SIMULATION_SYSTEM_WORKPLACE_PRODUCTION := "workplace_production"
+
 const SLOW_TICK_WARNING_USEC: int = 16_000
 const SAMPLE_WINDOW_SIZE: int = 120
 
 const MONITORED_SYSTEM_KEYS: Array[String] = [
-	WorldData.SIMULATION_SYSTEM_CITIZEN_NEEDS,
-	WorldData.SIMULATION_SYSTEM_CITIZEN_DECISIONS,
-	WorldData.SIMULATION_SYSTEM_CITIZEN_MOVEMENT,
-	WorldData.SIMULATION_SYSTEM_CITIZEN_TASKS,
-	WorldData.SIMULATION_SYSTEM_WORKPLACE_PRODUCTION,
+	SIMULATION_SYSTEM_CITIZEN_NEEDS,
+	SIMULATION_SYSTEM_CITIZEN_DECISIONS,
+	SIMULATION_SYSTEM_CITIZEN_MOVEMENT,
+	SIMULATION_SYSTEM_CITIZEN_TASKS,
+	SIMULATION_SYSTEM_WORKPLACE_PRODUCTION,
 ]
 
 const SYSTEM_DISPLAY_NAMES: Dictionary = {
-	WorldData.SIMULATION_SYSTEM_CITIZEN_NEEDS: "Needs",
-	WorldData.SIMULATION_SYSTEM_CITIZEN_DECISIONS: "Decisions",
-	WorldData.SIMULATION_SYSTEM_CITIZEN_MOVEMENT: "Movement",
-	WorldData.SIMULATION_SYSTEM_CITIZEN_TASKS: "Tasks",
-	WorldData.SIMULATION_SYSTEM_WORKPLACE_PRODUCTION: "Production",
+	SIMULATION_SYSTEM_CITIZEN_NEEDS: "Needs",
+	SIMULATION_SYSTEM_CITIZEN_DECISIONS: "Decisions",
+	SIMULATION_SYSTEM_CITIZEN_MOVEMENT: "Movement",
+	SIMULATION_SYSTEM_CITIZEN_TASKS: "Tasks",
+	SIMULATION_SYSTEM_WORKPLACE_PRODUCTION: "Production",
 }
 
 var last_tick_index: int = 0
@@ -95,11 +101,57 @@ func run_simulation_systems(
 	minutes_advanced: int,
 	duration_recorder: Callable = Callable()
 ) -> void:
-	WorldData.run_simulation_tick(
-		tick_index,
-		minutes_advanced,
-		duration_recorder
-	)
+	# Keep simulation execution and profiling ownership together. System order is
+	# unchanged from the former WorldData forwarding implementation.
+	var should_record_durations := duration_recorder.is_valid()
+	var system_start_usec := 0
+
+	if should_record_durations:
+		system_start_usec = Time.get_ticks_usec()
+
+	CitizenNeedsSystem.run_tick(tick_index, minutes_advanced)
+
+	if should_record_durations:
+		duration_recorder.call(
+			SIMULATION_SYSTEM_CITIZEN_NEEDS,
+			Time.get_ticks_usec() - system_start_usec
+		)
+		system_start_usec = Time.get_ticks_usec()
+
+	CitizenDecisionSystem.run_tick(tick_index, minutes_advanced)
+
+	if should_record_durations:
+		duration_recorder.call(
+			SIMULATION_SYSTEM_CITIZEN_DECISIONS,
+			Time.get_ticks_usec() - system_start_usec
+		)
+		system_start_usec = Time.get_ticks_usec()
+
+	CitizenMovementSystem.run_tick(tick_index, minutes_advanced)
+
+	if should_record_durations:
+		duration_recorder.call(
+			SIMULATION_SYSTEM_CITIZEN_MOVEMENT,
+			Time.get_ticks_usec() - system_start_usec
+		)
+		system_start_usec = Time.get_ticks_usec()
+
+	CitizenTaskSystem.run_tick(tick_index, minutes_advanced)
+
+	if should_record_durations:
+		duration_recorder.call(
+			SIMULATION_SYSTEM_CITIZEN_TASKS,
+			Time.get_ticks_usec() - system_start_usec
+		)
+		system_start_usec = Time.get_ticks_usec()
+
+	WorkplaceProductionSystem.run_tick(tick_index, minutes_advanced)
+
+	if should_record_durations:
+		duration_recorder.call(
+			SIMULATION_SYSTEM_WORKPLACE_PRODUCTION,
+			Time.get_ticks_usec() - system_start_usec
+		)
 
 
 func reset_performance_statistics() -> void:

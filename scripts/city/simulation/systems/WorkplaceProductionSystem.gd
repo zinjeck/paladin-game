@@ -99,16 +99,18 @@ static func get_resource_source_evaluation(
 	else:
 		cache_entry = _preview_resource_source_evaluation_cache
 
-	if _resource_source_cache_matches(
-		cache_entry,
-		world_instance_id,
-		tile_data_version,
-		object_type,
-		footprint_tiles,
-		resource_type,
-		reach_tiles,
-		source_density_for_full_productivity_basis_points
-	):
+	if _resource_source_cache_matches({
+		"cache_entry": cache_entry,
+		"world_instance_id": world_instance_id,
+		"tile_data_version": tile_data_version,
+		"object_type": object_type,
+		"footprint_tiles": footprint_tiles,
+		"resource_type": resource_type,
+		"reach_tiles": reach_tiles,
+		"source_density_for_full_productivity_basis_points": (
+			source_density_for_full_productivity_basis_points
+		),
+	}):
 		var raw_cached_evaluation = cache_entry.get(
 			"evaluation",
 			{}
@@ -117,12 +119,12 @@ static func get_resource_source_evaluation(
 		if raw_cached_evaluation is Dictionary:
 			return raw_cached_evaluation
 
-	var zone_result := _build_footprint_reach_zone(
-		active_world,
-		footprint_tiles,
-		reach_tiles,
-		resource_type
-	)
+	var zone_result := _build_footprint_reach_zone({
+		"source_world": active_world,
+		"footprint_tiles": footprint_tiles,
+		"reach_tiles": reach_tiles,
+		"resource_type": resource_type,
+	})
 	var zone_tiles: Array = zone_result.get("zone_tiles", [])
 	var resource_tiles: Array = zone_result.get(
 		"resource_tiles",
@@ -292,11 +294,14 @@ static func _get_unique_footprint_tiles(
 
 
 static func _build_footprint_reach_zone(
-	source_world,
-	footprint_tiles: Array,
-	reach_tiles: int,
-	resource_type: String
+	values: Dictionary
 ) -> Dictionary:
+	var source_world = values.get("source_world")
+	var footprint_tiles: Array = values.get("footprint_tiles", [])
+	var reach_tiles := maxi(int(values.get("reach_tiles", 0)), 0)
+	var resource_type := str(
+		values.get("resource_type", WorldData.RESOURCE_NONE)
+	)
 	var zone_tile_lookup: Dictionary = {}
 	var reach_squared := reach_tiles * reach_tiles
 
@@ -366,15 +371,22 @@ static func _build_footprint_reach_zone(
 
 
 static func _resource_source_cache_matches(
-	cache_entry: Dictionary,
-	world_instance_id: int,
-	tile_data_version: int,
-	object_type: String,
-	footprint_tiles: Array,
-	resource_type: String,
-	reach_tiles: int,
-	source_density_for_full_productivity_basis_points: int
+	values: Dictionary
 ) -> bool:
+	var cache_entry: Dictionary = values.get("cache_entry", {})
+	var world_instance_id := int(values.get("world_instance_id", -1))
+	var tile_data_version := int(values.get("tile_data_version", -1))
+	var object_type := str(values.get("object_type", ""))
+	var footprint_tiles: Array = values.get("footprint_tiles", [])
+	var resource_type := str(values.get("resource_type", ""))
+	var reach_tiles := int(values.get("reach_tiles", -1))
+	var source_density_for_full_productivity_basis_points := int(
+		values.get(
+			"source_density_for_full_productivity_basis_points",
+			-1
+		)
+	)
+
 	if cache_entry.is_empty():
 		return false
 
@@ -514,24 +526,46 @@ static func _run_workplace_tick(
 	recipe: Dictionary,
 	minutes_advanced: int
 ) -> void:
+	var tick_context := _make_workplace_tick_context({
+		"city_object": city_object,
+		"recipe": recipe,
+		"minutes_advanced": minutes_advanced,
+	})
+
+	if tick_context.is_empty():
+		return
+
+	if not _prepare_workplace_tick_recipe(tick_context):
+		return
+
+	if _workplace_tick_is_blocked(tick_context):
+		return
+
+	if not _prepare_workplace_tick_output(tick_context):
+		return
+
+	_commit_workplace_tick_output(tick_context)
+
+
+static func _make_workplace_tick_context(
+	values: Dictionary
+) -> Dictionary:
+	var city_object: Dictionary = values.get("city_object", {})
+	var recipe: Dictionary = values.get("recipe", {})
+	var minutes_advanced := int(values.get("minutes_advanced", 0))
 	var object_id := int(city_object.get("id", -1))
 
 	if object_id <= 0:
-		return
+		return {}
 
 	var current_progress := (
 		WorldData.get_city_object_production_progress_work_units(
 			city_object
 		)
 	)
-	var source_evaluation := get_resource_source_evaluation(
-		city_object
-	)
+	var source_evaluation := get_resource_source_evaluation(city_object)
 	var uses_environmental_resource_source := bool(
-		source_evaluation.get(
-			"uses_environmental_source",
-			false
-		)
+		source_evaluation.get("uses_environmental_source", false)
 	)
 	var site_productivity := (
 		WorldData.get_city_object_site_productivity_basis_points(
@@ -549,14 +583,32 @@ static func _run_workplace_tick(
 			),
 			0
 		)
-	var productive_worker_count := _get_productive_worker_count(
-		city_object
-	)
 
-	var raw_work_units_per_batch = recipe.get(
-		"work_units_per_batch",
-		0
+	return {
+		"city_object": city_object,
+		"recipe": recipe,
+		"minutes_advanced": minutes_advanced,
+		"object_id": object_id,
+		"current_progress": current_progress,
+		"uses_environmental_resource_source": (
+			uses_environmental_resource_source
+		),
+		"site_productivity": site_productivity,
+		"productive_worker_count": _get_productive_worker_count(city_object),
+	}
+
+
+static func _prepare_workplace_tick_recipe(
+	context: Dictionary
+) -> bool:
+	var city_object: Dictionary = context.get("city_object", {})
+	var recipe: Dictionary = context.get("recipe", {})
+	var object_id := int(context.get("object_id", -1))
+	var productive_worker_count := int(
+		context.get("productive_worker_count", 0)
 	)
+	var site_productivity := int(context.get("site_productivity", 0))
+	var raw_work_units_per_batch = recipe.get("work_units_per_batch", 0)
 	var outputs := _get_recipe_outputs(recipe)
 	var raw_inputs = recipe.get("inputs", {})
 
@@ -565,10 +617,7 @@ static func _run_workplace_tick(
 		or int(raw_work_units_per_batch) <= 0
 		or outputs.is_empty()
 		or not raw_inputs is Dictionary
-		or not _outputs_are_valid_for_workplace(
-			city_object,
-			outputs
-		)
+		or not _outputs_are_valid_for_workplace(city_object, outputs)
 	):
 		_write_workplace_state({
 			"object_id": object_id,
@@ -579,10 +628,29 @@ static func _run_workplace_tick(
 			"productive_worker_count": productive_worker_count,
 			"site_productivity_basis_points": site_productivity,
 		})
-		return
+		return false
 
-	var work_units_per_batch: int = raw_work_units_per_batch
-	var inputs: Dictionary = raw_inputs
+	context["work_units_per_batch"] = int(raw_work_units_per_batch)
+	context["outputs"] = outputs
+	context["inputs"] = raw_inputs
+	return true
+
+
+static func _workplace_tick_is_blocked(
+	context: Dictionary
+) -> bool:
+	var city_object: Dictionary = context.get("city_object", {})
+	var object_id := int(context.get("object_id", -1))
+	var current_progress := int(context.get("current_progress", 0))
+	var productive_worker_count := int(
+		context.get("productive_worker_count", 0)
+	)
+	var site_productivity := int(context.get("site_productivity", 0))
+	var uses_environmental_resource_source := bool(
+		context.get("uses_environmental_resource_source", false)
+	)
+	var inputs: Dictionary = context.get("inputs", {})
+	var outputs: Dictionary = context.get("outputs", {})
 
 	if productive_worker_count <= 0:
 		_write_workplace_state({
@@ -594,12 +662,9 @@ static func _run_workplace_tick(
 			"productive_worker_count": 0,
 			"site_productivity_basis_points": site_productivity,
 		})
-		return
-		
-	if (
-		uses_environmental_resource_source
-		and site_productivity <= 0
-	):
+		return true
+
+	if uses_environmental_resource_source and site_productivity <= 0:
 		_write_workplace_state({
 			"object_id": object_id,
 			"progress_work_units": current_progress,
@@ -610,7 +675,8 @@ static func _run_workplace_tick(
 			"productive_worker_count": productive_worker_count,
 			"site_productivity_basis_points": 0,
 		})
-		return
+		return true
+
 	# Input-consuming recipes fail closed until stored-input processing
 	# is implemented. This prevents future recipes from creating free goods.
 	if not inputs.is_empty():
@@ -624,13 +690,11 @@ static func _run_workplace_tick(
 			"productive_worker_count": productive_worker_count,
 			"site_productivity_basis_points": site_productivity,
 		})
-		return
+		return true
 
-	var output_capacity_in_batches := (
-		_get_output_capacity_in_batches(
-			city_object,
-			outputs
-		)
+	var output_capacity_in_batches := _get_output_capacity_in_batches(
+		city_object,
+		outputs
 	)
 	var overflow_tile := WorldData.INVALID_CITY_TILE_POSITION
 	var can_overflow := false
@@ -640,12 +704,9 @@ static func _run_workplace_tick(
 	# overflow before accepting progress, preserving the existing fail-closed
 	# behavior.
 	if output_capacity_in_batches <= 0:
-		overflow_tile = _find_workplace_overflow_tile(
-			city_object
-		)
+		overflow_tile = _find_workplace_overflow_tile(city_object)
 		can_overflow = (
-			overflow_tile
-			!= WorldData.INVALID_CITY_TILE_POSITION
+			overflow_tile != WorldData.INVALID_CITY_TILE_POSITION
 		)
 
 	if output_capacity_in_batches <= 0 and not can_overflow:
@@ -658,8 +719,34 @@ static func _run_workplace_tick(
 			"productive_worker_count": productive_worker_count,
 			"site_productivity_basis_points": site_productivity,
 		})
-		return
+		return true
 
+	context["output_capacity_in_batches"] = output_capacity_in_batches
+	context["overflow_tile"] = overflow_tile
+	context["can_overflow"] = can_overflow
+	return false
+
+
+static func _prepare_workplace_tick_output(
+	context: Dictionary
+) -> bool:
+	var city_object: Dictionary = context.get("city_object", {})
+	var minutes_advanced := int(context.get("minutes_advanced", 0))
+	var object_id := int(context.get("object_id", -1))
+	var current_progress := int(context.get("current_progress", 0))
+	var productive_worker_count := int(
+		context.get("productive_worker_count", 0)
+	)
+	var site_productivity := int(context.get("site_productivity", 0))
+	var work_units_per_batch := int(context.get("work_units_per_batch", 0))
+	var output_capacity_in_batches := int(
+		context.get("output_capacity_in_batches", 0)
+	)
+	var overflow_tile: Vector2i = context.get(
+		"overflow_tile",
+		WorldData.INVALID_CITY_TILE_POSITION
+	)
+	var can_overflow := bool(context.get("can_overflow", false))
 	var work_units_added := _calculate_work_units(
 		minutes_advanced,
 		productive_worker_count,
@@ -676,7 +763,7 @@ static func _run_workplace_tick(
 			"productive_worker_count": productive_worker_count,
 			"site_productivity_basis_points": site_productivity,
 		})
-		return
+		return false
 
 	var total_progress := current_progress + work_units_added
 	var potential_completed_batches := int(
@@ -693,7 +780,7 @@ static func _run_workplace_tick(
 			"productive_worker_count": productive_worker_count,
 			"site_productivity_basis_points": site_productivity,
 		})
-		return
+		return false
 
 	var storage_batches_to_produce := mini(
 		potential_completed_batches,
@@ -706,27 +793,21 @@ static func _run_workplace_tick(
 	# progress survive after the last in-storage batch, matching prior behavior.
 	if (
 		not can_overflow
-		and potential_completed_batches
-		>= output_capacity_in_batches
+		and potential_completed_batches >= output_capacity_in_batches
 	):
-		overflow_tile = _find_workplace_overflow_tile(
-			city_object
-		)
+		overflow_tile = _find_workplace_overflow_tile(city_object)
 		can_overflow = (
-			overflow_tile
-			!= WorldData.INVALID_CITY_TILE_POSITION
+			overflow_tile != WorldData.INVALID_CITY_TILE_POSITION
 		)
 
 	if can_overflow:
 		overflow_batches_to_produce = maxi(
-			potential_completed_batches
-			- storage_batches_to_produce,
+			potential_completed_batches - storage_batches_to_produce,
 			0
 		)
 
 	var batches_to_produce := (
-		storage_batches_to_produce
-		+ overflow_batches_to_produce
+		storage_batches_to_produce + overflow_batches_to_produce
 	)
 
 	if batches_to_produce <= 0:
@@ -739,21 +820,58 @@ static func _run_workplace_tick(
 			"productive_worker_count": productive_worker_count,
 			"site_productivity_basis_points": site_productivity,
 		})
-		return
+		return false
 
-	if not _store_recipe_output_distribution(
-		object_id,
-		outputs,
-		storage_batches_to_produce,
-		overflow_batches_to_produce,
-		overflow_tile
-	):
+	context["total_progress"] = total_progress
+	context["storage_batches_to_produce"] = storage_batches_to_produce
+	context["overflow_batches_to_produce"] = overflow_batches_to_produce
+	context["batches_to_produce"] = batches_to_produce
+	context["overflow_tile"] = overflow_tile
+	context["can_overflow"] = can_overflow
+	return true
+
+
+static func _commit_workplace_tick_output(
+	context: Dictionary
+) -> void:
+	var city_object: Dictionary = context.get("city_object", {})
+	var object_id := int(context.get("object_id", -1))
+	var current_progress := int(context.get("current_progress", 0))
+	var productive_worker_count := int(
+		context.get("productive_worker_count", 0)
+	)
+	var site_productivity := int(context.get("site_productivity", 0))
+	var work_units_per_batch := int(context.get("work_units_per_batch", 0))
+	var outputs: Dictionary = context.get("outputs", {})
+	var output_capacity_in_batches := int(
+		context.get("output_capacity_in_batches", 0)
+	)
+	var total_progress := int(context.get("total_progress", 0))
+	var storage_batches_to_produce := int(
+		context.get("storage_batches_to_produce", 0)
+	)
+	var overflow_batches_to_produce := int(
+		context.get("overflow_batches_to_produce", 0)
+	)
+	var batches_to_produce := int(context.get("batches_to_produce", 0))
+	var overflow_tile: Vector2i = context.get(
+		"overflow_tile",
+		WorldData.INVALID_CITY_TILE_POSITION
+	)
+	var can_overflow := bool(context.get("can_overflow", false))
+
+	if not _store_recipe_output_distribution({
+		"object_id": object_id,
+		"outputs": outputs,
+		"storage_batch_count": storage_batches_to_produce,
+		"overflow_batch_count": overflow_batches_to_produce,
+		"overflow_tile": overflow_tile,
+	}):
 		push_error(
 			"Workplace "
 			+ str(object_id)
 			+ " could not store its prevalidated production output."
 		)
-
 		_write_workplace_state({
 			"object_id": object_id,
 			"progress_work_units": current_progress,
@@ -766,8 +884,7 @@ static func _run_workplace_tick(
 		return
 
 	var new_progress := (
-		total_progress
-		- batches_to_produce * work_units_per_batch
+		total_progress - batches_to_produce * work_units_per_batch
 	)
 
 	# If this tick exhausted the available output capacity, workers stop
@@ -779,19 +896,12 @@ static func _run_workplace_tick(
 	):
 		new_progress = 0
 
-	var updated_city_object := WorldData.get_city_object_by_id(
-		object_id
+	var updated_city_object := WorldData.get_city_object_by_id(object_id)
+	var remaining_output_capacity := _get_output_capacity_in_batches(
+		updated_city_object,
+		outputs
 	)
-	var remaining_output_capacity := (
-		_get_output_capacity_in_batches(
-			updated_city_object,
-			outputs
-		)
-	)
-
-	var new_status := (
-		WorldData.WORKPLACE_PRODUCTION_STATUS_WORKING
-	)
+	var new_status := WorldData.WORKPLACE_PRODUCTION_STATUS_WORKING
 
 	if remaining_output_capacity <= 0 and not can_overflow:
 		new_status = (
@@ -1016,14 +1126,14 @@ static func _find_workplace_overflow_tile(
 
 		var access_tile: Vector2i = raw_access_tile
 		var path_result := (
-			CityNavigationSystem.find_path_to_any_city_tile(
-				active_world,
-				access_tile,
-				candidate_tiles,
-				CityNavigationSystem.DEFAULT_MAX_EXPANDED_NODES,
-				-1,
-				1
-			)
+			CityNavigationSystem.find_path_to_any_city_tile({
+				"city_world": active_world,
+				"start_tile": access_tile,
+				"destination_tiles": candidate_tiles,
+				"max_expanded_nodes": CityNavigationSystem.DEFAULT_MAX_EXPANDED_NODES,
+				"citizen_id": -1,
+				"heuristic_weight": 1
+			})
 		)
 
 		if not bool(path_result.get("success", false)):
@@ -1157,12 +1267,22 @@ static func _store_recipe_outputs(
 
 
 static func _store_recipe_output_distribution(
-	object_id: int,
-	outputs: Dictionary,
-	storage_batch_count: int,
-	overflow_batch_count: int,
-	overflow_tile: Vector2i
+	values: Dictionary
 ) -> bool:
+	var object_id := int(values.get("object_id", -1))
+	var outputs: Dictionary = values.get("outputs", {})
+	var storage_batch_count := maxi(
+		int(values.get("storage_batch_count", 0)),
+		0
+	)
+	var overflow_batch_count := maxi(
+		int(values.get("overflow_batch_count", 0)),
+		0
+	)
+	var overflow_tile: Vector2i = values.get(
+		"overflow_tile",
+		WorldData.INVALID_CITY_TILE_POSITION
+	)
 	var stored_in_object := false
 
 	if storage_batch_count > 0:
@@ -1216,11 +1336,11 @@ static func _store_recipe_outputs_in_ground_pile(
 			* batch_count
 		)
 		var add_result := (
-			WorldData.add_resource_to_city_ground_piles_with_result(
-				tile_position,
-				resource,
-				requested_amount
-			)
+			WorldData.add_resource_to_city_ground_piles_with_result({
+				"tile_position": tile_position,
+				"resource": resource,
+				"amount_delta": requested_amount,
+			})
 		)
 		var added_amount := int(
 			add_result.get("added_amount", 0)

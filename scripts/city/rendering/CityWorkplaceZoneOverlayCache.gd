@@ -26,69 +26,59 @@ const SELECTED_BORDER_COLOR: Color = (
 var _preview_cache: Dictionary = {}
 var _selected_cache: Dictionary = {}
 
+#region Public cache API
 
 func invalidate_all() -> void:
 	_invalidate_cache(_preview_cache)
 	_invalidate_cache(_selected_cache)
 
 
-func prepare(
-	city_object: Dictionary,
-	preview_mode: bool,
-	city_world: WorldData,
-	city_tile_size: int
-) -> Dictionary:
-	return _get_cached(
-		city_object,
-		preview_mode,
-		city_world,
-		city_tile_size,
-		true
-	)
-
+func prepare(values: Dictionary) -> Dictionary:
+	var request := values.duplicate(false)
+	request["allow_rebuild"] = true
+	return _get_cached(request)
 
 func has_cached_zone(
 	city_object: Dictionary,
 	preview_mode: bool,
 	city_world: WorldData
 ) -> bool:
-	var render_cache := _get_cached(
-		city_object,
-		preview_mode,
-		city_world,
-		0,
-		false
-	)
+	var render_cache := _get_cached({
+		"city_object": city_object,
+		"preview_mode": preview_mode,
+		"city_world": city_world,
+		"city_tile_size": 0,
+		"allow_rebuild": false,
+	})
 
 	return bool(render_cache.get("has_zone", false))
 
-
-func draw_cached(
-	city_object: Dictionary,
-	preview_mode: bool,
-	city_world: WorldData,
-	draw_target: CanvasItem
-) -> bool:
-	var render_cache := _get_cached(
-		city_object,
-		preview_mode,
-		city_world,
-		0,
-		false
-	)
+func draw_cached(values: Dictionary) -> bool:
+	var city_object: Dictionary = values.get("city_object", {})
+	var preview_mode := bool(values.get("preview_mode", false))
+	var city_world: WorldData = values.get("city_world", null)
+	var draw_target: CanvasItem = values.get("draw_target", null)
+	var render_cache := _get_cached({
+		"city_object": city_object,
+		"preview_mode": preview_mode,
+		"city_world": city_world,
+		"city_tile_size": 0,
+		"allow_rebuild": false,
+	})
 
 	if not bool(render_cache.get("has_zone", false)):
 		return false
 
-	_draw_render_cache(
-		render_cache,
-		draw_target
-	)
+	if draw_target != null:
+		_draw_render_cache(render_cache, draw_target)
 
 	# Preserve the renderer contract: true means this object has a prepared
 	# environmental zone, even if an invalid texture cannot be drawn.
 	return true
 
+#endregion
+
+#region Cache lookup and lifecycle
 
 func _draw_render_cache(
 	render_cache: Dictionary,
@@ -130,19 +120,14 @@ func _invalidate_cache(render_cache: Dictionary) -> void:
 	render_cache["tile_data_version"] = -2
 
 
-func _get_cached(
-	city_object: Dictionary,
-	preview_mode: bool,
-	city_world: WorldData,
-	city_tile_size: int,
-	allow_rebuild: bool
-) -> Dictionary:
-	var object_id := int(
-		city_object.get("id", -1)
-	)
-	var object_type := str(
-		city_object.get("type", "")
-	)
+func _get_cached(values: Dictionary) -> Dictionary:
+	var city_object: Dictionary = values.get("city_object", {})
+	var preview_mode := bool(values.get("preview_mode", false))
+	var city_world: WorldData = values.get("city_world", null)
+	var city_tile_size := int(values.get("city_tile_size", 0))
+	var allow_rebuild := bool(values.get("allow_rebuild", false))
+	var object_id := int(city_object.get("id", -1))
+	var object_type := str(city_object.get("type", ""))
 	var top_left: Vector2i = city_object.get(
 		"top_left",
 		Vector2i(-1, -1)
@@ -151,20 +136,14 @@ func _get_cached(
 		"size",
 		Vector2i.ZERO
 	)
-	var footprint_tiles := (
-		WorldData.get_city_object_footprint_tiles(
-			city_object
-		)
+	var footprint_tiles := WorldData.get_city_object_footprint_tiles(
+		city_object
 	)
-	var footprint_hash_value := int(
-		hash(footprint_tiles)
-	)
+	var footprint_hash_value := int(hash(footprint_tiles))
 	var tile_data_version := -1
 
 	if city_world != null:
-		tile_data_version = (
-			city_world.tile_data_version
-		)
+		tile_data_version = city_world.tile_data_version
 
 	var active_cache := (
 		_preview_cache
@@ -172,16 +151,16 @@ func _get_cached(
 		else _selected_cache
 	)
 
-	if _cache_matches(
-		active_cache,
-		preview_mode,
-		object_id,
-		object_type,
-		top_left,
-		size_tiles,
-		footprint_hash_value,
-		tile_data_version
-	):
+	if _cache_matches({
+		"render_cache": active_cache,
+		"preview_mode": preview_mode,
+		"object_id": object_id,
+		"object_type": object_type,
+		"top_left": top_left,
+		"size_tiles": size_tiles,
+		"footprint_hash_value": footprint_hash_value,
+		"tile_data_version": tile_data_version,
+	}):
 		return active_cache
 
 	# Rendering is permitted to read only an already-prepared cache.
@@ -191,14 +170,8 @@ func _get_cached(
 
 	var reusable_texture: ImageTexture = null
 	var reusable_image: Image = null
-	var raw_reusable_texture = active_cache.get(
-		"texture",
-		null
-	)
-	var raw_reusable_image = active_cache.get(
-		"image",
-		null
-	)
+	var raw_reusable_texture = active_cache.get("texture", null)
+	var raw_reusable_image = active_cache.get("image", null)
 
 	if raw_reusable_texture is ImageTexture:
 		reusable_texture = raw_reusable_texture
@@ -220,26 +193,22 @@ func _get_cached(
 		"world_rect": Rect2()
 	}
 	var source_evaluation := (
-		WorkplaceProductionSystem
-		.get_resource_source_evaluation(
+		WorkplaceProductionSystem.get_resource_source_evaluation(
 			city_object,
 			city_world
 		)
 	)
 
 	if bool(
-		source_evaluation.get(
-			"uses_environmental_source",
-			false
-		)
+		source_evaluation.get("uses_environmental_source", false)
 	):
-		var texture_data := _build_texture(
-			source_evaluation,
-			preview_mode,
-			city_tile_size,
-			reusable_texture,
-			reusable_image
-		)
+		var texture_data := _build_texture({
+			"source_evaluation": source_evaluation,
+			"preview_mode": preview_mode,
+			"city_tile_size": city_tile_size,
+			"reusable_texture": reusable_texture,
+			"reusable_image": reusable_image,
+		})
 
 		if not texture_data.is_empty():
 			new_cache["has_zone"] = true
@@ -263,17 +232,18 @@ func _get_cached(
 
 	return new_cache
 
+func _cache_matches(values: Dictionary) -> bool:
+	var render_cache: Dictionary = values.get("render_cache", {})
+	var preview_mode := bool(values.get("preview_mode", false))
+	var object_id := int(values.get("object_id", -1))
+	var object_type := str(values.get("object_type", ""))
+	var top_left: Vector2i = values.get("top_left", Vector2i(-1, -1))
+	var size_tiles: Vector2i = values.get("size_tiles", Vector2i.ZERO)
+	var footprint_hash_value := int(
+		values.get("footprint_hash_value", -1)
+	)
+	var tile_data_version := int(values.get("tile_data_version", -1))
 
-func _cache_matches(
-	render_cache: Dictionary,
-	preview_mode: bool,
-	object_id: int,
-	object_type: String,
-	top_left: Vector2i,
-	size_tiles: Vector2i,
-	footprint_hash_value: int,
-	tile_data_version: int
-) -> bool:
 	if render_cache.is_empty():
 		return false
 
@@ -284,15 +254,9 @@ func _cache_matches(
 		== object_id
 		and str(render_cache.get("object_type", ""))
 		== object_type
-		and render_cache.get(
-			"top_left",
-			Vector2i(-2, -2)
-		)
+		and render_cache.get("top_left", Vector2i(-2, -2))
 		== top_left
-		and render_cache.get(
-			"size",
-			Vector2i.ZERO
-		)
+		and render_cache.get("size", Vector2i.ZERO)
 		== size_tiles
 		and int(render_cache.get("footprint_hash", -1))
 		== footprint_hash_value
@@ -300,22 +264,116 @@ func _cache_matches(
 		== tile_data_version
 	)
 
+#endregion
 
-func _build_texture(
-	source_evaluation: Dictionary,
-	preview_mode: bool,
-	city_tile_size: int,
-	reusable_texture: ImageTexture,
-	reusable_image: Image
-) -> Dictionary:
-	var zone_tiles: Array = source_evaluation.get(
-		"zone_tiles",
-		[]
+#region Texture construction
+
+func _build_texture(values: Dictionary) -> Dictionary:
+	var source_evaluation: Dictionary = values.get(
+		"source_evaluation",
+		{}
 	)
+	var preview_mode := bool(values.get("preview_mode", false))
+	var city_tile_size := int(values.get("city_tile_size", 0))
+	var reusable_texture: ImageTexture = values.get(
+		"reusable_texture",
+		null
+	)
+	var reusable_image: Image = values.get(
+		"reusable_image",
+		null
+	)
+	var zone_tiles: Array = source_evaluation.get("zone_tiles", [])
 
 	if zone_tiles.is_empty():
 		return {}
 
+	var zone_bounds := _get_zone_tile_bounds(zone_tiles)
+
+	if zone_bounds.is_empty():
+		return {}
+
+	var minimum_tile: Vector2i = zone_bounds.get(
+		"minimum_tile",
+		Vector2i.ZERO
+	)
+	var maximum_tile: Vector2i = zone_bounds.get(
+		"maximum_tile",
+		Vector2i.ZERO
+	)
+	var width_tiles := maximum_tile.x - minimum_tile.x + 1
+	var height_tiles := maximum_tile.y - minimum_tile.y + 1
+	var maximum_dimension_tiles := maxi(width_tiles, height_tiles)
+	var pixels_per_tile := clampi(
+		int(
+			floor(
+				float(TEXTURE_MAXIMUM_DIMENSION)
+				/ float(maximum_dimension_tiles)
+			)
+		),
+		1,
+		TEXTURE_TARGET_PIXELS_PER_TILE
+	)
+	var image_width := width_tiles * pixels_per_tile
+	var image_height := height_tiles * pixels_per_tile
+	var overlay_image := _prepare_overlay_image({
+		"reusable_image": reusable_image,
+		"image_width": image_width,
+		"image_height": image_height,
+	})
+
+	if preview_mode:
+		_paint_preview_zone({
+			"overlay_image": overlay_image,
+			"zone_tiles": zone_tiles,
+			"resource_tile_lookup": source_evaluation.get(
+				"resource_tile_lookup",
+				{}
+			),
+			"minimum_tile": minimum_tile,
+			"pixels_per_tile": pixels_per_tile,
+		})
+	else:
+		_paint_selected_zone({
+			"overlay_image": overlay_image,
+			"zone_tiles": zone_tiles,
+			"resource_tiles": source_evaluation.get(
+				"resource_tiles",
+				[]
+			),
+			"zone_tile_lookup": source_evaluation.get(
+				"zone_tile_lookup",
+				{}
+			),
+			"minimum_tile": minimum_tile,
+			"pixels_per_tile": pixels_per_tile,
+		})
+
+	var overlay_texture := _update_overlay_texture({
+		"reusable_texture": reusable_texture,
+		"overlay_image": overlay_image,
+		"image_width": image_width,
+		"image_height": image_height,
+	})
+	var world_rect := Rect2(
+		Vector2(
+			float(minimum_tile.x * city_tile_size),
+			float(minimum_tile.y * city_tile_size)
+		),
+		Vector2(
+			float(width_tiles * city_tile_size),
+			float(height_tiles * city_tile_size)
+		)
+	)
+
+	return {
+		"texture": overlay_texture,
+		"image": overlay_image,
+		"world_rect": world_rect,
+	}
+
+
+func _get_zone_tile_bounds(zone_tiles: Array) -> Dictionary:
 	var has_bounds := false
 	var minimum_tile := Vector2i.ZERO
 	var maximum_tile := Vector2i.ZERO
@@ -332,60 +390,30 @@ func _build_texture(
 			has_bounds = true
 			continue
 
-		minimum_tile.x = mini(
-			minimum_tile.x,
-			zone_tile.x
-		)
-		minimum_tile.y = mini(
-			minimum_tile.y,
-			zone_tile.y
-		)
-		maximum_tile.x = maxi(
-			maximum_tile.x,
-			zone_tile.x
-		)
-		maximum_tile.y = maxi(
-			maximum_tile.y,
-			zone_tile.y
-		)
+		minimum_tile.x = mini(minimum_tile.x, zone_tile.x)
+		minimum_tile.y = mini(minimum_tile.y, zone_tile.y)
+		maximum_tile.x = maxi(maximum_tile.x, zone_tile.x)
+		maximum_tile.y = maxi(maximum_tile.y, zone_tile.y)
 
 	if not has_bounds:
 		return {}
 
-	var width_tiles := (
-		maximum_tile.x - minimum_tile.x + 1
-	)
-	var height_tiles := (
-		maximum_tile.y - minimum_tile.y + 1
-	)
-	var maximum_dimension_tiles := maxi(
-		width_tiles,
-		height_tiles
-	)
-	var pixels_per_tile := clampi(
-		int(
-			floor(
-				float(
-					TEXTURE_MAXIMUM_DIMENSION
-				)
-				/ float(maximum_dimension_tiles)
-			)
-		),
-		1,
-		TEXTURE_TARGET_PIXELS_PER_TILE
-	)
-	var image_width := width_tiles * pixels_per_tile
-	var image_height := height_tiles * pixels_per_tile
-	var overlay_image: Image = reusable_image
+	return {
+		"minimum_tile": minimum_tile,
+		"maximum_tile": maximum_tile,
+	}
+
+
+func _prepare_overlay_image(values: Dictionary) -> Image:
+	var overlay_image: Image = values.get("reusable_image", null)
+	var image_width := int(values.get("image_width", 0))
+	var image_height := int(values.get("image_height", 0))
 
 	if (
 		overlay_image == null
 		or overlay_image.get_width() != image_width
 		or overlay_image.get_height() != image_height
-		or (
-			overlay_image.get_format()
-			!= Image.FORMAT_RGBA8
-		)
+		or overlay_image.get_format() != Image.FORMAT_RGBA8
 	):
 		overlay_image = Image.create(
 			image_width,
@@ -394,135 +422,117 @@ func _build_texture(
 			Image.FORMAT_RGBA8
 		)
 
-	overlay_image.fill(
-		Color(0.0, 0.0, 0.0, 0.0)
+	overlay_image.fill(Color(0.0, 0.0, 0.0, 0.0))
+	return overlay_image
+
+
+func _paint_preview_zone(values: Dictionary) -> void:
+	var overlay_image: Image = values.get("overlay_image", null)
+	var zone_tiles: Array = values.get("zone_tiles", [])
+	var resource_tile_lookup: Dictionary = values.get(
+		"resource_tile_lookup",
+		{}
 	)
-
-	var resource_tile_lookup: Dictionary = (
-		source_evaluation.get(
-			"resource_tile_lookup",
-			{}
-		)
+	var minimum_tile: Vector2i = values.get(
+		"minimum_tile",
+		Vector2i.ZERO
 	)
+	var pixels_per_tile := int(values.get("pixels_per_tile", 1))
 
-	if preview_mode:
-		for raw_zone_tile in zone_tiles:
-			if not raw_zone_tile is Vector2i:
-				continue
+	for raw_zone_tile in zone_tiles:
+		if not raw_zone_tile is Vector2i:
+			continue
 
-			var zone_tile: Vector2i = raw_zone_tile
+		var zone_tile: Vector2i = raw_zone_tile
+		_paint_preview_tile({
+			"overlay_image": overlay_image,
+			"tile_position": zone_tile,
+			"minimum_tile": minimum_tile,
+			"pixels_per_tile": pixels_per_tile,
+			"has_resource": resource_tile_lookup.has(zone_tile),
+		})
 
-			_paint_preview_tile(
-				overlay_image,
-				zone_tile,
-				minimum_tile,
-				pixels_per_tile,
-				resource_tile_lookup.has(zone_tile)
-			)
-	else:
-		var resource_tiles: Array = source_evaluation.get(
-			"resource_tiles",
-			[]
-		)
 
-		for raw_resource_tile in resource_tiles:
-			if not raw_resource_tile is Vector2i:
-				continue
-
-			var resource_tile: Vector2i = (
-				raw_resource_tile
-			)
-			var resource_rect := _get_tile_rect(
-				resource_tile,
-				minimum_tile,
-				pixels_per_tile
-			)
-
-			overlay_image.fill_rect(
-				resource_rect,
-				SELECTED_RESOURCE_COLOR
-			)
-
-		var zone_tile_lookup: Dictionary = (
-			source_evaluation.get(
-				"zone_tile_lookup",
-				{}
-			)
-		)
-
-		for raw_zone_tile in zone_tiles:
-			if not raw_zone_tile is Vector2i:
-				continue
-
-			var zone_tile: Vector2i = raw_zone_tile
-			var tile_rect := _get_tile_rect(
-				zone_tile,
-				minimum_tile,
-				pixels_per_tile
-			)
-
-			_paint_border(
-				overlay_image,
-				tile_rect,
-				SELECTED_BORDER_COLOR,
-				not zone_tile_lookup.has(
-					zone_tile + Vector2i(0, -1)
-				),
-				not zone_tile_lookup.has(
-					zone_tile + Vector2i(0, 1)
-				),
-				not zone_tile_lookup.has(
-					zone_tile + Vector2i(-1, 0)
-				),
-				not zone_tile_lookup.has(
-					zone_tile + Vector2i(1, 0)
-				)
-			)
-
-	var overlay_texture: ImageTexture = (
-		reusable_texture
+func _paint_selected_zone(values: Dictionary) -> void:
+	var overlay_image: Image = values.get("overlay_image", null)
+	var zone_tiles: Array = values.get("zone_tiles", [])
+	var resource_tiles: Array = values.get("resource_tiles", [])
+	var zone_tile_lookup: Dictionary = values.get("zone_tile_lookup", {})
+	var minimum_tile: Vector2i = values.get(
+		"minimum_tile",
+		Vector2i.ZERO
 	)
+	var pixels_per_tile := int(values.get("pixels_per_tile", 1))
+
+	for raw_resource_tile in resource_tiles:
+		if not raw_resource_tile is Vector2i:
+			continue
+
+		var resource_tile: Vector2i = raw_resource_tile
+		var resource_rect := _get_tile_rect(
+			resource_tile,
+			minimum_tile,
+			pixels_per_tile
+		)
+		overlay_image.fill_rect(
+			resource_rect,
+			SELECTED_RESOURCE_COLOR
+		)
+
+	for raw_zone_tile in zone_tiles:
+		if not raw_zone_tile is Vector2i:
+			continue
+
+		var zone_tile: Vector2i = raw_zone_tile
+		var tile_rect := _get_tile_rect(
+			zone_tile,
+			minimum_tile,
+			pixels_per_tile
+		)
+		_paint_border({
+			"overlay_image": overlay_image,
+			"tile_rect": tile_rect,
+			"border_color": SELECTED_BORDER_COLOR,
+			"draw_top": not zone_tile_lookup.has(
+				zone_tile + Vector2i(0, -1)
+			),
+			"draw_bottom": not zone_tile_lookup.has(
+				zone_tile + Vector2i(0, 1)
+			),
+			"draw_left": not zone_tile_lookup.has(
+				zone_tile + Vector2i(-1, 0)
+			),
+			"draw_right": not zone_tile_lookup.has(
+				zone_tile + Vector2i(1, 0)
+			),
+		})
+
+
+func _update_overlay_texture(values: Dictionary) -> ImageTexture:
+	var overlay_texture: ImageTexture = values.get(
+		"reusable_texture",
+		null
+	)
+	var overlay_image: Image = values.get("overlay_image", null)
+	var image_width := int(values.get("image_width", 0))
+	var image_height := int(values.get("image_height", 0))
 
 	if overlay_texture == null:
-		overlay_texture = ImageTexture.create_from_image(
-			overlay_image
-		)
-	elif (
+		return ImageTexture.create_from_image(overlay_image)
+
+	if (
 		overlay_texture.get_width() == image_width
 		and overlay_texture.get_height() == image_height
-		and (
-			overlay_texture.get_format()
-			== Image.FORMAT_RGBA8
-		)
+		and overlay_texture.get_format() == Image.FORMAT_RGBA8
 	):
 		# Fast path: same GPU allocation, new pixel contents.
-		overlay_texture.update(
-			overlay_image
-		)
+		overlay_texture.update(overlay_image)
 	else:
 		# This should occur mainly when a zone becomes clipped
 		# against a map edge and changes dimensions.
-		overlay_texture.set_image(
-			overlay_image
-		)
+		overlay_texture.set_image(overlay_image)
 
-	var world_rect := Rect2(
-		Vector2(
-			float(minimum_tile.x * city_tile_size),
-			float(minimum_tile.y * city_tile_size)
-		),
-		Vector2(
-			float(width_tiles * city_tile_size),
-			float(height_tiles * city_tile_size)
-		)
-	)
-
-	return {
-		"texture": overlay_texture,
-		"image": overlay_image,
-		"world_rect": world_rect
-	}
-
+	return overlay_texture
 
 func _get_tile_rect(
 	tile_position: Vector2i,
@@ -539,13 +549,22 @@ func _get_tile_rect(
 	)
 
 
-func _paint_preview_tile(
-	overlay_image: Image,
-	tile_position: Vector2i,
-	minimum_tile: Vector2i,
-	pixels_per_tile: int,
-	has_resource: bool
-) -> void:
+func _paint_preview_tile(values: Dictionary) -> void:
+	var overlay_image: Image = values.get("overlay_image", null)
+	var tile_position: Vector2i = values.get(
+		"tile_position",
+		Vector2i.ZERO
+	)
+	var minimum_tile: Vector2i = values.get(
+		"minimum_tile",
+		Vector2i.ZERO
+	)
+	var pixels_per_tile := int(values.get("pixels_per_tile", 1))
+	var has_resource := bool(values.get("has_resource", false))
+
+	if overlay_image == null:
+		return
+
 	var tile_rect := _get_tile_rect(
 		tile_position,
 		minimum_tile,
@@ -558,31 +577,28 @@ func _paint_preview_tile(
 		fill_color = PREVIEW_MAGENTA_FILL_COLOR
 		border_color = PREVIEW_MAGENTA_BORDER_COLOR
 
-	overlay_image.fill_rect(
-		tile_rect,
-		fill_color
-	)
+	overlay_image.fill_rect(tile_rect, fill_color)
+	_paint_border({
+		"overlay_image": overlay_image,
+		"tile_rect": tile_rect,
+		"border_color": border_color,
+		"draw_top": true,
+		"draw_bottom": true,
+		"draw_left": true,
+		"draw_right": true,
+	})
 
-	_paint_border(
-		overlay_image,
-		tile_rect,
-		border_color,
-		true,
-		true,
-		true,
-		true
-	)
+func _paint_border(values: Dictionary) -> void:
+	var overlay_image: Image = values.get("overlay_image", null)
+	var tile_rect: Rect2i = values.get("tile_rect", Rect2i())
+	var border_color: Color = values.get("border_color", Color(0.0, 0.0, 0.0, 0.0))
+	var draw_top := bool(values.get("draw_top", false))
+	var draw_bottom := bool(values.get("draw_bottom", false))
+	var draw_left := bool(values.get("draw_left", false))
+	var draw_right := bool(values.get("draw_right", false))
 
-
-func _paint_border(
-	overlay_image: Image,
-	tile_rect: Rect2i,
-	border_color: Color,
-	draw_top: bool,
-	draw_bottom: bool,
-	draw_left: bool,
-	draw_right: bool
-) -> void:
+	if overlay_image == null:
+		return
 	var border_width := clampi(
 		TEXTURE_BORDER_PIXELS,
 		1,
@@ -646,3 +662,5 @@ func _paint_border(
 			),
 			border_color
 		)
+
+#endregion

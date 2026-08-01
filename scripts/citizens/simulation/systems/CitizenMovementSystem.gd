@@ -22,361 +22,376 @@ static func run_tick(
 	if city_world == null:
 		return
 
-	var active_mover_ids := (
-		WorldData.get_city_active_mover_ids_snapshot()
-	)
+	var active_mover_ids := WorldData.get_city_active_mover_ids_snapshot()
 
 	if active_mover_ids.is_empty():
 		return
 
-	var citizen_updates: Array = []
 	var next_active_mover_ids: Array[int] = []
-	var repath_requests_remaining: int = (
-		MAX_REPATH_REQUESTS_PER_TICK
-	)
+	var tick_context := {
+		"city_world": city_world,
+		"minutes_advanced": minutes_advanced,
+		"citizen_updates": [],
+		"next_active_mover_ids": next_active_mover_ids,
+		"repath_requests_remaining": MAX_REPATH_REQUESTS_PER_TICK,
+	}
 
 	for citizen_id in active_mover_ids:
-		var citizen_index := (
-			WorldData.get_city_citizen_index_by_id(
-				citizen_id
-			)
-		)
+		_advance_active_mover({
+			"tick_context": tick_context,
+			"citizen_id": int(citizen_id),
+		})
 
-		if citizen_index < 0:
-			continue
-
-		var raw_citizen = WorldData.city_citizens[
-			citizen_index
-		]
-
-		if not raw_citizen is Dictionary:
-			continue
-
-		var citizen: Dictionary = raw_citizen.duplicate(true)
-		var raw_current_tile = citizen.get(
-			"city_tile_position",
-			WorldData.INVALID_CITY_TILE_POSITION
-		)
-
-		if not raw_current_tile is Vector2i:
-			push_error(
-				"Cannot advance citizen "
-				+ str(citizen_id)
-				+ ": authoritative position is invalid."
-			)
-			continue
-
-		var current_tile: Vector2i = raw_current_tile
-		var traversed_tiles: Array[Vector2i] = [current_tile]
-
-		if not bool(citizen.get("alive", false)):
-			CityCitizens.reset_city_citizen_movement_state(
-				citizen,
-				true
-			)
-			_append_citizen_update(
-				citizen_updates,
-				citizen_id,
-				citizen,
-				current_tile,
-				traversed_tiles
-			)
-			continue
-
-		if (
-			str(citizen.get("movement_state", ""))
-			!= WorldData.CITY_CITIZEN_MOVEMENT_STATE_MOVING
-		):
-			continue
-
-		var raw_path = citizen.get("movement_path", [])
-		var raw_path_index = citizen.get(
-			"movement_path_index",
-			0
-		)
-		var raw_progress = citizen.get(
-			"movement_progress_basis_points",
-			0
-		)
-		var raw_speed = citizen.get(
-			"movement_speed_basis_points_per_minute",
-			WorldData.DEFAULT_CITIZEN_MOVEMENT_SPEED_PER_MINUTE
-		)
-		var raw_repath_attempt_count = citizen.get(
-			"movement_repath_attempt_count",
-			0
-		)
-		var raw_destination = citizen.get(
-			"movement_destination_tile",
-			WorldData.INVALID_CITY_TILE_POSITION
-		)
-
-		var basic_state_is_valid := (
-			raw_path is Array
-			and typeof(raw_path_index) == TYPE_INT
-			and typeof(raw_progress) == TYPE_INT
-			and typeof(raw_speed) == TYPE_INT
-			and typeof(raw_repath_attempt_count) == TYPE_INT
-			and raw_destination is Vector2i
-		)
-
-		if not basic_state_is_valid:
-			_stop_citizen_for_invalid_path(
-				citizen,
-				raw_destination
-			)
-			_append_citizen_update(
-				citizen_updates,
-				citizen_id,
-				citizen,
-				current_tile,
-				traversed_tiles
-			)
-			continue
-
-		var movement_path: Array = raw_path
-		var movement_path_index: int = raw_path_index
-		var movement_progress: int = raw_progress
-		var movement_speed: int = raw_speed
-		var repath_attempt_count: int = (
-			raw_repath_attempt_count
-		)
-		var movement_destination: Vector2i = raw_destination
-
-		var current_step_cost := 0
-
-		if (
-			movement_path_index >= 1
-			and movement_path_index < movement_path.size()
-			and movement_path[movement_path_index - 1] is Vector2i
-			and movement_path[movement_path_index] is Vector2i
-		):
-			current_step_cost = (
-				WorldData.get_city_citizen_movement_step_cost(
-					movement_path[movement_path_index - 1],
-					movement_path[movement_path_index]
-				)
-			)
-
-		var path_state_is_valid: bool = (
-			movement_path.size() >= 2
-			and movement_path_index >= 1
-			and movement_path_index < movement_path.size()
-			and current_step_cost > 0
-			and movement_progress >= 0
-			and movement_progress < current_step_cost
-			and movement_speed > 0
-			and repath_attempt_count >= 0
-			and repath_attempt_count
-			<= WorldData.MAX_CITIZEN_MOVEMENT_REPATH_ATTEMPTS
-			and movement_path[
-				movement_path_index - 1
-			] == current_tile
-			and movement_path.back() == movement_destination
-		)
-
-		if not path_state_is_valid:
-			_stop_citizen_for_invalid_path(
-				citizen,
-				movement_destination
-			)
-			_append_citizen_update(
-				citizen_updates,
-				citizen_id,
-				citizen,
-				current_tile,
-				traversed_tiles
-			)
-			continue
-
-		movement_progress += (
-			minutes_advanced * movement_speed
-		)
-		var movement_was_blocked := false
-		var movement_repath_was_deferred := false
-
-		while movement_path_index < movement_path.size():
-			var raw_next_tile = movement_path[
-				movement_path_index
-			]
-
-			if not raw_next_tile is Vector2i:
-				_set_citizen_movement_blocked(
-					citizen,
-					movement_destination,
-					WorldData.CITY_CITIZEN_MOVEMENT_FAILURE_INVALID_PATH
-				)
-				movement_was_blocked = true
-				break
-
-			var next_tile: Vector2i = raw_next_tile
-			var step_cost := (
-				WorldData.get_city_citizen_movement_step_cost(
-					current_tile,
-					next_tile
-				)
-			)
-
-			if step_cost <= 0:
-				_set_citizen_movement_blocked(
-					citizen,
-					movement_destination,
-					WorldData.CITY_CITIZEN_MOVEMENT_FAILURE_INVALID_PATH
-				)
-				movement_was_blocked = true
-				break
-
-			if not WorldData.can_city_citizen_traverse_step(
-				city_world,
-				current_tile,
-				next_tile,
-				citizen_id
-			):
-				if (
-					repath_attempt_count
-					>= WorldData.MAX_CITIZEN_MOVEMENT_REPATH_ATTEMPTS
-				):
-					_set_citizen_movement_blocked(
-						citizen,
-						movement_destination,
-						WorldData.CITY_CITIZEN_MOVEMENT_FAILURE_REPATH_FAILED
-					)
-					movement_was_blocked = true
-					break
-
-				if repath_requests_remaining <= 0:
-					movement_progress = 0
-					movement_repath_was_deferred = true
-					break
-
-				repath_requests_remaining -= 1
-				repath_attempt_count += 1
-				citizen["movement_repath_attempt_count"] = (
-					repath_attempt_count
-				)
-
-				var repath_path := _find_bounded_repath(
-					city_world,
-					current_tile,
-					movement_destination,
-					citizen_id
-				)
-
-				if repath_path.is_empty():
-					_set_citizen_movement_blocked(
-						citizen,
-						movement_destination,
-						WorldData.CITY_CITIZEN_MOVEMENT_FAILURE_REPATH_FAILED
-					)
-					movement_was_blocked = true
-					break
-
-				movement_path = repath_path
-				movement_path_index = 1
-
-				if movement_path.size() == 1:
-					break
-
-				continue
-
-			if movement_progress < step_cost:
-				break
-
-			movement_progress -= step_cost
-			current_tile = next_tile
-			traversed_tiles.append(current_tile)
-			movement_path_index += 1
-		if movement_repath_was_deferred:
-			citizen["movement_path"] = movement_path.duplicate()
-			citizen["movement_path_index"] = movement_path_index
-			citizen["movement_progress_basis_points"] = 0
-			citizen["movement_repath_attempt_count"] = (
-				repath_attempt_count
-			)
-			citizen["movement_failure_reason"] = (
-				WorldData.CITY_CITIZEN_MOVEMENT_FAILURE_NONE
-			)
-			next_active_mover_ids.append(citizen_id)
-			_append_citizen_update(
-				citizen_updates,
-				citizen_id,
-				citizen,
-				current_tile,
-				traversed_tiles
-			)
-			continue
-		if movement_was_blocked:
-			_append_citizen_update(
-				citizen_updates,
-				citizen_id,
-				citizen,
-				current_tile,
-				traversed_tiles
-			)
-			continue
-
-		if movement_path_index >= movement_path.size():
-			CityCitizens.reset_city_citizen_movement_state(
-				citizen,
-				true
-			)
-			_append_citizen_update(
-				citizen_updates,
-				citizen_id,
-				citizen,
-				current_tile,
-				traversed_tiles
-			)
-			continue
-
-		citizen["movement_path"] = movement_path.duplicate()
-		citizen["movement_path_index"] = movement_path_index
-		citizen["movement_progress_basis_points"] = (
-			movement_progress
-		)
-		citizen["movement_repath_attempt_count"] = (
-			repath_attempt_count
-		)
-		citizen["movement_failure_reason"] = (
-			WorldData.CITY_CITIZEN_MOVEMENT_FAILURE_NONE
-		)
-
-		next_active_mover_ids.append(citizen_id)
-		_append_citizen_update(
-			citizen_updates,
-			citizen_id,
-			citizen,
-			current_tile,
-			traversed_tiles
-		)
-
-	var commit_result := (
-		WorldData.commit_city_citizen_movement_tick(
-			city_world,
-			citizen_updates,
-			next_active_mover_ids
-		)
+	var commit_result := WorldData.commit_city_citizen_movement_tick(
+		city_world,
+		tick_context.get("citizen_updates", []),
+		next_active_mover_ids
 	)
 
 	if not bool(commit_result.get("success", false)):
+		push_error("Citizen movement tick could not be committed.")
+
+
+static func _advance_active_mover(values: Dictionary) -> void:
+	var tick_context: Dictionary = values.get("tick_context", {})
+	var citizen_id := int(values.get("citizen_id", -1))
+	var citizen_index := WorldData.get_city_citizen_index_by_id(citizen_id)
+
+	if citizen_index < 0:
+		return
+
+	var raw_citizen = WorldData.city_citizens[citizen_index]
+
+	if not raw_citizen is Dictionary:
+		return
+
+	var citizen: Dictionary = raw_citizen.duplicate(true)
+	var raw_current_tile = citizen.get(
+		"city_tile_position",
+		WorldData.INVALID_CITY_TILE_POSITION
+	)
+
+	if not raw_current_tile is Vector2i:
 		push_error(
-			"Citizen movement tick could not be committed."
+			"Cannot advance citizen "
+				+ str(citizen_id)
+				+ ": authoritative position is invalid."
+		)
+		return
+
+	var mover_context := {
+		"tick_context": tick_context,
+		"citizen_id": citizen_id,
+		"citizen": citizen,
+		"current_tile": raw_current_tile,
+		"traversed_tiles": [raw_current_tile],
+	}
+
+	if not bool(citizen.get("alive", false)):
+		CityCitizens.reset_city_citizen_movement_state(citizen, true)
+		_append_active_mover_update(mover_context)
+		return
+
+	if (
+		str(citizen.get("movement_state", ""))
+		!= WorldData.CITY_CITIZEN_MOVEMENT_STATE_MOVING
+	):
+		return
+
+	if not _prepare_active_mover_path(mover_context):
+		_append_active_mover_update(mover_context)
+		return
+
+	_advance_active_mover_path(mover_context)
+	_finalize_active_mover(mover_context)
+
+
+static func _prepare_active_mover_path(context: Dictionary) -> bool:
+	var citizen: Dictionary = context.get("citizen", {})
+	var current_tile: Vector2i = context.get(
+		"current_tile",
+		WorldData.INVALID_CITY_TILE_POSITION
+	)
+	var raw_path = citizen.get("movement_path", [])
+	var raw_path_index = citizen.get("movement_path_index", 0)
+	var raw_progress = citizen.get("movement_progress_basis_points", 0)
+	var raw_speed = citizen.get(
+		"movement_speed_basis_points_per_minute",
+		WorldData.DEFAULT_CITIZEN_MOVEMENT_SPEED_PER_MINUTE
+	)
+	var raw_repath_attempt_count = citizen.get(
+		"movement_repath_attempt_count",
+		0
+	)
+	var raw_destination = citizen.get(
+		"movement_destination_tile",
+		WorldData.INVALID_CITY_TILE_POSITION
+	)
+	var basic_state_is_valid := (
+		raw_path is Array
+		and typeof(raw_path_index) == TYPE_INT
+		and typeof(raw_progress) == TYPE_INT
+		and typeof(raw_speed) == TYPE_INT
+		and typeof(raw_repath_attempt_count) == TYPE_INT
+		and raw_destination is Vector2i
+	)
+
+	if not basic_state_is_valid:
+		_stop_citizen_for_invalid_path(citizen, raw_destination)
+		return false
+
+	var movement_path: Array = raw_path
+	var movement_path_index: int = raw_path_index
+	var movement_progress: int = raw_progress
+	var movement_speed: int = raw_speed
+	var repath_attempt_count: int = raw_repath_attempt_count
+	var movement_destination: Vector2i = raw_destination
+	var current_step_cost := 0
+
+	if (
+		movement_path_index >= 1
+		and movement_path_index < movement_path.size()
+		and movement_path[movement_path_index - 1] is Vector2i
+		and movement_path[movement_path_index] is Vector2i
+	):
+		current_step_cost = WorldData.get_city_citizen_movement_step_cost(
+			movement_path[movement_path_index - 1],
+			movement_path[movement_path_index]
 		)
 
-static func _find_bounded_repath(
-	city_world: WorldData,
-	start_tile: Vector2i,
-	destination_tile: Vector2i,
-	citizen_id: int
-) -> Array:
-	var result := (
-		CityNavigationSystemScript.find_path_to_any_city_tile(
-			city_world,
-			start_tile,
-			[destination_tile],
-			MAX_REPATH_EXPANDED_NODES,
-			citizen_id
+	var path_state_is_valid: bool = (
+		movement_path.size() >= 2
+		and movement_path_index >= 1
+		and movement_path_index < movement_path.size()
+		and current_step_cost > 0
+		and movement_progress >= 0
+		and movement_progress < current_step_cost
+		and movement_speed > 0
+		and repath_attempt_count >= 0
+		and repath_attempt_count
+		<= WorldData.MAX_CITIZEN_MOVEMENT_REPATH_ATTEMPTS
+		and movement_path[movement_path_index - 1] == current_tile
+		and movement_path.back() == movement_destination
+	)
+
+	if not path_state_is_valid:
+		_stop_citizen_for_invalid_path(citizen, movement_destination)
+		return false
+
+	var tick_context: Dictionary = context.get("tick_context", {})
+	context["movement_path"] = movement_path
+	context["movement_path_index"] = movement_path_index
+	context["movement_progress"] = (
+		movement_progress
+		+ int(tick_context.get("minutes_advanced", 0)) * movement_speed
+	)
+	context["repath_attempt_count"] = repath_attempt_count
+	context["movement_destination"] = movement_destination
+	context["movement_was_blocked"] = false
+	context["movement_repath_was_deferred"] = false
+	return true
+
+
+static func _advance_active_mover_path(context: Dictionary) -> void:
+	var tick_context: Dictionary = context.get("tick_context", {})
+	var city_world: WorldData = tick_context.get("city_world")
+	var citizen_id := int(context.get("citizen_id", -1))
+	var citizen: Dictionary = context.get("citizen", {})
+	var current_tile: Vector2i = context.get(
+		"current_tile",
+		WorldData.INVALID_CITY_TILE_POSITION
+	)
+	var traversed_tiles: Array = context.get("traversed_tiles", [])
+	var movement_path: Array = context.get("movement_path", [])
+	var movement_path_index := int(context.get("movement_path_index", 0))
+	var movement_progress := int(context.get("movement_progress", 0))
+	var repath_attempt_count := int(context.get("repath_attempt_count", 0))
+	var movement_destination: Vector2i = context.get(
+		"movement_destination",
+		WorldData.INVALID_CITY_TILE_POSITION
+	)
+	var movement_was_blocked := false
+	var movement_repath_was_deferred := false
+
+	while movement_path_index < movement_path.size():
+		var raw_next_tile = movement_path[movement_path_index]
+
+		if not raw_next_tile is Vector2i:
+			_set_citizen_movement_blocked(
+				citizen,
+				movement_destination,
+				WorldData.CITY_CITIZEN_MOVEMENT_FAILURE_INVALID_PATH
+			)
+			movement_was_blocked = true
+			break
+
+		var next_tile: Vector2i = raw_next_tile
+		var step_cost := WorldData.get_city_citizen_movement_step_cost(
+			current_tile,
+			next_tile
 		)
+
+		if step_cost <= 0:
+			_set_citizen_movement_blocked(
+				citizen,
+				movement_destination,
+				WorldData.CITY_CITIZEN_MOVEMENT_FAILURE_INVALID_PATH
+			)
+			movement_was_blocked = true
+			break
+
+		if not WorldData.can_city_citizen_traverse_step(
+			city_world,
+			current_tile,
+			next_tile,
+			citizen_id
+		):
+			if (
+				repath_attempt_count
+				>= WorldData.MAX_CITIZEN_MOVEMENT_REPATH_ATTEMPTS
+			):
+				_set_citizen_movement_blocked(
+					citizen,
+					movement_destination,
+					WorldData.CITY_CITIZEN_MOVEMENT_FAILURE_REPATH_FAILED
+				)
+				movement_was_blocked = true
+				break
+
+			var repath_requests_remaining := int(
+				tick_context.get("repath_requests_remaining", 0)
+			)
+
+			if repath_requests_remaining <= 0:
+				movement_progress = 0
+				movement_repath_was_deferred = true
+				break
+
+			repath_requests_remaining -= 1
+			tick_context["repath_requests_remaining"] = repath_requests_remaining
+			repath_attempt_count += 1
+			citizen["movement_repath_attempt_count"] = repath_attempt_count
+
+			var repath_path := _find_bounded_repath({
+				"city_world": city_world,
+				"start_tile": current_tile,
+				"destination_tile": movement_destination,
+				"citizen_id": citizen_id,
+			})
+
+			if repath_path.is_empty():
+				_set_citizen_movement_blocked(
+					citizen,
+					movement_destination,
+					WorldData.CITY_CITIZEN_MOVEMENT_FAILURE_REPATH_FAILED
+				)
+				movement_was_blocked = true
+				break
+
+			movement_path = repath_path
+			movement_path_index = 1
+
+			if movement_path.size() == 1:
+				break
+
+			continue
+
+		if movement_progress < step_cost:
+			break
+
+		movement_progress -= step_cost
+		current_tile = next_tile
+		traversed_tiles.append(current_tile)
+		movement_path_index += 1
+
+	context["current_tile"] = current_tile
+	context["movement_path"] = movement_path
+	context["movement_path_index"] = movement_path_index
+	context["movement_progress"] = movement_progress
+	context["repath_attempt_count"] = repath_attempt_count
+	context["movement_was_blocked"] = movement_was_blocked
+	context["movement_repath_was_deferred"] = movement_repath_was_deferred
+
+
+static func _finalize_active_mover(context: Dictionary) -> void:
+	var tick_context: Dictionary = context.get("tick_context", {})
+	var citizen_id := int(context.get("citizen_id", -1))
+	var citizen: Dictionary = context.get("citizen", {})
+	var movement_path: Array = context.get("movement_path", [])
+	var movement_path_index := int(context.get("movement_path_index", 0))
+	var movement_progress := int(context.get("movement_progress", 0))
+	var repath_attempt_count := int(context.get("repath_attempt_count", 0))
+	var next_active_mover_ids: Array = tick_context.get(
+		"next_active_mover_ids",
+		[]
+	)
+
+	if bool(context.get("movement_repath_was_deferred", false)):
+		citizen["movement_path"] = movement_path.duplicate()
+		citizen["movement_path_index"] = movement_path_index
+		citizen["movement_progress_basis_points"] = 0
+		citizen["movement_repath_attempt_count"] = repath_attempt_count
+		citizen["movement_failure_reason"] = (
+			WorldData.CITY_CITIZEN_MOVEMENT_FAILURE_NONE
+		)
+		next_active_mover_ids.append(citizen_id)
+		_append_active_mover_update(context)
+		return
+
+	if bool(context.get("movement_was_blocked", false)):
+		_append_active_mover_update(context)
+		return
+
+	if movement_path_index >= movement_path.size():
+		CityCitizens.reset_city_citizen_movement_state(citizen, true)
+		_append_active_mover_update(context)
+		return
+
+	citizen["movement_path"] = movement_path.duplicate()
+	citizen["movement_path_index"] = movement_path_index
+	citizen["movement_progress_basis_points"] = movement_progress
+	citizen["movement_repath_attempt_count"] = repath_attempt_count
+	citizen["movement_failure_reason"] = (
+		WorldData.CITY_CITIZEN_MOVEMENT_FAILURE_NONE
+	)
+	next_active_mover_ids.append(citizen_id)
+	_append_active_mover_update(context)
+
+
+static func _append_active_mover_update(context: Dictionary) -> void:
+	var tick_context: Dictionary = context.get("tick_context", {})
+	_append_citizen_update({
+		"citizen_updates": tick_context.get("citizen_updates", []),
+		"citizen_id": int(context.get("citizen_id", -1)),
+		"citizen": context.get("citizen", {}),
+		"final_tile": context.get(
+			"current_tile",
+			WorldData.INVALID_CITY_TILE_POSITION
+		),
+		"traversed_tiles": context.get("traversed_tiles", []),
+	})
+
+
+static func _find_bounded_repath(values: Dictionary) -> Array:
+	var city_world: WorldData = values.get("city_world")
+	var start_tile: Vector2i = values.get(
+		"start_tile",
+		WorldData.INVALID_CITY_TILE_POSITION
+	)
+	var destination_tile: Vector2i = values.get(
+		"destination_tile",
+		WorldData.INVALID_CITY_TILE_POSITION
+	)
+	var citizen_id := int(values.get("citizen_id", -1))
+	var result := (
+		CityNavigationSystemScript.find_path_to_any_city_tile({
+			"city_world": city_world,
+			"start_tile": start_tile,
+			"destination_tiles": [destination_tile],
+			"max_expanded_nodes": MAX_REPATH_EXPANDED_NODES,
+			"citizen_id": citizen_id,
+			"heuristic_weight": CityNavigationSystem.HEURISTIC_WEIGHT
+		})
 	)
 
 	if not bool(result.get("success", false)):
@@ -400,13 +415,15 @@ static func _find_bounded_repath(
 
 	return repath_path.duplicate()
 
-static func _append_citizen_update(
-	citizen_updates: Array,
-	citizen_id: int,
-	citizen: Dictionary,
-	final_tile: Vector2i,
-	traversed_tiles: Array[Vector2i]
-) -> void:
+static func _append_citizen_update(values: Dictionary) -> void:
+	var citizen_updates: Array = values.get("citizen_updates", [])
+	var citizen_id := int(values.get("citizen_id", -1))
+	var citizen: Dictionary = values.get("citizen", {})
+	var final_tile: Vector2i = values.get(
+		"final_tile",
+		WorldData.INVALID_CITY_TILE_POSITION
+	)
+	var traversed_tiles: Array = values.get("traversed_tiles", [])
 	citizen_updates.append({
 		"citizen_id": citizen_id,
 		"citizen": citizen,

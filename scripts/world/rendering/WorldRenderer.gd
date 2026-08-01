@@ -10,6 +10,12 @@ var view_mode: int = MapVisuals.ViewMode.BIOME
 var world_map_texture: ImageTexture
 var world_texture_cache := MapTextureCache.new()
 
+const MapTextureCacheStateScript = preload(
+	"res://scripts/map/visuals/MapTextureCacheState.gd"
+)
+const MapCameraSessionStateScript = preload(
+	"res://scripts/map/MapCameraSessionState.gd"
+)
 const WORLD_CURSOR_LOOK_FILL_COLOR: Color = Color(1.0, 1.0, 1.0, 0.08)
 const WORLD_CURSOR_LOOK_BORDER_COLOR: Color = Color(1.0, 1.0, 1.0, 0.58)
 const WORLD_CURSOR_LOOK_GRID_COLOR: Color = Color(1.0, 1.0, 1.0, 0.20)
@@ -161,15 +167,15 @@ func setup_world_texture_cache() -> void:
 
 
 func has_valid_saved_world_map_texture_cache(source_world: WorldData) -> bool:
-	return WorldData.has_valid_world_map_texture_cache(source_world)
+	return MapTextureCacheStateScript.has_valid_world_cache(source_world)
 
 
 func get_saved_world_map_texture_cache() -> Dictionary:
-	return WorldData.get_world_map_texture_cache()
+	return MapTextureCacheStateScript.get_world_cache()
 
 
 func store_saved_world_map_texture_cache(source_world: WorldData, texture_cache: Dictionary) -> void:
-	WorldData.store_world_map_texture_cache(source_world, texture_cache)
+	MapTextureCacheStateScript.store_world_cache(source_world, texture_cache)
 
 func load_locked_world_save() -> void:
 	world = WorldData.official_world
@@ -1155,9 +1161,9 @@ func configure_world_camera() -> void:
 	if current_camera.has_method("configure_for_map"):
 		current_camera.call("configure_for_map", world.width, world.height, settings.tile_size, false)
 
-	if WorldData.has_world_camera_state:
-		current_camera.position = WorldData.world_camera_position
-		current_camera.zoom = WorldData.world_camera_zoom
+	if MapCameraSessionStateScript.has_world_camera_state:
+		current_camera.position = MapCameraSessionStateScript.world_camera_position
+		current_camera.zoom = MapCameraSessionStateScript.world_camera_zoom
 
 	if current_camera.has_method("clamp_camera_to_map_bounds"):
 		current_camera.call("clamp_camera_to_map_bounds")
@@ -1169,6 +1175,7 @@ func store_current_world_camera_state() -> void:
 	if current_camera == null:
 		return
 
-	WorldData.world_camera_position = current_camera.position
-	WorldData.world_camera_zoom = current_camera.zoom
-	WorldData.has_world_camera_state = true
+	MapCameraSessionStateScript.store_world_camera(
+		current_camera.position,
+		current_camera.zoom
+	)

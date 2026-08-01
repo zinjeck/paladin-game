@@ -16,6 +16,7 @@ const TEST_MINUTES_PER_TICK: int = 120
 const VALIDATION_INTERVAL_TICKS: int = 2
 const CRITICAL_HUNGER_GRACE_MINUTES: int = 360
 const WORKPLACE_FISH_FIXTURE_AMOUNT: int = 48
+const MAX_FIXTURE_DETOUR_TILES: int = 32
 
 var failure_count: int = 0
 var validation_count: int = 0
@@ -178,13 +179,13 @@ func _create_mixed_work_fixture(renderer: CityRenderer) -> Dictionary:
 	if keep_top_left == WorldData.INVALID_CITY_TILE_POSITION:
 		return {}
 
-	var keep := WorldData.add_city_object(
-		WorldData.CITY_OBJECT_CITY_CENTER,
-		keep_top_left,
-		keep_size,
-		"player",
-		city_world
-	)
+	var keep := WorldData.add_city_object({
+		"object_type": WorldData.CITY_OBJECT_CITY_CENTER,
+		"top_left": keep_top_left,
+		"size_tiles": keep_size,
+		"object_owner": "player",
+		"city_world": city_world,
+	})
 	renderer.after_city_center_placed(keep)
 
 	_expect(
@@ -233,13 +234,13 @@ func _create_mixed_work_fixture(renderer: CityRenderer) -> Dictionary:
 		fishery_footprint
 	)
 
-	var fishery := WorldData.add_city_object(
-		WorldData.CITY_OBJECT_FISHING_GROUNDS,
-		fishery_top_left,
-		fishery_size,
-		"player",
-		city_world
-	)
+	var fishery := WorldData.add_city_object({
+		"object_type": WorldData.CITY_OBJECT_FISHING_GROUNDS,
+		"top_left": fishery_top_left,
+		"size_tiles": fishery_size,
+		"object_owner": "player",
+		"city_world": city_world,
+	})
 	var fishery_id := int(fishery.get("id", -1))
 	var accepted_fish := WorldData.add_resource_to_city_object_storage(
 		fishery_id,
@@ -330,13 +331,13 @@ func _create_mixed_work_fixture(renderer: CityRenderer) -> Dictionary:
 		WorldData.CITY_SURFACE_FEATURE_ROCK
 	)
 
-	var house_site := CityConstructionSystemScript.create_rectangular_site(
-		WorldData.CITY_OBJECT_HOUSE,
-		house_top_left,
-		house_size,
-		"player",
-		city_world
-	)
+	var house_site := CityConstructionSystemScript.create_rectangular_site({
+		"object_type": WorldData.CITY_OBJECT_HOUSE,
+		"top_left": house_top_left,
+		"size_tiles": house_size,
+		"object_owner": "player",
+		"city_world": city_world,
+	})
 	var house_site_id := int(house_site.get("id", -1))
 	_expect(house_site_id > 0, "The House blueprint must be created.")
 
@@ -344,11 +345,11 @@ func _create_mixed_work_fixture(renderer: CityRenderer) -> Dictionary:
 		return {}
 
 	var cleanup_result := (
-		WorldData.add_resource_to_city_ground_piles_with_result(
-			cleanup_tile,
-			WorldData.RESOURCE_COAL,
-			1
-		)
+		WorldData.add_resource_to_city_ground_piles_with_result({
+			"tile_position": cleanup_tile,
+			"resource": WorldData.RESOURCE_COAL,
+			"amount_delta": 1,
+		})
 	)
 	_expect(
 		int(cleanup_result.get("added_amount", 0)) == 1,
@@ -377,11 +378,11 @@ func _create_mixed_work_fixture(renderer: CityRenderer) -> Dictionary:
 		"A reachable source tile must exist for construction lumber."
 	)
 
-	var lumber_result := WorldData.add_resource_to_city_ground_piles_with_result(
-		lumber_source_tile,
-		WorldData.RESOURCE_LUMBER,
-		4
-	)
+	var lumber_result := WorldData.add_resource_to_city_ground_piles_with_result({
+		"tile_position": lumber_source_tile,
+		"resource": WorldData.RESOURCE_LUMBER,
+		"amount_delta": 4,
+	})
 	_expect(
 		int(lumber_result.get("added_amount", 0)) == 4,
 		"The construction fixture must seed deliverable lumber outside the site."
@@ -405,11 +406,11 @@ func _create_mixed_work_fixture(renderer: CityRenderer) -> Dictionary:
 		natural_exclusions,
 		3
 	)
-	var added_trees := WorldData.add_city_player_command_targets(
+	var added_trees := CityWorkSystem.add_city_player_command_targets(
 		WorldData.CITY_PLAYER_COMMAND_TYPE_CHOP_TREE,
 		tree_targets
 	)
-	var added_rocks := WorldData.add_city_player_command_targets(
+	var added_rocks := CityWorkSystem.add_city_player_command_targets(
 		WorldData.CITY_PLAYER_COMMAND_TYPE_COLLECT_ROCK,
 		rock_targets
 	)
@@ -418,7 +419,7 @@ func _create_mixed_work_fixture(renderer: CityRenderer) -> Dictionary:
 		"At least two independent tree and rock jobs must be designated."
 	)
 
-	for command in WorldData.get_city_player_command_snapshot():
+	for command in CityWorkSystem.get_city_player_command_snapshot():
 		if not command is Dictionary:
 			continue
 
@@ -427,14 +428,14 @@ func _create_mixed_work_fixture(renderer: CityRenderer) -> Dictionary:
 
 	var command_expectations: Dictionary = {}
 
-	for command in WorldData.get_city_player_command_snapshot():
+	for command in CityWorkSystem.get_city_player_command_snapshot():
 		if not command is Dictionary:
 			continue
 
 		var command_id := int(command.get("id", -1))
 		var command_type := str(command.get("type", ""))
 		command_expectations[command_id] = {
-			"resource": WorldData.get_city_player_command_resource_type(
+			"resource": CityWorkSystem.get_city_player_command_resource_type(
 				command_type
 			),
 			"yield": int(command.get("resource_yield", 0)),
@@ -756,14 +757,14 @@ func _citizen_can_reach_tiles(
 		return false
 
 	var city_world: WorldData = WorldData.official_city_world
-	var path_result := CityNavigationSystemScript.find_path_to_any_city_tile(
-		city_world,
-		raw_tile,
-		destination_tiles,
-		maxi(city_world.width * city_world.height, 1),
-		citizen_id,
-		1
-	)
+	var path_result := CityNavigationSystemScript.find_path_to_any_city_tile({
+		"city_world": city_world,
+		"start_tile": raw_tile,
+		"destination_tiles": destination_tiles,
+		"max_expanded_nodes": maxi(city_world.width * city_world.height, 1),
+		"citizen_id": citizen_id,
+		"heuristic_weight": 1,
+	})
 	return bool(path_result.get("success", false))
 
 
@@ -793,20 +794,13 @@ func _prepare_fixture_access_for_all_citizens(
 		if access_target == WorldData.INVALID_CITY_TILE_POSITION:
 			continue
 
-		var corridor := _make_cardinal_fixture_path(
+		var corridor := _find_clear_fixture_corridor(
+			city_world,
 			raw_start_tile,
-			access_target,
-			true
+			access_target
 		)
 
-		if not _fixture_path_is_clear(corridor):
-			corridor = _make_cardinal_fixture_path(
-				raw_start_tile,
-				access_target,
-				false
-			)
-
-		if not _fixture_path_is_clear(corridor):
+		if corridor.is_empty():
 			continue
 
 		for corridor_tile in corridor:
@@ -847,7 +841,7 @@ func _prepare_deterministic_natural_targets(
 					not city_world.is_in_bounds(tile_position.x, tile_position.y)
 					or excluded_tiles.has(tile_position)
 					or not WorldData.get_city_object_at_tile(tile_position).is_empty()
-					or not WorldData.get_city_construction_site_at_tile(
+					or not CityConstructionSystem.get_city_construction_site_at_tile(
 						tile_position
 					).is_empty()
 					or WorldData.has_city_ground_pile_at_tile(tile_position)
@@ -861,23 +855,23 @@ func _prepare_deterministic_natural_targets(
 				_set_surface_feature(city_world, tile_position, feature)
 				city_world.mark_tile_data_changed()
 
-				if not WorldData.can_designate_city_player_command_at_tile(
+				if not CityWorkSystem.can_designate_city_player_command_at_tile(
 					command_type,
 					tile_position
 				):
 					continue
 
-				var work_tiles := WorldData.get_city_player_command_work_tiles({
+				var work_tiles := CityWorkSystem.get_city_player_command_work_tiles({
 					"tile_position": tile_position,
 				}, -1)
-				var path_result := CityNavigationSystemScript.find_path_to_any_city_tile(
-					city_world,
-					start_tile,
-					work_tiles,
-					maxi(city_world.width * city_world.height, 1),
-					-1,
-					1
-				)
+				var path_result := CityNavigationSystemScript.find_path_to_any_city_tile({
+					"city_world": city_world,
+					"start_tile": start_tile,
+					"destination_tiles": work_tiles,
+					"max_expanded_nodes": maxi(city_world.width * city_world.height, 1),
+					"citizen_id": -1,
+					"heuristic_weight": 1,
+				})
 
 				if not bool(path_result.get("success", false)):
 					continue
@@ -917,25 +911,25 @@ func _find_reachable_natural_command_tiles(
 				if (
 					not city_world.is_in_bounds(tile_position.x, tile_position.y)
 					or excluded_tiles.has(tile_position)
-					or not WorldData.can_designate_city_player_command_at_tile(
+					or not CityWorkSystem.can_designate_city_player_command_at_tile(
 						command_type,
 						tile_position
 					)
 				):
 					continue
 
-				var work_tiles := WorldData.get_city_player_command_work_tiles({
+				var work_tiles := CityWorkSystem.get_city_player_command_work_tiles({
 					"tile_position": tile_position,
 				}, -1)
 				var path_result := (
-					CityNavigationSystemScript.find_path_to_any_city_tile(
-						city_world,
-						start_tile,
-						work_tiles,
-						maximum_expanded_nodes,
-						-1,
-						1
-					)
+					CityNavigationSystemScript.find_path_to_any_city_tile({
+						"city_world": city_world,
+						"start_tile": start_tile,
+						"destination_tiles": work_tiles,
+						"max_expanded_nodes": maximum_expanded_nodes,
+						"citizen_id": -1,
+						"heuristic_weight": 1,
+					})
 				)
 
 				if not bool(path_result.get("success", false)):
@@ -973,14 +967,14 @@ func _find_open_ground_tile_outside_footprint(
 					continue
 
 				var path_result := (
-					CityNavigationSystemScript.find_path_to_any_city_tile(
-						city_world,
-						start_tile,
-						[tile_position],
-						maxi(city_world.width * city_world.height, 1),
-						citizen_id,
-						1
-					)
+					CityNavigationSystemScript.find_path_to_any_city_tile({
+						"city_world": city_world,
+						"start_tile": start_tile,
+						"destination_tiles": [tile_position],
+						"max_expanded_nodes": maxi(city_world.width * city_world.height, 1),
+						"citizen_id": citizen_id,
+						"heuristic_weight": 1,
+					})
 				)
 
 				if bool(path_result.get("success", false)):
@@ -1092,14 +1086,14 @@ func _find_and_prepare_reachable_rectangle(
 					footprint_tiles
 				)
 				var path_result := (
-					CityNavigationSystemScript.find_path_to_any_city_tile(
-						city_world,
-						citizen_tile,
-						access_tiles,
-						maxi(city_world.width * city_world.height, 1),
-						citizen_id,
-						1
-					)
+					CityNavigationSystemScript.find_path_to_any_city_tile({
+						"city_world": city_world,
+						"start_tile": citizen_tile,
+						"destination_tiles": access_tiles,
+						"max_expanded_nodes": maxi(city_world.width * city_world.height, 1),
+						"citizen_id": citizen_id,
+						"heuristic_weight": 1,
+					})
 				)
 
 				if not bool(path_result.get("success", false)):
@@ -1155,7 +1149,7 @@ func _select_external_access_target(
 				or candidates.has(candidate)
 				or not city_world.is_in_bounds(candidate.x, candidate.y)
 				or not WorldData.get_city_object_at_tile(candidate).is_empty()
-				or not WorldData.get_city_construction_site_at_tile(
+				or not CityConstructionSystem.get_city_construction_site_at_tile(
 					candidate
 				).is_empty()
 				or WorldData.has_city_ground_pile_at_tile(candidate)
@@ -1180,6 +1174,95 @@ func _select_external_access_target(
 		return distance_a < distance_b
 	)
 	return candidates[0]
+
+
+func _find_clear_fixture_corridor(
+	city_world: WorldData,
+	start_tile: Vector2i,
+	destination_tile: Vector2i
+) -> Array[Vector2i]:
+	var corridor := _make_cardinal_fixture_path(
+		start_tile,
+		destination_tile,
+		true
+	)
+
+	if _fixture_path_is_clear(corridor):
+		return corridor
+
+	corridor = _make_cardinal_fixture_path(
+		start_tile,
+		destination_tile,
+		false
+	)
+
+	if _fixture_path_is_clear(corridor):
+		return corridor
+
+	var maximum_detour := mini(
+		MAX_FIXTURE_DETOUR_TILES,
+		maxi(city_world.width, city_world.height)
+	)
+
+	for detour_distance in range(1, maximum_detour + 1):
+		for direction in [-1, 1]:
+			var detour_y := (
+				start_tile.y + detour_distance * int(direction)
+			)
+
+			if detour_y >= 0 and detour_y < city_world.height:
+				corridor = _make_two_bend_fixture_path(
+					start_tile,
+					destination_tile,
+					Vector2i(start_tile.x, detour_y),
+					Vector2i(destination_tile.x, detour_y)
+				)
+
+				if _fixture_path_is_clear(corridor):
+					return corridor
+
+			var detour_x := (
+				start_tile.x + detour_distance * int(direction)
+			)
+
+			if detour_x >= 0 and detour_x < city_world.width:
+				corridor = _make_two_bend_fixture_path(
+					start_tile,
+					destination_tile,
+					Vector2i(detour_x, start_tile.y),
+					Vector2i(detour_x, destination_tile.y)
+				)
+
+				if _fixture_path_is_clear(corridor):
+					return corridor
+
+	return []
+
+
+func _make_two_bend_fixture_path(
+	start_tile: Vector2i,
+	destination_tile: Vector2i,
+	first_turn: Vector2i,
+	second_turn: Vector2i
+) -> Array[Vector2i]:
+	var path: Array[Vector2i] = [start_tile]
+	var turn_tiles: Array[Vector2i] = [
+		first_turn,
+		second_turn,
+		destination_tile,
+	]
+
+	for turn_tile in turn_tiles:
+		var leg := _make_cardinal_fixture_path(
+			path[path.size() - 1],
+			turn_tile,
+			true
+		)
+
+		for leg_index in range(1, leg.size()):
+			path.append(leg[leg_index])
+
+	return path
 
 
 func _make_cardinal_fixture_path(
@@ -1224,7 +1307,7 @@ func _fixture_path_is_clear(path_tiles: Array[Vector2i]) -> bool:
 
 		if (
 			not WorldData.get_city_object_at_tile(tile_position).is_empty()
-			or not WorldData.get_city_construction_site_at_tile(
+			or not CityConstructionSystem.get_city_construction_site_at_tile(
 				tile_position
 			).is_empty()
 			or WorldData.has_city_ground_pile_at_tile(tile_position)
@@ -1279,7 +1362,7 @@ func _footprint_is_unoccupied(footprint_tiles: Array) -> bool:
 
 		if (
 			not WorldData.get_city_object_at_tile(raw_tile).is_empty()
-			or not WorldData.get_city_construction_site_at_tile(
+			or not CityConstructionSystem.get_city_construction_site_at_tile(
 				raw_tile
 			).is_empty()
 			or WorldData.has_city_ground_pile_at_tile(raw_tile)

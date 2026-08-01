@@ -208,7 +208,7 @@ static func _get_legal_food_source_endpoints_at_citizen(
 	# A resident's own home is always their first legal food source. Other homes
 	# never enter this list, even if the citizen is standing beside one.
 	if (
-		WorldData.city_object_is_household_home(home)
+		CityResourceMatcher.city_object_is_household_home(home)
 		and WorldData.get_city_object_footprint_tiles(home).has(citizen_tile)
 	):
 		sources.append(WorldData.make_city_citizen_haul_endpoint(home_id))

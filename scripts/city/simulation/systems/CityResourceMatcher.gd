@@ -1,6 +1,9 @@
 extends RefCounted
 class_name CityResourceMatcher
 
+# File responsibility: Food-demand accounting plus central resource supply, demand, endpoint, and reachability matching. Authoritative inventories remain in WorldData.
+# Matching policy lives here; hauling executes the selected physical transfer.
+
 const CityNavigationSystemScript = preload(
 	"res://scripts/city/simulation/systems/CityNavigationSystem.gd"
 )
@@ -35,6 +38,262 @@ static var _resource_demand_category_priorities: Dictionary = {
 	RESOURCE_DEMAND_CATEGORY_STORAGE: 40,
 }
 
+
+#region Food Supply and Household Demand Accounting
+
+
+
+static func city_object_is_household_home(
+	city_object: Dictionary
+) -> bool:
+	return (
+		not city_object.is_empty()
+		and WorldData.get_city_object_container_type(city_object)
+		== WorldData.CONTAINER_TYPE_PRIVATE_HOME_STORAGE
+		and WorldData.get_city_object_resident_capacity(city_object) > 0
+	)
+
+static func get_city_home_food_target_nutrition(
+	home: Dictionary
+) -> int:
+	if not city_object_is_household_home(home):
+		return 0
+
+	return ceili(
+		float(
+			WorldData.get_city_object_resident_count(home)
+			* WorldData.CITIZEN_HUNGER_LOSS_PER_DAY
+			* WorldData.HOUSEHOLD_FOOD_TARGET_DAY_NUMERATOR
+		)
+		/ float(WorldData.HOUSEHOLD_FOOD_TARGET_DAY_DENOMINATOR)
+	)
+
+
+# Compatibility name retained for existing UI/debug callers. The policy is now
+# a half-day pantry target rather than a full private day of food.
+
+static func get_city_home_one_day_food_target_nutrition(
+	home: Dictionary
+) -> int:
+	return get_city_home_food_target_nutrition(home)
+
+static func get_living_city_citizen_count() -> int:
+	var living_count := 0
+
+	for raw_citizen in WorldData.city_citizens:
+		if not raw_citizen is Dictionary:
+			continue
+
+		var citizen: Dictionary = raw_citizen
+
+		if bool(citizen.get("alive", false)):
+			living_count += 1
+
+	return living_count
+
+static func get_city_public_food_reserve_target_nutrition() -> int:
+	return ceili(
+		float(
+			get_living_city_citizen_count()
+			* WorldData.CITIZEN_HUNGER_LOSS_PER_DAY
+			* WorldData.PUBLIC_FOOD_RESERVE_TARGET_DAY_NUMERATOR
+		)
+		/ float(WorldData.PUBLIC_FOOD_RESERVE_TARGET_DAY_DENOMINATOR)
+	)
+
+static func get_city_food_task_reserved_source_amount(
+	object_id: int,
+	resource: String,
+	excluding_citizen_id: int = -1
+) -> int:
+	return WorldData.get_city_food_task_reserved_endpoint_amount(
+		WorldData.CITY_CITIZEN_HAUL_ENDPOINT_KIND_CITY_OBJECT_CONTAINER,
+		object_id,
+		resource,
+		excluding_citizen_id
+	)
+
+
+static func get_city_object_unreserved_food_amount(
+	city_object: Dictionary,
+	resource: String,
+	excluding_citizen_id: int = -1
+) -> int:
+	if city_object.is_empty() or WorldData.get_city_food_hunger_restore(resource) <= 0:
+		return 0
+
+	var object_id := int(city_object.get("id", -1))
+	var endpoint := WorldData.make_city_citizen_haul_endpoint(object_id)
+
+	return maxi(
+		WorldData.get_city_object_stored_resource_amount(city_object, resource)
+		- WorldData.get_city_haul_endpoint_source_reserved_amount(endpoint, resource)
+		- get_city_food_task_reserved_source_amount(
+			object_id,
+			resource,
+			excluding_citizen_id
+		),
+		0
+	)
+
+static func get_city_public_unreserved_food_nutrition() -> int:
+	var total_nutrition := 0
+
+	for raw_city_object in WorldData.city_objects:
+		if not raw_city_object is Dictionary:
+			continue
+
+		var city_object: Dictionary = raw_city_object
+
+		if (
+			WorldData.get_city_object_public_storage_tier(city_object)
+			== WorldData.PUBLIC_CITY_STORAGE_TIER_NONE
+			or not WorldData.city_object_container_is_publicly_usable(city_object)
+		):
+			continue
+
+		for resource in WorldData.get_city_food_resource_types():
+			total_nutrition += (
+				get_city_object_unreserved_food_amount(city_object, resource)
+				* WorldData.get_city_food_hunger_restore(resource)
+			)
+
+	return total_nutrition
+
+static func get_city_public_food_surplus_nutrition() -> int:
+	return maxi(
+		get_city_public_unreserved_food_nutrition()
+		- get_city_public_food_reserve_target_nutrition(),
+		0
+	)
+
+static func get_city_home_stored_food_nutrition(
+	home: Dictionary
+) -> int:
+	if not city_object_is_household_home(home):
+		return 0
+
+	return WorldData.get_food_nutrition_in_resource_container(
+		home.get("stored_resources", {})
+	)
+
+static func get_city_home_incoming_food_nutrition(
+	home: Dictionary,
+	excluding_reservation_id: int = (
+		WorldData.INVALID_CITY_CITIZEN_HAUL_RESERVATION_ID
+	)
+) -> int:
+	if not city_object_is_household_home(home):
+		return 0
+
+	var home_endpoint := WorldData.make_city_citizen_haul_endpoint(
+		int(home.get("id", -1))
+	)
+	var incoming_nutrition := 0
+
+	for raw_reservation in WorldData.city_haul_reservations.values():
+		if not raw_reservation is Dictionary:
+			continue
+
+		var reservation: Dictionary = raw_reservation
+		var reservation_id := int(reservation.get("id", -1))
+
+		if reservation_id == excluding_reservation_id:
+			continue
+
+		if (
+			str(
+				reservation.get(
+					"destination_access_purpose",
+					WorldData.CONTAINER_HAUL_PURPOSE_NONE
+				)
+			)
+			!= WorldData.CONTAINER_HAUL_PURPOSE_HOME_DELIVERY
+			or not WorldData.city_citizen_haul_endpoints_match(
+				reservation.get("destination", {}),
+				home_endpoint
+			)
+		):
+			continue
+
+		var resource := str(
+			reservation.get("resource_type", WorldData.RESOURCE_NONE)
+		)
+		incoming_nutrition += (
+			maxi(
+				int(
+					reservation.get(
+						"destination_reserved_amount",
+						0
+					)
+				),
+				0
+			)
+			* WorldData.get_city_food_hunger_restore(resource)
+		)
+
+	return incoming_nutrition
+
+static func get_city_home_unfulfilled_food_nutrition(
+	home: Dictionary,
+	excluding_reservation_id: int = (
+		WorldData.INVALID_CITY_CITIZEN_HAUL_RESERVATION_ID
+	)
+) -> int:
+	return maxi(
+		get_city_home_food_target_nutrition(home)
+		- get_city_home_stored_food_nutrition(home)
+		- get_city_home_incoming_food_nutrition(
+			home,
+			excluding_reservation_id
+		),
+		0
+	)
+
+static func get_city_home_requested_food_units(
+	home: Dictionary,
+	resource: String,
+	excluding_reservation_id: int = (
+		WorldData.INVALID_CITY_CITIZEN_HAUL_RESERVATION_ID
+	)
+) -> int:
+	var hunger_restore := WorldData.get_city_food_hunger_restore(resource)
+
+	if hunger_restore <= 0:
+		return 0
+
+	var unfulfilled_nutrition := (
+		get_city_home_unfulfilled_food_nutrition(
+			home,
+			excluding_reservation_id
+		)
+	)
+
+	if unfulfilled_nutrition <= 0:
+		return 0
+
+	var pantry_requested_units := ceili(
+		float(unfulfilled_nutrition) / float(hunger_restore)
+	)
+	return pantry_requested_units
+
+static func get_city_home_food_supply_status(
+	home: Dictionary
+) -> Dictionary:
+	return {
+		"target_nutrition": (
+			get_city_home_food_target_nutrition(home)
+		),
+		"stored_nutrition": get_city_home_stored_food_nutrition(home),
+		"incoming_nutrition": get_city_home_incoming_food_nutrition(home),
+		"unfulfilled_nutrition": (
+			get_city_home_unfulfilled_food_nutrition(home)
+		),
+	}
+
+#endregion
+
+#region Resource Demand Policy and Cargo Matching
 
 static func set_resource_demand_category_priority(
 	category: String,
@@ -247,7 +506,7 @@ static func _find_best_cargo_construction_demand(
 	# Build cheap demand descriptors first. Exact route searches are reserved for
 	# the strongest bounded candidates, preventing a city with many blueprints
 	# from performing one full-city pathfind per site at every cargo boundary.
-	for raw_site in WorldData.get_city_construction_site_snapshot():
+	for raw_site in CityConstructionSystem.get_city_construction_site_snapshot():
 		if not raw_site is Dictionary:
 			continue
 
@@ -317,7 +576,7 @@ static func _find_best_cargo_construction_demand(
 			continue
 
 		var access_tiles := (
-			WorldData.get_city_construction_site_access_tiles(
+			CityConstructionSystem.get_city_construction_site_access_tiles(
 				city_world,
 				site,
 				citizen_id
@@ -383,14 +642,14 @@ static func _find_best_cargo_construction_demand(
 
 		path_requests_used += 1
 		var path_result := (
-			CityNavigationSystemScript.find_path_to_any_city_tile(
-				city_world,
-				start_tile,
-				access_tiles,
-				_get_city_wide_path_expansion_limit(city_world),
-				citizen_id,
-				EXACT_PATH_HEURISTIC_WEIGHT
-			)
+			CityNavigationSystemScript.find_path_to_any_city_tile({
+				"city_world": city_world,
+				"start_tile": start_tile,
+				"destination_tiles": access_tiles,
+				"max_expanded_nodes": _get_city_wide_path_expansion_limit(city_world),
+				"citizen_id": citizen_id,
+				"heuristic_weight": EXACT_PATH_HEURISTIC_WEIGHT
+			})
 		)
 
 		if not bool(path_result.get("success", false)):
@@ -475,7 +734,7 @@ static func _sort_preliminary_resource_demand_candidates(
 
 
 static func _get_construction_order_priority_rank(site_id: int) -> int:
-	for raw_order in WorldData.get_city_work_order_snapshot():
+	for raw_order in CityWorkSystem.get_city_work_order_snapshot():
 		if (
 			raw_order is Dictionary
 			and str(raw_order.get("order_type", ""))
@@ -511,6 +770,892 @@ static func _resource_demand_candidate_is_better(
 # Shared supply enumeration for work that still uses the established generic
 # haul request/executor. Callers receive legal, unreserved physical endpoints;
 # they remain responsible for citizen-specific source-to-destination routing.
+#endregion
+
+#region Source Selection
+
+static func find_nearest_eligible_public_storage_source(
+	values: Dictionary
+) -> Dictionary:
+	for storage_tier in WorldData.get_public_city_storage_tiers():
+		var source_result := (
+			_find_nearest_eligible_public_storage_source_in_tier(
+				values,
+				storage_tier
+			)
+		)
+
+		if not source_result.is_empty():
+			return source_result
+
+	return {}
+
+
+static func _find_nearest_eligible_public_storage_source_in_tier(
+	values: Dictionary,
+	storage_tier: int
+) -> Dictionary:
+	var raw_city_world = values.get("city_world")
+	var raw_start_tile = values.get(
+		"start_tile",
+		WorldData.INVALID_CITY_TILE_POSITION
+	)
+
+	if not raw_city_world is WorldData or not raw_start_tile is Vector2i:
+		return {}
+
+	var city_world: WorldData = raw_city_world
+	var start_tile: Vector2i = raw_start_tile
+	var citizen_id := int(values.get("citizen_id", -1))
+	var resource := str(
+		values.get("resource_type", WorldData.RESOURCE_NONE)
+	)
+	var source_access_purpose := str(
+		values.get(
+			"source_access_purpose",
+			WorldData.CONTAINER_HAUL_PURPOSE_NONE
+		)
+	)
+	var requested_amount := maxi(
+		int(values.get("requested_amount", 0)),
+		0
+	)
+
+	if (
+		citizen_id <= 0
+		or not WorldData.is_city_resource_type(resource)
+		or source_access_purpose
+		== WorldData.CONTAINER_HAUL_PURPOSE_NONE
+	):
+		return {}
+
+	var endpoint_ids_by_access_tile: Dictionary = {}
+	var source_tiles: Array = []
+
+	for raw_city_object in WorldData.city_objects:
+		if not raw_city_object is Dictionary:
+			continue
+
+		var city_object: Dictionary = raw_city_object
+
+		if (
+			WorldData.get_city_object_public_storage_tier(city_object)
+			!= storage_tier
+		):
+			continue
+
+		var object_id := int(city_object.get("id", -1))
+		var endpoint := WorldData.make_city_citizen_haul_endpoint(
+			object_id
+		)
+
+		if not WorldData.city_haul_endpoint_can_provide_resource({
+			"endpoint": endpoint,
+			"resource": resource,
+			"withdrawal_purpose": source_access_purpose,
+			"require_unreserved_amount": true,
+		}):
+			continue
+
+		for access_tile in get_haul_endpoint_access_tiles(city_world, endpoint):
+			if not endpoint_ids_by_access_tile.has(access_tile):
+				endpoint_ids_by_access_tile[access_tile] = []
+				source_tiles.append(access_tile)
+
+			var endpoint_ids: Array = endpoint_ids_by_access_tile[access_tile]
+			endpoint_ids.append(object_id)
+			endpoint_ids_by_access_tile[access_tile] = endpoint_ids
+
+	if source_tiles.is_empty():
+		return {}
+
+	var path_result := (
+		CityNavigationSystemScript.find_path_to_any_city_tile({
+			"city_world": city_world,
+			"start_tile": start_tile,
+			"destination_tiles": source_tiles,
+			"max_expanded_nodes": _get_city_wide_path_expansion_limit(city_world),
+			"citizen_id": citizen_id,
+			"heuristic_weight": EXACT_PATH_HEURISTIC_WEIGHT
+		})
+	)
+
+	if not bool(path_result.get("success", false)):
+		return {}
+
+	var raw_source_tile = path_result.get(
+		"destination_tile",
+		WorldData.INVALID_CITY_TILE_POSITION
+	)
+	var raw_path = path_result.get("path", [])
+
+	if not raw_source_tile is Vector2i or not raw_path is Array:
+		return {}
+
+	var source_tile: Vector2i = raw_source_tile
+	var raw_endpoint_ids = endpoint_ids_by_access_tile.get(source_tile, [])
+
+	if not raw_endpoint_ids is Array:
+		return {}
+
+	var endpoint_ids: Array = raw_endpoint_ids
+	endpoint_ids.sort()
+
+	for raw_endpoint_id in endpoint_ids:
+		var endpoint := WorldData.make_city_citizen_haul_endpoint(
+			int(raw_endpoint_id)
+		)
+
+		if not WorldData.city_haul_endpoint_can_provide_resource({
+			"endpoint": endpoint,
+			"resource": resource,
+			"withdrawal_purpose": source_access_purpose,
+			"require_unreserved_amount": true,
+		}):
+			continue
+
+		var available_amount := (
+			WorldData.get_city_haul_endpoint_unreserved_resource_amount(
+				endpoint,
+				resource
+			)
+		)
+
+		if requested_amount > 0:
+			available_amount = mini(available_amount, requested_amount)
+
+		if available_amount <= 0:
+			continue
+
+		return {
+			"endpoint": endpoint,
+			"source_tile": source_tile,
+			"path": raw_path.duplicate(),
+			"path_cost": int(path_result.get("path_cost", 0)),
+			"available_amount": available_amount,
+			"storage_tier": storage_tier,
+		}
+
+	return {}
+
+
+#endregion
+
+#region Single-Resource Destination Selection
+
+static func find_nearest_eligible_destination(
+	values: Dictionary
+) -> Dictionary:
+	# Storage tiers are absolute policy boundaries. A reachable Stockpile wins
+	# before the City Keep is even considered, regardless of distance.
+	for storage_tier in WorldData.get_public_city_storage_tiers():
+		var destination_result := (
+			_find_nearest_eligible_destination_in_tier(
+				values,
+				storage_tier
+			)
+		)
+
+		if not destination_result.is_empty():
+			return destination_result
+
+	return {}
+
+
+static func _find_nearest_eligible_destination_in_tier(
+	values: Dictionary,
+	storage_tier: int
+) -> Dictionary:
+	var raw_city_world = values.get("city_world")
+	var raw_start_tile = values.get(
+		"start_tile",
+		WorldData.INVALID_CITY_TILE_POSITION
+	)
+
+	if not raw_city_world is WorldData:
+		return {}
+
+	if not raw_start_tile is Vector2i:
+		return {}
+
+	var city_world: WorldData = raw_city_world
+	var start_tile: Vector2i = raw_start_tile
+	var citizen_id := int(values.get("citizen_id", -1))
+	var resource := str(
+		values.get("resource_type", WorldData.RESOURCE_NONE)
+	)
+	var destination_access_purpose := str(
+		values.get(
+			"destination_access_purpose",
+			WorldData.CONTAINER_HAUL_PURPOSE_NONE
+		)
+	)
+	var reservation_id := int(
+		values.get(
+			"reservation_id",
+			WorldData.INVALID_CITY_CITIZEN_HAUL_RESERVATION_ID
+		)
+	)
+	var requested_amount := maxi(
+		int(values.get("requested_amount", 0)),
+		0
+	)
+
+	if (
+		citizen_id <= 0
+		or not WorldData.is_city_resource_type(resource)
+		or destination_access_purpose
+		== WorldData.CONTAINER_HAUL_PURPOSE_NONE
+	):
+		return {}
+
+	var endpoint_ids_by_access_tile: Dictionary = {}
+	var destination_tiles: Array = []
+
+	# This is the replaceable destination-eligibility policy boundary. The
+	# current policy deliberately scans every compatible public container in
+	# the city; later radii, priorities, filters, and preferences belong here.
+	for raw_city_object in WorldData.city_objects:
+		if not raw_city_object is Dictionary:
+			continue
+
+		var city_object: Dictionary = raw_city_object
+
+		if (
+			WorldData.get_city_object_public_storage_tier(
+				city_object
+			)
+			!= storage_tier
+		):
+			continue
+
+		var object_id := int(city_object.get("id", -1))
+
+		if object_id <= 0:
+			continue
+
+		var endpoint := WorldData.make_city_citizen_haul_endpoint(
+			object_id
+		)
+
+		if not WorldData.city_haul_endpoint_can_accept_resource({
+			"endpoint": endpoint,
+			"resource": resource,
+			"deposit_purpose": destination_access_purpose,
+			"require_unreserved_space": true,
+			"excluding_reservation_id": reservation_id,
+		}):
+			continue
+
+		for access_tile in get_haul_endpoint_access_tiles(
+			city_world,
+			endpoint
+		):
+			if not endpoint_ids_by_access_tile.has(access_tile):
+				endpoint_ids_by_access_tile[access_tile] = []
+				destination_tiles.append(access_tile)
+
+			var endpoint_ids: Array = (
+				endpoint_ids_by_access_tile[access_tile]
+			)
+			endpoint_ids.append(object_id)
+			endpoint_ids_by_access_tile[access_tile] = endpoint_ids
+
+	if destination_tiles.is_empty():
+		return {}
+
+	var path_result := (
+		CityNavigationSystemScript.find_path_to_any_city_tile({
+			"city_world": city_world,
+			"start_tile": start_tile,
+			"destination_tiles": destination_tiles,
+			"max_expanded_nodes": _get_city_wide_path_expansion_limit(city_world),
+			"citizen_id": citizen_id,
+			"heuristic_weight": EXACT_PATH_HEURISTIC_WEIGHT
+		})
+	)
+
+	if not bool(path_result.get("success", false)):
+		return {}
+
+	var raw_destination_tile = path_result.get(
+		"destination_tile",
+		WorldData.INVALID_CITY_TILE_POSITION
+	)
+	var raw_path = path_result.get("path", [])
+
+	if not raw_destination_tile is Vector2i:
+		return {}
+
+	if not raw_path is Array:
+		return {}
+
+	var destination_tile: Vector2i = raw_destination_tile
+	var raw_endpoint_ids = endpoint_ids_by_access_tile.get(
+		destination_tile,
+		[]
+	)
+
+	if not raw_endpoint_ids is Array:
+		return {}
+
+	var endpoint_ids: Array = raw_endpoint_ids
+	endpoint_ids.sort()
+
+	for raw_endpoint_id in endpoint_ids:
+		var endpoint_id := int(raw_endpoint_id)
+		var endpoint := WorldData.make_city_citizen_haul_endpoint(
+			endpoint_id
+		)
+
+		if not WorldData.city_haul_endpoint_can_accept_resource({
+			"endpoint": endpoint,
+			"resource": resource,
+			"deposit_purpose": destination_access_purpose,
+			"require_unreserved_space": true,
+			"excluding_reservation_id": reservation_id,
+		}):
+			continue
+
+		var available_amount := (
+			WorldData.get_city_haul_endpoint_unreserved_destination_space(
+				endpoint,
+				reservation_id
+			)
+		)
+
+		if requested_amount > 0:
+			available_amount = mini(
+				available_amount,
+				requested_amount
+			)
+
+		if available_amount <= 0:
+			continue
+
+		return {
+			"endpoint": endpoint,
+			"destination_tile": destination_tile,
+			"path": raw_path.duplicate(),
+			"path_cost": int(path_result.get("path_cost", 0)),
+			"available_amount": available_amount,
+			"storage_tier": storage_tier,
+		}
+
+	return {}
+
+
+#endregion
+
+#region Multi-Resource Destination Selection
+
+static func find_nearest_eligible_destination_for_resources(
+	values: Dictionary
+) -> Dictionary:
+	for storage_tier in WorldData.get_public_city_storage_tiers():
+		var destination_result := (
+			_find_nearest_eligible_destination_for_resources_in_tier(
+				values,
+				storage_tier
+			)
+		)
+
+		if not destination_result.is_empty():
+			return destination_result
+
+	return {}
+
+
+static func _find_nearest_eligible_destination_for_resources_in_tier(
+	values: Dictionary,
+	storage_tier: int
+) -> Dictionary:
+	var raw_city_world = values.get("city_world")
+	var raw_start_tile = values.get(
+		"start_tile",
+		WorldData.INVALID_CITY_TILE_POSITION
+	)
+	var raw_resources = values.get("resources", {})
+
+	if (
+		not raw_city_world is WorldData
+		or not raw_start_tile is Vector2i
+		or not raw_resources is Dictionary
+	):
+		return {}
+
+	var city_world: WorldData = raw_city_world
+	var start_tile: Vector2i = raw_start_tile
+	var resources: Dictionary = raw_resources
+	var citizen_id := int(values.get("citizen_id", -1))
+	var destination_access_purpose := str(
+		values.get(
+			"destination_access_purpose",
+			WorldData.CONTAINER_HAUL_PURPOSE_NONE
+		)
+	)
+	var reservation_id := int(
+		values.get(
+			"reservation_id",
+			WorldData.INVALID_CITY_CITIZEN_HAUL_RESERVATION_ID
+		)
+	)
+	var requested_amount := maxi(
+		int(values.get("requested_amount", 0)),
+		0
+	)
+
+	if (
+		citizen_id <= 0
+		or resources.is_empty()
+		or destination_access_purpose
+		== WorldData.CONTAINER_HAUL_PURPOSE_NONE
+	):
+		return {}
+
+	var endpoint_ids_by_access_tile: Dictionary = {}
+	var destination_tiles: Array = []
+
+	for raw_city_object in WorldData.city_objects:
+		if not raw_city_object is Dictionary:
+			continue
+
+		var city_object: Dictionary = raw_city_object
+
+		if (
+			WorldData.get_city_object_public_storage_tier(
+				city_object
+			)
+			!= storage_tier
+		):
+			continue
+
+		var object_id := int(city_object.get("id", -1))
+
+		if object_id <= 0:
+			continue
+
+		var endpoint := WorldData.make_city_citizen_haul_endpoint(
+			object_id
+		)
+
+		if not _destination_accepts_resource_manifest({
+			"destination": endpoint,
+			"resources": resources,
+			"destination_access_purpose": destination_access_purpose,
+			"reservation_id": reservation_id,
+		}):
+			continue
+
+		for access_tile in get_haul_endpoint_access_tiles(
+			city_world,
+			endpoint
+		):
+			if not endpoint_ids_by_access_tile.has(access_tile):
+				endpoint_ids_by_access_tile[access_tile] = []
+				destination_tiles.append(access_tile)
+
+			var endpoint_ids: Array = (
+				endpoint_ids_by_access_tile[access_tile]
+			)
+			endpoint_ids.append(object_id)
+			endpoint_ids_by_access_tile[access_tile] = endpoint_ids
+
+	if destination_tiles.is_empty():
+		return {}
+
+	var path_result := (
+		CityNavigationSystemScript.find_path_to_any_city_tile({
+			"city_world": city_world,
+			"start_tile": start_tile,
+			"destination_tiles": destination_tiles,
+			"max_expanded_nodes": _get_city_wide_path_expansion_limit(city_world),
+			"citizen_id": citizen_id,
+			"heuristic_weight": EXACT_PATH_HEURISTIC_WEIGHT
+		})
+	)
+
+	if not bool(path_result.get("success", false)):
+		return {}
+
+	var raw_destination_tile = path_result.get(
+		"destination_tile",
+		WorldData.INVALID_CITY_TILE_POSITION
+	)
+	var raw_path = path_result.get("path", [])
+
+	if not raw_destination_tile is Vector2i or not raw_path is Array:
+		return {}
+
+	var destination_tile: Vector2i = raw_destination_tile
+	var raw_endpoint_ids = endpoint_ids_by_access_tile.get(
+		destination_tile,
+		[]
+	)
+
+	if not raw_endpoint_ids is Array:
+		return {}
+
+	var endpoint_ids: Array = raw_endpoint_ids
+	endpoint_ids.sort()
+
+	for raw_endpoint_id in endpoint_ids:
+		var endpoint_id := int(raw_endpoint_id)
+		var endpoint := WorldData.make_city_citizen_haul_endpoint(
+			endpoint_id
+		)
+
+		if not _destination_accepts_resource_manifest({
+			"destination": endpoint,
+			"resources": resources,
+			"destination_access_purpose": destination_access_purpose,
+			"reservation_id": reservation_id,
+		}):
+			continue
+
+		var available_amount := (
+			WorldData.get_city_haul_endpoint_unreserved_destination_space(
+				endpoint,
+				reservation_id
+			)
+		)
+
+		if requested_amount > 0:
+			available_amount = mini(
+				available_amount,
+				requested_amount
+			)
+
+		if available_amount <= 0:
+			continue
+
+		return {
+			"endpoint": endpoint,
+			"destination_tile": destination_tile,
+			"path": raw_path.duplicate(),
+			"path_cost": int(path_result.get("path_cost", 0)),
+			"available_amount": available_amount,
+			"storage_tier": storage_tier,
+		}
+
+	return {}
+
+
+static func _destination_accepts_resource_manifest(
+	values: Dictionary
+) -> bool:
+	var destination: Dictionary = values.get("destination", {})
+	var resources: Dictionary = values.get("resources", {})
+	var destination_access_purpose := str(
+		values.get(
+			"destination_access_purpose",
+			WorldData.CONTAINER_HAUL_PURPOSE_NONE
+		)
+	)
+	var reservation_id := int(
+		values.get(
+			"reservation_id",
+			WorldData.INVALID_CITY_CITIZEN_HAUL_RESERVATION_ID
+		)
+	)
+	if resources.is_empty():
+		return false
+
+	for raw_resource in resources.keys():
+		var resource := str(raw_resource)
+		var amount := maxi(int(resources.get(raw_resource, 0)), 0)
+
+		if (
+			amount <= 0
+			or not WorldData.is_city_resource_type(resource)
+			or not WorldData.city_haul_endpoint_can_accept_resource({
+				"endpoint": destination,
+				"resource": resource,
+				"deposit_purpose": destination_access_purpose,
+				"require_unreserved_space": true,
+				"excluding_reservation_id": reservation_id,
+			})
+		):
+			return false
+
+	return true
+
+
+static func make_destination_result_for_endpoint_resources(
+	values: Dictionary
+) -> Dictionary:
+	var raw_city_world = values.get("city_world")
+	var raw_start_tile = values.get(
+		"start_tile",
+		WorldData.INVALID_CITY_TILE_POSITION
+	)
+	var raw_destination = values.get("destination", {})
+	var raw_resources = values.get("resources", {})
+
+	if (
+		not raw_city_world is WorldData
+		or not raw_start_tile is Vector2i
+		or not raw_destination is Dictionary
+		or not raw_resources is Dictionary
+	):
+		return {}
+
+	var city_world: WorldData = raw_city_world
+	var start_tile: Vector2i = raw_start_tile
+	var destination := CityCitizens.make_city_citizen_haul_endpoint(
+		raw_destination
+	)
+	var resources: Dictionary = raw_resources
+	var citizen_id := int(values.get("citizen_id", -1))
+	var destination_access_purpose := str(
+		values.get(
+			"destination_access_purpose",
+			WorldData.CONTAINER_HAUL_PURPOSE_NONE
+		)
+	)
+	var reservation_id := int(
+		values.get(
+			"reservation_id",
+			WorldData.INVALID_CITY_CITIZEN_HAUL_RESERVATION_ID
+		)
+	)
+	var requested_amount := maxi(
+		int(values.get("requested_amount", 0)),
+		0
+	)
+
+	if not _destination_accepts_resource_manifest({
+		"destination": destination,
+		"resources": resources,
+		"destination_access_purpose": destination_access_purpose,
+		"reservation_id": reservation_id,
+	}):
+		return {}
+
+	var available_amount := (
+		WorldData.get_city_haul_endpoint_unreserved_destination_space(
+			destination,
+			reservation_id
+		)
+	)
+
+	if reservation_id > 0:
+		var reservation := WorldData.get_city_haul_reservation(
+			reservation_id
+		)
+
+		if (
+			reservation.is_empty()
+			or int(reservation.get("citizen_id", -1)) != citizen_id
+			or not WorldData.city_citizen_haul_endpoints_match(
+				reservation.get("destination", {}),
+				destination
+			)
+		):
+			return {}
+
+		available_amount = mini(
+			available_amount,
+			maxi(
+				int(
+					reservation.get(
+						"destination_reserved_amount",
+						0
+					)
+				),
+				0
+			)
+		)
+
+	if requested_amount > 0:
+		available_amount = mini(available_amount, requested_amount)
+
+	if available_amount <= 0:
+		return {}
+
+	var destination_tiles := get_haul_endpoint_access_tiles(
+		city_world,
+		destination
+	)
+
+	if destination_tiles.is_empty():
+		return {}
+
+	var path_result := (
+		CityNavigationSystemScript.find_path_to_any_city_tile({
+			"city_world": city_world,
+			"start_tile": start_tile,
+			"destination_tiles": destination_tiles,
+			"max_expanded_nodes": _get_city_wide_path_expansion_limit(city_world),
+			"citizen_id": citizen_id,
+			"heuristic_weight": EXACT_PATH_HEURISTIC_WEIGHT
+		})
+	)
+
+	if not bool(path_result.get("success", false)):
+		return {}
+
+	var raw_destination_tile = path_result.get(
+		"destination_tile",
+		WorldData.INVALID_CITY_TILE_POSITION
+	)
+	var raw_path = path_result.get("path", [])
+
+	if not raw_destination_tile is Vector2i or not raw_path is Array:
+		return {}
+
+	return {
+		"endpoint": destination,
+		"destination_tile": raw_destination_tile,
+		"path": raw_path.duplicate(),
+		"path_cost": int(path_result.get("path_cost", 0)),
+		"available_amount": available_amount,
+		"storage_tier": WorldData.get_city_object_public_storage_tier(
+			_get_container_object_for_endpoint(destination)
+		),
+	}
+
+
+static func make_destination_result_for_endpoint(
+	values: Dictionary
+) -> Dictionary:
+	var raw_city_world = values.get("city_world")
+	var raw_start_tile = values.get(
+		"start_tile",
+		WorldData.INVALID_CITY_TILE_POSITION
+	)
+	var raw_destination = values.get("destination", {})
+
+	if (
+		not raw_city_world is WorldData
+		or not raw_start_tile is Vector2i
+		or not raw_destination is Dictionary
+	):
+		return {}
+
+	var city_world: WorldData = raw_city_world
+	var start_tile: Vector2i = raw_start_tile
+	var destination := CityCitizens.make_city_citizen_haul_endpoint(
+		raw_destination
+	)
+	var citizen_id := int(values.get("citizen_id", -1))
+	var resource := str(
+		values.get("resource_type", WorldData.RESOURCE_NONE)
+	)
+	var destination_access_purpose := str(
+		values.get(
+			"destination_access_purpose",
+			WorldData.CONTAINER_HAUL_PURPOSE_NONE
+		)
+	)
+	var reservation_id := int(
+		values.get(
+			"reservation_id",
+			WorldData.INVALID_CITY_CITIZEN_HAUL_RESERVATION_ID
+		)
+	)
+	var requested_amount := maxi(
+		int(values.get("requested_amount", 0)),
+		0
+	)
+
+	if not WorldData.city_haul_endpoint_can_accept_resource({
+		"endpoint": destination,
+		"resource": resource,
+		"deposit_purpose": destination_access_purpose,
+		"require_unreserved_space": true,
+		"excluding_reservation_id": reservation_id,
+	}):
+		return {}
+
+	var available_amount := (
+		WorldData.get_city_haul_endpoint_unreserved_destination_space(
+			destination,
+			reservation_id
+		)
+	)
+
+	if reservation_id > 0:
+		var reservation := WorldData.get_city_haul_reservation(
+			reservation_id
+		)
+
+		if (
+			reservation.is_empty()
+			or int(reservation.get("citizen_id", -1)) != citizen_id
+			or not WorldData.city_citizen_haul_endpoints_match(
+				reservation.get("destination", {}),
+				destination
+			)
+		):
+			return {}
+
+		available_amount = mini(
+			available_amount,
+			maxi(
+				int(
+					reservation.get(
+						"destination_reserved_amount",
+						0
+					)
+				),
+				0
+			)
+		)
+
+	if requested_amount > 0:
+		available_amount = mini(available_amount, requested_amount)
+
+	if available_amount <= 0:
+		return {}
+
+	var destination_tiles := get_haul_endpoint_access_tiles(
+		city_world,
+		destination
+	)
+
+	if destination_tiles.is_empty():
+		return {}
+
+	var path_result := (
+		CityNavigationSystemScript.find_path_to_any_city_tile({
+			"city_world": city_world,
+			"start_tile": start_tile,
+			"destination_tiles": destination_tiles,
+			"max_expanded_nodes": _get_city_wide_path_expansion_limit(city_world),
+			"citizen_id": citizen_id,
+			"heuristic_weight": EXACT_PATH_HEURISTIC_WEIGHT
+		})
+	)
+
+	if not bool(path_result.get("success", false)):
+		return {}
+
+	var raw_destination_tile = path_result.get(
+		"destination_tile",
+		WorldData.INVALID_CITY_TILE_POSITION
+	)
+	var raw_path = path_result.get("path", [])
+
+	if not raw_destination_tile is Vector2i or not raw_path is Array:
+		return {}
+
+	return {
+		"endpoint": destination,
+		"destination_tile": raw_destination_tile,
+		"path": raw_path.duplicate(),
+		"path_cost": int(path_result.get("path_cost", 0)),
+		"available_amount": available_amount,
+		"storage_tier": WorldData.get_city_object_public_storage_tier(
+			_get_container_object_for_endpoint(destination)
+		),
+	}
+
+
+#endregion
+
+#region General Supply Candidate Collection
+
 static func get_resource_supply_candidates(
 	purpose: String,
 	resource: String,
@@ -537,15 +1682,17 @@ static func get_resource_supply_candidates(
 		var endpoint := WorldData.make_city_citizen_haul_endpoint(
 			int(city_object.get("id", -1))
 		)
-		_append_supply_candidate(
-			candidates,
-			endpoint,
-			resource,
-			requested_amount,
-			WorldData.CONTAINER_HAUL_PURPOSE_CONSTRUCTION,
-			_get_public_storage_source_tier(city_object),
-			true
-		)
+		_append_supply_candidate({
+			"candidates": candidates,
+			"endpoint": endpoint,
+			"resource": resource,
+			"requested_amount": requested_amount,
+			"source_access_purpose": (
+				WorldData.CONTAINER_HAUL_PURPOSE_CONSTRUCTION
+			),
+			"source_tier": _get_public_storage_source_tier(city_object),
+			"protect_public_food": true,
+		})
 
 	for raw_pile in WorldData.get_city_ground_pile_snapshot():
 		if (
@@ -554,37 +1701,46 @@ static func get_resource_supply_candidates(
 		):
 			continue
 
-		_append_supply_candidate(
-			candidates,
-			WorldData.make_city_ground_pile_haul_endpoint(
+		_append_supply_candidate({
+			"candidates": candidates,
+			"endpoint": WorldData.make_city_ground_pile_haul_endpoint(
 				int(raw_pile.get("id", -1))
 			),
-			resource,
-			requested_amount,
-			WorldData.CONTAINER_HAUL_PURPOSE_CONSTRUCTION,
-			2,
-			false
-		)
+			"resource": resource,
+			"requested_amount": requested_amount,
+			"source_access_purpose": (
+				WorldData.CONTAINER_HAUL_PURPOSE_CONSTRUCTION
+			),
+			"source_tier": 2,
+			"protect_public_food": false,
+		})
 
 	candidates.sort_custom(_sort_supply_candidates)
 	return candidates
 
 
-static func _append_supply_candidate(
-	candidates: Array[Dictionary],
-	endpoint: Dictionary,
-	resource: String,
-	requested_amount: int,
-	source_access_purpose: String,
-	source_tier: int,
-	protect_public_food: bool
-) -> void:
-	if not WorldData.city_haul_endpoint_can_provide_resource(
-		endpoint,
-		resource,
-		source_access_purpose,
-		true
-	):
+static func _append_supply_candidate(values: Dictionary) -> void:
+	var candidates: Array[Dictionary] = values.get("candidates", [])
+	var endpoint: Dictionary = values.get("endpoint", {})
+	var resource := str(values.get("resource", WorldData.RESOURCE_NONE))
+	var requested_amount := maxi(int(values.get("requested_amount", 0)), 0)
+	var source_access_purpose := str(
+		values.get(
+			"source_access_purpose",
+			WorldData.CONTAINER_HAUL_PURPOSE_NONE
+		)
+	)
+	var source_tier := int(values.get("source_tier", 0))
+	var protect_public_food := bool(
+		values.get("protect_public_food", false)
+	)
+
+	if not WorldData.city_haul_endpoint_can_provide_resource({
+		"endpoint": endpoint,
+		"resource": resource,
+		"withdrawal_purpose": source_access_purpose,
+		"require_unreserved_amount": true,
+	}):
 		return
 
 	var available_amount := (
@@ -599,7 +1755,7 @@ static func _append_supply_candidate(
 		available_amount = mini(
 			available_amount,
 			floori(
-				float(WorldData.get_city_public_food_surplus_nutrition())
+				float(get_city_public_food_surplus_nutrition())
 				/ float(hunger_restore)
 			)
 		)
@@ -648,6 +1804,10 @@ static func _sort_supply_candidates(a: Dictionary, b: Dictionary) -> bool:
 
 	return int(endpoint_a.get("id", -1)) < int(endpoint_b.get("id", -1))
 
+
+#endregion
+
+#region Food Source Matching
 
 static func find_best_survival_food_source(
 	citizen: Dictionary,
@@ -782,7 +1942,7 @@ static func _get_survival_source_groups(
 	var home_id := int(citizen.get("home_object_id", -1))
 	var home := WorldData.get_city_object_by_id(home_id)
 
-	if WorldData.city_object_is_household_home(home):
+	if city_object_is_household_home(home):
 		own_home_group.append(
 			WorldData.make_city_citizen_haul_endpoint(home_id)
 		)
@@ -996,19 +2156,19 @@ static func _make_household_source_candidate(
 		available_amount = mini(
 			available_amount,
 			floori(
-				float(WorldData.get_city_public_food_surplus_nutrition())
+				float(get_city_public_food_surplus_nutrition())
 				/ float(WorldData.get_city_food_hunger_restore(resource))
 			)
 		)
 
 	if (
 		available_amount <= 0
-		or not WorldData.city_haul_endpoint_can_provide_resource(
-			endpoint,
-			resource,
-			source_access_purpose,
-			true
-		)
+		or not WorldData.city_haul_endpoint_can_provide_resource({
+			"endpoint": endpoint,
+			"resource": resource,
+			"withdrawal_purpose": source_access_purpose,
+			"require_unreserved_amount": true,
+		})
 	):
 		return {}
 
@@ -1060,17 +2220,16 @@ static func _find_best_reachable_source_candidate(
 	if target_tiles.is_empty():
 		return {}
 
-	var path_result := CityNavigationSystemScript.find_path_to_any_city_tile(
-		WorldData.official_city_world,
-		current_tile,
-		target_tiles,
-		_get_city_wide_path_expansion_limit(
+	var path_result := CityNavigationSystemScript.find_path_to_any_city_tile({
+		"city_world": WorldData.official_city_world,
+		"start_tile": current_tile,
+		"destination_tiles": target_tiles,
+		"max_expanded_nodes": _get_city_wide_path_expansion_limit(
 			WorldData.official_city_world
 		),
-		citizen_id,
-		EXACT_PATH_HEURISTIC_WEIGHT
-	)
-
+		"citizen_id": citizen_id,
+		"heuristic_weight": EXACT_PATH_HEURISTIC_WEIGHT,
+	})
 	if not bool(path_result.get("success", false)):
 		return {"path_requests_used": 1}
 
@@ -1103,6 +2262,10 @@ static func _find_best_reachable_source_candidate(
 
 	return best_result
 
+
+#endregion
+
+#region Shared Matching Helpers
 
 static func _get_city_wide_path_expansion_limit(
 	city_world: WorldData
@@ -1146,6 +2309,83 @@ static func _get_endpoint_access_tiles(
 				return [raw_tile]
 
 	return []
+
+
+
+
+static func get_haul_endpoint_access_tiles(
+	city_world: WorldData,
+	endpoint: Dictionary
+) -> Array:
+	var endpoint_kind := str(
+		endpoint.get(
+			"kind",
+			WorldData.CITY_CITIZEN_HAUL_ENDPOINT_KIND_NONE
+		)
+	)
+	var endpoint_id := int(endpoint.get("id", -1))
+
+	if endpoint_kind == WorldData.CITY_CITIZEN_HAUL_ENDPOINT_KIND_GROUND_PILE:
+		var ground_pile := WorldData.get_city_ground_pile_by_id(endpoint_id)
+		var raw_tile_position = ground_pile.get(
+			"tile_position",
+			WorldData.INVALID_CITY_TILE_POSITION
+		)
+
+		if raw_tile_position is Vector2i:
+			return [raw_tile_position]
+
+		return []
+
+	if endpoint_kind == WorldData.CITY_CITIZEN_HAUL_ENDPOINT_KIND_GROUND_TILE:
+		var raw_ground_tile = endpoint.get(
+			"tile_position",
+			WorldData.INVALID_CITY_TILE_POSITION
+		)
+
+		if (
+			raw_ground_tile is Vector2i
+			and WorldData.can_city_ground_pile_exist_at_tile(
+				city_world,
+				raw_ground_tile
+			)
+		):
+			return [raw_ground_tile]
+
+		return []
+
+	if (
+		endpoint_kind
+		== WorldData.CITY_CITIZEN_HAUL_ENDPOINT_KIND_CONSTRUCTION_SITE
+	):
+		return CityConstructionSystem.get_city_construction_site_access_tiles(
+			city_world,
+			WorldData.get_city_construction_site_by_id(endpoint_id)
+		)
+
+	var city_object := _get_container_object_for_endpoint(endpoint)
+
+	if city_object.is_empty():
+		return []
+
+	return WorldData.get_city_object_access_tiles(city_world, city_object)
+
+
+static func _get_container_object_for_endpoint(
+	endpoint: Dictionary
+) -> Dictionary:
+	if (
+		str(
+			endpoint.get(
+				"kind",
+				WorldData.CITY_CITIZEN_HAUL_ENDPOINT_KIND_NONE
+			)
+		)
+		!= WorldData.CITY_CITIZEN_HAUL_ENDPOINT_KIND_CITY_OBJECT_CONTAINER
+	):
+		return {}
+
+	return WorldData.get_city_object_by_id(int(endpoint.get("id", -1)))
 
 
 static func _source_result_is_better(
@@ -1207,3 +2447,5 @@ static func _sort_source_group(group: Array[Dictionary]) -> void:
 				endpoint_b.get("id", -1)
 			)
 	)
+
+#endregion

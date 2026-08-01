@@ -706,13 +706,13 @@ func _place_and_validate_city_fixture(
 		"Surface features must not invalidate building placement."
 	)
 
-	var keep := WorldData.add_city_object(
-		WorldData.CITY_OBJECT_CITY_CENTER,
-		keep_top_left,
-		keep_size,
-		"player",
-		renderer.city_world
-	)
+	var keep := WorldData.add_city_object({
+		"object_type": WorldData.CITY_OBJECT_CITY_CENTER,
+		"top_left": keep_top_left,
+		"size_tiles": keep_size,
+		"object_owner": "player",
+		"city_world": renderer.city_world,
+	})
 
 	_expect(
 		WorldData.get_city_surface_feature(
@@ -982,13 +982,13 @@ func _test_universal_construction_core(
 	)
 	renderer.city_world.consume_city_surface_feature_changes()
 
-	var house_site := CityConstructionSystemScript.create_rectangular_site(
-		WorldData.CITY_OBJECT_HOUSE,
-		house_top_left,
-		house_size,
-		"player",
-		renderer.city_world
-	)
+	var house_site := CityConstructionSystemScript.create_rectangular_site({
+		"object_type": WorldData.CITY_OBJECT_HOUSE,
+		"top_left": house_top_left,
+		"size_tiles": house_size,
+		"object_owner": "player",
+		"city_world": renderer.city_world,
+	})
 	var house_site_id := int(house_site.get("id", -1))
 
 	_expect(house_site_id > 0, "House placement must create a blueprint.")
@@ -1093,11 +1093,11 @@ func _test_universal_construction_core(
 	)
 
 	var cleanup_add_result := (
-		WorldData.add_resource_to_city_ground_piles_with_result(
-			cleanup_tile,
-			WorldData.RESOURCE_COAL,
-			1
-		)
+		WorldData.add_resource_to_city_ground_piles_with_result({
+			"tile_position": cleanup_tile,
+			"resource": WorldData.RESOURCE_COAL,
+			"amount_delta": 1,
+		})
 	)
 	var cleanup_placements: Array = cleanup_add_result.get(
 		"placements",
@@ -1131,7 +1131,7 @@ func _test_universal_construction_core(
 		)
 
 	for clearing_tile in [tree_tile, rock_tile]:
-		var command := WorldData.get_city_player_command_at_tile(
+		var command := CityWorkSystem.get_city_player_command_at_tile(
 			clearing_tile
 		)
 		var command_id := int(command.get("id", -1))
@@ -1147,25 +1147,25 @@ func _test_universal_construction_core(
 			continue
 
 		_expect(
-			WorldData.claim_city_player_command(
+			CityWorkSystem.claim_city_player_command(
 				command_id,
 				citizen_id
 			),
 			"The clearing command must be claimable."
 		)
 		_expect(
-			WorldData.repair_stale_city_player_command_claims() == 1,
+			CityWorkSystem.repair_stale_city_player_command_claims() == 1,
 			"A claim without its matching citizen task must self-repair."
 		)
 		_expect(
-			WorldData.claim_city_player_command(
+			CityWorkSystem.claim_city_player_command(
 				command_id,
 				citizen_id
 			),
 			"A repaired clearing command must become claimable again."
 		)
 		_expect(
-			WorldData.complete_city_player_command(
+			CityWorkSystem.complete_city_player_command(
 				command_id,
 				citizen_id
 			),
@@ -1230,17 +1230,17 @@ func _test_universal_construction_core(
 			int(raw_ground_pile.get("id", -1))
 		)
 		_expect(
-			not WorldData.city_haul_endpoint_can_provide_resource(
-				pile_endpoint,
-				str(raw_ground_pile.get("resource_type", "")),
-				WorldData.CONTAINER_HAUL_PURPOSE_GROUND_PILE_CLEANUP,
-				true
-			),
+			not WorldData.city_haul_endpoint_can_provide_resource({
+				"endpoint": pile_endpoint,
+				"resource": str(raw_ground_pile.get("resource_type", "")),
+				"withdrawal_purpose": WorldData.CONTAINER_HAUL_PURPOSE_GROUND_PILE_CLEANUP,
+				"require_unreserved_amount": true,
+			}),
 			"Ordinary hauling must ignore construction-reserved piles."
 		)
 
 	_expect(
-		WorldData.add_resource_to_city_construction_site(
+		CityConstructionSystem.add_resource_to_city_construction_site(
 			house_site_id,
 			WorldData.RESOURCE_LUMBER,
 			4
@@ -1263,7 +1263,7 @@ func _test_universal_construction_core(
 	house_site["completed_labor_minutes"] = int(
 		house_site.get("required_labor_minutes", 0)
 	)
-	WorldData.update_city_construction_site(house_site)
+	CityConstructionSystem.update_city_construction_site(house_site)
 	var completed_house := (
 		CityConstructionSystemScript.complete_city_construction_site(
 			house_site_id
@@ -1355,7 +1355,7 @@ func _test_universal_construction_core(
 	)
 
 	_expect(
-		WorldData.add_resource_to_city_construction_site(
+		CityConstructionSystem.add_resource_to_city_construction_site(
 			road_site_id,
 			WorldData.RESOURCE_STONE,
 			1
@@ -1443,14 +1443,14 @@ func _find_reachable_construction_rectangle(
 		1
 	)
 	var keep_path := (
-		CityNavigationSystemScript.find_path_to_any_city_tile(
-			city_world,
-			citizen_tile,
-			destination_access_tiles,
-			maximum_expanded_nodes,
-			citizen_id,
-			1
-		)
+		CityNavigationSystemScript.find_path_to_any_city_tile({
+			"city_world": city_world,
+			"start_tile": citizen_tile,
+			"destination_tiles": destination_access_tiles,
+			"max_expanded_nodes": maximum_expanded_nodes,
+			"citizen_id": citizen_id,
+			"heuristic_weight": 1,
+		})
 	)
 
 	if not bool(keep_path.get("success", false)):
@@ -1494,7 +1494,7 @@ func _find_reachable_construction_rectangle(
 							not WorldData.get_city_object_at_tile(
 								raw_tile
 							).is_empty()
-							or not WorldData.get_city_construction_site_at_tile(
+							or not CityConstructionSystem.get_city_construction_site_at_tile(
 								raw_tile
 							).is_empty()
 							or
@@ -1559,28 +1559,28 @@ func _find_reachable_construction_rectangle(
 					continue
 
 				var source_path := (
-					CityNavigationSystemScript.find_path_to_any_city_tile(
-						city_world,
-						citizen_tile,
-						[cleanup_tile],
-						maximum_expanded_nodes,
-						citizen_id,
-						1
-					)
+					CityNavigationSystemScript.find_path_to_any_city_tile({
+						"city_world": city_world,
+						"start_tile": citizen_tile,
+						"destination_tiles": [cleanup_tile],
+						"max_expanded_nodes": maximum_expanded_nodes,
+						"citizen_id": citizen_id,
+						"heuristic_weight": 1,
+					})
 				)
 
 				if not bool(source_path.get("success", false)):
 					continue
 
 				var destination_path := (
-					CityNavigationSystemScript.find_path_to_any_city_tile(
-						city_world,
-						cleanup_tile,
-						destination_access_tiles,
-						maximum_expanded_nodes,
-						citizen_id,
-						1
-					)
+					CityNavigationSystemScript.find_path_to_any_city_tile({
+						"city_world": city_world,
+						"start_tile": cleanup_tile,
+						"destination_tiles": destination_access_tiles,
+						"max_expanded_nodes": maximum_expanded_nodes,
+						"citizen_id": citizen_id,
+						"heuristic_weight": 1,
+					})
 				)
 
 				if bool(destination_path.get("success", false)):
@@ -1631,7 +1631,7 @@ func _fixture_path_is_clear(path_tiles: Array[Vector2i]) -> bool:
 
 		if (
 			not WorldData.get_city_object_at_tile(tile_position).is_empty()
-			or not WorldData.get_city_construction_site_at_tile(
+			or not CityConstructionSystem.get_city_construction_site_at_tile(
 				tile_position
 			).is_empty()
 			or WorldData.has_city_ground_pile_at_tile(tile_position)

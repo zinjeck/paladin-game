@@ -245,13 +245,13 @@ func _test_critical_hunger_interrupts_cargo_safely() -> void:
 	var fishery_size := WorldData.get_city_object_size_for_type(
 		WorldData.CITY_OBJECT_FISHING_GROUNDS
 	)
-	var fishery := WorldData.add_city_object(
-		WorldData.CITY_OBJECT_FISHING_GROUNDS,
-		Vector2i(12, 9),
-		fishery_size,
-		"player",
-		city_world
-	)
+	var fishery := WorldData.add_city_object({
+		"object_type": WorldData.CITY_OBJECT_FISHING_GROUNDS,
+		"top_left": Vector2i(12, 9),
+		"size_tiles": fishery_size,
+		"object_owner": "player",
+		"city_world": city_world,
+	})
 	var fishery_id := int(fishery.get("id", -1))
 	_expect(
 		WorldData.add_resource_to_city_object_storage(
@@ -340,13 +340,13 @@ func _test_construction_labor_releases_at_atomic_boundary() -> void:
 	var house_size := WorldData.get_city_object_size_for_type(
 		WorldData.CITY_OBJECT_HOUSE
 	)
-	var house_site := CityConstructionSystemScript.create_rectangular_site(
-		WorldData.CITY_OBJECT_HOUSE,
-		Vector2i(10, 8),
-		house_size,
-		"player",
-		city_world
-	)
+	var house_site := CityConstructionSystemScript.create_rectangular_site({
+		"object_type": WorldData.CITY_OBJECT_HOUSE,
+		"top_left": Vector2i(10, 8),
+		"size_tiles": house_size,
+		"object_owner": "player",
+		"city_world": city_world,
+	})
 	var site_id := int(house_site.get("id", -1))
 	_expect(site_id > 0, "The boundary fixture must create a House site.")
 
@@ -354,12 +354,12 @@ func _test_construction_labor_releases_at_atomic_boundary() -> void:
 		return
 
 	_expect(
-		WorldData.add_resource_to_city_construction_site(
+		CityConstructionSystem.add_resource_to_city_construction_site(
 			site_id,
 			WorldData.RESOURCE_LUMBER,
 			8
 		) == 8
-		and WorldData.add_resource_to_city_construction_site(
+		and CityConstructionSystem.add_resource_to_city_construction_site(
 			site_id,
 			WorldData.RESOURCE_STONE,
 			4
@@ -513,15 +513,15 @@ func _add_stockpile(
 	city_world: WorldData,
 	top_left: Vector2i
 ) -> Dictionary:
-	return WorldData.add_city_object(
-		WorldData.CITY_OBJECT_STOCKPILE,
-		top_left,
-		WorldData.get_city_object_size_for_type(
-			WorldData.CITY_OBJECT_STOCKPILE
-		),
-		"player",
-		city_world
-	)
+	return WorldData.add_city_object({
+		"object_type": WorldData.CITY_OBJECT_STOCKPILE,
+		"top_left": top_left,
+		"size_tiles": WorldData.get_city_object_size_for_type(
+						WorldData.CITY_OBJECT_STOCKPILE
+					),
+		"object_owner": "player",
+		"city_world": city_world,
+	})
 
 
 func _add_ground_resource(
@@ -529,11 +529,11 @@ func _add_ground_resource(
 	resource: String,
 	amount: int
 ) -> int:
-	var add_result := WorldData.add_resource_to_city_ground_piles_with_result(
-		tile_position,
-		resource,
-		amount
-	)
+	var add_result := WorldData.add_resource_to_city_ground_piles_with_result({
+		"tile_position": tile_position,
+		"resource": resource,
+		"amount_delta": amount,
+	})
 
 	for raw_placement in add_result.get("placements", []):
 		if raw_placement is Dictionary:
@@ -580,7 +580,7 @@ func _add_natural_command(
 	city_world.get_tile(tile_position.x, tile_position.y)[
 		"surface_feature"
 	] = WorldData.get_city_player_command_surface_feature(command_type)
-	var added_count := WorldData.add_city_player_command_targets(
+	var added_count := CityWorkSystem.add_city_player_command_targets(
 		command_type,
 		[tile_position]
 	)
@@ -589,7 +589,7 @@ func _add_natural_command(
 		return -1
 
 	return int(
-		WorldData.get_city_player_command_at_tile(tile_position).get(
+		CityWorkSystem.get_city_player_command_at_tile(tile_position).get(
 			"id",
 			-1
 		)

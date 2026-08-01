@@ -1,6 +1,9 @@
 extends RefCounted
 class_name WorldData
 
+# File responsibility: Authoritative world and city state, mutation APIs, indexes, and session-level caches.
+# Navigation regions are organizational only; they do not define runtime ownership.
+
 const CityCitizensScript = preload(
 	"res://scripts/citizens/simulation/CityCitizens.gd"
 )
@@ -9,6 +12,12 @@ const CityResourceCatalogScript = preload(
 )
 const CityObjectCatalogScript = preload(
 	"res://scripts/city/data/CityObjectCatalog.gd"
+)
+const MapTextureCacheStateScript = preload(
+	"res://scripts/map/visuals/MapTextureCacheState.gd"
+)
+const MapCameraSessionStateScript = preload(
+	"res://scripts/map/MapCameraSessionState.gd"
 )
 
 const TERRAIN_WATER := "water"
@@ -66,22 +75,8 @@ static var city_start_region_size: int = 0
 static var city_start_tiles: Array = []
 static var city_return_world_scene_path: String = ""
 static var save_locked: bool = false
-static var has_world_camera_state: bool = false
-static var world_camera_position: Vector2 = Vector2.ZERO
-static var world_camera_zoom: Vector2 = Vector2.ONE
-static var world_map_mode_texture_cache: Dictionary = {}
-static var world_map_texture_cache_seed: int = -1
-static var world_map_texture_cache_size: Vector2i = Vector2i.ZERO
-static var world_map_texture_cache_visual_version: int = -1
-static var city_map_texture_cache_visual_version: int = -1
-static var city_map_mode_texture_cache: Dictionary = {}
-static var city_map_texture_cache_seed: int = -1
-static var city_map_texture_cache_size: Vector2i = Vector2i.ZERO
 static var player_city_foundation_top_left: Vector2i = Vector2i(-1, -1)
 static var player_city_foundation_size: Vector2i = Vector2i.ZERO
-static var has_city_camera_state: bool = false
-static var city_camera_position: Vector2 = Vector2.ZERO
-static var city_camera_zoom: Vector2 = Vector2.ONE
 static var official_world = null
 static var official_city_world = null
 static var official_city_seed: int = 0
@@ -89,11 +84,6 @@ static var player_city_founded: bool = false
 static var player_city_data: Dictionary = {}
 static var debug_mode_enabled: bool = false
 
-const SIMULATION_SYSTEM_CITIZEN_DECISIONS := "citizen_decisions"
-const SIMULATION_SYSTEM_CITIZEN_NEEDS := "citizen_needs"
-const SIMULATION_SYSTEM_CITIZEN_MOVEMENT := "citizen_movement"
-const SIMULATION_SYSTEM_CITIZEN_TASKS := "citizen_tasks"
-const SIMULATION_SYSTEM_WORKPLACE_PRODUCTION := "workplace_production"
 
 static var official_selected_region_center: Vector2i = Vector2i(-1, -1)
 static var official_selected_region_top_left: Vector2i = Vector2i(-1, -1)
@@ -553,6 +543,8 @@ const CITY_OBJECT_INTERIOR_ACCESS_PUBLIC := CityObjectCatalogScript.CITY_OBJECT_
 const CITY_OBJECT_ENTRY_MODE_ANY_BOUNDARY := CityObjectCatalogScript.CITY_OBJECT_ENTRY_MODE_ANY_BOUNDARY
 const CITY_OBJECT_ENTRY_MODE_EXPLICIT_TILES := CityObjectCatalogScript.CITY_OBJECT_ENTRY_MODE_EXPLICIT_TILES
 
+#region City Object Definitions and Workplace Policies
+
 static func ensure_city_object_definitions_ready() -> void:
 	CityObjectCatalogScript.ensure_city_object_definitions_ready()
 
@@ -872,6 +864,10 @@ static var city_object_definitions: Dictionary = (
 	CityObjectCatalogScript.get_city_object_definitions()
 )
 
+#endregion
+
+#region World Grid and Tile State
+
 func setup(new_width: int, new_height: int, new_seed: int):
 	width = new_width
 	height = new_height
@@ -953,6 +949,10 @@ func consume_city_surface_feature_changes() -> Array[Dictionary]:
 	pending_city_surface_feature_changes.clear()
 	return changes
 
+
+#endregion
+
+#region Session Save and City Foundation State
 
 static func store_city_start_region(
 	source_world: WorldData,
@@ -1065,7 +1065,7 @@ static func store_city_world_save(city_world: WorldData, city_seed: int) -> void
 	WorkplaceProductionSystem.clear_resource_source_evaluation_cache()
 	official_city_world = city_world
 	official_city_seed = city_seed
-	clear_city_map_texture_cache()
+	MapTextureCacheStateScript.clear_city_cache()
 	
 static func found_player_city(values: Dictionary) -> void:
 	if player_city_founded:
@@ -1155,6 +1155,10 @@ static func can_build_in_city() -> bool:
 		return false
 
 	return bool(player_city_data["can_build"])
+
+#endregion
+
+#region Resource and Surface Feature Metadata
 
 static func get_city_resource_types() -> Array[String]:
 	return CityResourceCatalogScript.get_city_resource_types()
@@ -1249,31 +1253,20 @@ static func clear_city_surface_features_at_tiles(
 
 	return cleared_count
 
+#endregion
+
+#region Player Command and Work Order State Primitives
+
 static func get_city_player_command_types() -> Array[String]:
 	return [
 		CITY_PLAYER_COMMAND_TYPE_CHOP_TREE,
 		CITY_PLAYER_COMMAND_TYPE_COLLECT_ROCK,
 	]
 
-
 static func is_valid_city_player_command_type(
 	command_type: String
 ) -> bool:
 	return get_city_player_command_types().has(command_type)
-
-
-static func get_city_player_command_display_name(
-	command_type: String
-) -> String:
-	match command_type:
-		CITY_PLAYER_COMMAND_TYPE_CHOP_TREE:
-			return "Chop Tree"
-
-		CITY_PLAYER_COMMAND_TYPE_COLLECT_ROCK:
-			return "Collect Rock"
-
-	return "Player Command"
-
 
 static func get_city_player_command_surface_feature(
 	command_type: String
@@ -1287,79 +1280,17 @@ static func get_city_player_command_surface_feature(
 
 	return CITY_SURFACE_FEATURE_NONE
 
-
-static func get_city_player_command_resource_type(
-	command_type: String
-) -> String:
-	return get_city_surface_feature_resource_type(
-		get_city_player_command_surface_feature(command_type)
-	)
-
-
 static func _mark_city_player_commands_changed() -> void:
 	city_player_command_version += 1
 
-
 static func mark_city_work_orders_changed() -> void:
 	city_work_order_version += 1
-
-
-static func get_city_work_order_by_id(order_id: int) -> Dictionary:
-	if order_id <= 0 or not city_work_orders.has(order_id):
-		return {}
-
-	var raw_order = city_work_orders.get(order_id, {})
-
-	if not raw_order is Dictionary:
-		return {}
-
-	return raw_order.duplicate(true)
-
-
-static func get_city_work_order_snapshot() -> Array:
-	var snapshot: Array = []
-	var order_ids: Array = city_work_orders.keys()
-	order_ids.sort()
-
-	for raw_order_id in order_ids:
-		var order := get_city_work_order_by_id(int(raw_order_id))
-
-		if not order.is_empty():
-			snapshot.append(order)
-
-	return snapshot
-
 
 static func reset_city_work_order_state() -> void:
 	city_work_orders.clear()
 	city_work_order_id_by_source_key.clear()
 	next_city_work_order_id = 1
 	mark_city_work_orders_changed()
-
-
-static func rebuild_city_player_command_index() -> void:
-	city_player_command_index_by_id.clear()
-	city_player_command_id_by_tile.clear()
-
-	for command_index in range(city_player_commands.size()):
-		var raw_command = city_player_commands[command_index]
-
-		if not raw_command is Dictionary:
-			continue
-
-		var command: Dictionary = raw_command
-		var command_id := int(command.get("id", -1))
-		var raw_tile_position = command.get(
-			"tile_position",
-			INVALID_CITY_TILE_POSITION
-		)
-
-		if command_id <= 0 or not raw_tile_position is Vector2i:
-			continue
-
-		city_player_command_index_by_id[command_id] = command_index
-		city_player_command_id_by_tile[raw_tile_position] = command_id
-
 
 static func get_city_player_command_index_by_id(
 	command_id: int
@@ -1387,7 +1318,6 @@ static func get_city_player_command_index_by_id(
 
 	return command_index
 
-
 static func get_city_player_command_by_id(
 	command_id: int
 ) -> Dictionary:
@@ -1397,298 +1327,6 @@ static func get_city_player_command_by_id(
 		return {}
 
 	return city_player_commands[command_index].duplicate(true)
-
-
-static func get_city_player_command_snapshot() -> Array:
-	return city_player_commands.duplicate(true)
-
-
-static func get_city_player_command_at_tile(
-	tile_position: Vector2i
-) -> Dictionary:
-	if not city_player_command_id_by_tile.has(tile_position):
-		return {}
-
-	return get_city_player_command_by_id(
-		int(city_player_command_id_by_tile[tile_position])
-	)
-
-
-static func can_designate_city_player_command_at_tile(
-	command_type: String,
-	tile_position: Vector2i
-) -> bool:
-	var city_world: WorldData = official_city_world
-
-	if (
-		city_world == null
-		or not is_valid_city_player_command_type(command_type)
-		or not city_world.is_in_bounds(tile_position.x, tile_position.y)
-		or city_player_command_id_by_tile.has(tile_position)
-	):
-		return false
-
-	var tile := city_world.get_tile(tile_position.x, tile_position.y)
-
-	return (
-		get_city_surface_feature(tile)
-		== get_city_player_command_surface_feature(command_type)
-	)
-
-
-static func add_city_player_command_targets(
-	command_type: String,
-	raw_tile_positions: Array
-) -> int:
-	if (
-		official_city_world == null
-		or not is_valid_city_player_command_type(command_type)
-	):
-		return 0
-
-	var clean_tiles: Array[Vector2i] = []
-	var visited_tiles: Dictionary = {}
-
-	for raw_tile_position in raw_tile_positions:
-		if not raw_tile_position is Vector2i:
-			continue
-
-		var tile_position: Vector2i = raw_tile_position
-
-		if visited_tiles.has(tile_position):
-			continue
-
-		visited_tiles[tile_position] = true
-
-		if can_designate_city_player_command_at_tile(
-			command_type,
-			tile_position
-		):
-			clean_tiles.append(tile_position)
-
-	if clean_tiles.is_empty():
-		return 0
-
-	clean_tiles.sort_custom(_sort_city_tiles_y_then_x)
-
-	var group_id := next_city_player_command_group_id
-	next_city_player_command_group_id += 1
-
-	for tile_position in clean_tiles:
-		var command_id := next_city_player_command_id
-		next_city_player_command_id += 1
-
-		var command := {
-			"id": command_id,
-			"group_id": group_id,
-			"type": command_type,
-			"tile_position": tile_position,
-			"status": CITY_PLAYER_COMMAND_STATUS_PENDING,
-			"claimed_citizen_id": -1,
-			"issued_world_minute": SimulationClock.absolute_world_minutes,
-			"next_retry_world_minute": -1,
-			"work_duration_minutes": (
-				CITY_PLAYER_COMMAND_WORK_DURATION_MINUTES
-			),
-			"resource_yield": CITY_PLAYER_COMMAND_RESOURCE_YIELD,
-			"construction_site_id": -1,
-			"created_by_construction": false,
-		}
-
-		city_player_commands.append(command)
-		city_player_command_index_by_id[command_id] = (
-			city_player_commands.size() - 1
-		)
-		city_player_command_id_by_tile[tile_position] = command_id
-
-	_mark_city_player_commands_changed()
-	return clean_tiles.size()
-
-
-static func ensure_city_construction_clearing_command(
-	site_id: int,
-	command_type: String,
-	tile_position: Vector2i
-) -> int:
-	var site := get_city_construction_site_by_id(site_id)
-
-	if (
-		site.is_empty()
-		or not site.get("footprint_tiles", []).has(tile_position)
-		or not can_designate_city_player_command_at_tile(
-			command_type,
-			tile_position
-		)
-		and get_city_player_command_at_tile(tile_position).is_empty()
-	):
-		return -1
-
-	var existing_command := get_city_player_command_at_tile(
-		tile_position
-	)
-
-	if not existing_command.is_empty():
-		if (
-			str(existing_command.get("type", ""))
-			!= command_type
-			or int(
-				existing_command.get(
-					"construction_site_id",
-					-1
-				)
-			) not in [-1, site_id]
-		):
-			return -1
-
-		var command_id := int(existing_command.get("id", -1))
-		var command_index := get_city_player_command_index_by_id(
-			command_id
-		)
-
-		if command_index < 0:
-			return -1
-
-		existing_command["construction_site_id"] = site_id
-		existing_command["created_by_construction"] = bool(
-			existing_command.get(
-				"created_by_construction",
-				false
-			)
-		)
-		city_player_commands[command_index] = existing_command
-		_mark_city_player_commands_changed()
-		return command_id
-
-	if add_city_player_command_targets(
-		command_type,
-		[tile_position]
-	) != 1:
-		return -1
-
-	var command := get_city_player_command_at_tile(tile_position)
-	var command_id := int(command.get("id", -1))
-	var command_index := get_city_player_command_index_by_id(command_id)
-
-	if command_index < 0:
-		return -1
-
-	command["construction_site_id"] = site_id
-	command["created_by_construction"] = true
-	city_player_commands[command_index] = command
-	_mark_city_player_commands_changed()
-	return command_id
-
-
-static func detach_city_player_command_from_construction(
-	command_id: int,
-	site_id: int
-) -> bool:
-	var command_index := get_city_player_command_index_by_id(command_id)
-
-	if command_index < 0:
-		return false
-
-	var command: Dictionary = city_player_commands[command_index]
-
-	if int(command.get("construction_site_id", -1)) != site_id:
-		return false
-
-	command["construction_site_id"] = -1
-	command["created_by_construction"] = false
-	city_player_commands[command_index] = command
-	_mark_city_player_commands_changed()
-	return true
-
-
-static func city_player_command_is_for_construction(
-	command: Dictionary
-) -> bool:
-	return int(command.get("construction_site_id", -1)) > 0
-
-
-static func _remove_city_player_command_record(
-	command_id: int
-) -> bool:
-	var command_index := get_city_player_command_index_by_id(command_id)
-
-	if command_index < 0:
-		return false
-
-	city_player_commands.remove_at(command_index)
-	rebuild_city_player_command_index()
-	_mark_city_player_commands_changed()
-	return true
-
-
-static func cancel_city_player_command(command_id: int) -> bool:
-	var command := get_city_player_command_by_id(command_id)
-
-	if command.is_empty():
-		return false
-
-	var claimed_citizen_id := int(
-		command.get("claimed_citizen_id", -1)
-	)
-
-	if claimed_citizen_id > 0:
-		var current_task := get_city_citizen_current_task(
-			claimed_citizen_id
-		)
-
-		if (
-			str(current_task.get("kind", ""))
-			== CITY_CITIZEN_TASK_KIND_PLAYER_COMMAND
-			and int(current_task.get("target_object_id", -1))
-			== command_id
-		):
-			clear_city_citizen_task(
-				claimed_citizen_id,
-				CITY_CITIZEN_TASK_SOURCE_PLAYER
-			)
-			cancel_city_citizen_movement(claimed_citizen_id)
-
-	return _remove_city_player_command_record(command_id)
-
-
-static func remove_city_player_commands_at_tiles(
-	command_type: String,
-	raw_tile_positions: Array
-) -> int:
-	var command_ids: Array[int] = []
-	var visited_command_ids: Dictionary = {}
-
-	for raw_tile_position in raw_tile_positions:
-		if not raw_tile_position is Vector2i:
-			continue
-
-		var command := get_city_player_command_at_tile(raw_tile_position)
-
-		if command.is_empty():
-			continue
-
-		if (
-			command_type != CITY_PLAYER_COMMAND_TYPE_NONE
-			and str(command.get("type", "")) != command_type
-		):
-			continue
-
-		var command_id := int(command.get("id", -1))
-
-		if command_id <= 0 or visited_command_ids.has(command_id):
-			continue
-
-		visited_command_ids[command_id] = true
-		command_ids.append(command_id)
-
-	command_ids.sort()
-	var removed_count := 0
-
-	for command_id in command_ids:
-		if cancel_city_player_command(command_id):
-			removed_count += 1
-
-	return removed_count
-
 
 static func is_city_player_command_target_valid(
 	command: Dictionary
@@ -1721,244 +1359,6 @@ static func is_city_player_command_target_valid(
 		== get_city_player_command_surface_feature(command_type)
 	)
 
-
-static func prune_invalid_city_player_commands() -> int:
-	var invalid_command_ids: Array[int] = []
-
-	for raw_command in city_player_commands:
-		if not raw_command is Dictionary:
-			continue
-
-		var command: Dictionary = raw_command
-
-		if is_city_player_command_target_valid(command):
-			continue
-
-		invalid_command_ids.append(int(command.get("id", -1)))
-
-	var removed_count := 0
-
-	for command_id in invalid_command_ids:
-		if cancel_city_player_command(command_id):
-			removed_count += 1
-
-	return removed_count
-
-
-static func repair_stale_city_player_command_claims() -> int:
-	var repaired_count := 0
-
-	for command_index in range(city_player_commands.size()):
-		var raw_command = city_player_commands[command_index]
-
-		if not raw_command is Dictionary:
-			continue
-
-		var command: Dictionary = raw_command
-		var command_id := int(command.get("id", -1))
-		var claimed_citizen_id := int(
-			command.get("claimed_citizen_id", -1)
-		)
-		var status := str(command.get("status", ""))
-		var claim_is_live := false
-
-		if (
-			command_id > 0
-			and claimed_citizen_id > 0
-			and status == CITY_PLAYER_COMMAND_STATUS_CLAIMED
-		):
-			var citizen := get_city_citizen_by_id(claimed_citizen_id)
-			var current_task := get_city_citizen_current_task(
-				claimed_citizen_id
-			)
-
-			claim_is_live = (
-				not citizen.is_empty()
-				and bool(citizen.get("alive", false))
-				and int(citizen.get("job_object_id", -1)) <= 0
-				and str(current_task.get("kind", ""))
-				== CITY_CITIZEN_TASK_KIND_PLAYER_COMMAND
-				and str(current_task.get("source", ""))
-				== CITY_CITIZEN_TASK_SOURCE_PLAYER
-				and int(current_task.get("target_object_id", -1))
-				== command_id
-			)
-
-		if claim_is_live:
-			continue
-
-		var has_stale_claim := (
-			claimed_citizen_id > 0
-			or status == CITY_PLAYER_COMMAND_STATUS_CLAIMED
-		)
-
-		if not has_stale_claim:
-			continue
-
-		command["claimed_citizen_id"] = -1
-		command["status"] = CITY_PLAYER_COMMAND_STATUS_PENDING
-		command["next_retry_world_minute"] = -1
-		city_player_commands[command_index] = command
-		repaired_count += 1
-
-	if repaired_count > 0:
-		_mark_city_player_commands_changed()
-
-	return repaired_count
-
-
-static func city_player_command_is_assignable(
-	command: Dictionary
-) -> bool:
-	if not is_city_player_command_target_valid(command):
-		return false
-
-	if int(command.get("claimed_citizen_id", -1)) > 0:
-		return false
-
-	var status := str(command.get("status", ""))
-
-	if status == CITY_PLAYER_COMMAND_STATUS_PENDING:
-		return true
-
-	return (
-		status == CITY_PLAYER_COMMAND_STATUS_BLOCKED
-		and int(command.get("next_retry_world_minute", -1))
-		<= SimulationClock.absolute_world_minutes
-	)
-
-
-static func get_city_player_command_work_tiles(
-	command: Dictionary,
-	citizen_id: int
-) -> Array[Vector2i]:
-	var work_tiles: Array[Vector2i] = []
-	var raw_command_tile = command.get(
-		"tile_position",
-		INVALID_CITY_TILE_POSITION
-	)
-
-	if official_city_world == null or not raw_command_tile is Vector2i:
-		return work_tiles
-
-	var command_tile: Vector2i = raw_command_tile
-
-	for offset_y in range(-1, 2):
-		for offset_x in range(-1, 2):
-			var candidate_tile := (
-				command_tile + Vector2i(offset_x, offset_y)
-			)
-
-			if is_city_tile_walkable_for_citizen(
-				official_city_world,
-				candidate_tile,
-				citizen_id
-			):
-				work_tiles.append(candidate_tile)
-
-	work_tiles.sort_custom(_sort_city_tiles_y_then_x)
-	return work_tiles
-
-
-static func get_best_assignable_city_player_command_for_citizen(
-	citizen_id: int
-) -> Dictionary:
-	var citizen := get_city_citizen_by_id(citizen_id)
-	var raw_citizen_tile = citizen.get(
-		"city_tile_position",
-		INVALID_CITY_TILE_POSITION
-	)
-
-	if (
-		citizen.is_empty()
-		or not bool(citizen.get("alive", false))
-		or int(citizen.get("job_object_id", -1)) > 0
-		or not raw_citizen_tile is Vector2i
-	):
-		return {}
-
-	var citizen_tile: Vector2i = raw_citizen_tile
-	var best_command: Dictionary = {}
-	var best_cost := 0
-	var best_command_id := 0
-
-	for raw_command in city_player_commands:
-		if not raw_command is Dictionary:
-			continue
-
-		var command: Dictionary = raw_command
-
-		if not city_player_command_is_assignable(command):
-			continue
-
-		var target_tile: Vector2i = command["tile_position"]
-		var distance_x := absi(target_tile.x - citizen_tile.x)
-		var distance_y := absi(target_tile.y - citizen_tile.y)
-		var diagonal_steps := mini(distance_x, distance_y)
-		var straight_steps := maxi(distance_x, distance_y) - diagonal_steps
-		var estimated_cost := (
-			diagonal_steps * 14_142
-			+ straight_steps * 10_000
-		)
-		var command_age_minutes := maxi(
-			SimulationClock.absolute_world_minutes
-			- int(command.get("issued_world_minute", 0)),
-			0
-		)
-		var fairness_bonus := mini(
-			command_age_minutes
-			* CITY_CONSTRUCTION_FAIRNESS_BONUS_PER_MINUTE,
-			CITY_CONSTRUCTION_MAX_FAIRNESS_BONUS
-		)
-		var selection_score := estimated_cost - fairness_bonus
-		var command_id := int(command.get("id", -1))
-
-		if (
-			best_command.is_empty()
-			or selection_score < best_cost
-			or (
-				selection_score == best_cost
-				and command_id < best_command_id
-			)
-		):
-			best_command = command.duplicate(true)
-			best_command["player_work_kind"] = "command"
-			best_command["estimated_path_cost"] = estimated_cost
-			best_command["selection_score"] = selection_score
-			best_cost = selection_score
-			best_command_id = command_id
-
-	return best_command
-
-
-static func claim_city_player_command(
-	command_id: int,
-	citizen_id: int
-) -> bool:
-	var command_index := get_city_player_command_index_by_id(command_id)
-	var citizen := get_city_citizen_by_id(citizen_id)
-
-	if (
-		command_index < 0
-		or citizen.is_empty()
-		or not bool(citizen.get("alive", false))
-		or int(citizen.get("job_object_id", -1)) > 0
-	):
-		return false
-
-	var command: Dictionary = city_player_commands[command_index]
-
-	if not city_player_command_is_assignable(command):
-		return false
-
-	command["status"] = CITY_PLAYER_COMMAND_STATUS_CLAIMED
-	command["claimed_citizen_id"] = citizen_id
-	command["next_retry_world_minute"] = -1
-	city_player_commands[command_index] = command
-	_mark_city_player_commands_changed()
-	return true
-
-
 static func release_city_player_command_claim(
 	command_id: int,
 	citizen_id: int,
@@ -1987,120 +1387,6 @@ static func release_city_player_command_claim(
 	_mark_city_player_commands_changed()
 	return true
 
-
-static func complete_city_player_command(
-	command_id: int,
-	citizen_id: int
-) -> bool:
-	var command := get_city_player_command_by_id(command_id)
-
-	if (
-		command.is_empty()
-		or int(command.get("claimed_citizen_id", -1)) != citizen_id
-		or not is_city_player_command_target_valid(command)
-	):
-		return false
-
-	var city_world: WorldData = official_city_world
-	var command_type := str(command.get("type", ""))
-	var tile_position: Vector2i = command["tile_position"]
-	var expected_feature := get_city_player_command_surface_feature(
-		command_type
-	)
-	var resource := get_city_player_command_resource_type(command_type)
-	var resource_yield := maxi(
-		int(
-			command.get(
-				"resource_yield",
-				CITY_PLAYER_COMMAND_RESOURCE_YIELD
-			)
-		),
-		0
-	)
-	var tile := city_world.get_tile(tile_position.x, tile_position.y)
-
-	if (
-		expected_feature == CITY_SURFACE_FEATURE_NONE
-		or not is_city_resource_type(resource)
-		or resource_yield <= 0
-		or get_city_surface_feature(tile) != expected_feature
-	):
-		return false
-
-	# Remove the feature first so tree tiles become valid ground-pile tiles.
-	# If physical output cannot be created, restore the feature atomically.
-	tile.erase("surface_feature")
-
-	var construction_site_id := int(
-		command.get("construction_site_id", -1)
-	)
-	var reserved_amount := 0
-
-	if (
-		construction_site_id > 0
-		and not get_city_construction_site_by_id(
-			construction_site_id
-		).is_empty()
-	):
-		reserved_amount = mini(
-			resource_yield,
-			get_city_construction_site_unreserved_resource_space(
-				construction_site_id,
-				resource
-			)
-		)
-
-	var reserved_result := {
-		"added_amount": 0,
-		"placements": [],
-	}
-
-	if reserved_amount > 0:
-		reserved_result = add_resource_to_city_ground_piles_with_result(
-			tile_position,
-			resource,
-			reserved_amount,
-			construction_site_id
-		)
-
-	var ordinary_amount := resource_yield - reserved_amount
-	var ordinary_result := {
-		"added_amount": 0,
-		"placements": [],
-	}
-
-	if ordinary_amount > 0:
-		ordinary_result = add_resource_to_city_ground_piles_with_result(
-			tile_position,
-			resource,
-			ordinary_amount
-		)
-
-	if (
-		int(reserved_result.get("added_amount", 0))
-		!= reserved_amount
-		or int(ordinary_result.get("added_amount", 0))
-		!= ordinary_amount
-	):
-		rollback_city_ground_pile_additions(
-			resource,
-			ordinary_result.get("placements", [])
-		)
-		rollback_city_ground_pile_additions(
-			resource,
-			reserved_result.get("placements", [])
-		)
-		tile["surface_feature"] = expected_feature
-		return false
-
-	city_world.mark_city_surface_feature_changed(
-		tile_position,
-		expected_feature,
-		CITY_SURFACE_FEATURE_NONE
-	)
-	return _remove_city_player_command_record(command_id)
-
-
 static func reset_city_player_command_state() -> void:
 	city_player_commands.clear()
 	city_player_command_index_by_id.clear()
@@ -2109,10 +1395,12 @@ static func reset_city_player_command_state() -> void:
 	next_city_player_command_group_id = 1
 	_mark_city_player_commands_changed()
 
+#endregion
+
+#region Food Resource Accounting Primitives
 
 static func get_city_food_hunger_restore(resource: String) -> int:
 	return CityResourceCatalogScript.get_city_food_hunger_restore(resource)
-
 
 static func get_food_nutrition_in_resource_container(
 	raw_container
@@ -2129,81 +1417,6 @@ static func get_food_nutrition_in_resource_container(
 		)
 
 	return total_nutrition
-
-
-static func city_object_is_household_home(
-	city_object: Dictionary
-) -> bool:
-	return (
-		not city_object.is_empty()
-		and get_city_object_container_type(city_object)
-		== CONTAINER_TYPE_PRIVATE_HOME_STORAGE
-		and get_city_object_resident_capacity(city_object) > 0
-	)
-
-
-static func get_city_home_food_target_nutrition(
-	home: Dictionary
-) -> int:
-	if not city_object_is_household_home(home):
-		return 0
-
-	return ceili(
-		float(
-			get_city_object_resident_count(home)
-			* CITIZEN_HUNGER_LOSS_PER_DAY
-			* HOUSEHOLD_FOOD_TARGET_DAY_NUMERATOR
-		)
-		/ float(HOUSEHOLD_FOOD_TARGET_DAY_DENOMINATOR)
-	)
-
-
-# Compatibility name retained for existing UI/debug callers. The policy is now
-# a half-day pantry target rather than a full private day of food.
-static func get_city_home_one_day_food_target_nutrition(
-	home: Dictionary
-) -> int:
-	return get_city_home_food_target_nutrition(home)
-
-
-static func get_living_city_citizen_count() -> int:
-	var living_count := 0
-
-	for raw_citizen in city_citizens:
-		if not raw_citizen is Dictionary:
-			continue
-
-		var citizen: Dictionary = raw_citizen
-
-		if bool(citizen.get("alive", false)):
-			living_count += 1
-
-	return living_count
-
-
-static func get_city_public_food_reserve_target_nutrition() -> int:
-	return ceili(
-		float(
-			get_living_city_citizen_count()
-			* CITIZEN_HUNGER_LOSS_PER_DAY
-			* PUBLIC_FOOD_RESERVE_TARGET_DAY_NUMERATOR
-		)
-		/ float(PUBLIC_FOOD_RESERVE_TARGET_DAY_DENOMINATOR)
-	)
-
-
-static func get_city_food_task_reserved_source_amount(
-	object_id: int,
-	resource: String,
-	excluding_citizen_id: int = -1
-) -> int:
-	return get_city_food_task_reserved_endpoint_amount(
-		CITY_CITIZEN_HAUL_ENDPOINT_KIND_CITY_OBJECT_CONTAINER,
-		object_id,
-		resource,
-		excluding_citizen_id
-	)
-
 
 static func get_city_food_task_reserved_endpoint_amount(
 	endpoint_kind: String,
@@ -2258,191 +1471,9 @@ static func get_city_food_task_reserved_endpoint_amount(
 
 	return reserved_amount
 
+#endregion
 
-static func get_city_object_unreserved_food_amount(
-	city_object: Dictionary,
-	resource: String,
-	excluding_citizen_id: int = -1
-) -> int:
-	if city_object.is_empty() or get_city_food_hunger_restore(resource) <= 0:
-		return 0
-
-	var object_id := int(city_object.get("id", -1))
-	var endpoint := make_city_citizen_haul_endpoint(object_id)
-
-	return maxi(
-		get_city_object_stored_resource_amount(city_object, resource)
-		- get_city_haul_endpoint_source_reserved_amount(endpoint, resource)
-		- get_city_food_task_reserved_source_amount(
-			object_id,
-			resource,
-			excluding_citizen_id
-		),
-		0
-	)
-
-
-static func get_city_public_unreserved_food_nutrition() -> int:
-	var total_nutrition := 0
-
-	for raw_city_object in city_objects:
-		if not raw_city_object is Dictionary:
-			continue
-
-		var city_object: Dictionary = raw_city_object
-
-		if (
-			get_city_object_public_storage_tier(city_object)
-			== PUBLIC_CITY_STORAGE_TIER_NONE
-			or not city_object_container_is_publicly_usable(city_object)
-		):
-			continue
-
-		for resource in get_city_food_resource_types():
-			total_nutrition += (
-				get_city_object_unreserved_food_amount(city_object, resource)
-				* get_city_food_hunger_restore(resource)
-			)
-
-	return total_nutrition
-
-
-static func get_city_public_food_surplus_nutrition() -> int:
-	return maxi(
-		get_city_public_unreserved_food_nutrition()
-		- get_city_public_food_reserve_target_nutrition(),
-		0
-	)
-
-
-static func get_city_home_stored_food_nutrition(
-	home: Dictionary
-) -> int:
-	if not city_object_is_household_home(home):
-		return 0
-
-	return get_food_nutrition_in_resource_container(
-		home.get("stored_resources", {})
-	)
-
-
-static func get_city_home_incoming_food_nutrition(
-	home: Dictionary,
-	excluding_reservation_id: int = (
-		INVALID_CITY_CITIZEN_HAUL_RESERVATION_ID
-	)
-) -> int:
-	if not city_object_is_household_home(home):
-		return 0
-
-	var home_endpoint := make_city_citizen_haul_endpoint(
-		int(home.get("id", -1))
-	)
-	var incoming_nutrition := 0
-
-	for raw_reservation in city_haul_reservations.values():
-		if not raw_reservation is Dictionary:
-			continue
-
-		var reservation: Dictionary = raw_reservation
-		var reservation_id := int(reservation.get("id", -1))
-
-		if reservation_id == excluding_reservation_id:
-			continue
-
-		if (
-			str(
-				reservation.get(
-					"destination_access_purpose",
-					CONTAINER_HAUL_PURPOSE_NONE
-				)
-			)
-			!= CONTAINER_HAUL_PURPOSE_HOME_DELIVERY
-			or not city_citizen_haul_endpoints_match(
-				reservation.get("destination", {}),
-				home_endpoint
-			)
-		):
-			continue
-
-		var resource := str(
-			reservation.get("resource_type", RESOURCE_NONE)
-		)
-		incoming_nutrition += (
-			maxi(
-				int(
-					reservation.get(
-						"destination_reserved_amount",
-						0
-					)
-				),
-				0
-			)
-			* get_city_food_hunger_restore(resource)
-		)
-
-	return incoming_nutrition
-
-
-static func get_city_home_unfulfilled_food_nutrition(
-	home: Dictionary,
-	excluding_reservation_id: int = (
-		INVALID_CITY_CITIZEN_HAUL_RESERVATION_ID
-	)
-) -> int:
-	return maxi(
-		get_city_home_food_target_nutrition(home)
-		- get_city_home_stored_food_nutrition(home)
-		- get_city_home_incoming_food_nutrition(
-			home,
-			excluding_reservation_id
-		),
-		0
-	)
-
-
-static func get_city_home_requested_food_units(
-	home: Dictionary,
-	resource: String,
-	excluding_reservation_id: int = (
-		INVALID_CITY_CITIZEN_HAUL_RESERVATION_ID
-	)
-) -> int:
-	var hunger_restore := get_city_food_hunger_restore(resource)
-
-	if hunger_restore <= 0:
-		return 0
-
-	var unfulfilled_nutrition := (
-		get_city_home_unfulfilled_food_nutrition(
-			home,
-			excluding_reservation_id
-		)
-	)
-
-	if unfulfilled_nutrition <= 0:
-		return 0
-
-	var pantry_requested_units := ceili(
-		float(unfulfilled_nutrition) / float(hunger_restore)
-	)
-	return pantry_requested_units
-
-
-static func get_city_home_food_supply_status(
-	home: Dictionary
-) -> Dictionary:
-	return {
-		"target_nutrition": (
-			get_city_home_food_target_nutrition(home)
-		),
-		"stored_nutrition": get_city_home_stored_food_nutrition(home),
-		"incoming_nutrition": get_city_home_incoming_food_nutrition(home),
-		"unfulfilled_nutrition": (
-			get_city_home_unfulfilled_food_nutrition(home)
-		),
-	}
-
+#region City Resource Totals
 
 static func ensure_city_resource_amounts() -> void:
 	city_resource_amounts = make_sparse_resource_container(
@@ -2630,6 +1661,10 @@ static func get_total_city_resource_storage_capacity(
 		)
 
 	return total_capacity
+
+#endregion
+
+#region Change Versions and Runtime Indexes
 
 static func _mark_city_objects_changed() -> void:
 	city_object_version += 1
@@ -3194,28 +2229,9 @@ static func get_city_object_by_id(object_id: int) -> Dictionary:
 	return raw_city_object
 
 
-static func rebuild_city_construction_site_index() -> void:
-	city_construction_site_index_by_id.clear()
-	city_construction_site_id_by_tile.clear()
+#endregion
 
-	for site_index in range(city_construction_sites.size()):
-		var raw_site = city_construction_sites[site_index]
-
-		if not raw_site is Dictionary:
-			continue
-
-		var site: Dictionary = raw_site
-		var site_id := int(site.get("id", -1))
-
-		if site_id <= 0:
-			continue
-
-		city_construction_site_index_by_id[site_id] = site_index
-
-		for raw_tile in site.get("footprint_tiles", []):
-			if raw_tile is Vector2i:
-				city_construction_site_id_by_tile[raw_tile] = site_id
-
+#region Construction State Primitives
 
 static func get_city_construction_site_index_by_id(
 	site_id: int
@@ -3243,7 +2259,6 @@ static func get_city_construction_site_index_by_id(
 
 	return site_index
 
-
 static func get_city_construction_site_by_id(
 	site_id: int
 ) -> Dictionary:
@@ -3253,22 +2268,6 @@ static func get_city_construction_site_by_id(
 		return {}
 
 	return city_construction_sites[site_index].duplicate(true)
-
-
-static func get_city_construction_site_snapshot() -> Array:
-	return city_construction_sites.duplicate(true)
-
-
-static func get_city_construction_site_at_tile(
-	tile_position: Vector2i
-) -> Dictionary:
-	if not city_construction_site_id_by_tile.has(tile_position):
-		return {}
-
-	return get_city_construction_site_by_id(
-		int(city_construction_site_id_by_tile[tile_position])
-	)
-
 
 static func can_place_city_construction_footprint(
 	city_world: WorldData,
@@ -3341,363 +2340,12 @@ static func can_place_city_construction_footprint(
 
 	return false
 
-
-static func create_city_construction_site(
-	values: Dictionary
-) -> Dictionary:
-	var raw_footprint_tiles = values.get("footprint_tiles", [])
-
-	if not raw_footprint_tiles is Array:
-		return {}
-
-	var footprint_tiles: Array[Vector2i] = []
-	var footprint_lookup: Dictionary = {}
-
-	for raw_tile in raw_footprint_tiles:
-		if not raw_tile is Vector2i:
-			continue
-
-		var tile_position: Vector2i = raw_tile
-
-		if footprint_lookup.has(tile_position):
-			continue
-
-		footprint_lookup[tile_position] = true
-		footprint_tiles.append(tile_position)
-
-	footprint_tiles.sort_custom(_sort_city_tiles_y_then_x)
-
-	var target_kind := str(
-		values.get(
-			"target_kind",
-			CITY_CONSTRUCTION_TARGET_NEW
-		)
-	)
-	var target_object_id := int(
-		values.get("target_object_id", -1)
-	)
-	var allowed_occupied_object_id := -1
-
-	if target_kind == CITY_CONSTRUCTION_TARGET_MODIFICATION:
-		var target_object := get_city_object_by_id(
-			target_object_id
-		)
-
-		if target_object.is_empty():
-			return {}
-
-		allowed_occupied_object_id = target_object_id
-	elif target_kind != CITY_CONSTRUCTION_TARGET_NEW:
-		return {}
-
-	if not can_place_city_construction_footprint(
-		official_city_world,
-		footprint_tiles,
-		bool(values.get("require_external_access", false)),
-		allowed_occupied_object_id
-	):
-		return {}
-
-	var object_type := str(values.get("object_type", ""))
-
-	if not city_object_type_uses_construction(object_type):
-		return {}
-
-	if (
-		target_kind == CITY_CONSTRUCTION_TARGET_MODIFICATION
-		and str(
-			get_city_object_by_id(target_object_id).get(
-				"type",
-				""
-			)
-		) != object_type
-	):
-		return {}
-
-	var raw_recipe = values.get("material_recipe", {})
-
-	if not raw_recipe is Dictionary:
-		return {}
-
-	var material_recipe: Dictionary = {}
-
-	for resource in get_city_resource_types():
-		var amount := maxi(int(raw_recipe.get(resource, 0)), 0)
-
-		if amount > 0:
-			material_recipe[resource] = amount
-
-	var required_labor_minutes := maxi(
-		int(values.get("required_labor_minutes", 0)),
-		1
-	)
-	var work_positions: Array[Vector2i] = []
-	var work_position_lookup: Dictionary = {}
-	var raw_work_positions = values.get("work_positions", [])
-
-	if raw_work_positions is Array:
-		for raw_work_position in raw_work_positions:
-			if not raw_work_position is Vector2i:
-				continue
-
-			var work_position: Vector2i = raw_work_position
-
-			if work_position_lookup.has(work_position):
-				continue
-
-			work_position_lookup[work_position] = true
-			work_positions.append(work_position)
-
-	work_positions.sort_custom(_sort_city_tiles_y_then_x)
-
-	if work_positions.is_empty():
-		return {}
-
-	var site_id := next_city_construction_site_id
-	var site := {
-		"id": site_id,
-		"target_kind": target_kind,
-		"target_object_id": target_object_id,
-		"object_type": object_type,
-		"shape_mode": str(
-			values.get(
-				"shape_mode",
-				CITY_OBJECT_SHAPE_RECTANGLE
-			)
-		),
-		"top_left": values.get(
-			"top_left",
-			INVALID_CITY_TILE_POSITION
-		),
-		"size": values.get("size", Vector2i.ZERO),
-		"tiles": footprint_tiles.duplicate(),
-		"footprint_tiles": footprint_tiles.duplicate(),
-		"owner": str(values.get("owner", "player")),
-		"phase": CITY_CONSTRUCTION_PHASE_CLEARING,
-		"material_recipe": material_recipe,
-		"required_clearing_work_units": -1.0,
-		"required_labor_minutes": required_labor_minutes,
-		"completed_labor_minutes": 0,
-		"maximum_workers": maxi(
-			int(values.get("maximum_workers", 1)),
-			1
-		),
-		"work_positions": work_positions,
-		"issued_world_minute": (
-			SimulationClock.absolute_world_minutes
-		),
-	}
-
-	next_city_construction_site_id += 1
-	city_construction_sites.append(site)
-	city_construction_site_index_by_id[site_id] = (
-		city_construction_sites.size() - 1
-	)
-
-	for tile_position in footprint_tiles:
-		city_construction_site_id_by_tile[tile_position] = site_id
-
-	mark_city_construction_changed()
-	return site.duplicate(true)
-
-
-static func update_city_construction_site(
-	site: Dictionary
-) -> bool:
-	var site_id := int(site.get("id", -1))
-	var site_index := get_city_construction_site_index_by_id(site_id)
-
-	if site_index < 0:
-		return false
-
-	var current_site: Dictionary = city_construction_sites[site_index]
-	var raw_updated_footprint = site.get("footprint_tiles", [])
-
-	if not raw_updated_footprint is Array:
-		return false
-
-	var updated_footprint: Array[Vector2i] = []
-	var updated_footprint_lookup: Dictionary = {}
-
-	for raw_tile in raw_updated_footprint:
-		if not raw_tile is Vector2i:
-			return false
-
-		var tile_position: Vector2i = raw_tile
-
-		if updated_footprint_lookup.has(tile_position):
-			continue
-
-		updated_footprint_lookup[tile_position] = true
-		updated_footprint.append(tile_position)
-
-	updated_footprint.sort_custom(_sort_city_tiles_y_then_x)
-
-	if updated_footprint.is_empty():
-		return false
-
-	var current_footprint: Array = current_site.get(
-		"footprint_tiles",
-		[]
-	)
-	var footprint_changed := current_footprint != updated_footprint
-
-	if (
-		footprint_changed
-		and not _can_update_city_construction_site_footprint(
-			site_id,
-			site,
-			updated_footprint
-		)
-	):
-		return false
-
-	site["footprint_tiles"] = updated_footprint.duplicate()
-	site["tiles"] = updated_footprint.duplicate()
-
-	if current_site == site:
-		return true
-
-	if footprint_changed:
-		for raw_tile in current_footprint:
-			if (
-				raw_tile is Vector2i
-				and int(
-					city_construction_site_id_by_tile.get(
-						raw_tile,
-						-1
-					)
-				) == site_id
-			):
-				city_construction_site_id_by_tile.erase(raw_tile)
-
-		for tile_position in updated_footprint:
-			city_construction_site_id_by_tile[tile_position] = site_id
-
-	city_construction_sites[site_index] = site.duplicate(true)
-	mark_city_construction_changed()
-	return true
-
-
-static func _can_update_city_construction_site_footprint(
-	site_id: int,
-	site: Dictionary,
-	updated_footprint: Array[Vector2i]
-) -> bool:
-	if official_city_world == null:
-		return false
-
-	var target_kind := str(
-		site.get(
-			"target_kind",
-			CITY_CONSTRUCTION_TARGET_NEW
-		)
-	)
-	var target_object_id := int(
-		site.get("target_object_id", -1)
-	)
-
-	if target_kind not in [
-		CITY_CONSTRUCTION_TARGET_NEW,
-		CITY_CONSTRUCTION_TARGET_MODIFICATION,
-	]:
-		return false
-
-	for tile_position in updated_footprint:
-		if not official_city_world.is_in_bounds(
-			tile_position.x,
-			tile_position.y
-		):
-			return false
-
-		var other_site_id := int(
-			city_construction_site_id_by_tile.get(
-				tile_position,
-				-1
-			)
-		)
-
-		if other_site_id > 0 and other_site_id != site_id:
-			return false
-
-		if city_occupied_tiles.has(tile_position):
-			var occupied_object_id := int(
-				city_occupied_tiles.get(tile_position, -1)
-			)
-
-			if (
-				target_kind != CITY_CONSTRUCTION_TARGET_MODIFICATION
-				or target_object_id <= 0
-				or occupied_object_id != target_object_id
-			):
-				return false
-
-		var tile: Dictionary = official_city_world.get_tile(
-			tile_position.x,
-			tile_position.y
-		)
-		var terrain := str(tile.get("terrain", TERRAIN_WATER))
-
-		if (
-			terrain == TERRAIN_WATER
-			or terrain == TERRAIN_MOUNTAIN
-			or not bool(tile.get("is_land", false))
-		):
-			return false
-
-	for raw_ground_pile in city_ground_piles:
-		if (
-			raw_ground_pile is Dictionary
-			and get_city_ground_pile_construction_site_id(
-				raw_ground_pile
-			) == site_id
-			and not updated_footprint.has(
-				raw_ground_pile.get(
-					"tile_position",
-					INVALID_CITY_TILE_POSITION
-				)
-			)
-		):
-			return false
-
-	return true
-
-
-static func remove_city_construction_site_record(
-	site_id: int
-) -> bool:
-	var site_index := get_city_construction_site_index_by_id(site_id)
-
-	if site_index < 0:
-		return false
-
-	var site: Dictionary = city_construction_sites[site_index]
-
-	for raw_tile in site.get("footprint_tiles", []):
-		if (
-			raw_tile is Vector2i
-			and int(
-				city_construction_site_id_by_tile.get(
-					raw_tile,
-					-1
-				)
-			) == site_id
-		):
-			city_construction_site_id_by_tile.erase(raw_tile)
-
-	city_construction_sites.remove_at(site_index)
-	rebuild_city_construction_site_index()
-	mark_city_construction_changed()
-	return true
-
-
 static func reset_city_construction_state() -> void:
 	city_construction_sites.clear()
 	city_construction_site_index_by_id.clear()
 	city_construction_site_id_by_tile.clear()
 	next_city_construction_site_id = 1
 	mark_city_construction_changed()
-
 
 static func make_city_construction_site_haul_endpoint(
 	site_id: int
@@ -3709,7 +2357,6 @@ static func make_city_construction_site_haul_endpoint(
 		"kind": CITY_CITIZEN_HAUL_ENDPOINT_KIND_CONSTRUCTION_SITE,
 		"id": site_id,
 	})
-
 
 static func get_city_construction_site_work_positions(
 	site: Dictionary
@@ -3726,32 +2373,6 @@ static func get_city_construction_site_work_positions(
 
 	return positions
 
-
-static func get_city_construction_site_access_tiles(
-	city_world: WorldData,
-	site: Dictionary,
-	citizen_id: int = -1
-) -> Array[Vector2i]:
-	var access_tiles: Array[Vector2i] = []
-
-	if city_world == null or site.is_empty():
-		return access_tiles
-
-	for raw_tile in site.get("footprint_tiles", []):
-		if (
-			raw_tile is Vector2i
-			and is_city_tile_walkable_for_citizen(
-				city_world,
-				raw_tile,
-				citizen_id
-			)
-		):
-			access_tiles.append(raw_tile)
-
-	access_tiles.sort_custom(_sort_city_tiles_y_then_x)
-	return access_tiles
-
-
 static func get_city_ground_pile_construction_site_id(
 	ground_pile: Dictionary
 ) -> int:
@@ -3760,12 +2381,10 @@ static func get_city_ground_pile_construction_site_id(
 		-1
 	)
 
-
 static func city_ground_pile_is_construction_reserved(
 	ground_pile: Dictionary
 ) -> bool:
 	return get_city_ground_pile_construction_site_id(ground_pile) > 0
-
 
 static func get_city_construction_site_reserved_resource_amount(
 	site_id: int,
@@ -3792,7 +2411,6 @@ static func get_city_construction_site_reserved_resource_amount(
 
 	return total_amount
 
-
 static func get_city_construction_site_remaining_resource_amount(
 	site_id: int,
 	resource: String
@@ -3815,7 +2433,6 @@ static func get_city_construction_site_remaining_resource_amount(
 		),
 		0
 	)
-
 
 static func get_city_construction_site_destination_reserved_resource_amount(
 	site_id: int,
@@ -3855,7 +2472,6 @@ static func get_city_construction_site_destination_reserved_resource_amount(
 
 	return reserved_amount
 
-
 static func get_city_construction_site_unreserved_resource_space(
 	site_id: int,
 	resource: String,
@@ -3876,7 +2492,6 @@ static func get_city_construction_site_unreserved_resource_space(
 		0
 	)
 
-
 static func get_city_construction_site_unreserved_total_space(
 	site_id: int,
 	excluding_reservation_id: int = (
@@ -3894,271 +2509,9 @@ static func get_city_construction_site_unreserved_total_space(
 
 	return total_space
 
+#endregion
 
-static func city_construction_site_has_all_materials(
-	site_id: int
-) -> bool:
-	var site := get_city_construction_site_by_id(site_id)
-
-	if site.is_empty():
-		return false
-
-	for resource in get_city_resource_types():
-		if (
-			get_city_construction_site_remaining_resource_amount(
-				site_id,
-				resource
-			) > 0
-		):
-			return false
-
-	return true
-
-
-static func _get_city_construction_material_deposit_tile(
-	site: Dictionary
-) -> Vector2i:
-	for raw_tile in site.get("footprint_tiles", []):
-		if (
-			raw_tile is Vector2i
-			and can_city_ground_pile_exist_at_tile(
-				official_city_world,
-				raw_tile
-			)
-		):
-			return raw_tile
-
-	return INVALID_CITY_TILE_POSITION
-
-
-static func add_resource_to_city_construction_site(
-	site_id: int,
-	resource: String,
-	requested_amount: int
-) -> int:
-	var site := get_city_construction_site_by_id(site_id)
-
-	if (
-		site.is_empty()
-		or requested_amount <= 0
-		or str(site.get("phase", ""))
-		!= CITY_CONSTRUCTION_PHASE_GATHERING
-	):
-		return 0
-
-	var accepted_amount := mini(
-		requested_amount,
-		get_city_construction_site_remaining_resource_amount(
-			site_id,
-			resource
-		)
-	)
-	var deposit_tile := _get_city_construction_material_deposit_tile(
-		site
-	)
-
-	if accepted_amount <= 0 or deposit_tile == INVALID_CITY_TILE_POSITION:
-		return 0
-
-	var add_result := add_resource_to_city_ground_piles_with_result(
-		deposit_tile,
-		resource,
-		accepted_amount,
-		site_id
-	)
-	return int(add_result.get("added_amount", 0))
-
-
-static func remove_resource_from_city_construction_site(
-	site_id: int,
-	resource: String,
-	requested_amount: int
-) -> int:
-	if requested_amount <= 0:
-		return 0
-
-	var remaining_amount := requested_amount
-	var pile_ids: Array[int] = []
-
-	for raw_ground_pile in city_ground_piles:
-		if not raw_ground_pile is Dictionary:
-			continue
-
-		var ground_pile: Dictionary = raw_ground_pile
-
-		if (
-			get_city_ground_pile_construction_site_id(ground_pile)
-			!= site_id
-			or get_city_ground_pile_resource_amount(
-				ground_pile,
-				resource
-			) <= 0
-		):
-			continue
-
-		pile_ids.append(int(ground_pile.get("id", -1)))
-
-	pile_ids.sort()
-
-	for pile_id in pile_ids:
-		if remaining_amount <= 0:
-			break
-
-		var ground_pile := get_city_ground_pile_by_id(pile_id)
-		var removed_amount := remove_resource_from_city_ground_pile(
-			pile_id,
-			resource,
-			mini(
-				remaining_amount,
-				get_city_ground_pile_resource_amount(
-					ground_pile,
-					resource
-				)
-			)
-		)
-		remaining_amount -= removed_amount
-
-	return requested_amount - remaining_amount
-
-
-static func release_city_construction_site_materials(
-	site_id: int
-) -> int:
-	var released_amount := 0
-	var changed := false
-
-	for pile_index in range(city_ground_piles.size()):
-		var raw_ground_pile = city_ground_piles[pile_index]
-
-		if not raw_ground_pile is Dictionary:
-			continue
-
-		var ground_pile: Dictionary = raw_ground_pile
-
-		if (
-			get_city_ground_pile_construction_site_id(ground_pile)
-			!= site_id
-		):
-			continue
-
-		released_amount += maxi(
-			int(ground_pile.get("amount", 0)),
-			0
-		)
-		ground_pile.erase("construction_site_id")
-		city_ground_piles[pile_index] = ground_pile
-		changed = true
-
-	if changed:
-		_coalesce_ordinary_city_ground_piles()
-		_mark_city_ground_piles_changed()
-
-	return released_amount
-
-
-static func _coalesce_ordinary_city_ground_piles() -> void:
-	var merge_radius_squared := (
-		CITY_GROUND_PILE_MERGE_RADIUS_TILES
-		* CITY_GROUND_PILE_MERGE_RADIUS_TILES
-	)
-	var merged_any := true
-
-	while merged_any:
-		merged_any = false
-		var pile_ids: Array[int] = []
-
-		for raw_ground_pile in city_ground_piles:
-			if (
-				raw_ground_pile is Dictionary
-				and not city_ground_pile_is_construction_reserved(
-					raw_ground_pile
-				)
-			):
-				pile_ids.append(int(raw_ground_pile.get("id", -1)))
-
-		pile_ids.sort()
-
-		for source_order_index in range(1, pile_ids.size()):
-			var source_id := pile_ids[source_order_index]
-			var source_index := get_city_ground_pile_index_by_id(
-				source_id
-			)
-
-			if source_index < 0:
-				continue
-
-			var source: Dictionary = city_ground_piles[source_index]
-			var source_resource := str(
-				source.get("resource_type", RESOURCE_NONE)
-			)
-			var raw_source_tile = source.get(
-				"tile_position",
-				INVALID_CITY_TILE_POSITION
-			)
-
-			if not raw_source_tile is Vector2i:
-				continue
-
-			for target_order_index in range(source_order_index):
-				var target_id := pile_ids[target_order_index]
-				var target_index := get_city_ground_pile_index_by_id(
-					target_id
-				)
-
-				if target_index < 0:
-					continue
-
-				var target: Dictionary = city_ground_piles[target_index]
-				var raw_target_tile = target.get(
-					"tile_position",
-					INVALID_CITY_TILE_POSITION
-				)
-
-				if (
-					not raw_target_tile is Vector2i
-					or str(
-						target.get("resource_type", RESOURCE_NONE)
-					) != source_resource
-					or city_ground_pile_is_construction_reserved(
-						target
-					)
-					or get_city_ground_pile_tile_distance_squared(
-						raw_source_tile,
-						raw_target_tile
-					) > merge_radius_squared
-				):
-					continue
-
-				var moved_amount := mini(
-					maxi(int(source.get("amount", 0)), 0),
-					get_city_ground_pile_free_space(target)
-				)
-
-				if moved_amount <= 0:
-					continue
-
-				target["amount"] = (
-					maxi(int(target.get("amount", 0)), 0)
-					+ moved_amount
-				)
-				source["amount"] = (
-					maxi(int(source.get("amount", 0)), 0)
-					- moved_amount
-				)
-				city_ground_piles[target_index] = target
-
-				if int(source.get("amount", 0)) > 0:
-					city_ground_piles[source_index] = source
-				else:
-					city_ground_piles.remove_at(source_index)
-					rebuild_city_ground_pile_index()
-
-				merged_any = true
-				break
-
-			if merged_any:
-				break
-
+#region Citizen and Haul Endpoint Factories
 
 static func reset_city_citizen_state() -> void:
 	reset_city_haul_reservation_state()
@@ -4260,6 +2613,10 @@ static func city_citizen_haul_endpoints_match(
 		endpoint_b.get("id", -1)
 	)
 
+
+#endregion
+
+#region Ground Pile State
 
 static func rebuild_city_ground_pile_index() -> void:
 	city_ground_pile_index_by_id.clear()
@@ -4459,7 +2816,7 @@ static func _find_city_ground_pile_merge_target_index(
 				ground_pile.get("resource_type", RESOURCE_NONE)
 			)
 			!= resource
-			or get_city_ground_pile_construction_site_id(
+			or WorldData.get_city_ground_pile_construction_site_id(
 				ground_pile
 			) != construction_site_id
 			or get_city_ground_pile_free_space(ground_pile) <= 0
@@ -4500,12 +2857,19 @@ static func _find_city_ground_pile_merge_target_index(
 
 
 static func add_resource_to_city_ground_piles_with_result(
-	tile_position: Vector2i,
-	resource: String,
-	amount_delta: int,
-	construction_site_id: int = -1,
-	excluded_ground_pile_ids: Array[int] = []
+	values: Dictionary
 ) -> Dictionary:
+	var tile_position: Vector2i = values.get(
+		"tile_position",
+		INVALID_CITY_TILE_POSITION
+	)
+	var resource := str(values.get("resource", RESOURCE_NONE))
+	var amount_delta := int(values.get("amount_delta", 0))
+	var construction_site_id := int(values.get("construction_site_id", -1))
+	var excluded_ground_pile_ids: Array[int] = []
+	excluded_ground_pile_ids.assign(
+		values.get("excluded_ground_pile_ids", [])
+	)
 	var result := {
 		"added_amount": 0,
 		"placements": [],
@@ -4519,7 +2883,7 @@ static func add_resource_to_city_ground_piles_with_result(
 
 	if (
 		construction_site_id > 0
-		and get_city_construction_site_by_id(
+		and WorldData.get_city_construction_site_by_id(
 			construction_site_id
 		).is_empty()
 	):
@@ -4605,12 +2969,12 @@ static func add_resource_to_city_ground_pile(
 	amount_delta: int,
 	construction_site_id: int = -1
 ) -> int:
-	var result := add_resource_to_city_ground_piles_with_result(
-		tile_position,
-		resource,
-		amount_delta,
-		construction_site_id
-	)
+	var result := add_resource_to_city_ground_piles_with_result({
+		"tile_position": tile_position,
+		"resource": resource,
+		"amount_delta": amount_delta,
+		"construction_site_id": construction_site_id,
+	})
 	return int(result.get("added_amount", 0))
 
 
@@ -4775,7 +3139,7 @@ static func reserve_city_ground_pile_for_construction(
 	site_id: int,
 	requested_amount: int
 ) -> int:
-	var site := get_city_construction_site_by_id(site_id)
+	var site := WorldData.get_city_construction_site_by_id(site_id)
 	var pile_index := get_city_ground_pile_index_by_id(ground_pile_id)
 
 	if site.is_empty() or pile_index < 0 or requested_amount <= 0:
@@ -4783,7 +3147,7 @@ static func reserve_city_ground_pile_for_construction(
 
 	var ground_pile: Dictionary = city_ground_piles[pile_index]
 
-	if city_ground_pile_is_construction_reserved(ground_pile):
+	if WorldData.city_ground_pile_is_construction_reserved(ground_pile):
 		return 0
 
 	var raw_tile_position = ground_pile.get(
@@ -4830,12 +3194,12 @@ static func reserve_city_ground_pile_for_construction(
 	ground_pile["amount"] = current_amount - reservable_amount
 	city_ground_piles[pile_index] = ground_pile
 
-	var add_result := add_resource_to_city_ground_piles_with_result(
-		raw_tile_position,
-		resource,
-		reservable_amount,
-		site_id
-	)
+	var add_result := add_resource_to_city_ground_piles_with_result({
+		"tile_position": raw_tile_position,
+		"resource": resource,
+		"amount_delta": reservable_amount,
+		"construction_site_id": site_id,
+	})
 
 	if int(add_result.get("added_amount", 0)) != reservable_amount:
 		ground_pile["amount"] = current_amount
@@ -4912,6 +3276,10 @@ static func get_total_physical_city_resource_amount(
 
 	return total_amount
 
+
+#endregion
+
+#region Haul Reservations and Endpoint Accounting
 
 static func _get_city_haul_endpoint_key(
 	endpoint: Dictionary
@@ -5442,7 +3810,7 @@ static func get_city_haul_endpoint_unreserved_resource_amount(
 	excluding_food_citizen_id: int = -1
 ) -> int:
 	var food_task_reserved_amount := (
-		get_city_food_task_reserved_endpoint_amount(
+		WorldData.get_city_food_task_reserved_endpoint_amount(
 			str(
 				endpoint.get(
 					"kind",
@@ -5482,7 +3850,7 @@ static func get_city_haul_endpoint_unreserved_destination_space(
 	var endpoint_id := int(endpoint.get("id", -1))
 
 	if endpoint_kind == CITY_CITIZEN_HAUL_ENDPOINT_KIND_CONSTRUCTION_SITE:
-		return get_city_construction_site_unreserved_total_space(
+		return WorldData.get_city_construction_site_unreserved_total_space(
 			endpoint_id,
 			excluding_reservation_id
 		)
@@ -5548,7 +3916,7 @@ static func get_city_haul_endpoint_unreserved_destination_resource_space(
 		)
 		== CITY_CITIZEN_HAUL_ENDPOINT_KIND_CONSTRUCTION_SITE
 	):
-		return get_city_construction_site_unreserved_resource_space(
+		return WorldData.get_city_construction_site_unreserved_resource_space(
 			int(endpoint.get("id", -1)),
 			resource,
 			excluding_reservation_id
@@ -5561,14 +3929,22 @@ static func get_city_haul_endpoint_unreserved_destination_resource_space(
 
 
 static func city_haul_endpoint_can_provide_resource(
-	endpoint: Dictionary,
-	resource: String,
-	withdrawal_purpose: String,
-	require_unreserved_amount: bool = true,
-	excluding_reservation_id: int = (
-		INVALID_CITY_CITIZEN_HAUL_RESERVATION_ID
-	)
+	values: Dictionary
 ) -> bool:
+	var endpoint: Dictionary = values.get("endpoint", {})
+	var resource := str(values.get("resource", RESOURCE_NONE))
+	var withdrawal_purpose := str(
+		values.get("withdrawal_purpose", CONTAINER_HAUL_PURPOSE_NONE)
+	)
+	var require_unreserved_amount := bool(
+		values.get("require_unreserved_amount", true)
+	)
+	var excluding_reservation_id := int(
+		values.get(
+			"excluding_reservation_id",
+			INVALID_CITY_CITIZEN_HAUL_RESERVATION_ID
+		)
+	)
 	var endpoint_kind := str(
 		endpoint.get(
 			"kind",
@@ -5600,7 +3976,7 @@ static func city_haul_endpoint_can_provide_resource(
 					CONTAINER_HAUL_PURPOSE_CONSTRUCTION,
 					CONTAINER_HAUL_PURPOSE_HOUSEHOLD_FOOD_SOURCE,
 				].has(withdrawal_purpose)
-				or city_ground_pile_is_construction_reserved(
+				or WorldData.city_ground_pile_is_construction_reserved(
 					ground_pile
 				)
 				or get_city_ground_pile_resource_amount(
@@ -5624,14 +4000,22 @@ static func city_haul_endpoint_can_provide_resource(
 
 
 static func city_haul_endpoint_can_accept_resource(
-	endpoint: Dictionary,
-	resource: String,
-	deposit_purpose: String,
-	require_unreserved_space: bool = true,
-	excluding_reservation_id: int = (
-		INVALID_CITY_CITIZEN_HAUL_RESERVATION_ID
-	)
+	values: Dictionary
 ) -> bool:
+	var endpoint: Dictionary = values.get("endpoint", {})
+	var resource := str(values.get("resource", RESOURCE_NONE))
+	var deposit_purpose := str(
+		values.get("deposit_purpose", CONTAINER_HAUL_PURPOSE_NONE)
+	)
+	var require_unreserved_space := bool(
+		values.get("require_unreserved_space", true)
+	)
+	var excluding_reservation_id := int(
+		values.get(
+			"excluding_reservation_id",
+			INVALID_CITY_CITIZEN_HAUL_RESERVATION_ID
+		)
+	)
 	var endpoint_kind := str(
 		endpoint.get(
 			"kind",
@@ -5666,7 +4050,7 @@ static func city_haul_endpoint_can_accept_resource(
 		)
 
 	if endpoint_kind == CITY_CITIZEN_HAUL_ENDPOINT_KIND_CONSTRUCTION_SITE:
-		var site := get_city_construction_site_by_id(endpoint_id)
+		var site := WorldData.get_city_construction_site_by_id(endpoint_id)
 
 		if (
 			site.is_empty()
@@ -5678,7 +4062,7 @@ static func city_haul_endpoint_can_accept_resource(
 
 		return (
 			not require_unreserved_space
-			or get_city_construction_site_unreserved_resource_space(
+			or WorldData.get_city_construction_site_unreserved_resource_space(
 				endpoint_id,
 				resource,
 				excluding_reservation_id
@@ -5809,6 +4193,20 @@ static func get_city_haul_reservation_destination_resource_amount(
 static func create_city_haul_reservation(
 	values: Dictionary
 ) -> Dictionary:
+	var context := _make_city_haul_reservation_context(values)
+
+	if context.is_empty():
+		return {}
+
+	if not _prepare_city_haul_reservation_amounts(context):
+		return {}
+
+	return _commit_city_haul_reservation(context)
+
+
+static func _make_city_haul_reservation_context(
+	values: Dictionary
+) -> Dictionary:
 	var citizen_id := int(values.get("citizen_id", -1))
 	var citizen := get_city_citizen_by_id(citizen_id)
 	var raw_source = values.get("source", {})
@@ -5827,18 +4225,11 @@ static func create_city_haul_reservation(
 	var source := CityCitizensScript.make_city_citizen_haul_endpoint(
 		raw_source
 	)
-	var destination := (
-		CityCitizensScript.make_city_citizen_haul_endpoint(
-			raw_destination
-		)
+	var destination := CityCitizensScript.make_city_citizen_haul_endpoint(
+		raw_destination
 	)
-	var resource := str(
-		values.get("resource_type", RESOURCE_NONE)
-	)
-	var requested_amount := maxi(
-		int(values.get("requested_amount", 0)),
-		0
-	)
+	var resource := str(values.get("resource_type", RESOURCE_NONE))
+	var requested_amount := maxi(int(values.get("requested_amount", 0)), 0)
 	var source_access_purpose := str(
 		values.get(
 			"source_access_purpose",
@@ -5855,145 +4246,198 @@ static func create_city_haul_reservation(
 	if (
 		requested_amount <= 0
 		or not is_city_resource_type(resource)
-		or not CityCitizensScript.is_valid_city_citizen_haul_endpoint(
-			source
-		)
+		or not CityCitizensScript.is_valid_city_citizen_haul_endpoint(source)
 		or not CityCitizensScript.is_valid_city_citizen_haul_endpoint(
 			destination
 		)
 	):
 		return {}
 
-	var cargo_resources := get_city_citizen_haul_cargo_resources(
-		citizen_id
-	)
-	var cargo_amount := get_city_citizen_haul_cargo_amount(citizen_id)
-	var destination_space := (
-		get_city_haul_endpoint_unreserved_destination_space(
-			destination
-		)
+	var destination_space := get_city_haul_endpoint_unreserved_destination_space(
+		destination
 	)
 
 	if destination_space <= 0:
 		return {}
 
-	var destination_resources: Dictionary = {}
-	var source_reserved_amount := 0
+	return {
+		"citizen_id": citizen_id,
+		"source": source,
+		"destination": destination,
+		"resource": resource,
+		"requested_amount": requested_amount,
+		"source_access_purpose": source_access_purpose,
+		"destination_access_purpose": destination_access_purpose,
+		"cargo_resources": get_city_citizen_haul_cargo_resources(citizen_id),
+		"cargo_amount": get_city_citizen_haul_cargo_amount(citizen_id),
+		"destination_space": destination_space,
+		"source_reserved_amount": 0,
+		"destination_resources": {},
+	}
 
-	if cargo_amount > 0:
-		var maximum_reserved := mini(
-			requested_amount,
-			mini(cargo_amount, destination_space)
+
+static func _prepare_city_haul_reservation_amounts(
+	context: Dictionary
+) -> bool:
+	if int(context.get("cargo_amount", 0)) > 0:
+		return _prepare_loaded_city_haul_reservation(context)
+
+	return _prepare_pending_city_haul_reservation(context)
+
+
+static func _prepare_loaded_city_haul_reservation(
+	context: Dictionary
+) -> bool:
+	var destination: Dictionary = context.get("destination", {})
+	var maximum_reserved := mini(
+		int(context.get("requested_amount", 0)),
+		mini(
+			int(context.get("cargo_amount", 0)),
+			int(context.get("destination_space", 0))
 		)
-		destination_resources = (
-			_normalize_city_haul_resource_manifest(
-				cargo_resources,
-				maximum_reserved
+	)
+	var destination_resources := _normalize_city_haul_resource_manifest(
+		context.get("cargo_resources", {}),
+		maximum_reserved
+	)
+
+	if (
+		str(
+			destination.get(
+				"kind",
+				CITY_CITIZEN_HAUL_ENDPOINT_KIND_NONE
 			)
 		)
-
-		if (
-			str(
-				destination.get(
-					"kind",
-					CITY_CITIZEN_HAUL_ENDPOINT_KIND_NONE
+		== CITY_CITIZEN_HAUL_ENDPOINT_KIND_CONSTRUCTION_SITE
+	):
+		for cargo_resource in destination_resources.keys():
+			var resource_space := (
+				get_city_haul_endpoint_unreserved_destination_resource_space(
+					destination,
+					str(cargo_resource)
 				)
 			)
-			== CITY_CITIZEN_HAUL_ENDPOINT_KIND_CONSTRUCTION_SITE
-		):
-			for cargo_resource in destination_resources.keys():
-				var resource_space := (
+			var capped_amount := mini(
+				int(destination_resources.get(cargo_resource, 0)),
+				resource_space
+			)
+
+			if capped_amount > 0:
+				destination_resources[cargo_resource] = capped_amount
+			else:
+				destination_resources.erase(cargo_resource)
+
+	for cargo_resource in destination_resources.keys():
+		if not city_haul_endpoint_can_accept_resource({
+			"endpoint": destination,
+			"resource": str(cargo_resource),
+			"deposit_purpose": str(context.get("destination_access_purpose", "")),
+			"require_unreserved_space": true,
+		}):
+			return false
+
+	context["destination_resources"] = destination_resources
+	return _get_city_haul_resource_manifest_total(destination_resources) > 0
+
+
+static func _prepare_pending_city_haul_reservation(
+	context: Dictionary
+) -> bool:
+	var citizen_id := int(context.get("citizen_id", -1))
+	var source: Dictionary = context.get("source", {})
+	var destination: Dictionary = context.get("destination", {})
+	var resource := str(context.get("resource", RESOURCE_NONE))
+	var source_access_purpose := str(
+		context.get("source_access_purpose", CONTAINER_HAUL_PURPOSE_NONE)
+	)
+	var destination_access_purpose := str(
+		context.get(
+			"destination_access_purpose",
+			CONTAINER_HAUL_PURPOSE_NONE
+		)
+	)
+
+	if not city_haul_endpoint_can_provide_resource({
+		"endpoint": source,
+		"resource": resource,
+		"withdrawal_purpose": source_access_purpose,
+		"require_unreserved_amount": true,
+	}):
+		return false
+
+	if not city_haul_endpoint_can_accept_resource({
+		"endpoint": destination,
+		"resource": resource,
+		"deposit_purpose": destination_access_purpose,
+		"require_unreserved_space": true,
+	}):
+		return false
+
+	var reservable_amount := mini(
+		int(context.get("requested_amount", 0)),
+		mini(
+			get_city_citizen_available_haul_capacity(citizen_id),
+			mini(
+				get_city_haul_endpoint_unreserved_resource_amount(
+					source,
+					resource
+				),
+				mini(
+					int(context.get("destination_space", 0)),
 					get_city_haul_endpoint_unreserved_destination_resource_space(
 						destination,
-						str(cargo_resource)
-					)
-				)
-				var capped_amount := mini(
-					int(
-						destination_resources.get(
-							cargo_resource,
-							0
-						)
-					),
-					resource_space
-				)
-
-				if capped_amount > 0:
-					destination_resources[cargo_resource] = (
-						capped_amount
-					)
-				else:
-					destination_resources.erase(cargo_resource)
-
-		for cargo_resource in destination_resources.keys():
-			if not city_haul_endpoint_can_accept_resource(
-				destination,
-				str(cargo_resource),
-				destination_access_purpose,
-				true
-			):
-				return {}
-	else:
-		if not city_haul_endpoint_can_provide_resource(
-			source,
-			resource,
-			source_access_purpose,
-			true
-		):
-			return {}
-
-		if not city_haul_endpoint_can_accept_resource(
-			destination,
-			resource,
-			destination_access_purpose,
-			true
-		):
-			return {}
-
-		var reservable_amount := mini(
-			requested_amount,
-			mini(
-				get_city_citizen_available_haul_capacity(citizen_id),
-				mini(
-					get_city_haul_endpoint_unreserved_resource_amount(
-						source,
 						resource
-					),
-					mini(
-						destination_space,
-						get_city_haul_endpoint_unreserved_destination_resource_space(
-							destination,
-							resource
-						)
 					)
 				)
 			)
 		)
+	)
 
-		if reservable_amount <= 0:
-			return {}
+	if reservable_amount <= 0:
+		return false
 
-		source_reserved_amount = reservable_amount
-		destination_resources[resource] = reservable_amount
+	context["source_reserved_amount"] = reservable_amount
+	context["destination_resources"] = {resource: reservable_amount}
+	return true
 
+
+static func _commit_city_haul_reservation(
+	context: Dictionary
+) -> Dictionary:
+	var destination_resources: Dictionary = context.get(
+		"destination_resources",
+		{}
+	)
 	var destination_reserved_amount := (
-		_get_city_haul_resource_manifest_total(
-			destination_resources
-		)
+		_get_city_haul_resource_manifest_total(destination_resources)
 	)
 
 	if destination_reserved_amount <= 0:
 		return {}
 
 	var reservation_id := next_city_haul_reservation_id
+	var citizen_id := int(context.get("citizen_id", -1))
+	var source: Dictionary = context.get("source", {})
+	var destination: Dictionary = context.get("destination", {})
+	var resource := str(context.get("resource", RESOURCE_NONE))
+	var source_reserved_amount := int(
+		context.get("source_reserved_amount", 0)
+	)
 	var reservation := {
 		"id": reservation_id,
 		"citizen_id": citizen_id,
 		"resource_type": resource,
 		"source": source,
 		"destination": destination,
-		"source_access_purpose": source_access_purpose,
-		"destination_access_purpose": destination_access_purpose,
+		"source_access_purpose": str(
+			context.get("source_access_purpose", CONTAINER_HAUL_PURPOSE_NONE)
+		),
+		"destination_access_purpose": str(
+			context.get(
+				"destination_access_purpose",
+				CONTAINER_HAUL_PURPOSE_NONE
+			)
+		),
 		"source_reserved_amount": source_reserved_amount,
 		"destination_reserved_amount": destination_reserved_amount,
 		"destination_reserved_resources": destination_resources,
@@ -6002,9 +4446,7 @@ static func create_city_haul_reservation(
 
 	next_city_haul_reservation_id += 1
 	city_haul_reservations[reservation_id] = reservation
-	city_haul_reservation_id_by_citizen_id[citizen_id] = (
-		reservation_id
-	)
+	city_haul_reservation_id_by_citizen_id[citizen_id] = reservation_id
 	_change_city_haul_reserved_source_amount(
 		source,
 		resource,
@@ -6108,20 +4550,20 @@ static func expand_pending_city_haul_reservation(
 	)
 
 	if (
-		not city_haul_endpoint_can_provide_resource(
-			source,
-			resource,
-			source_access_purpose,
-			true,
-			reservation_id
-		)
-		or not city_haul_endpoint_can_accept_resource(
-			destination,
-			resource,
-			destination_access_purpose,
-			true,
-			reservation_id
-		)
+		not city_haul_endpoint_can_provide_resource({
+			"endpoint": source,
+			"resource": resource,
+			"withdrawal_purpose": source_access_purpose,
+			"require_unreserved_amount": true,
+			"excluding_reservation_id": reservation_id,
+		})
+		or not city_haul_endpoint_can_accept_resource({
+			"endpoint": destination,
+			"resource": resource,
+			"deposit_purpose": destination_access_purpose,
+			"require_unreserved_space": true,
+			"excluding_reservation_id": reservation_id,
+		})
 	):
 		return 0
 
@@ -6194,12 +4636,15 @@ static func expand_pending_city_haul_reservations() -> int:
 
 
 static func retarget_city_haul_reservation_source(
-	reservation_id: int,
-	source: Dictionary,
-	resource: String,
-	requested_amount: int,
-	source_access_purpose: String
+	values: Dictionary
 ) -> int:
+	var reservation_id := int(values.get("reservation_id", -1))
+	var source: Dictionary = values.get("source", {})
+	var resource := str(values.get("resource", RESOURCE_NONE))
+	var requested_amount := int(values.get("requested_amount", 0))
+	var source_access_purpose := str(
+		values.get("source_access_purpose", CONTAINER_HAUL_PURPOSE_NONE)
+	)
 	var reservation := get_city_haul_reservation(reservation_id)
 
 	if (
@@ -6223,19 +4668,19 @@ static func retarget_city_haul_reservation_source(
 	)
 
 	if (
-		not city_haul_endpoint_can_provide_resource(
-			normalized_source,
-			resource,
-			source_access_purpose,
-			true
-		)
-		or not city_haul_endpoint_can_accept_resource(
-			destination,
-			resource,
-			destination_access_purpose,
-			true,
-			reservation_id
-		)
+		not city_haul_endpoint_can_provide_resource({
+			"endpoint": normalized_source,
+			"resource": resource,
+			"withdrawal_purpose": source_access_purpose,
+			"require_unreserved_amount": true,
+		})
+		or not city_haul_endpoint_can_accept_resource({
+			"endpoint": destination,
+			"resource": resource,
+			"deposit_purpose": destination_access_purpose,
+			"require_unreserved_space": true,
+			"excluding_reservation_id": reservation_id,
+		})
 	):
 		return 0
 
@@ -6633,13 +5078,13 @@ static func reserve_city_haul_destination(
 	)
 
 	for resource in resources_to_reserve.keys():
-		if not city_haul_endpoint_can_accept_resource(
-			normalized_destination,
-			str(resource),
-			destination_access_purpose,
-			true,
-			reservation_id
-		):
+		if not city_haul_endpoint_can_accept_resource({
+			"endpoint": normalized_destination,
+			"resource": str(resource),
+			"deposit_purpose": destination_access_purpose,
+			"require_unreserved_space": true,
+			"excluding_reservation_id": reservation_id,
+		}):
 			return 0
 
 	if (
@@ -6766,6 +5211,10 @@ static func commit_city_haul_destination_reservation(
 	_mark_city_haul_reservations_changed()
 	return true
 
+
+#endregion
+
+#region Citizen Haul Cargo
 
 static func get_city_citizen_current_haul(
 	citizen_id: int
@@ -7089,6 +5538,10 @@ static func city_citizen_is_hauling(
 	)
 
 
+#endregion
+
+#region Citizen Inventory
+
 static func get_city_citizen_inventory(
 	citizen_id: int
 ) -> Dictionary:
@@ -7284,6 +5737,10 @@ static func remove_resource_from_city_citizen_inventory(
 	)
 
 	return maxi(current_amount - final_amount, 0)
+
+#endregion
+
+#region Citizen Identity and Population Creation
 
 static func get_city_citizen_name_seed() -> int:
 	var name_seed := int(official_city_seed)
@@ -7654,6 +6111,10 @@ static func ensure_city_citizen_demographic_state() -> int:
 	return migrated_count
 
 
+#endregion
+
+#region Citizen Needs
+
 static func ensure_city_citizen_need_state() -> int:
 	var migrated_count := 0
 
@@ -7693,7 +6154,6 @@ static func ensure_city_citizen_need_state() -> int:
 
 static func get_city_citizen_hunger(citizen_id: int) -> int:
 	var citizen := get_city_citizen_by_id(citizen_id)
-
 	if citizen.is_empty():
 		return 0
 
@@ -7740,6 +6200,10 @@ static func set_city_citizen_hunger_state(
 	city_citizens[citizen_index] = citizen
 	_mark_city_citizens_changed()
 	return true
+
+#endregion
+
+#region Citizen Task State
 
 static func is_valid_city_citizen_task_kind(
 	task_kind: String
@@ -7844,7 +6308,6 @@ static func get_city_citizen_current_task(
 	citizen_id: int
 ) -> Dictionary:
 	var citizen := get_city_citizen_by_id(citizen_id)
-
 	if citizen.is_empty():
 		return {}
 
@@ -7860,56 +6323,67 @@ static func assign_city_citizen_task(
 	citizen_id: int,
 	task_values: Dictionary
 ) -> bool:
-	var citizen_index := get_city_citizen_index_by_id(
-		citizen_id
+	var assignment := _make_city_citizen_task_assignment_context(
+		citizen_id,
+		task_values
 	)
 
-	if citizen_index < 0:
+	if assignment.is_empty():
 		return false
+
+	if not _prepare_city_citizen_task_assignment(assignment):
+		return false
+
+	return _commit_city_citizen_task_assignment(assignment)
+
+
+static func _make_city_citizen_task_assignment_context(
+	citizen_id: int,
+	task_values: Dictionary
+) -> Dictionary:
+	var citizen_index := get_city_citizen_index_by_id(citizen_id)
+
+	if citizen_index < 0:
+		return {}
 
 	var raw_citizen = city_citizens[citizen_index]
 
 	if not raw_citizen is Dictionary:
-		return false
+		return {}
 
 	var citizen: Dictionary = raw_citizen
 
 	if not bool(citizen.get("alive", false)):
-		return false
+		return {}
 
 	var raw_task_kind = task_values.get("kind")
 	var raw_task_source = task_values.get("source")
 	var raw_task_priority = task_values.get("priority")
-	var raw_target_object_id = task_values.get(
-		"target_object_id"
-	)
+	var raw_target_object_id = task_values.get("target_object_id")
 	var raw_work_order_id = task_values.get("work_order_id", -1)
 	var raw_job_id = task_values.get("job_id", "")
-	var raw_player_locked = task_values.get(
-		"player_locked",
-		false
-	)
+	var raw_player_locked = task_values.get("player_locked", false)
 
 	if typeof(raw_task_kind) != TYPE_STRING:
-		return false
+		return {}
 
 	if typeof(raw_task_source) != TYPE_STRING:
-		return false
+		return {}
 
 	if typeof(raw_task_priority) != TYPE_INT:
-		return false
+		return {}
 
 	if typeof(raw_target_object_id) != TYPE_INT:
-		return false
+		return {}
 
 	if typeof(raw_work_order_id) != TYPE_INT:
-		return false
+		return {}
 
 	if typeof(raw_job_id) != TYPE_STRING:
-		return false
+		return {}
 
 	if typeof(raw_player_locked) != TYPE_BOOL:
-		return false
+		return {}
 
 	var task_kind: String = raw_task_kind
 	var task_source: String = raw_task_source
@@ -7923,25 +6397,25 @@ static func assign_city_citizen_task(
 		not is_valid_city_citizen_task_kind(task_kind)
 		or task_kind == CITY_CITIZEN_TASK_KIND_NONE
 	):
-		return false
+		return {}
 
 	if (
 		not is_valid_city_citizen_task_source(task_source)
 		or task_source == CITY_CITIZEN_TASK_SOURCE_NONE
 	):
-		return false
+		return {}
 
 	if task_priority <= CITY_CITIZEN_TASK_PRIORITY_NONE:
-		return false
+		return {}
 
 	if target_object_id <= 0:
-		return false
+		return {}
 
 	if (
 		player_locked
 		and task_source != CITY_CITIZEN_TASK_SOURCE_PLAYER
 	):
-		return false
+		return {}
 
 	# Employment is already a standing player directive. Direct commands and
 	# autonomous logistics require unemployment, but biological food seeking is
@@ -7954,25 +6428,9 @@ static func assign_city_citizen_task(
 		and int(citizen.get("job_object_id", -1)) > 0
 		and task_kind != CITY_CITIZEN_TASK_KIND_ACQUIRE_FOOD
 	):
-		return false
+		return {}
 
 	var raw_existing_task = citizen.get("current_task", {})
-	var assigned_haul := CityCitizensScript.make_city_citizen_haul()
-	var assigned_haul_reservation: Dictionary = {}
-	var assigned_target_tile: Vector2i = INVALID_CITY_TILE_POSITION
-	var assigned_food_resource := RESOURCE_NONE
-	var assigned_food_requested_amount := 0
-	var assigned_food_endpoint_kind := (
-		CITY_CITIZEN_HAUL_ENDPOINT_KIND_NONE
-	)
-	var assigned_food_access_purpose := (
-		CONTAINER_DIRECT_WITHDRAWAL_PURPOSE_NONE
-	)
-	var haul_cargo := get_city_citizen_haul_cargo(citizen_id)
-	var haul_cargo_amount := maxi(
-		int(haul_cargo.get("amount", 0)),
-		0
-	)
 
 	if raw_existing_task is Dictionary:
 		var existing_task: Dictionary = raw_existing_task
@@ -7981,7 +6439,7 @@ static func assign_city_citizen_task(
 			bool(existing_task.get("player_locked", false))
 			and task_source != CITY_CITIZEN_TASK_SOURCE_PLAYER
 		):
-			return false
+			return {}
 
 		# Replacements must pass through the appropriate cancellation or player-
 		# interruption gateway first. That path owns reservation release and cargo
@@ -7990,444 +6448,467 @@ static func assign_city_citizen_task(
 			str(existing_task.get("kind", CITY_CITIZEN_TASK_KIND_NONE))
 			!= CITY_CITIZEN_TASK_KIND_NONE
 		):
-			return false
+			return {}
+
+	var haul_cargo_amount := maxi(
+		int(get_city_citizen_haul_cargo(citizen_id).get("amount", 0)),
+		0
+	)
 
 	if (
 		haul_cargo_amount > 0
 		and task_kind != CITY_CITIZEN_TASK_KIND_HAUL
 	):
-		return false
+		return {}
 
-	match task_kind:
+	return {
+		"citizen_id": citizen_id,
+		"citizen_index": citizen_index,
+		"citizen": citizen,
+		"task_values": task_values,
+		"task_kind": task_kind,
+		"task_source": task_source,
+		"task_priority": task_priority,
+		"target_object_id": target_object_id,
+		"work_order_id": work_order_id,
+		"job_id": job_id,
+		"player_locked": player_locked,
+		"haul_cargo_amount": haul_cargo_amount,
+		"assigned_haul": CityCitizensScript.make_city_citizen_haul(),
+		"assigned_target_tile": INVALID_CITY_TILE_POSITION,
+		"assigned_food_resource": RESOURCE_NONE,
+		"assigned_food_requested_amount": 0,
+		"assigned_food_endpoint_kind": CITY_CITIZEN_HAUL_ENDPOINT_KIND_NONE,
+		"assigned_food_access_purpose": CONTAINER_DIRECT_WITHDRAWAL_PURPOSE_NONE,
+	}
+
+
+static func _prepare_city_citizen_task_assignment(
+	assignment: Dictionary
+) -> bool:
+	match str(assignment.get("task_kind", CITY_CITIZEN_TASK_KIND_NONE)):
 		CITY_CITIZEN_TASK_KIND_WORK:
-			var workplace := get_city_object_by_id(
-				target_object_id
-			)
-
-			if (
-				workplace.is_empty()
-				or not city_object_is_workplace(workplace)
-			):
-				return false
-
-			if (
-				int(citizen.get("job_object_id", -1))
-				!= target_object_id
-			):
-				return false
+			return _prepare_city_work_task_assignment(assignment)
 
 		CITY_CITIZEN_TASK_KIND_ACQUIRE_FOOD:
-			var food_resource := str(
-				task_values.get("food_resource_type", RESOURCE_NONE)
-			)
-			var food_endpoint_kind := str(
-				task_values.get(
-					"food_source_endpoint_kind",
-					CITY_CITIZEN_HAUL_ENDPOINT_KIND_CITY_OBJECT_CONTAINER
-				)
-			)
-			var food_endpoint := {
-				"kind": food_endpoint_kind,
-				"id": target_object_id,
-			}
-			var food_requested_amount := maxi(
-				int(task_values.get("food_requested_amount", 0)),
-				0
-			)
-			var food_access_purpose := str(
-				task_values.get(
-					"food_source_access_purpose",
-					CONTAINER_DIRECT_WITHDRAWAL_PURPOSE_NONE
-				)
-			)
-			var raw_food_target_tile = task_values.get(
-				"target_tile",
-				INVALID_CITY_TILE_POSITION
-			)
-
-			var hunger_restore := get_city_food_hunger_restore(food_resource)
-			var personal_food_nutrition := (
-				get_food_nutrition_in_resource_container(
-					get_city_citizen_inventory(citizen_id)
-				)
-			)
-			var desired_nutrition := maxi(
-				CITIZEN_EAT_TARGET_HUNGER
-				- get_city_citizen_hunger(citizen_id)
-				- personal_food_nutrition,
-				0
-			)
-
-			if (
-				hunger_restore <= 0
-				or food_requested_amount <= 0
-				or desired_nutrition <= 0
-				or food_access_purpose
-				!= CONTAINER_DIRECT_WITHDRAWAL_PURPOSE_PERSONAL_FOOD
-				or not raw_food_target_tile is Vector2i
-				or not CityCitizensScript.is_valid_city_citizen_haul_endpoint(
-					food_endpoint
-				)
-				or not get_city_citizen_food_endpoint_target_tiles(
-					citizen_id,
-					food_endpoint
-				).has(raw_food_target_tile)
-				or not city_citizen_can_withdraw_food_from_endpoint(
-					citizen_id,
-					food_endpoint,
-					food_resource
-				)
-			):
-				return false
-
-			assigned_food_requested_amount = mini(
-				food_requested_amount,
-				mini(
-					get_city_food_endpoint_unreserved_amount(
-						citizen_id,
-						food_endpoint,
-						food_resource,
-						citizen_id
-					),
-					mini(
-						get_city_citizen_inventory_free_space(citizen_id),
-						ceili(
-							float(desired_nutrition)
-							/ float(hunger_restore)
-						)
-					)
-				)
-			)
-
-			if assigned_food_requested_amount <= 0:
-				return false
-
-			assigned_target_tile = raw_food_target_tile
-			assigned_food_resource = food_resource
-			assigned_food_endpoint_kind = food_endpoint_kind
-			assigned_food_access_purpose = food_access_purpose
+			return _prepare_city_food_task_assignment(assignment)
 
 		CITY_CITIZEN_TASK_KIND_PLAYER_COMMAND:
-			var command := get_city_player_command_by_id(
-				target_object_id
-			)
-
-			if (
-				task_source != CITY_CITIZEN_TASK_SOURCE_PLAYER
-				or command.is_empty()
-				or int(command.get("claimed_citizen_id", -1))
-				!= citizen_id
-				or not is_city_player_command_target_valid(command)
-			):
-				return false
-
-			var raw_command_tile = command.get(
-				"tile_position",
-				INVALID_CITY_TILE_POSITION
-			)
-
-			if not raw_command_tile is Vector2i:
-				return false
-
-			assigned_target_tile = raw_command_tile
+			return _prepare_city_player_command_task_assignment(assignment)
 
 		CITY_CITIZEN_TASK_KIND_CONSTRUCTION:
-			var construction_site := (
-				get_city_construction_site_by_id(
-					target_object_id
-				)
-			)
-			var raw_construction_target_tile = task_values.get(
-				"target_tile",
-				INVALID_CITY_TILE_POSITION
-			)
-
-			if (
-				task_source != CITY_CITIZEN_TASK_SOURCE_PLAYER
-				or player_locked
-				or construction_site.is_empty()
-				or str(construction_site.get("phase", ""))
-				!= CITY_CONSTRUCTION_PHASE_LABOR
-				or not raw_construction_target_tile is Vector2i
-				or not get_city_construction_site_work_positions(
-					construction_site
-				).has(raw_construction_target_tile)
-			):
-				return false
-
-			assigned_target_tile = raw_construction_target_tile
+			return _prepare_city_construction_task_assignment(assignment)
 
 		CITY_CITIZEN_TASK_KIND_HAUL:
-			var raw_haul = task_values.get("haul", {})
-
-			if not raw_haul is Dictionary:
-				return false
-
-			assigned_haul = (
-				CityCitizensScript.make_city_citizen_haul(
-					raw_haul
-				)
-			)
-			var haul_phase := str(
-				assigned_haul.get(
-					"phase",
-					CITY_CITIZEN_HAUL_PHASE_NONE
-				)
-			)
-			var haul_resource := str(
-				assigned_haul.get(
-					"resource_type",
-					RESOURCE_NONE
-				)
-			)
-			var haul_source: Dictionary = (
-				assigned_haul.get("source", {})
-			)
-			var haul_destination: Dictionary = (
-				assigned_haul.get("destination", {})
-			)
-			var haul_requester: Dictionary = (
-				assigned_haul.get("requester", {})
-			)
-			var source_endpoint_id := int(
-				haul_source.get("id", -1)
-			)
-
-			if (
-				not CityCitizensScript
-				.is_valid_city_citizen_haul_phase(haul_phase)
-				or haul_phase == CITY_CITIZEN_HAUL_PHASE_NONE
-				or not is_city_resource_type(haul_resource)
-				or int(
-					assigned_haul.get("requested_amount", 0)
-				) <= 0
-				or str(
-					assigned_haul.get(
-						"reason",
-						CITY_CITIZEN_HAUL_REASON_NONE
-					)
-				) == CITY_CITIZEN_HAUL_REASON_NONE
-				or str(
-					assigned_haul.get(
-						"source_access_purpose",
-						CONTAINER_HAUL_PURPOSE_NONE
-					)
-				) == CONTAINER_HAUL_PURPOSE_NONE
-				or str(
-					assigned_haul.get(
-						"destination_access_purpose",
-						CONTAINER_HAUL_PURPOSE_NONE
-					)
-				) == CONTAINER_HAUL_PURPOSE_NONE
-				or not assigned_haul.get("source_tile") is Vector2i
-				or not assigned_haul.get("destination_tile") is Vector2i
-			):
-				return false
-
-			if not CityCitizensScript.is_valid_city_citizen_haul_endpoint(
-				haul_source
-			):
-				return false
-
-			if not CityCitizensScript.is_valid_city_citizen_haul_endpoint(
-				haul_requester
-			):
-				return false
-
-			if source_endpoint_id != target_object_id:
-				return false
-
-			if haul_cargo_amount <= 0:
-				if not CityCitizensScript.is_valid_city_citizen_haul_endpoint(
-					haul_destination
-				):
-					return false
-
-				var source_access_purpose := str(
-					assigned_haul.get(
-						"source_access_purpose",
-						CONTAINER_HAUL_PURPOSE_NONE
-					)
-				)
-
-				if not city_haul_endpoint_can_provide_resource(
-					haul_source,
-					haul_resource,
-					source_access_purpose,
-					true
-				):
-					return false
-			else:
-				var cargo_resources := (
-					get_city_citizen_haul_cargo_resources(
-						citizen_id
-					)
-				)
-
-				if cargo_resources.is_empty():
-					return false
-
-			var destination_is_valid := (
-				CityCitizensScript
-				.is_valid_city_citizen_haul_endpoint(
-					haul_destination,
-					haul_cargo_amount > 0
-				)
-			)
-
-			if not destination_is_valid:
-				return false
-
-			if (
-				str(
-					haul_destination.get(
-						"kind",
-						CITY_CITIZEN_HAUL_ENDPOINT_KIND_NONE
-					)
-				)
-				!= CITY_CITIZEN_HAUL_ENDPOINT_KIND_NONE
-			):
-				var destination_access_purpose := str(
-					assigned_haul.get(
-						"destination_access_purpose",
-						CONTAINER_HAUL_PURPOSE_NONE
-					)
-				)
-
-				var destination_resources: Dictionary = {
-					haul_resource: int(
-						assigned_haul.get(
-							"requested_amount",
-							0
-						)
-					)
-				}
-
-				if haul_cargo_amount > 0:
-					destination_resources = (
-						get_city_citizen_haul_cargo_resources(
-							citizen_id
-						)
-					)
-
-				for destination_resource in destination_resources.keys():
-					if not city_haul_endpoint_can_accept_resource(
-						haul_destination,
-						str(destination_resource),
-						destination_access_purpose,
-						true
-					):
-						return false
-
-				assigned_haul_reservation = (
-					create_city_haul_reservation({
-						"citizen_id": citizen_id,
-						"source": haul_source,
-						"destination": haul_destination,
-						"resource_type": haul_resource,
-						"requested_amount": int(
-							assigned_haul.get(
-								"requested_amount",
-								0
-							)
-						),
-						"source_access_purpose": str(
-							assigned_haul.get(
-								"source_access_purpose",
-								CONTAINER_HAUL_PURPOSE_NONE
-							)
-						),
-						"destination_access_purpose": (
-							destination_access_purpose
-						),
-					})
-				)
-
-				if assigned_haul_reservation.is_empty():
-					return false
-
-				assigned_haul["reservation_id"] = int(
-					assigned_haul_reservation.get("id", -1)
-				)
-
-				if haul_cargo_amount <= 0:
-					assigned_haul["requested_amount"] = int(
-						assigned_haul_reservation.get(
-							"source_reserved_amount",
-							0
-						)
-					)
-				else:
-					assigned_haul["requested_amount"] = (
-						haul_cargo_amount
-					)
+			return _prepare_city_haul_task_assignment(assignment)
 
 		CITY_CITIZEN_TASK_KIND_RETURN_HOME:
-			var home := get_city_object_by_id(
-				target_object_id
-			)
-
-			if (
-				home.is_empty()
-				or get_city_object_resident_capacity(home) <= 0
-				or not city_object_supports_citizen_interior(home)
-			):
-				return false
-
-			if (
-				int(citizen.get("home_object_id", -1))
-				!= target_object_id
-			):
-				return false
-
-			if not get_city_object_resident_ids(home).has(
-				citizen_id
-			):
-				return false
-
-			if not city_citizen_can_access_object_interior(
-				citizen_id,
-				home
-			):
-				return false
+			return _prepare_city_return_home_task_assignment(assignment)
 
 		_:
 			return false
 
-	var current_task := (
-		CityCitizensScript.make_city_citizen_task({
-			"kind": task_kind,
-			"source": task_source,
-			"phase": CITY_CITIZEN_TASK_PHASE_PENDING,
-			"priority": task_priority,
-			"target_object_id": target_object_id,
-			"work_order_id": work_order_id,
-			"job_id": job_id,
-			"start_world_minute": (
-				SimulationClock.absolute_world_minutes
-			),
-			"target_tile": assigned_target_tile,
-			"player_locked": player_locked,
-			"food_resource_type": assigned_food_resource,
-			"food_requested_amount": assigned_food_requested_amount,
-			"food_source_endpoint_kind": assigned_food_endpoint_kind,
-			"food_source_access_purpose": assigned_food_access_purpose
-		})
+
+static func _prepare_city_work_task_assignment(
+	assignment: Dictionary
+) -> bool:
+	var citizen: Dictionary = assignment.get("citizen", {})
+	var target_object_id := int(assignment.get("target_object_id", -1))
+	var workplace := get_city_object_by_id(target_object_id)
+
+	if workplace.is_empty() or not city_object_is_workplace(workplace):
+		return false
+
+	return int(citizen.get("job_object_id", -1)) == target_object_id
+
+
+static func _prepare_city_food_task_assignment(
+	assignment: Dictionary
+) -> bool:
+	var citizen_id := int(assignment.get("citizen_id", -1))
+	var target_object_id := int(assignment.get("target_object_id", -1))
+	var task_values: Dictionary = assignment.get("task_values", {})
+	var food_resource := str(
+		task_values.get("food_resource_type", RESOURCE_NONE)
 	)
+	var food_endpoint_kind := str(
+		task_values.get(
+			"food_source_endpoint_kind",
+			CITY_CITIZEN_HAUL_ENDPOINT_KIND_CITY_OBJECT_CONTAINER
+		)
+	)
+	var food_endpoint := {
+		"kind": food_endpoint_kind,
+		"id": target_object_id,
+	}
+	var food_requested_amount := maxi(
+		int(task_values.get("food_requested_amount", 0)),
+		0
+	)
+	var food_access_purpose := str(
+		task_values.get(
+			"food_source_access_purpose",
+			CONTAINER_DIRECT_WITHDRAWAL_PURPOSE_NONE
+		)
+	)
+	var raw_food_target_tile = task_values.get(
+		"target_tile",
+		INVALID_CITY_TILE_POSITION
+	)
+	var hunger_restore := get_city_food_hunger_restore(food_resource)
+	var personal_food_nutrition := get_food_nutrition_in_resource_container(
+		get_city_citizen_inventory(citizen_id)
+	)
+	var desired_nutrition := maxi(
+		CITIZEN_EAT_TARGET_HUNGER
+		- get_city_citizen_hunger(citizen_id)
+		- personal_food_nutrition,
+		0
+	)
+
+	if (
+		hunger_restore <= 0
+		or food_requested_amount <= 0
+		or desired_nutrition <= 0
+		or food_access_purpose
+		!= CONTAINER_DIRECT_WITHDRAWAL_PURPOSE_PERSONAL_FOOD
+		or not raw_food_target_tile is Vector2i
+		or not CityCitizensScript.is_valid_city_citizen_haul_endpoint(
+			food_endpoint
+		)
+		or not get_city_citizen_food_endpoint_target_tiles(
+			citizen_id,
+			food_endpoint
+		).has(raw_food_target_tile)
+		or not city_citizen_can_withdraw_food_from_endpoint(
+			citizen_id,
+			food_endpoint,
+			food_resource
+		)
+	):
+		return false
+
+	var assigned_amount := mini(
+		food_requested_amount,
+		mini(
+			get_city_food_endpoint_unreserved_amount(
+				citizen_id,
+				food_endpoint,
+				food_resource,
+				citizen_id
+			),
+			mini(
+				get_city_citizen_inventory_free_space(citizen_id),
+				ceili(float(desired_nutrition) / float(hunger_restore))
+			)
+		)
+	)
+
+	if assigned_amount <= 0:
+		return false
+
+	assignment["assigned_target_tile"] = raw_food_target_tile
+	assignment["assigned_food_resource"] = food_resource
+	assignment["assigned_food_requested_amount"] = assigned_amount
+	assignment["assigned_food_endpoint_kind"] = food_endpoint_kind
+	assignment["assigned_food_access_purpose"] = food_access_purpose
+	return true
+
+
+static func _prepare_city_player_command_task_assignment(
+	assignment: Dictionary
+) -> bool:
+	var citizen_id := int(assignment.get("citizen_id", -1))
+	var target_object_id := int(assignment.get("target_object_id", -1))
+	var task_source := str(assignment.get("task_source", ""))
+	var command := get_city_player_command_by_id(target_object_id)
+
+	if (
+		task_source != CITY_CITIZEN_TASK_SOURCE_PLAYER
+		or command.is_empty()
+		or int(command.get("claimed_citizen_id", -1)) != citizen_id
+		or not is_city_player_command_target_valid(command)
+	):
+		return false
+
+	var raw_command_tile = command.get(
+		"tile_position",
+		INVALID_CITY_TILE_POSITION
+	)
+
+	if not raw_command_tile is Vector2i:
+		return false
+
+	assignment["assigned_target_tile"] = raw_command_tile
+	return true
+
+
+static func _prepare_city_construction_task_assignment(
+	assignment: Dictionary
+) -> bool:
+	var target_object_id := int(assignment.get("target_object_id", -1))
+	var task_source := str(assignment.get("task_source", ""))
+	var task_values: Dictionary = assignment.get("task_values", {})
+	var construction_site := get_city_construction_site_by_id(target_object_id)
+	var raw_target_tile = task_values.get(
+		"target_tile",
+		INVALID_CITY_TILE_POSITION
+	)
+
+	if (
+		task_source != CITY_CITIZEN_TASK_SOURCE_PLAYER
+		or bool(assignment.get("player_locked", false))
+		or construction_site.is_empty()
+		or str(construction_site.get("phase", ""))
+		!= CITY_CONSTRUCTION_PHASE_LABOR
+		or not raw_target_tile is Vector2i
+		or not get_city_construction_site_work_positions(
+			construction_site
+		).has(raw_target_tile)
+	):
+		return false
+
+	assignment["assigned_target_tile"] = raw_target_tile
+	return true
+
+
+static func _prepare_city_haul_task_assignment(
+	assignment: Dictionary
+) -> bool:
+	var citizen_id := int(assignment.get("citizen_id", -1))
+	var target_object_id := int(assignment.get("target_object_id", -1))
+	var task_values: Dictionary = assignment.get("task_values", {})
+	var haul_cargo_amount := maxi(
+		int(assignment.get("haul_cargo_amount", 0)),
+		0
+	)
+	var raw_haul = task_values.get("haul", {})
+
+	if not raw_haul is Dictionary:
+		return false
+
+	var assigned_haul := CityCitizensScript.make_city_citizen_haul(raw_haul)
+	var haul_phase := str(
+		assigned_haul.get("phase", CITY_CITIZEN_HAUL_PHASE_NONE)
+	)
+	var haul_resource := str(
+		assigned_haul.get("resource_type", RESOURCE_NONE)
+	)
+	var haul_source: Dictionary = assigned_haul.get("source", {})
+	var haul_destination: Dictionary = assigned_haul.get("destination", {})
+	var haul_requester: Dictionary = assigned_haul.get("requester", {})
+	var source_endpoint_id := int(haul_source.get("id", -1))
+
+	if (
+		not CityCitizensScript.is_valid_city_citizen_haul_phase(haul_phase)
+		or haul_phase == CITY_CITIZEN_HAUL_PHASE_NONE
+		or not is_city_resource_type(haul_resource)
+		or int(assigned_haul.get("requested_amount", 0)) <= 0
+		or str(
+			assigned_haul.get("reason", CITY_CITIZEN_HAUL_REASON_NONE)
+		) == CITY_CITIZEN_HAUL_REASON_NONE
+		or str(
+			assigned_haul.get(
+				"source_access_purpose",
+				CONTAINER_HAUL_PURPOSE_NONE
+			)
+		) == CONTAINER_HAUL_PURPOSE_NONE
+		or str(
+			assigned_haul.get(
+				"destination_access_purpose",
+				CONTAINER_HAUL_PURPOSE_NONE
+			)
+		) == CONTAINER_HAUL_PURPOSE_NONE
+		or not assigned_haul.get("source_tile") is Vector2i
+		or not assigned_haul.get("destination_tile") is Vector2i
+	):
+		return false
+
+	if not CityCitizensScript.is_valid_city_citizen_haul_endpoint(haul_source):
+		return false
+
+	if not CityCitizensScript.is_valid_city_citizen_haul_endpoint(haul_requester):
+		return false
+
+	if source_endpoint_id != target_object_id:
+		return false
+
+	if haul_cargo_amount <= 0:
+		if not CityCitizensScript.is_valid_city_citizen_haul_endpoint(
+			haul_destination
+		):
+			return false
+
+		var source_access_purpose := str(
+			assigned_haul.get(
+				"source_access_purpose",
+				CONTAINER_HAUL_PURPOSE_NONE
+			)
+		)
+
+		if not city_haul_endpoint_can_provide_resource({
+			"endpoint": haul_source,
+			"resource": haul_resource,
+			"withdrawal_purpose": source_access_purpose,
+			"require_unreserved_amount": true,
+		}):
+			return false
+	else:
+		var cargo_resources := get_city_citizen_haul_cargo_resources(citizen_id)
+
+		if cargo_resources.is_empty():
+			return false
+
+	if not CityCitizensScript.is_valid_city_citizen_haul_endpoint(
+		haul_destination,
+		haul_cargo_amount > 0
+	):
+		return false
+
+	if (
+		str(
+			haul_destination.get(
+				"kind",
+				CITY_CITIZEN_HAUL_ENDPOINT_KIND_NONE
+			)
+		)
+		!= CITY_CITIZEN_HAUL_ENDPOINT_KIND_NONE
+	):
+		var destination_access_purpose := str(
+			assigned_haul.get(
+				"destination_access_purpose",
+				CONTAINER_HAUL_PURPOSE_NONE
+			)
+		)
+		var destination_resources: Dictionary = {
+			haul_resource: int(assigned_haul.get("requested_amount", 0))
+		}
+
+		if haul_cargo_amount > 0:
+			destination_resources = get_city_citizen_haul_cargo_resources(
+				citizen_id
+			)
+
+		for destination_resource in destination_resources.keys():
+			if not city_haul_endpoint_can_accept_resource({
+				"endpoint": haul_destination,
+				"resource": str(destination_resource),
+				"deposit_purpose": destination_access_purpose,
+				"require_unreserved_space": true,
+			}):
+				return false
+
+		var reservation := create_city_haul_reservation({
+			"citizen_id": citizen_id,
+			"source": haul_source,
+			"destination": haul_destination,
+			"resource_type": haul_resource,
+			"requested_amount": int(
+				assigned_haul.get("requested_amount", 0)
+			),
+			"source_access_purpose": str(
+				assigned_haul.get(
+					"source_access_purpose",
+					CONTAINER_HAUL_PURPOSE_NONE
+				)
+			),
+			"destination_access_purpose": destination_access_purpose,
+		})
+
+		if reservation.is_empty():
+			return false
+
+		assigned_haul["reservation_id"] = int(reservation.get("id", -1))
+
+		if haul_cargo_amount <= 0:
+			assigned_haul["requested_amount"] = int(
+				reservation.get("source_reserved_amount", 0)
+			)
+		else:
+			assigned_haul["requested_amount"] = haul_cargo_amount
+
+	assignment["assigned_haul"] = assigned_haul
+	return true
+
+
+static func _prepare_city_return_home_task_assignment(
+	assignment: Dictionary
+) -> bool:
+	var citizen_id := int(assignment.get("citizen_id", -1))
+	var citizen: Dictionary = assignment.get("citizen", {})
+	var target_object_id := int(assignment.get("target_object_id", -1))
+	var home := get_city_object_by_id(target_object_id)
+
+	if (
+		home.is_empty()
+		or get_city_object_resident_capacity(home) <= 0
+		or not city_object_supports_citizen_interior(home)
+	):
+		return false
+
+	if int(citizen.get("home_object_id", -1)) != target_object_id:
+		return false
+
+	if not get_city_object_resident_ids(home).has(citizen_id):
+		return false
+
+	return city_citizen_can_access_object_interior(citizen_id, home)
+
+
+static func _commit_city_citizen_task_assignment(
+	assignment: Dictionary
+) -> bool:
+	var citizen_id := int(assignment.get("citizen_id", -1))
+	var citizen_index := int(assignment.get("citizen_index", -1))
+	var citizen: Dictionary = assignment.get("citizen", {})
+	var task_kind := str(assignment.get("task_kind", ""))
+	var current_task := CityCitizensScript.make_city_citizen_task({
+		"kind": task_kind,
+		"source": str(assignment.get("task_source", "")),
+		"phase": CITY_CITIZEN_TASK_PHASE_PENDING,
+		"priority": int(assignment.get("task_priority", 0)),
+		"target_object_id": int(assignment.get("target_object_id", -1)),
+		"work_order_id": int(assignment.get("work_order_id", -1)),
+		"job_id": str(assignment.get("job_id", "")),
+		"start_world_minute": SimulationClock.absolute_world_minutes,
+		"target_tile": assignment.get(
+			"assigned_target_tile",
+			INVALID_CITY_TILE_POSITION
+		),
+		"player_locked": bool(assignment.get("player_locked", false)),
+		"food_resource_type": str(
+			assignment.get("assigned_food_resource", RESOURCE_NONE)
+		),
+		"food_requested_amount": int(
+			assignment.get("assigned_food_requested_amount", 0)
+		),
+		"food_source_endpoint_kind": str(
+			assignment.get(
+				"assigned_food_endpoint_kind",
+				CITY_CITIZEN_HAUL_ENDPOINT_KIND_NONE
+			)
+		),
+		"food_source_access_purpose": str(
+			assignment.get(
+				"assigned_food_access_purpose",
+				CONTAINER_DIRECT_WITHDRAWAL_PURPOSE_NONE
+			)
+		),
+	})
 
 	citizen["current_task"] = current_task
 
 	if task_kind == CITY_CITIZEN_TASK_KIND_HAUL:
-		citizen["current_haul"] = assigned_haul
-	else:
-		CityCitizensScript.reset_city_citizen_haul_state(
-			citizen
+		citizen["current_haul"] = assignment.get(
+			"assigned_haul",
+			CityCitizensScript.make_city_citizen_haul()
 		)
+	else:
+		CityCitizensScript.reset_city_citizen_haul_state(citizen)
 
 	city_citizens[citizen_index] = citizen
 	_add_city_active_task_id(citizen_id)
 	_mark_city_citizen_task_changed()
-
 	return true
 
 
@@ -8692,7 +7173,7 @@ static func clear_city_citizen_task(
 		)
 
 	if current_task_kind == CITY_CITIZEN_TASK_KIND_PLAYER_COMMAND:
-		release_city_player_command_claim(
+		WorldData.release_city_player_command_claim(
 			int(raw_current_task.get("target_object_id", -1)),
 			citizen_id
 		)
@@ -8742,6 +7223,10 @@ static func clear_city_citizen_task(
 	_mark_city_citizen_task_changed()
 
 	return true
+
+#endregion
+
+#region Citizen Movement and Spatial State
 
 static func is_valid_city_citizen_movement_state(
 	movement_state: String
@@ -9126,73 +7611,115 @@ static func commit_city_citizen_movement_tick(
 	var result := {
 		"success": false,
 		"updated_citizen_count": 0,
-		"moved_citizen_count": 0
+		"moved_citizen_count": 0,
 	}
 
 	if city_world == null:
 		return result
 
+	var update_normalization := _normalize_city_citizen_movement_updates(
+		city_world,
+		raw_citizen_updates
+	)
+
+	if not bool(update_normalization.get("success", false)):
+		return result
+
+	var clean_updates: Array = update_normalization.get("updates", [])
+	var clean_update_by_id: Dictionary = update_normalization.get(
+		"update_by_id",
+		{}
+	)
+	var active_normalization := _normalize_next_active_mover_ids(
+		raw_next_active_mover_ids,
+		clean_update_by_id
+	)
+
+	if not bool(active_normalization.get("success", false)):
+		return result
+
+	var clean_next_active_ids: Array[int] = active_normalization.get(
+		"active_ids",
+		[]
+	)
+	var application_result := _apply_city_citizen_movement_updates(
+		clean_updates
+	)
+	var moved_citizen_count := int(
+		application_result.get("moved_citizen_count", 0)
+	)
+	var active_registry_changed := (
+		city_active_mover_ids != clean_next_active_ids
+	)
+
+	_replace_city_active_mover_registry(clean_next_active_ids)
+
+	if not clean_updates.is_empty() or active_registry_changed:
+		_mark_city_citizen_movement_changed()
+
+	if moved_citizen_count > 0:
+		_mark_city_citizen_spatial_changed()
+
+	city_citizen_movement_visual_events = application_result.get(
+		"movement_visual_events",
+		[]
+	)
+	result["success"] = true
+	result["updated_citizen_count"] = clean_updates.size()
+	result["moved_citizen_count"] = moved_citizen_count
+	return result
+
+
+static func _normalize_city_citizen_movement_updates(
+	city_world: WorldData,
+	raw_citizen_updates: Array
+) -> Dictionary:
 	var clean_updates: Array = []
 	var clean_update_by_id: Dictionary = {}
 
 	for raw_update in raw_citizen_updates:
 		if not raw_update is Dictionary:
-			return result
+			return {"success": false}
 
 		var update: Dictionary = raw_update
-		var citizen_id := int(
-			update.get("citizen_id", -1)
-		)
-		var raw_updated_citizen = update.get(
-			"citizen",
-			{}
-		)
+		var citizen_id := int(update.get("citizen_id", -1))
+		var raw_updated_citizen = update.get("citizen", {})
 		var raw_final_tile = update.get(
 			"final_tile",
 			INVALID_CITY_TILE_POSITION
 		)
-		var raw_traversed_tiles = update.get(
-			"traversed_tiles",
-			[]
-		)
+		var raw_traversed_tiles = update.get("traversed_tiles", [])
 
-		if citizen_id <= 0:
-			return result
-
-		if clean_update_by_id.has(citizen_id):
-			return result
+		if citizen_id <= 0 or clean_update_by_id.has(citizen_id):
+			return {"success": false}
 
 		if not raw_updated_citizen is Dictionary:
-			return result
+			return {"success": false}
 
 		if not raw_final_tile is Vector2i:
-			return result
+			return {"success": false}
 
 		if not is_city_tile_walkable_for_citizen(
 			city_world,
 			raw_final_tile,
 			citizen_id
 		):
-			return result
+			return {"success": false}
 
-		var citizen_index := get_city_citizen_index_by_id(
-			citizen_id
-		)
+		var citizen_index := get_city_citizen_index_by_id(citizen_id)
 
 		if citizen_index < 0:
-			return result
+			return {"success": false}
 
-		var updated_citizen: Dictionary = (
-			raw_updated_citizen
-		)
+		var updated_citizen: Dictionary = raw_updated_citizen
 
 		if int(updated_citizen.get("id", -1)) != citizen_id:
-			return result
+			return {"success": false}
 
 		var existing_citizen = city_citizens[citizen_index]
 
 		if not existing_citizen is Dictionary:
-			return result
+			return {"success": false}
 
 		if not (
 			existing_citizen.get(
@@ -9201,115 +7728,111 @@ static func commit_city_citizen_movement_tick(
 			)
 			is Vector2i
 		):
-			return result
+			return {"success": false}
 
 		var clean_update := {
 			"citizen_id": citizen_id,
 			"citizen_index": citizen_index,
 			"citizen": updated_citizen,
 			"final_tile": raw_final_tile,
-			"traversed_tiles": raw_traversed_tiles
+			"traversed_tiles": raw_traversed_tiles,
 		}
-
 		clean_updates.append(clean_update)
 		clean_update_by_id[citizen_id] = clean_update
 
+	return {
+		"success": true,
+		"updates": clean_updates,
+		"update_by_id": clean_update_by_id,
+	}
+
+
+static func _normalize_next_active_mover_ids(
+	raw_next_active_mover_ids: Array[int],
+	clean_update_by_id: Dictionary
+) -> Dictionary:
 	var clean_next_active_ids: Array[int] = []
 	var clean_next_active_lookup: Dictionary = {}
 
 	for citizen_id in raw_next_active_mover_ids:
-		if citizen_id <= 0:
-			return result
+		if citizen_id <= 0 or clean_next_active_lookup.has(citizen_id):
+			return {"success": false}
 
-		if clean_next_active_lookup.has(citizen_id):
-			return result
-
-		var proposed_citizen := get_city_citizen_by_id(
-			citizen_id
-		)
+		var proposed_citizen := get_city_citizen_by_id(citizen_id)
 
 		if clean_update_by_id.has(citizen_id):
-			var proposed_update: Dictionary = (
-				clean_update_by_id[citizen_id]
-			)
-			proposed_citizen = proposed_update.get(
-				"citizen",
-				{}
-			)
+			var proposed_update: Dictionary = clean_update_by_id[citizen_id]
+			proposed_citizen = proposed_update.get("citizen", {})
 
 		if proposed_citizen.is_empty():
-			return result
+			return {"success": false}
 
 		if not bool(proposed_citizen.get("alive", false)):
-			return result
+			return {"success": false}
 
 		if (
 			str(proposed_citizen.get("movement_state", ""))
 			!= CITY_CITIZEN_MOVEMENT_STATE_MOVING
 		):
-			return result
+			return {"success": false}
 
 		clean_next_active_ids.append(citizen_id)
 		clean_next_active_lookup[citizen_id] = true
 
 	clean_next_active_ids.sort()
+	return {
+		"success": true,
+		"active_ids": clean_next_active_ids,
+	}
 
+
+static func _apply_city_citizen_movement_updates(
+	clean_updates: Array
+) -> Dictionary:
 	var moved_citizen_count := 0
 	var movement_visual_events: Array = []
 
 	for clean_update in clean_updates:
-		var citizen_id := int(
-			clean_update.get("citizen_id", -1)
-		)
-		var citizen_index := int(
-			clean_update.get("citizen_index", -1)
-		)
-		var updated_citizen: Dictionary = (
-			clean_update.get("citizen", {})
-		)
+		var citizen_id := int(clean_update.get("citizen_id", -1))
+		var citizen_index := int(clean_update.get("citizen_index", -1))
+		var updated_citizen: Dictionary = clean_update.get("citizen", {})
 		var final_tile: Vector2i = clean_update.get(
 			"final_tile",
 			INVALID_CITY_TILE_POSITION
 		)
-		var existing_citizen: Dictionary = (
-			city_citizens[citizen_index]
-		)
+		var existing_citizen: Dictionary = city_citizens[citizen_index]
 		var old_tile: Vector2i = existing_citizen.get(
 			"city_tile_position",
 			INVALID_CITY_TILE_POSITION
 		)
-		var movement_visual_event := (
-			_make_city_citizen_movement_visual_event(
-				existing_citizen,
-				updated_citizen,
-				old_tile,
-				final_tile,
-				clean_update.get("traversed_tiles", [])
-			)
-		)
+		var movement_visual_event := _make_city_citizen_movement_visual_event({
+			"before_citizen": existing_citizen,
+			"after_citizen": updated_citizen,
+			"before_tile": old_tile,
+			"after_tile": final_tile,
+			"traversed_tiles": clean_update.get("traversed_tiles", []),
+		})
 
 		if not movement_visual_event.is_empty():
 			movement_visual_events.append(movement_visual_event)
 
 		if old_tile != final_tile:
-			_remove_city_citizen_from_spatial_index(
-				citizen_id,
-				old_tile
-			)
+			_remove_city_citizen_from_spatial_index(citizen_id, old_tile)
 			moved_citizen_count += 1
 
 		updated_citizen["city_tile_position"] = final_tile
 		city_citizens[citizen_index] = updated_citizen
+		_add_city_citizen_to_spatial_index(citizen_id, final_tile)
 
-		_add_city_citizen_to_spatial_index(
-			citizen_id,
-			final_tile
-		)
+	return {
+		"moved_citizen_count": moved_citizen_count,
+		"movement_visual_events": movement_visual_events,
+	}
 
-	var active_registry_changed := (
-		city_active_mover_ids != clean_next_active_ids
-	)
 
+static func _replace_city_active_mover_registry(
+	clean_next_active_ids: Array[int]
+) -> void:
 	city_active_mover_ids.clear()
 	city_active_mover_id_lookup.clear()
 
@@ -9317,27 +7840,21 @@ static func commit_city_citizen_movement_tick(
 		city_active_mover_ids.append(citizen_id)
 		city_active_mover_id_lookup[citizen_id] = true
 
-	if not clean_updates.is_empty() or active_registry_changed:
-		_mark_city_citizen_movement_changed()
-
-	if moved_citizen_count > 0:
-		_mark_city_citizen_spatial_changed()
-
-	city_citizen_movement_visual_events = movement_visual_events
-	result["success"] = true
-	result["updated_citizen_count"] = clean_updates.size()
-	result["moved_citizen_count"] = moved_citizen_count
-
-	return result
-
 
 static func _make_city_citizen_movement_visual_event(
-	before_citizen: Dictionary,
-	after_citizen: Dictionary,
-	before_tile: Vector2i,
-	after_tile: Vector2i,
-	raw_traversed_tiles
+	values: Dictionary
 ) -> Dictionary:
+	var before_citizen: Dictionary = values.get("before_citizen", {})
+	var after_citizen: Dictionary = values.get("after_citizen", {})
+	var before_tile: Vector2i = values.get(
+		"before_tile",
+		INVALID_CITY_TILE_POSITION
+	)
+	var after_tile: Vector2i = values.get(
+		"after_tile",
+		INVALID_CITY_TILE_POSITION
+	)
+	var raw_traversed_tiles = values.get("traversed_tiles", [])
 	var citizen_id := int(before_citizen.get("id", -1))
 
 	if citizen_id <= 0:
@@ -9462,6 +7979,10 @@ static func _get_clean_city_citizen_movement_visual_trace(
 
 	return clean_tiles
 
+
+#endregion
+
+#region Population, Housing, and Workplace Queries
 
 static func get_city_population_count() -> int:
 	return city_citizens.size()
@@ -10175,6 +8696,10 @@ static func assign_homeless_citizens_to_available_housing() -> int:
 
 	return assigned_count
 
+#endregion
+
+#region City Reset and Placement State
+
 static func reset_player_city_state() -> void:
 	player_city_founded = false
 	player_city_data.clear()
@@ -10183,8 +8708,8 @@ static func reset_player_city_state() -> void:
 	city_resource_amounts.clear()
 	city_owned_resource_amount_cache.clear()
 	city_owned_resource_amount_cache_container_version = -1
-	reset_city_work_order_state()
-	reset_city_player_command_state()
+	WorldData.reset_city_work_order_state()
+	WorldData.reset_city_player_command_state()
 	reset_city_object_state()
 	reset_city_citizen_state()
 
@@ -10208,7 +8733,7 @@ static func reset_city_haul_reservation_state() -> void:
 static func reset_city_object_state() -> void:
 	reset_city_haul_reservation_state()
 	reset_city_ground_pile_state()
-	reset_city_construction_state()
+	WorldData.reset_city_construction_state()
 	city_object_access_tile_cache.clear()
 	city_objects.clear()
 	city_object_index_by_id.clear()
@@ -10226,6 +8751,10 @@ static func reset_city_object_state() -> void:
 	# Houses and workplaces no longer exist, so assignment observers must
 	# invalidate any relationship displays.
 	_mark_city_assignments_changed()
+
+#endregion
+
+#region City Object Placement and Traversal
 
 static func can_place_city_object(
 	city_world: WorldData,
@@ -10303,7 +8832,7 @@ static func can_place_city_object_construction(
 	):
 		return false
 
-	return can_place_city_construction_footprint(
+	return WorldData.can_place_city_construction_footprint(
 		city_world,
 		make_rectangle_city_object_footprint_tiles(
 			top_left,
@@ -10938,12 +9467,16 @@ static func get_starting_city_citizen_spawn_tiles(
 	return []
 
 static func add_city_object(
-	object_type: String,
-	top_left: Vector2i,
-	size_tiles: Vector2i,
-	object_owner: String = "player",
-	city_world: WorldData = null
+	values: Dictionary
 ) -> Dictionary:
+	var object_type := str(values.get("object_type", ""))
+	var top_left: Vector2i = values.get(
+		"top_left",
+		INVALID_CITY_TILE_POSITION
+	)
+	var size_tiles: Vector2i = values.get("size_tiles", Vector2i.ZERO)
+	var object_owner := str(values.get("object_owner", "player"))
+	var city_world: WorldData = values.get("city_world")
 	var city_object := {
 		"id": next_city_object_id,
 		"type": object_type,
@@ -11051,6 +9584,10 @@ static func add_city_object(
 		assign_unemployed_citizens_to_available_workplaces()
 
 	return city_object
+
+#endregion
+
+#region Resource Containers and Storage
 
 static func make_empty_resource_container(
 	_resource_list: Array = []
@@ -11411,7 +9948,7 @@ static func city_citizen_can_directly_withdraw_resource(
 	if (
 		withdrawal_purpose
 		== CONTAINER_DIRECT_WITHDRAWAL_PURPOSE_PERSONAL_FOOD
-		and get_city_food_hunger_restore(resource) <= 0
+		and WorldData.get_city_food_hunger_restore(resource) <= 0
 	):
 		return false
 
@@ -11491,7 +10028,7 @@ static func city_citizen_can_withdraw_food_from_endpoint(
 	endpoint: Dictionary,
 	resource: String
 ) -> bool:
-	if get_city_food_hunger_restore(resource) <= 0:
+	if WorldData.get_city_food_hunger_restore(resource) <= 0:
 		return false
 
 	var endpoint_kind := str(
@@ -11515,7 +10052,7 @@ static func city_citizen_can_withdraw_food_from_endpoint(
 				not citizen.is_empty()
 				and bool(citizen.get("alive", false))
 				and not ground_pile.is_empty()
-				and not city_ground_pile_is_construction_reserved(ground_pile)
+				and not WorldData.city_ground_pile_is_construction_reserved(ground_pile)
 				and get_city_ground_pile_resource_amount(
 					ground_pile,
 					resource
@@ -11549,7 +10086,7 @@ static func get_city_citizen_food_endpoint_target_tiles(
 			)
 
 			if (
-				not city_ground_pile_is_construction_reserved(ground_pile)
+				not WorldData.city_ground_pile_is_construction_reserved(ground_pile)
 				and raw_tile is Vector2i
 				and is_city_tile_walkable_for_citizen(
 					official_city_world,
@@ -11679,11 +10216,11 @@ static func transfer_city_food_endpoint_to_citizen_inventory(
 		CITY_CITIZEN_HAUL_ENDPOINT_KIND_GROUND_PILE:
 			if original_ground_tile != INVALID_CITY_TILE_POSITION:
 				rollback_amount = int(
-					add_resource_to_city_ground_piles_with_result(
-						original_ground_tile,
-						resource,
-						removed_amount
-					).get("added_amount", 0)
+					add_resource_to_city_ground_piles_with_result({
+						"tile_position": original_ground_tile,
+						"resource": resource,
+						"amount_delta": removed_amount,
+					}).get("added_amount", 0)
 				)
 
 	if rollback_amount != removed_amount:
@@ -11697,13 +10234,18 @@ static func transfer_city_food_endpoint_to_citizen_inventory(
 
 
 static func transfer_city_object_resource_to_citizen_inventory(
-	citizen_id: int,
-	object_id: int,
-	resource: String,
-	requested_amount: int,
-	withdrawal_purpose: String,
-	excluding_food_task_citizen_id: int = -1
+	values: Dictionary
 ) -> int:
+	var citizen_id := int(values.get("citizen_id", -1))
+	var object_id := int(values.get("object_id", -1))
+	var resource := str(values.get("resource", RESOURCE_NONE))
+	var requested_amount := int(values.get("requested_amount", 0))
+	var withdrawal_purpose := str(
+		values.get("withdrawal_purpose", CONTAINER_HAUL_PURPOSE_NONE)
+	)
+	var excluding_food_task_citizen_id := int(
+		values.get("excluding_food_task_citizen_id", -1)
+	)
 	if requested_amount <= 0:
 		return 0
 
@@ -12189,6 +10731,10 @@ static func remove_resource_from_city_object_storage(
 
 	return maxi(current_amount - final_amount, 0)
 
+#endregion
+
+#region Placed Objects and Roads
+
 static func occupy_city_object_tiles(city_object: Dictionary) -> void:
 	var object_id: int = int(city_object.get("id", -1))
 
@@ -12220,7 +10766,7 @@ static func has_city_object_type(object_type: String) -> bool:
 static func can_place_city_road_tile(city_world: WorldData, tile_position: Vector2i) -> bool:
 	return (
 		city_object_type_uses_construction(CITY_OBJECT_ROAD)
-		and can_place_city_construction_footprint(
+		and WorldData.can_place_city_construction_footprint(
 			city_world,
 			[tile_position]
 		)
@@ -12278,156 +10824,11 @@ static func add_city_road_object(
 
 	return city_object
 
-static func has_valid_world_map_texture_cache(source_world) -> bool:
-	if source_world == null:
-		return false
-
-	if world_map_mode_texture_cache.is_empty():
-		return false
-
-	if world_map_texture_cache_seed != source_world.seed:
-		return false
-
-	if world_map_texture_cache_size != Vector2i(source_world.width, source_world.height):
-		return false
-	
-	if world_map_texture_cache_visual_version != MapVisuals.MAP_VISUAL_CACHE_VERSION:
-		return false
-
-	return true
-
-static func store_world_map_texture_cache(source_world, texture_cache: Dictionary) -> void:
-	if source_world == null:
-		return
-
-	world_map_texture_cache_seed = source_world.seed
-	world_map_texture_cache_size = Vector2i(source_world.width, source_world.height)
-	world_map_mode_texture_cache = texture_cache.duplicate(false)
-	world_map_texture_cache_visual_version = MapVisuals.MAP_VISUAL_CACHE_VERSION
-
-static func get_world_map_texture_cache() -> Dictionary:
-	return world_map_mode_texture_cache.duplicate(false)
+#endregion
 
 
-static func clear_world_map_texture_cache() -> void:
-	world_map_mode_texture_cache.clear()
-	world_map_texture_cache_seed = -1
-	world_map_texture_cache_size = Vector2i.ZERO
 
-
-static func has_valid_city_map_texture_cache(source_city_world, source_city_seed: int) -> bool:
-	if source_city_world == null:
-		return false
-
-	if city_map_mode_texture_cache.is_empty():
-		return false
-
-	if city_map_texture_cache_seed != source_city_seed:
-		return false
-
-	if city_map_texture_cache_size != Vector2i(source_city_world.width, source_city_world.height):
-		return false
-		
-	if city_map_texture_cache_visual_version != MapVisuals.MAP_VISUAL_CACHE_VERSION:
-		return false
-		
-	return true
-
-
-static func store_city_map_texture_cache(
-	source_city_world,
-	source_city_seed: int,
-	texture_cache: Dictionary
-) -> void:
-	if source_city_world == null:
-		return
-
-	city_map_texture_cache_seed = source_city_seed
-	city_map_texture_cache_size = Vector2i(source_city_world.width, source_city_world.height)
-	city_map_mode_texture_cache = texture_cache.duplicate(false)
-	city_map_texture_cache_visual_version = MapVisuals.MAP_VISUAL_CACHE_VERSION
-
-static func get_city_map_texture_cache() -> Dictionary:
-	return city_map_mode_texture_cache.duplicate(false)
-
-
-static func clear_city_map_texture_cache() -> void:
-	city_map_mode_texture_cache.clear()
-	city_map_texture_cache_seed = -1
-	city_map_texture_cache_size = Vector2i.ZERO
-
-static func run_simulation_tick(
-	tick_index: int,
-	minutes_advanced: int,
-	duration_recorder: Callable = Callable()
-) -> void:
-	# Simulation systems run here in deterministic order.
-	# The optional recorder keeps profiling outside the simulation systems and
-	# avoids clock reads when the debug monitor is disabled.
-	var should_record_durations := duration_recorder.is_valid()
-	var system_start_usec := 0
-
-	if should_record_durations:
-		system_start_usec = Time.get_ticks_usec()
-
-	CitizenNeedsSystem.run_tick(
-		tick_index,
-		minutes_advanced
-	)
-
-	if should_record_durations:
-		duration_recorder.call(
-			SIMULATION_SYSTEM_CITIZEN_NEEDS,
-			Time.get_ticks_usec() - system_start_usec
-		)
-		system_start_usec = Time.get_ticks_usec()
-
-	CitizenDecisionSystem.run_tick(
-		tick_index,
-		minutes_advanced
-	)
-
-	if should_record_durations:
-		duration_recorder.call(
-			SIMULATION_SYSTEM_CITIZEN_DECISIONS,
-			Time.get_ticks_usec() - system_start_usec
-		)
-		system_start_usec = Time.get_ticks_usec()
-
-	CitizenMovementSystem.run_tick(
-		tick_index,
-		minutes_advanced
-	)
-
-	if should_record_durations:
-		duration_recorder.call(
-			SIMULATION_SYSTEM_CITIZEN_MOVEMENT,
-			Time.get_ticks_usec() - system_start_usec
-		)
-		system_start_usec = Time.get_ticks_usec()
-
-	CitizenTaskSystem.run_tick(
-		tick_index,
-		minutes_advanced
-	)
-
-	if should_record_durations:
-		duration_recorder.call(
-			SIMULATION_SYSTEM_CITIZEN_TASKS,
-			Time.get_ticks_usec() - system_start_usec
-		)
-		system_start_usec = Time.get_ticks_usec()
-
-	WorkplaceProductionSystem.run_tick(
-		tick_index,
-		minutes_advanced
-	)
-
-	if should_record_durations:
-		duration_recorder.call(
-			SIMULATION_SYSTEM_WORKPLACE_PRODUCTION,
-			Time.get_ticks_usec() - system_start_usec
-		)
+#region Simulation Tick and Session Reset
 
 static func reset_runtime_session_state(clear_debug: bool = false) -> void:
 	reset_world_session_state()
@@ -12450,7 +10851,7 @@ static func reset_world_session_state() -> void:
 
 	reset_city_start_region_state()
 	reset_world_camera_state()
-	clear_world_map_texture_cache()
+	MapTextureCacheStateScript.clear_world_cache()
 
 
 static func reset_city_session_state() -> void:
@@ -12458,7 +10859,7 @@ static func reset_city_session_state() -> void:
 	official_city_seed = 0
 
 	reset_city_camera_state()
-	clear_city_map_texture_cache()
+	MapTextureCacheStateScript.clear_city_cache()
 
 
 static func reset_city_start_region_state() -> void:
@@ -12470,19 +10871,19 @@ static func reset_city_start_region_state() -> void:
 
 
 static func reset_world_camera_state() -> void:
-	has_world_camera_state = false
-	world_camera_position = Vector2.ZERO
-	world_camera_zoom = Vector2.ONE
+	MapCameraSessionStateScript.reset_world_camera()
 
 
 static func reset_city_camera_state() -> void:
-	has_city_camera_state = false
-	city_camera_position = Vector2.ZERO
-	city_camera_zoom = Vector2.ONE
+	MapCameraSessionStateScript.reset_city_camera()
 
 static func clear_visual_texture_caches() -> void:
-	clear_world_map_texture_cache()
-	clear_city_map_texture_cache()
+	MapTextureCacheStateScript.clear_world_cache()
+	MapTextureCacheStateScript.clear_city_cache()
+
+#endregion
+
+#region Citizen Assignment Mutation
 
 static func get_city_object_worker_names(city_object: Dictionary) -> Array:
 	var worker_names := []
@@ -12985,3 +11386,5 @@ static func remove_city_citizen_job(citizen_id: int) -> bool:
 	)
 
 	return true
+
+#endregion

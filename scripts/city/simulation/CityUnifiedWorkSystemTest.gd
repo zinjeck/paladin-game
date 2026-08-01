@@ -70,14 +70,14 @@ func _test_unreachable_order_runtime_diagnostics() -> void:
 		WorldData.CITY_SURFACE_FEATURE_TREE
 	)
 	_expect(
-		WorldData.add_city_player_command_targets(
+		CityWorkSystem.add_city_player_command_targets(
 			WorldData.CITY_PLAYER_COMMAND_TYPE_CHOP_TREE,
 			[target_tile]
 		) == 1,
 		"The reachability fixture must create one valid command."
 	)
 	CityWorkSystemScript.synchronize_player_work_board()
-	var orders := WorldData.get_city_work_order_snapshot()
+	var orders := CityWorkSystem.get_city_work_order_snapshot()
 	var blocked_order: Dictionary = orders[0] if orders.size() == 1 else {}
 	var blocked_jobs: Array = blocked_order.get("jobs", [])
 	var blocked_job: Dictionary = (
@@ -115,7 +115,7 @@ func _test_unreachable_order_runtime_diagnostics() -> void:
 	gate_tile["is_land"] = true
 	CityWorkSystemScript.synchronize_player_work_board()
 	var recovered_order: Dictionary = (
-		WorldData.get_city_work_order_snapshot()[0]
+		CityWorkSystem.get_city_work_order_snapshot()[0]
 	)
 	var recovered_jobs: Array = recovered_order.get("jobs", [])
 	var recovered_job: Dictionary = (
@@ -152,7 +152,7 @@ func _test_parent_orders_and_two_level_fairness() -> void:
 		)
 		command_tiles.append(tile_position)
 
-	var designated_count := WorldData.add_city_player_command_targets(
+	var designated_count := CityWorkSystem.add_city_player_command_targets(
 		WorldData.CITY_PLAYER_COMMAND_TYPE_CHOP_TREE,
 		command_tiles
 	)
@@ -173,7 +173,7 @@ func _test_parent_orders_and_two_level_fairness() -> void:
 		return
 
 	_expect(
-		WorldData.add_resource_to_city_construction_site(
+		CityConstructionSystem.add_resource_to_city_construction_site(
 			site_id,
 			WorldData.RESOURCE_STONE,
 			1
@@ -183,7 +183,7 @@ func _test_parent_orders_and_two_level_fairness() -> void:
 	CityConstructionSystemScript.refresh_city_construction_site(site_id)
 	CityWorkSystemScript.synchronize_player_work_board()
 
-	var orders := WorldData.get_city_work_order_snapshot()
+	var orders := CityWorkSystem.get_city_work_order_snapshot()
 	var group_order: Dictionary = {}
 	var site_order: Dictionary = {}
 
@@ -232,7 +232,7 @@ func _test_parent_orders_and_two_level_fairness() -> void:
 	# Establish progress signatures, then make only the large group old and
 	# neglected. Its bounded neglect bonus must eventually overcome locality.
 	var group_order_id := int(group_order.get("id", -1))
-	var neglected_order := WorldData.get_city_work_order_by_id(group_order_id)
+	var neglected_order := CityWorkSystem.get_city_work_order_by_id(group_order_id)
 	SimulationClock.absolute_world_minutes = 240
 	neglected_order["created_world_minute"] = 0
 	neglected_order["last_progress_world_minute"] = 0
@@ -270,13 +270,13 @@ func _test_survival_food_fallback_and_reservation_accounting() -> void:
 	var fishery_size := WorldData.get_city_object_size_for_type(
 		WorldData.CITY_OBJECT_FISHING_GROUNDS
 	)
-	var fishery := WorldData.add_city_object(
-		WorldData.CITY_OBJECT_FISHING_GROUNDS,
-		Vector2i(10, 9),
-		fishery_size,
-		"player",
-		city_world
-	)
+	var fishery := WorldData.add_city_object({
+		"object_type": WorldData.CITY_OBJECT_FISHING_GROUNDS,
+		"top_left": Vector2i(10, 9),
+		"size_tiles": fishery_size,
+		"object_owner": "player",
+		"city_world": city_world,
+	})
 	var fishery_id := int(fishery.get("id", -1))
 	_expect(
 		WorldData.add_resource_to_city_object_storage(
@@ -287,11 +287,11 @@ func _test_survival_food_fallback_and_reservation_accounting() -> void:
 		"The fishery fixture must expose one unit of workplace output."
 	)
 
-	var pile_result := WorldData.add_resource_to_city_ground_piles_with_result(
-		Vector2i(7, 12),
-		WorldData.RESOURCE_FISH,
-		2
-	)
+	var pile_result := WorldData.add_resource_to_city_ground_piles_with_result({
+		"tile_position": Vector2i(7, 12),
+		"resource": WorldData.RESOURCE_FISH,
+		"amount_delta": 2,
+	})
 	var pile_id := _first_ground_pile_id(pile_result)
 	_expect(pile_id > 0, "The food fixture must create an ordinary fish pile.")
 
@@ -367,13 +367,13 @@ func _test_unreachable_food_tier_does_not_hide_fallbacks() -> void:
 	]
 
 	for top_left in stockpile_positions:
-		var stockpile := WorldData.add_city_object(
-			WorldData.CITY_OBJECT_STOCKPILE,
-			top_left,
-			stockpile_size,
-			"player",
-			city_world
-		)
+		var stockpile := WorldData.add_city_object({
+			"object_type": WorldData.CITY_OBJECT_STOCKPILE,
+			"top_left": top_left,
+			"size_tiles": stockpile_size,
+			"object_owner": "player",
+			"city_world": city_world,
+		})
 		_expect(
 			WorldData.add_resource_to_city_object_storage(
 				int(stockpile.get("id", -1)),
@@ -386,13 +386,13 @@ func _test_unreachable_food_tier_does_not_hide_fallbacks() -> void:
 	var fishery_size := WorldData.get_city_object_size_for_type(
 		WorldData.CITY_OBJECT_FISHING_GROUNDS
 	)
-	var fishery := WorldData.add_city_object(
-		WorldData.CITY_OBJECT_FISHING_GROUNDS,
-		Vector2i(23, 8),
-		fishery_size,
-		"player",
-		city_world
-	)
+	var fishery := WorldData.add_city_object({
+		"object_type": WorldData.CITY_OBJECT_FISHING_GROUNDS,
+		"top_left": Vector2i(23, 8),
+		"size_tiles": fishery_size,
+		"object_owner": "player",
+		"city_world": city_world,
+	})
 	var fishery_id := int(fishery.get("id", -1))
 	_expect(
 		WorldData.add_resource_to_city_object_storage(
@@ -403,11 +403,11 @@ func _test_unreachable_food_tier_does_not_hide_fallbacks() -> void:
 		"The reachable fallback workplace must contain fish."
 	)
 
-	var pile_result := WorldData.add_resource_to_city_ground_piles_with_result(
-		Vector2i(20, 13),
-		WorldData.RESOURCE_FISH,
-		1
-	)
+	var pile_result := WorldData.add_resource_to_city_ground_piles_with_result({
+		"tile_position": Vector2i(20, 13),
+		"resource": WorldData.RESOURCE_FISH,
+		"amount_delta": 1,
+	})
 	var pile_id := _first_ground_pile_id(pile_result)
 	_expect(pile_id > 0, "The reachable ground-food fallback must exist.")
 
@@ -514,36 +514,36 @@ func _test_food_candidate_rotation_prevents_budget_starvation() -> void:
 	var second := _add_hungry_citizen("Second scan", Vector2i(28, 15))
 	var first_id := int(first.get("id", -1))
 	var second_id := int(second.get("id", -1))
-	var house := WorldData.add_city_object(
-		WorldData.CITY_OBJECT_HOUSE,
-		Vector2i(7, 2),
-		WorldData.get_city_object_size_for_type(WorldData.CITY_OBJECT_HOUSE),
-		"player",
-		city_world
-	)
-	var stockpile := WorldData.add_city_object(
-		WorldData.CITY_OBJECT_STOCKPILE,
-		Vector2i(11, 2),
-		WorldData.get_city_object_size_for_type(WorldData.CITY_OBJECT_STOCKPILE),
-		"player",
-		city_world
-	)
-	var keep := WorldData.add_city_object(
-		WorldData.CITY_OBJECT_CITY_CENTER,
-		Vector2i(15, 1),
-		WorldData.get_city_object_size_for_type(WorldData.CITY_OBJECT_CITY_CENTER),
-		"player",
-		city_world
-	)
-	var fishery := WorldData.add_city_object(
-		WorldData.CITY_OBJECT_FISHING_GROUNDS,
-		Vector2i(21, 2),
-		WorldData.get_city_object_size_for_type(
-			WorldData.CITY_OBJECT_FISHING_GROUNDS
-		),
-		"player",
-		city_world
-	)
+	var house := WorldData.add_city_object({
+		"object_type": WorldData.CITY_OBJECT_HOUSE,
+		"top_left": Vector2i(7, 2),
+		"size_tiles": WorldData.get_city_object_size_for_type(WorldData.CITY_OBJECT_HOUSE),
+		"object_owner": "player",
+		"city_world": city_world,
+	})
+	var stockpile := WorldData.add_city_object({
+		"object_type": WorldData.CITY_OBJECT_STOCKPILE,
+		"top_left": Vector2i(11, 2),
+		"size_tiles": WorldData.get_city_object_size_for_type(WorldData.CITY_OBJECT_STOCKPILE),
+		"object_owner": "player",
+		"city_world": city_world,
+	})
+	var keep := WorldData.add_city_object({
+		"object_type": WorldData.CITY_OBJECT_CITY_CENTER,
+		"top_left": Vector2i(15, 1),
+		"size_tiles": WorldData.get_city_object_size_for_type(WorldData.CITY_OBJECT_CITY_CENTER),
+		"object_owner": "player",
+		"city_world": city_world,
+	})
+	var fishery := WorldData.add_city_object({
+		"object_type": WorldData.CITY_OBJECT_FISHING_GROUNDS,
+		"top_left": Vector2i(21, 2),
+		"size_tiles": WorldData.get_city_object_size_for_type(
+						WorldData.CITY_OBJECT_FISHING_GROUNDS
+					),
+		"object_owner": "player",
+		"city_world": city_world,
+	})
 
 	_expect(
 		WorldData.assign_city_citizen_home(
@@ -567,11 +567,11 @@ func _test_food_candidate_rotation_prevents_budget_starvation() -> void:
 			"Every populated food tier must contain one physical fish."
 		)
 
-	var pile_result := WorldData.add_resource_to_city_ground_piles_with_result(
-		Vector2i(27, 15),
-		WorldData.RESOURCE_FISH,
-		2
-	)
+	var pile_result := WorldData.add_resource_to_city_ground_piles_with_result({
+		"tile_position": Vector2i(27, 15),
+		"resource": WorldData.RESOURCE_FISH,
+		"amount_delta": 2,
+	})
 	var pile_id := _first_ground_pile_id(pile_result)
 	_expect(pile_id > 0, "The later citizen needs a reachable final-tier pile.")
 
@@ -677,13 +677,13 @@ func _test_full_storage_construction_relocation_and_cancel_preview() -> void:
 	var stockpile_size := WorldData.get_city_object_size_for_type(
 		WorldData.CITY_OBJECT_STOCKPILE
 	)
-	var stockpile := WorldData.add_city_object(
-		WorldData.CITY_OBJECT_STOCKPILE,
-		Vector2i(2, 2),
-		stockpile_size,
-		"player",
-		city_world
-	)
+	var stockpile := WorldData.add_city_object({
+		"object_type": WorldData.CITY_OBJECT_STOCKPILE,
+		"top_left": Vector2i(2, 2),
+		"size_tiles": stockpile_size,
+		"object_owner": "player",
+		"city_world": city_world,
+	})
 	var stockpile_id := int(stockpile.get("id", -1))
 	var stockpile_capacity := WorldData.get_city_object_storage_capacity(
 		stockpile
@@ -700,13 +700,13 @@ func _test_full_storage_construction_relocation_and_cancel_preview() -> void:
 	var house_size := WorldData.get_city_object_size_for_type(
 		WorldData.CITY_OBJECT_HOUSE
 	)
-	var house_site := CityConstructionSystemScript.create_rectangular_site(
-		WorldData.CITY_OBJECT_HOUSE,
-		Vector2i(15, 14),
-		house_size,
-		"player",
-		city_world
-	)
+	var house_site := CityConstructionSystemScript.create_rectangular_site({
+		"object_type": WorldData.CITY_OBJECT_HOUSE,
+		"top_left": Vector2i(15, 14),
+		"size_tiles": house_size,
+		"object_owner": "player",
+		"city_world": city_world,
+	})
 	var site_id := int(house_site.get("id", -1))
 	_expect(site_id > 0, "The relocation fixture must create a House blueprint.")
 
@@ -714,11 +714,11 @@ func _test_full_storage_construction_relocation_and_cancel_preview() -> void:
 		return
 
 	var footprint_tiles: Array = house_site.get("footprint_tiles", [])
-	var pile_result := WorldData.add_resource_to_city_ground_piles_with_result(
-		footprint_tiles[0],
-		WorldData.RESOURCE_COAL,
-		1
-	)
+	var pile_result := WorldData.add_resource_to_city_ground_piles_with_result({
+		"tile_position": footprint_tiles[0],
+		"resource": WorldData.RESOURCE_COAL,
+		"amount_delta": 1,
+	})
 	var pile_id := _first_ground_pile_id(pile_result)
 	CityConstructionSystemScript.refresh_city_construction_site(site_id)
 	CityWorkSystemScript.synchronize_player_work_board()
@@ -830,11 +830,11 @@ func _test_safe_boundary_and_cancellation_preserve_physical_cargo() -> void:
 	if site_id <= 0:
 		return
 
-	var source_result := WorldData.add_resource_to_city_ground_piles_with_result(
-		Vector2i(7, 7),
-		WorldData.RESOURCE_STONE,
-		2
-	)
+	var source_result := WorldData.add_resource_to_city_ground_piles_with_result({
+		"tile_position": Vector2i(7, 7),
+		"resource": WorldData.RESOURCE_STONE,
+		"amount_delta": 2,
+	})
 	var source_id := _first_ground_pile_id(source_result)
 	var source := WorldData.make_city_ground_pile_haul_endpoint(source_id)
 	var site_endpoint := WorldData.make_city_construction_site_haul_endpoint(
@@ -944,24 +944,24 @@ func _test_cargo_ready_demand_preempts_soft_claim() -> void:
 			tile_position.y
 		).erase("surface_feature")
 
-	var keep := WorldData.add_city_object(
-		WorldData.CITY_OBJECT_CITY_CENTER,
-		Vector2i(2, 2),
-		keep_size,
-		"player",
-		city_world
-	)
+	var keep := WorldData.add_city_object({
+		"object_type": WorldData.CITY_OBJECT_CITY_CENTER,
+		"top_left": Vector2i(2, 2),
+		"size_tiles": keep_size,
+		"object_owner": "player",
+		"city_world": city_world,
+	})
 	var keep_id := int(keep.get("id", -1))
 	var keep_endpoint := WorldData.make_city_citizen_haul_endpoint(
 		keep_id
 	)
-	var house_site := CityConstructionSystemScript.create_rectangular_site(
-		WorldData.CITY_OBJECT_HOUSE,
-		Vector2i(12, 9),
-		house_size,
-		"player",
-		city_world
-	)
+	var house_site := CityConstructionSystemScript.create_rectangular_site({
+		"object_type": WorldData.CITY_OBJECT_HOUSE,
+		"top_left": Vector2i(12, 9),
+		"size_tiles": house_size,
+		"object_owner": "player",
+		"city_world": city_world,
+	})
 	var site_id := int(house_site.get("id", -1))
 	var site_endpoint := (
 		WorldData.make_city_construction_site_haul_endpoint(site_id)
@@ -978,11 +978,11 @@ func _test_cargo_ready_demand_preempts_soft_claim() -> void:
 	if keep_id <= 0 or site_id <= 0:
 		return
 
-	var source_result := WorldData.add_resource_to_city_ground_piles_with_result(
-		Vector2i(24, 10),
-		WorldData.RESOURCE_STONE,
-		4
-	)
+	var source_result := WorldData.add_resource_to_city_ground_piles_with_result({
+		"tile_position": Vector2i(24, 10),
+		"resource": WorldData.RESOURCE_STONE,
+		"amount_delta": 4,
+	})
 	var source_id := _first_ground_pile_id(source_result)
 	var source_endpoint := WorldData.make_city_ground_pile_haul_endpoint(
 		source_id
@@ -1083,11 +1083,13 @@ func _test_cargo_ready_demand_preempts_soft_claim() -> void:
 	)
 	CitizenHaulingSystemScript._advance_pending_destination(
 		city_world,
-		carrier_id,
-		carrier,
-		carrier_task,
-		carrier_haul,
-		8
+		{
+			"citizen_id": carrier_id,
+			"citizen": carrier,
+			"current_task": carrier_task,
+			"haul": carrier_haul,
+			"path_requests_remaining": 8,
+		}
 	)
 	var final_reservation := WorldData.get_city_haul_reservation(
 		WorldData.get_city_haul_reservation_id_for_citizen(
@@ -1278,7 +1280,7 @@ func _first_ground_pile_id(add_result: Dictionary) -> int:
 
 
 func _find_order(order_type: String, source_id: int) -> Dictionary:
-	for raw_order in WorldData.get_city_work_order_snapshot():
+	for raw_order in CityWorkSystem.get_city_work_order_snapshot():
 		if (
 			raw_order is Dictionary
 			and str(raw_order.get("order_type", "")) == order_type

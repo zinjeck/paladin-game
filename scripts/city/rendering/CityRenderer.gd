@@ -1,6 +1,16 @@
 extends Node2D
 class_name CityRenderer
 
+# File responsibility: City-scene input, UI coordination, render-layer orchestration,
+# and high-level drawing. Specialized caches and diagnostic text live with their
+# dedicated presentation owners.
+
+const MapTextureCacheStateScript = preload(
+	"res://scripts/map/visuals/MapTextureCacheState.gd"
+)
+const MapCameraSessionStateScript = preload(
+	"res://scripts/map/MapCameraSessionState.gd"
+)
 const CityStateValidator = preload(
 	"res://scripts/city/simulation/CityStateValidator.gd"
 )
@@ -12,6 +22,9 @@ const CityCitizenMovementPresentationScript = preload(
 )
 const CitizenDebugPanelScript = preload(
 	"res://scripts/ui/debug/CitizenDebugPanel.gd"
+)
+const CityDebugPresentationScript = preload(
+	"res://scripts/city/rendering/CityDebugPresentation.gd"
 )
 const CityRenderLayerScript = preload(
 	"res://scripts/city/rendering/CityRenderLayer.gd"
@@ -237,8 +250,6 @@ const CITY_CITIZEN_MARKER_COLOR: Color = (
 const CITY_CITIZEN_MARKER_TILE_SCALE: float = 0.5
 const CITY_HAUL_CARGO_MARKER_CITIZEN_SCALE: float = 0.5
 const CITY_GROUND_PILE_MARKER_TILE_SCALE: float = 0.16
-const CITY_GROUND_PILE_BORDER_COLOR := Color(0.08, 0.08, 0.08, 0.95)
-const CITY_CONSTRUCTION_PILE_BORDER_COLOR := Color(1.0, 0.72, 0.08, 1.0)
 const CITY_CONSTRUCTION_CLEARING_COLOR := Color(1.0, 0.48, 0.08, 0.9)
 const CITY_CONSTRUCTION_GATHERING_COLOR := Color(0.12, 0.78, 1.0, 0.9)
 const CITY_CONSTRUCTION_LABOR_COLOR := Color(0.25, 1.0, 0.48, 0.9)
@@ -314,6 +325,22 @@ func _ready() -> void:
 
 
 func _process(delta: float) -> void:
+	_process_texture_cache_and_camera()
+	var city_hover_tile_changed := _update_city_hover_state()
+	_update_active_city_interaction_state()
+	var change_flags := _collect_city_change_flags()
+	_synchronize_city_citizen_movement(change_flags)
+
+	if city_citizen_movement_presentation.update(delta):
+		queue_city_citizen_layer_redraw()
+
+	_apply_city_change_refreshes(
+		change_flags,
+		city_hover_tile_changed
+	)
+
+
+func _process_texture_cache_and_camera() -> void:
 	if city_texture_cache != null:
 		city_texture_cache.process_warmup()
 
@@ -325,31 +352,36 @@ func _process(delta: float) -> void:
 		queue_city_citizen_layer_redraw()
 		queue_city_interaction_layer_redraw()
 
-	var current_hovered_tile := (
-		get_city_tile_under_mouse()
-	)
+
+func _update_city_hover_state() -> bool:
+	var current_hovered_tile := get_city_tile_under_mouse()
 	var city_hover_tile_changed := (
-		current_hovered_tile
-		!= hovered_city_tile
+		current_hovered_tile != hovered_city_tile
 	)
 
-	if city_hover_tile_changed:
-		hovered_city_tile = current_hovered_tile
-		update_debug_panel_text()
+	if not city_hover_tile_changed:
+		return false
 
-		var hover_visual_can_change := (
-			not has_selected_city_entity()
-			or has_active_city_object_placement()
-			or is_road_placement_active
-			or is_road_dragging
-			or is_object_selection_dragging
-			or is_city_player_command_tool_active()
-			or is_city_player_command_dragging
-		)
+	hovered_city_tile = current_hovered_tile
+	update_debug_panel_text()
 
-		if hover_visual_can_change:
-			queue_city_interaction_layer_redraw()
+	var hover_visual_can_change := (
+		not has_selected_city_entity()
+		or has_active_city_object_placement()
+		or is_road_placement_active
+		or is_road_dragging
+		or is_object_selection_dragging
+		or is_city_player_command_tool_active()
+		or is_city_player_command_dragging
+	)
 
+	if hover_visual_can_change:
+		queue_city_interaction_layer_redraw()
+
+	return true
+
+
+func _update_active_city_interaction_state() -> void:
 	if is_road_placement_active:
 		update_road_cursor_icon_position()
 
@@ -362,63 +394,80 @@ func _process(delta: float) -> void:
 	if selected_city_construction_site_id > 0:
 		update_construction_site_info_panel_screen_position()
 
-	var city_objects_changed := false
-	var city_containers_changed := false
-	var public_storage_changed := false
-	var city_citizens_changed := false
-	var city_citizen_spatial_changed := false
-	var city_citizen_movement_changed := false
-	var city_citizen_task_changed := false
-	var city_ground_piles_changed := false
-	var city_player_commands_changed := false
-	var city_haul_reservations_changed := false
-	var city_construction_changed := false
-	var city_assignments_changed := false
-	var city_workplaces_changed := false
-	var city_tile_data_changed := false
-	var city_surface_features_changed := false
 
-	if city_world != null:
-		if (
-			observed_city_tile_data_version
-			!= city_world.tile_data_version
-		):
-			observed_city_tile_data_version = (
-				city_world.tile_data_version
-			)
-			city_tile_data_changed = true
-			workplace_zone_overlay_cache.invalidate_all()
-			rebuild_city_natural_feature_multimeshes()
-			observed_city_surface_feature_change_version = (
-				city_world.city_surface_feature_change_version
-			)
-			city_world.consume_city_surface_feature_changes()
-		elif (
-			observed_city_surface_feature_change_version
-			!= city_world.city_surface_feature_change_version
-		):
-			observed_city_surface_feature_change_version = (
-				city_world.city_surface_feature_change_version
-			)
-			var surface_feature_changes := (
-				city_world.consume_city_surface_feature_changes()
-			)
+func _collect_city_change_flags() -> Dictionary:
+	var change_flags := {
+		"city_objects_changed": false,
+		"city_containers_changed": false,
+		"public_storage_changed": false,
+		"city_citizens_changed": false,
+		"city_citizen_spatial_changed": false,
+		"city_citizen_movement_changed": false,
+		"city_citizen_task_changed": false,
+		"city_ground_piles_changed": false,
+		"city_player_commands_changed": false,
+		"city_haul_reservations_changed": false,
+		"city_construction_changed": false,
+		"city_assignments_changed": false,
+		"city_workplaces_changed": false,
+		"city_tile_data_changed": false,
+		"city_surface_features_changed": false,
+	}
 
-			if not surface_feature_changes.is_empty():
-				city_surface_features_changed = true
+	_collect_city_world_change_flags(change_flags)
+	_collect_world_data_change_flags(change_flags)
+	return change_flags
 
-				if not apply_city_surface_feature_changes(
-					surface_feature_changes
-				):
-					rebuild_city_natural_feature_multimeshes()
 
+func _collect_city_world_change_flags(
+	change_flags: Dictionary
+) -> void:
+	if city_world == null:
+		return
+
+	if observed_city_tile_data_version != city_world.tile_data_version:
+		observed_city_tile_data_version = city_world.tile_data_version
+		change_flags["city_tile_data_changed"] = true
+		workplace_zone_overlay_cache.invalidate_all()
+		rebuild_city_natural_feature_multimeshes()
+		observed_city_surface_feature_change_version = (
+			city_world.city_surface_feature_change_version
+		)
+		city_world.consume_city_surface_feature_changes()
+		return
+
+	if (
+		observed_city_surface_feature_change_version
+		== city_world.city_surface_feature_change_version
+	):
+		return
+
+	observed_city_surface_feature_change_version = (
+		city_world.city_surface_feature_change_version
+	)
+	var surface_feature_changes := (
+		city_world.consume_city_surface_feature_changes()
+	)
+
+	if surface_feature_changes.is_empty():
+		return
+
+	change_flags["city_surface_features_changed"] = true
+
+	if not apply_city_surface_feature_changes(surface_feature_changes):
+		rebuild_city_natural_feature_multimeshes()
+
+
+func _collect_world_data_change_flags(
+	change_flags: Dictionary
+) -> void:
 	if observed_city_object_version != WorldData.city_object_version:
 		observed_city_object_version = WorldData.city_object_version
-		city_objects_changed = true
+		change_flags["city_objects_changed"] = true
 
 	if observed_city_container_version != WorldData.city_container_version:
 		observed_city_container_version = WorldData.city_container_version
-		city_containers_changed = true
+		change_flags["city_containers_changed"] = true
 
 	if (
 		observed_city_public_storage_version
@@ -427,11 +476,11 @@ func _process(delta: float) -> void:
 		observed_city_public_storage_version = (
 			WorldData.city_public_storage_version
 		)
-		public_storage_changed = true
+		change_flags["public_storage_changed"] = true
 
 	if observed_city_citizen_version != WorldData.city_citizen_version:
 		observed_city_citizen_version = WorldData.city_citizen_version
-		city_citizens_changed = true
+		change_flags["city_citizens_changed"] = true
 
 	if (
 		observed_city_citizen_spatial_version
@@ -440,7 +489,7 @@ func _process(delta: float) -> void:
 		observed_city_citizen_spatial_version = (
 			WorldData.city_citizen_spatial_version
 		)
-		city_citizen_spatial_changed = true
+		change_flags["city_citizen_spatial_changed"] = true
 
 	if (
 		observed_city_citizen_movement_version
@@ -449,7 +498,7 @@ func _process(delta: float) -> void:
 		observed_city_citizen_movement_version = (
 			WorldData.city_citizen_movement_version
 		)
-		city_citizen_movement_changed = true
+		change_flags["city_citizen_movement_changed"] = true
 
 	if (
 		observed_city_citizen_task_version
@@ -458,7 +507,7 @@ func _process(delta: float) -> void:
 		observed_city_citizen_task_version = (
 			WorldData.city_citizen_task_version
 		)
-		city_citizen_task_changed = true
+		change_flags["city_citizen_task_changed"] = true
 
 	if (
 		observed_city_ground_pile_version
@@ -467,7 +516,7 @@ func _process(delta: float) -> void:
 		observed_city_ground_pile_version = (
 			WorldData.city_ground_pile_version
 		)
-		city_ground_piles_changed = true
+		change_flags["city_ground_piles_changed"] = true
 
 	if (
 		observed_city_player_command_version
@@ -476,7 +525,7 @@ func _process(delta: float) -> void:
 		observed_city_player_command_version = (
 			WorldData.city_player_command_version
 		)
-		city_player_commands_changed = true
+		change_flags["city_player_commands_changed"] = true
 
 	if (
 		observed_city_haul_reservation_version
@@ -485,7 +534,7 @@ func _process(delta: float) -> void:
 		observed_city_haul_reservation_version = (
 			WorldData.city_haul_reservation_version
 		)
-		city_haul_reservations_changed = true
+		change_flags["city_haul_reservations_changed"] = true
 
 	if (
 		observed_city_construction_version
@@ -494,7 +543,7 @@ func _process(delta: float) -> void:
 		observed_city_construction_version = (
 			WorldData.city_construction_version
 		)
-		city_construction_changed = true
+		change_flags["city_construction_changed"] = true
 
 	if (
 		observed_city_assignment_version
@@ -503,7 +552,7 @@ func _process(delta: float) -> void:
 		observed_city_assignment_version = (
 			WorldData.city_assignment_version
 		)
-		city_assignments_changed = true
+		change_flags["city_assignments_changed"] = true
 
 	if (
 		observed_city_workplace_version
@@ -512,9 +561,17 @@ func _process(delta: float) -> void:
 		observed_city_workplace_version = (
 			WorldData.city_workplace_version
 		)
-		city_workplaces_changed = true
+		change_flags["city_workplaces_changed"] = true
 
-	if city_citizen_movement_changed:
+
+func _synchronize_city_citizen_movement(
+	change_flags: Dictionary
+) -> void:
+	var movement_changed := bool(
+		change_flags.get("city_citizen_movement_changed", false)
+	)
+
+	if movement_changed:
 		if (
 			synchronized_city_citizen_movement_version
 			!= observed_city_citizen_movement_version
@@ -526,13 +583,71 @@ func _process(delta: float) -> void:
 			synchronized_city_citizen_movement_version = (
 				observed_city_citizen_movement_version
 			)
-	elif city_citizens_changed or city_citizen_spatial_changed:
+		return
+
+	if (
+		bool(change_flags.get("city_citizens_changed", false))
+		or bool(
+			change_flags.get(
+				"city_citizen_spatial_changed",
+				false
+			)
+		)
+	):
 		# Non-movement position edits are teleports. Refresh any tracked mover
 		# without animating from a stale tile.
 		city_citizen_movement_presentation.synchronize(false)
 
-	if city_citizen_movement_presentation.update(delta):
-		queue_city_citizen_layer_redraw()
+
+func _apply_city_change_refreshes(
+	change_flags: Dictionary,
+	city_hover_tile_changed: bool
+) -> void:
+	var city_objects_changed := bool(
+		change_flags.get("city_objects_changed", false)
+	)
+	var city_containers_changed := bool(
+		change_flags.get("city_containers_changed", false)
+	)
+	var public_storage_changed := bool(
+		change_flags.get("public_storage_changed", false)
+	)
+	var city_citizens_changed := bool(
+		change_flags.get("city_citizens_changed", false)
+	)
+	var city_citizen_spatial_changed := bool(
+		change_flags.get("city_citizen_spatial_changed", false)
+	)
+	var city_citizen_movement_changed := bool(
+		change_flags.get("city_citizen_movement_changed", false)
+	)
+	var city_citizen_task_changed := bool(
+		change_flags.get("city_citizen_task_changed", false)
+	)
+	var city_ground_piles_changed := bool(
+		change_flags.get("city_ground_piles_changed", false)
+	)
+	var city_player_commands_changed := bool(
+		change_flags.get("city_player_commands_changed", false)
+	)
+	var city_haul_reservations_changed := bool(
+		change_flags.get("city_haul_reservations_changed", false)
+	)
+	var city_construction_changed := bool(
+		change_flags.get("city_construction_changed", false)
+	)
+	var city_assignments_changed := bool(
+		change_flags.get("city_assignments_changed", false)
+	)
+	var city_workplaces_changed := bool(
+		change_flags.get("city_workplaces_changed", false)
+	)
+	var city_tile_data_changed := bool(
+		change_flags.get("city_tile_data_changed", false)
+	)
+	var city_surface_features_changed := bool(
+		change_flags.get("city_surface_features_changed", false)
+	)
 
 	if (
 		has_active_city_object_placement()
@@ -553,10 +668,7 @@ func _process(delta: float) -> void:
 	):
 		refresh_selected_workplace_zone_cache()
 
-	if (
-		city_containers_changed
-		or public_storage_changed
-	):
+	if city_containers_changed or public_storage_changed:
 		update_resource_bar_values()
 
 	if (
@@ -943,12 +1055,12 @@ func create_city_camera() -> void:
 		city_world.width,
 		city_world.height,
 		city_tile_size,
-		not WorldData.has_city_camera_state
+		not MapCameraSessionStateScript.has_city_camera_state
 	)
 
-	if WorldData.has_city_camera_state:
-		camera.position = WorldData.city_camera_position
-		camera.zoom = WorldData.city_camera_zoom
+	if MapCameraSessionStateScript.has_city_camera_state:
+		camera.position = MapCameraSessionStateScript.city_camera_position
+		camera.zoom = MapCameraSessionStateScript.city_camera_zoom
 		camera.clamp_camera_to_map_bounds()
 
 	camera.make_current()
@@ -958,9 +1070,10 @@ func store_current_city_camera_state() -> void:
 	if camera == null:
 		return
 
-	WorldData.city_camera_position = camera.position
-	WorldData.city_camera_zoom = camera.zoom
-	WorldData.has_city_camera_state = true
+	MapCameraSessionStateScript.store_city_camera(
+		camera.position,
+		camera.zoom
+	)
 
 #endregion
 
@@ -2538,7 +2651,7 @@ func update_selected_city_citizen_panel() -> void:
 	var state_text := str(
 		citizen.get("state", "unknown")
 	).capitalize()
-	var task_text := get_citizen_debug_task_text(citizen)
+	var task_text := CitizenDebugPanelScript.get_task_text(citizen)
 	var task_target_text := "none"
 	var raw_current_task = citizen.get("current_task", {})
 
@@ -2601,11 +2714,11 @@ func update_selected_city_citizen_panel() -> void:
 			)
 			+ " nutrition",
 		"Home: "
-			+ get_citizen_debug_home_text(
+			+ CitizenDebugPanelScript.get_home_text(
 				citizen
 			),
 		"Workplace: "
-			+ get_citizen_debug_job_text(
+			+ CitizenDebugPanelScript.get_job_text(
 				citizen
 			)
 	]
@@ -2747,109 +2860,14 @@ func get_citizen_haul_status_lines(
 func get_city_resource_manifest_display_text(
 	resources: Dictionary
 ) -> String:
-	if resources.is_empty():
-		return "Empty"
-
-	var resource_names: Array = resources.keys()
-	resource_names.sort()
-	var parts: Array[String] = []
-
-	for raw_resource in resource_names:
-		var resource := str(raw_resource)
-		var amount := maxi(int(resources.get(raw_resource, 0)), 0)
-
-		if amount <= 0:
-			continue
-
-		parts.append(resource.capitalize() + " " + str(amount))
-
-	if parts.is_empty():
-		return "Empty"
-
-	return ", ".join(parts)
-
-
-func get_haul_endpoint_display_text(
-	raw_endpoint
-) -> String:
-	if not raw_endpoint is Dictionary:
-		return "invalid"
-
-	var endpoint: Dictionary = raw_endpoint
-	var endpoint_kind := str(
-		endpoint.get(
-			"kind",
-			WorldData.CITY_CITIZEN_HAUL_ENDPOINT_KIND_NONE
-		)
-	)
-	var endpoint_id := int(endpoint.get("id", -1))
-
-	if endpoint_kind == WorldData.CITY_CITIZEN_HAUL_ENDPOINT_KIND_NONE:
-		return "none"
-
-	if (
-		endpoint_kind
-		== WorldData.CITY_CITIZEN_HAUL_ENDPOINT_KIND_GROUND_PILE
-	):
-		var ground_pile := WorldData.get_city_ground_pile_by_id(
-			endpoint_id
-		)
-
-		if ground_pile.is_empty():
-			return "missing ground pile #" + str(endpoint_id)
-
-		return (
-			"Ground Pile #"
-			+ str(endpoint_id)
-			+ " ("
-			+ str(
-				ground_pile.get(
-					"resource_type",
-					WorldData.RESOURCE_NONE
-				)
-			).capitalize()
-			+ " "
-			+ str(maxi(int(ground_pile.get("amount", 0)), 0))
-			+ ")"
-		)
-
-	if (
-		endpoint_kind
-		== WorldData.CITY_CITIZEN_HAUL_ENDPOINT_KIND_CONSTRUCTION_SITE
-	):
-		var site := WorldData.get_city_construction_site_by_id(
-			endpoint_id
-		)
-
-		if site.is_empty():
-			return "missing construction site #" + str(endpoint_id)
-
-		return (
-			WorldData.get_city_object_display_name_for_type(
-				str(site.get("object_type", ""))
-			)
-			+ " Blueprint #"
-			+ str(endpoint_id)
-		)
-
-	if (
-		endpoint_kind
-		!= WorldData
-		.CITY_CITIZEN_HAUL_ENDPOINT_KIND_CITY_OBJECT_CONTAINER
-	):
-		return endpoint_kind + " #" + str(endpoint_id)
-
-	var city_object := get_city_object_by_id(endpoint_id)
-
-	if city_object.is_empty():
-		return "missing #" + str(endpoint_id)
-
-	return (
-		get_city_object_display_name(city_object)
-		+ " #"
-		+ str(endpoint_id)
+	return CitizenDebugPanelScript.format_resource_manifest(
+		resources
 	)
 
+func get_haul_endpoint_display_text(raw_endpoint) -> String:
+	return CitizenDebugPanelScript.format_haul_endpoint(
+		raw_endpoint
+	)
 
 func update_citizen_inventory_display(
 	citizen: Dictionary
@@ -3120,27 +3138,34 @@ func update_selected_entity_panel() -> void:
 
 	hide_construction_site_info_panel()
 
-	if (
-		selected_city_entity_kind
-		== CITY_SELECTION_KIND_CITIZEN
-	):
+	if selected_city_entity_kind == CITY_SELECTION_KIND_CITIZEN:
 		update_selected_city_citizen_panel()
 		return
 
 	if selected_city_object_id < 0:
-		object_info_panel.visible = false
-		hide_object_info_storage_display()
-		hide_workplace_details_ui()
+		_hide_selected_city_object_panel()
 		return
 
-	var city_object: Dictionary = get_city_object_by_id(selected_city_object_id)
+	var city_object: Dictionary = get_city_object_by_id(
+		selected_city_object_id
+	)
 
 	if city_object.is_empty():
-		object_info_panel.visible = false
-		hide_object_info_storage_display()
-		hide_workplace_details_ui()
+		_hide_selected_city_object_panel()
 		return
 
+	_update_selected_city_object_panel(city_object)
+
+
+func _hide_selected_city_object_panel() -> void:
+	object_info_panel.visible = false
+	hide_object_info_storage_display()
+	hide_workplace_details_ui()
+
+
+func _update_selected_city_object_panel(
+	city_object: Dictionary
+) -> void:
 	object_info_panel.visible = true
 
 	var object_type: String = str(city_object["type"])
@@ -3148,315 +3173,44 @@ func update_selected_entity_panel() -> void:
 	if object_type == WorldData.CITY_OBJECT_CITY_CENTER:
 		object_info_title_label.text = "City Keep"
 	else:
-		object_info_title_label.text = get_city_object_display_name(city_object)
-
-	var top_left: Vector2i = city_object.get("top_left", Vector2i(-1, -1))
-	var size_tiles: Vector2i = city_object.get("size", Vector2i.ZERO)
-
-	var container_type := WorldData.get_city_object_container_type(city_object)
-	var container_text := get_container_type_display_name(container_type)
-	var is_workplace: bool = (
-		WorldData.city_object_is_workplace(city_object)
-	)
-	var workplace_detail_lines: Array = []
+		object_info_title_label.text = get_city_object_display_name(
+			city_object
+		)
 
 	var body_lines: Array = [
 		"Object: " + get_city_object_display_name(city_object)
 	]
+	var workplace_detail_lines: Array = []
+	var is_workplace := WorldData.city_object_is_workplace(
+		city_object
+	)
 
 	if object_type == WorldData.CITY_OBJECT_CITY_CENTER:
-		body_lines.append(
-			"Population: " 
-			+ str(WorldData.get_city_population_count())
-		)
-		body_lines.append(
-			"Male: "
-			+ str(
-				WorldData.get_city_citizen_count_by_sex(
-					WorldData.CITY_CITIZEN_SEX_MALE
-				)
-			)
-			+ " | Female: "
-			+ str(
-				WorldData.get_city_citizen_count_by_sex(
-					WorldData.CITY_CITIZEN_SEX_FEMALE
-				)
-			)
-		)
-		body_lines.append(
-			"Housed: "
-			+ str(WorldData.get_city_housed_citizen_count())
-			+ " / "
-			+ str(WorldData.get_total_city_resident_capacity())
-		)
-		body_lines.append("Unemployed: " + str(WorldData.get_city_unemployed_citizen_count()))
+		_append_city_center_object_info(body_lines)
 	elif object_type == WorldData.CITY_OBJECT_HOUSE:
-		body_lines.append(
-			"Residents: "
-			+ str(WorldData.get_city_object_resident_count(city_object))
-			+ " / "
-			+ str(WorldData.get_city_object_resident_capacity(city_object))
-		)
-		var food_supply := WorldData.get_city_home_food_supply_status(
-			city_object
-		)
-		body_lines.append(
-			"Food reserve: "
-			+ str(int(food_supply.get("stored_nutrition", 0)))
-			+ " / "
-			+ str(int(food_supply.get("target_nutrition", 0)))
-			+ " nutrition"
-		)
-		body_lines.append(
-			"Incoming food: "
-			+ str(int(food_supply.get("incoming_nutrition", 0)))
-			+ " | Unfilled: "
-			+ str(int(food_supply.get("unfulfilled_nutrition", 0)))
-		)
-
-		var resident_names := WorldData.get_city_object_resident_names(city_object)
-
-		for resident_name in resident_names:
-			body_lines.append("- " + str(resident_name))
-	
+		_append_house_object_info({
+			"city_object": city_object,
+			"body_lines": body_lines,
+		})
 	elif is_workplace:
-		var production_status := (
-			WorldData.get_city_object_production_status(
-				city_object
-			)
-		)
-
-		body_lines.append(
-			"Status: "
-			+ get_workplace_production_status_display_name(
-				production_status
-			)
-		)
-
-		body_lines.append(
-			"Assigned: "
-			+ str(
-				WorldData.get_city_object_worker_count(
-					city_object
-				)
-			)
-			+ " / "
-			+ str(
-				WorldData.get_city_object_worker_capacity(
-					city_object
-				)
-			)
-		)
-
-		body_lines.append(
-			"Present: "
-			+ str(
-				WorldData.get_city_object_attending_worker_count(
-					city_object
-				)
-			)
-		)
-
-		body_lines.append(
-			"Productive: "
-			+ str(
-				WorldData.get_city_object_productive_worker_count(
-					city_object
-				)
-			)
-		)
-
-		var worker_names := (
-			WorldData.get_city_object_worker_names(
-				city_object
-			)
-		)
-
-		for worker_name in worker_names:
-			body_lines.append("- " + str(worker_name))
-
-		var output_resources := (
-			WorldData.get_city_object_output_resources(
-				city_object
-			)
-		)
-
-		if not output_resources.is_empty():
-			var output_names: Array[String] = []
-
-			for output_resource in output_resources:
-				output_names.append(
-					output_resource.capitalize()
-				)
-
-			workplace_detail_lines.append(
-				"Output: "
-					+ ", ".join(output_names)
-			)
-
-		var production_recipe := (
-			WorldData.get_city_object_production_recipe(
-				city_object
-			)
-		)
-		var work_units_per_batch := int(
-			production_recipe.get(
-				"work_units_per_batch",
-				0
-			)
-		)
-		var progress_work_units := (
-			WorldData.get_city_object_production_progress_work_units(
-				city_object
-			)
-		)
-
-		if work_units_per_batch > 0:
-			workplace_detail_lines.append(
-				"Progress: "
-					+ str(progress_work_units)
-				+ " / "
-				+ str(work_units_per_batch)
-			)
-
-		for output_resource in output_resources:
-			var output_per_hour := (
-				WorkplaceProductionSystem.get_estimated_output_per_hour(
-					city_object,
-					output_resource
-				)
-			)
-
-			workplace_detail_lines.append(
-				"Rate: "
-				+ format_compact_production_number(
-					output_per_hour
-				)
-				+ " "
-				+ output_resource
-				+ "/hour"
-			)
-		var source_evaluation := (
-			WorkplaceProductionSystem.get_resource_source_evaluation(
-				city_object,
-				city_world
-			)
-		)
-
-		if bool(
-			source_evaluation.get(
-				"uses_environmental_source",
-				false
-			)
-		):
-			var source_resource := str(
-				source_evaluation.get(
-					"resource_type",
-					WorldData.RESOURCE_NONE
-				)
-			)
-			var resource_tile_count := int(
-				source_evaluation.get(
-					"resource_tile_count",
-					0
-				)
-			)
-			var zone_tile_count := int(
-				source_evaluation.get(
-					"zone_tile_count",
-					0
-				)
-			)
-			var density_percentage := (
-				float(
-					source_evaluation.get(
-						"density_basis_points",
-						0
-					)
-				)
-				/ 100.0
-			)
-			var full_productivity_density_percentage := (
-				float(
-					source_evaluation.get(
-						"source_density_for_full_productivity_basis_points",
-						0
-					)
-				)
-				/ 100.0
-			)
-			var reach_tiles := int(
-				source_evaluation.get(
-					"reach_tiles",
-					0
-				)
-			)
-
-			workplace_detail_lines.append(
-				source_resource.capitalize()
-				+ " Source: "
-				+ str(resource_tile_count)
-				+ " / "
-				+ str(zone_tile_count)
-				+ " zone tiles"
-			)
-
-			workplace_detail_lines.append(
-				"Density: "
-				+ format_compact_production_number(
-					density_percentage
-				)
-				+ "% | Full Density: "
-				+ format_compact_production_number(
-					full_productivity_density_percentage
-				)
-				+ "% | Reach: "
-				+ str(reach_tiles)
-			)
-
-		var site_productivity_percentage := (
-			float(
-				WorkplaceProductionSystem.get_current_site_productivity_basis_points(
-					city_object,
-					city_world
-				)
-			)
-			/ 100.0
-		)
-
-		workplace_detail_lines.append(
-			"Site Productivity: "
-			+ format_compact_production_number(
-				site_productivity_percentage
-			)
-			+ "%"
-		)
+		_append_workplace_object_info({
+			"city_object": city_object,
+			"body_lines": body_lines,
+			"workplace_detail_lines": workplace_detail_lines,
+		})
 
 	var metadata_lines: Array = body_lines
 
 	if is_workplace:
 		metadata_lines = workplace_detail_lines
 
-	metadata_lines.append(
-		"Owner: "
-			+ str(city_object.get("owner", "none"))
-	)
-	metadata_lines.append("Container: " + container_text)
-	metadata_lines.append(
-		"Position: "
-			+ str(top_left.x)
-			+ ", "
-			+ str(top_left.y)
-	)
-	metadata_lines.append(
-		"Size: "
-			+ str(size_tiles.x)
-			+ " x "
-			+ str(size_tiles.y)
-	)
+	_append_selected_object_metadata({
+		"city_object": city_object,
+		"metadata_lines": metadata_lines,
+	})
 
-	object_info_body_label.text = (
-		get_object_info_lines_text(body_lines)
+	object_info_body_label.text = get_object_info_lines_text(
+		body_lines
 	)
 
 	if is_workplace:
@@ -3467,8 +3221,296 @@ func update_selected_entity_panel() -> void:
 		)
 	else:
 		hide_workplace_details_ui()
-	
+
 	update_object_info_storage_display(city_object)
+
+
+func _append_city_center_object_info(body_lines: Array) -> void:
+	body_lines.append(
+		"Population: "
+		+ str(WorldData.get_city_population_count())
+	)
+	body_lines.append(
+		"Male: "
+		+ str(
+			WorldData.get_city_citizen_count_by_sex(
+				WorldData.CITY_CITIZEN_SEX_MALE
+			)
+		)
+		+ " | Female: "
+		+ str(
+			WorldData.get_city_citizen_count_by_sex(
+				WorldData.CITY_CITIZEN_SEX_FEMALE
+			)
+		)
+	)
+	body_lines.append(
+		"Housed: "
+		+ str(WorldData.get_city_housed_citizen_count())
+		+ " / "
+		+ str(WorldData.get_total_city_resident_capacity())
+	)
+	body_lines.append(
+		"Unemployed: "
+		+ str(WorldData.get_city_unemployed_citizen_count())
+	)
+
+
+func _append_house_object_info(values: Dictionary) -> void:
+	var city_object: Dictionary = values.get("city_object", {})
+	var body_lines: Array = values.get("body_lines", [])
+
+	body_lines.append(
+		"Residents: "
+		+ str(WorldData.get_city_object_resident_count(city_object))
+		+ " / "
+		+ str(WorldData.get_city_object_resident_capacity(city_object))
+	)
+	var food_supply := CityResourceMatcher.get_city_home_food_supply_status(
+		city_object
+	)
+	body_lines.append(
+		"Food reserve: "
+		+ str(int(food_supply.get("stored_nutrition", 0)))
+		+ " / "
+		+ str(int(food_supply.get("target_nutrition", 0)))
+		+ " nutrition"
+	)
+	body_lines.append(
+		"Incoming food: "
+		+ str(int(food_supply.get("incoming_nutrition", 0)))
+		+ " | Unfilled: "
+		+ str(int(food_supply.get("unfulfilled_nutrition", 0)))
+	)
+
+	var resident_names := WorldData.get_city_object_resident_names(
+		city_object
+	)
+
+	for resident_name in resident_names:
+		body_lines.append("- " + str(resident_name))
+
+
+func _append_workplace_object_info(values: Dictionary) -> void:
+	var city_object: Dictionary = values.get("city_object", {})
+	var body_lines: Array = values.get("body_lines", [])
+	var workplace_detail_lines: Array = values.get(
+		"workplace_detail_lines",
+		[]
+	)
+	var production_status := WorldData.get_city_object_production_status(
+		city_object
+	)
+
+	body_lines.append(
+		"Status: "
+		+ get_workplace_production_status_display_name(
+			production_status
+		)
+	)
+	body_lines.append(
+		"Assigned: "
+		+ str(WorldData.get_city_object_worker_count(city_object))
+		+ " / "
+		+ str(WorldData.get_city_object_worker_capacity(city_object))
+	)
+	body_lines.append(
+		"Present: "
+		+ str(
+			WorldData.get_city_object_attending_worker_count(
+				city_object
+			)
+		)
+	)
+	body_lines.append(
+		"Productive: "
+		+ str(
+			WorldData.get_city_object_productive_worker_count(
+				city_object
+			)
+		)
+	)
+
+	var worker_names := WorldData.get_city_object_worker_names(
+		city_object
+	)
+
+	for worker_name in worker_names:
+		body_lines.append("- " + str(worker_name))
+
+	var output_resources := WorldData.get_city_object_output_resources(
+		city_object
+	)
+
+	if not output_resources.is_empty():
+		var output_names: Array[String] = []
+
+		for output_resource in output_resources:
+			output_names.append(output_resource.capitalize())
+
+		workplace_detail_lines.append(
+			"Output: " + ", ".join(output_names)
+		)
+
+	var production_recipe := WorldData.get_city_object_production_recipe(
+		city_object
+	)
+	var work_units_per_batch := int(
+		production_recipe.get("work_units_per_batch", 0)
+	)
+	var progress_work_units := (
+		WorldData.get_city_object_production_progress_work_units(
+			city_object
+		)
+	)
+
+	if work_units_per_batch > 0:
+		workplace_detail_lines.append(
+			"Progress: "
+			+ str(progress_work_units)
+			+ " / "
+			+ str(work_units_per_batch)
+		)
+
+	for output_resource in output_resources:
+		var output_per_hour := (
+			WorkplaceProductionSystem.get_estimated_output_per_hour(
+				city_object,
+				output_resource
+			)
+		)
+
+		workplace_detail_lines.append(
+			"Rate: "
+			+ format_compact_production_number(output_per_hour)
+			+ " "
+			+ output_resource
+			+ "/hour"
+		)
+
+	_append_workplace_resource_source_details({
+		"city_object": city_object,
+		"workplace_detail_lines": workplace_detail_lines,
+	})
+
+	var site_productivity_percentage := (
+		float(
+			WorkplaceProductionSystem.get_current_site_productivity_basis_points(
+				city_object,
+				city_world
+			)
+		)
+		/ 100.0
+	)
+	workplace_detail_lines.append(
+		"Site Productivity: "
+		+ format_compact_production_number(
+			site_productivity_percentage
+		)
+		+ "%"
+	)
+
+
+func _append_workplace_resource_source_details(
+	values: Dictionary
+) -> void:
+	var city_object: Dictionary = values.get("city_object", {})
+	var workplace_detail_lines: Array = values.get(
+		"workplace_detail_lines",
+		[]
+	)
+	var source_evaluation := (
+		WorkplaceProductionSystem.get_resource_source_evaluation(
+			city_object,
+			city_world
+		)
+	)
+
+	if not bool(
+		source_evaluation.get("uses_environmental_source", false)
+	):
+		return
+
+	var source_resource := str(
+		source_evaluation.get(
+			"resource_type",
+			WorldData.RESOURCE_NONE
+		)
+	)
+	var resource_tile_count := int(
+		source_evaluation.get("resource_tile_count", 0)
+	)
+	var zone_tile_count := int(
+		source_evaluation.get("zone_tile_count", 0)
+	)
+	var density_percentage := (
+		float(source_evaluation.get("density_basis_points", 0))
+		/ 100.0
+	)
+	var full_productivity_density_percentage := (
+		float(
+			source_evaluation.get(
+				"source_density_for_full_productivity_basis_points",
+				0
+			)
+		)
+		/ 100.0
+	)
+	var reach_tiles := int(source_evaluation.get("reach_tiles", 0))
+
+	workplace_detail_lines.append(
+		source_resource.capitalize()
+		+ " Source: "
+		+ str(resource_tile_count)
+		+ " / "
+		+ str(zone_tile_count)
+		+ " zone tiles"
+	)
+	workplace_detail_lines.append(
+		"Density: "
+		+ format_compact_production_number(density_percentage)
+		+ "% | Full Density: "
+		+ format_compact_production_number(
+			full_productivity_density_percentage
+		)
+		+ "% | Reach: "
+		+ str(reach_tiles)
+	)
+
+
+func _append_selected_object_metadata(values: Dictionary) -> void:
+	var city_object: Dictionary = values.get("city_object", {})
+	var metadata_lines: Array = values.get("metadata_lines", [])
+	var top_left: Vector2i = city_object.get(
+		"top_left",
+		Vector2i(-1, -1)
+	)
+	var size_tiles: Vector2i = city_object.get(
+		"size",
+		Vector2i.ZERO
+	)
+	var container_type := WorldData.get_city_object_container_type(
+		city_object
+	)
+
+	metadata_lines.append(
+		"Owner: " + str(city_object.get("owner", "none"))
+	)
+	metadata_lines.append(
+		"Container: " + get_container_type_display_name(container_type)
+	)
+	metadata_lines.append(
+		"Position: "
+		+ str(top_left.x)
+		+ ", "
+		+ str(top_left.y)
+	)
+	metadata_lines.append(
+		"Size: "
+		+ str(size_tiles.x)
+		+ " x "
+		+ str(size_tiles.y)
+	)
 
 func update_object_info_storage_display(
 	city_object: Dictionary
@@ -3696,7 +3738,7 @@ func finish_city_player_command_drag(screen_position: Vector2) -> void:
 			city_player_command_drag_preview_tiles
 		)
 	else:
-		WorldData.add_city_player_command_targets(
+		CityWorkSystem.add_city_player_command_targets(
 			active_city_player_command_type,
 			city_player_command_drag_preview_tiles
 		)
@@ -3731,7 +3773,7 @@ func refresh_city_player_command_drag_preview() -> void:
 		return
 
 	for tile_position in drag_tiles:
-		if WorldData.can_designate_city_player_command_at_tile(
+		if CityWorkSystem.can_designate_city_player_command_at_tile(
 			active_city_player_command_type,
 			tile_position
 		):
@@ -4078,21 +4120,21 @@ func confirm_active_city_object_placement() -> void:
 	var placement_result: Dictionary = {}
 
 	if uses_construction:
-		placement_result = CityConstructionSystemScript.create_rectangular_site(
-			object_type,
-			top_left,
-			size_tiles,
-			object_owner,
-			city_world
-		)
+		placement_result = CityConstructionSystemScript.create_rectangular_site({
+			"object_type": object_type,
+			"top_left": top_left,
+			"size_tiles": size_tiles,
+			"object_owner": object_owner,
+			"city_world": city_world,
+		})
 	else:
-		placement_result = WorldData.add_city_object(
-			object_type,
-			top_left,
-			size_tiles,
-			object_owner,
-			city_world
-		)
+		placement_result = WorldData.add_city_object({
+			"object_type": object_type,
+			"top_left": top_left,
+			"size_tiles": size_tiles,
+			"object_owner": object_owner,
+			"city_world": city_world,
+		})
 		after_city_object_placed(placement_result)
 
 	if placement_result.is_empty():
@@ -4311,7 +4353,7 @@ func select_city_entity_under_mouse() -> void:
 		return
 
 	var construction_site := (
-		WorldData.get_city_construction_site_at_tile(
+		CityConstructionSystem.get_city_construction_site_at_tile(
 			tile_position
 		)
 	)
@@ -4796,15 +4838,15 @@ func setup_city_texture_cache() -> void:
 
 
 func has_valid_saved_city_map_texture_cache(source_world: WorldData) -> bool:
-	return WorldData.has_valid_city_map_texture_cache(source_world, city_seed)
+	return MapTextureCacheStateScript.has_valid_city_cache(source_world, city_seed)
 
 
 func get_saved_city_map_texture_cache() -> Dictionary:
-	return WorldData.get_city_map_texture_cache()
+	return MapTextureCacheStateScript.get_city_cache()
 
 
 func store_saved_city_map_texture_cache(source_world: WorldData, texture_cache: Dictionary) -> void:
-	WorldData.store_city_map_texture_cache(source_world, city_seed, texture_cache)
+	MapTextureCacheStateScript.store_city_cache(source_world, city_seed, texture_cache)
 
 func rebuild_city_terrain_texture() -> void:
 	if city_texture_cache == null:
@@ -5352,7 +5394,7 @@ func draw_city_player_command_overlay(draw_target: CanvasItem) -> void:
 		# Every active natural-resource target remains visible while the
 		# destructive tool is armed. Construction previews keep their normal
 		# phase rendering underneath this interaction-layer overlay.
-		for raw_command in WorldData.get_city_player_command_snapshot():
+		for raw_command in CityWorkSystem.get_city_player_command_snapshot():
 			if not raw_command is Dictionary:
 				continue
 
@@ -5372,12 +5414,12 @@ func draw_city_player_command_overlay(draw_target: CanvasItem) -> void:
 				CITY_PLAYER_COMMAND_REMOVE_PREVIEW_FILL,
 				true
 			)
-			draw_inner_box_border(
-				draw_target,
-				command_tile_rect,
-				CITY_PLAYER_COMMAND_REMOVE_PREVIEW_BORDER,
-				float(city_tile_size) * 0.08
-			)
+			CityRenderLayerScript.draw_inner_box_border({
+				"draw_target": draw_target,
+				"rect": command_tile_rect,
+				"border_color": CITY_PLAYER_COMMAND_REMOVE_PREVIEW_BORDER,
+				"border_width": float(city_tile_size) * 0.08
+			})
 
 		var cancel_preview_tiles := city_player_command_drag_preview_tiles
 
@@ -5395,12 +5437,12 @@ func draw_city_player_command_overlay(draw_target: CanvasItem) -> void:
 				CITY_PLAYER_COMMAND_REMOVE_PREVIEW_FILL,
 				true
 			)
-			draw_inner_box_border(
-				draw_target,
-				cancel_tile_rect,
-				CITY_PLAYER_COMMAND_REMOVE_PREVIEW_BORDER,
-				float(city_tile_size) * 0.08
-			)
+			CityRenderLayerScript.draw_inner_box_border({
+				"draw_target": draw_target,
+				"rect": cancel_tile_rect,
+				"border_color": CITY_PLAYER_COMMAND_REMOVE_PREVIEW_BORDER,
+				"border_width": float(city_tile_size) * 0.08
+			})
 		return
 
 	if not is_city_player_command_mode_active():
@@ -5419,7 +5461,7 @@ func draw_city_player_command_overlay(draw_target: CanvasItem) -> void:
 		true
 	)
 
-	var command_snapshot := WorldData.get_city_player_command_snapshot()
+	var command_snapshot := CityWorkSystem.get_city_player_command_snapshot()
 
 	for raw_command in command_snapshot:
 		if not raw_command is Dictionary:
@@ -5470,12 +5512,12 @@ func draw_city_player_command_overlay(draw_target: CanvasItem) -> void:
 		if int(command.get("claimed_citizen_id", -1)) > 0:
 			border_color = CITY_PLAYER_COMMAND_CLAIMED_BORDER
 
-		draw_inner_box_border(
-			draw_target,
-			get_city_tile_world_rect(raw_tile_position),
-			border_color,
-			float(city_tile_size) * 0.08
-		)
+		CityRenderLayerScript.draw_inner_box_border({
+			"draw_target": draw_target,
+			"rect": get_city_tile_world_rect(raw_tile_position),
+			"border_color": border_color,
+			"border_width": float(city_tile_size) * 0.08
+		})
 
 	var preview_fill := CITY_PLAYER_COMMAND_PREVIEW_FILL
 	var preview_border := CITY_PLAYER_COMMAND_PREVIEW_BORDER
@@ -5487,12 +5529,12 @@ func draw_city_player_command_overlay(draw_target: CanvasItem) -> void:
 	for tile_position in city_player_command_drag_preview_tiles:
 		var tile_rect := get_city_tile_world_rect(tile_position)
 		draw_target.draw_rect(tile_rect, preview_fill, true)
-		draw_inner_box_border(
-			draw_target,
-			tile_rect,
-			preview_border,
-			float(city_tile_size) * 0.08
-		)
+		CityRenderLayerScript.draw_inner_box_border({
+			"draw_target": draw_target,
+			"rect": tile_rect,
+			"border_color": preview_border,
+			"border_width": float(city_tile_size) * 0.08
+		})
 
 
 func draw_active_city_player_command_features(
@@ -5811,37 +5853,17 @@ func draw_city_ground_piles(draw_target: CanvasItem) -> void:
 			(float(tile_position.y) + 0.5) * float(city_tile_size)
 		)
 		tile_center += center_offset * float(city_tile_size)
-		# marker_scale is the complete marker size, including its border.
-		# Keeping the border inside the rectangle prevents a smaller resource
-		# center from accidentally leaving the overall ground pile unchanged.
 		var marker_side := float(city_tile_size) * marker_scale
 		var marker_rect := Rect2(
 			tile_center - Vector2.ONE * marker_side * 0.5,
 			Vector2.ONE * marker_side
 		)
-		var border_width := maxf(marker_side * 0.16, 0.5)
-		var resource_rect := marker_rect.grow(-border_width)
-		var border_color := CITY_GROUND_PILE_BORDER_COLOR
-
-		if (
-			WorldData.get_city_ground_pile_construction_site_id(
-				ground_pile
-			)
-			> 0
-		):
-			border_color = CITY_CONSTRUCTION_PILE_BORDER_COLOR
 
 		draw_target.draw_rect(
 			marker_rect,
-			border_color,
+			get_resource_color(resource),
 			true
 		)
-		if resource_rect.size.x > 0.0 and resource_rect.size.y > 0.0:
-			draw_target.draw_rect(
-				resource_rect,
-				get_resource_color(resource),
-				true
-			)
 
 
 func draw_debug_navigation_path(draw_target: CanvasItem) -> void:
@@ -5933,23 +5955,29 @@ func draw_city_object_debug_names(
 		var label_center := get_city_object_debug_label_center(city_object, rect)
 		var object_screen_size := rect.size * pixels_per_world_unit
 
-		draw_centered_city_object_debug_name(
-			draw_target,
-			label_center,
-			object_screen_size,
-			object_name,
-			font,
-			world_units_per_screen_pixel
-		)
+		draw_centered_city_object_debug_name({
+			"draw_target": draw_target,
+			"label_center": label_center,
+			"object_screen_size": object_screen_size,
+			"object_name": object_name,
+			"font": font,
+			"world_units_per_screen_pixel": world_units_per_screen_pixel,
+		})
 
 func draw_centered_city_object_debug_name(
-	draw_target: CanvasItem,
-	label_center: Vector2,
-	object_screen_size: Vector2,
-	object_name: String,
-	font: Font,
-	world_units_per_screen_pixel: float
+	values: Dictionary
 ) -> void:
+	var draw_target: CanvasItem = values.get("draw_target")
+	var label_center: Vector2 = values.get("label_center", Vector2.ZERO)
+	var object_screen_size: Vector2 = values.get(
+		"object_screen_size",
+		Vector2.ZERO
+	)
+	var object_name := str(values.get("object_name", ""))
+	var font: Font = values.get("font")
+	var world_units_per_screen_pixel := float(
+		values.get("world_units_per_screen_pixel", 1.0)
+	)
 	var font_size := get_debug_city_object_name_font_size(
 		object_name,
 		object_screen_size,
@@ -6141,13 +6169,13 @@ func draw_city_object_visual(
 	frame_color = with_alpha_multiplier(frame_color, alpha_multiplier)
 	fill_color = with_alpha_multiplier(fill_color, alpha_multiplier)
 
-	draw_framed_city_object_rect(
-		draw_target,
-		rect,
-		frame_color,
-		fill_color,
-		frame_thickness
-	)
+	CityRenderLayerScript.draw_framed_rect({
+		"draw_target": draw_target,
+		"rect": rect,
+		"frame_color": frame_color,
+		"fill_color": fill_color,
+		"frame_thickness": frame_thickness
+	})
 
 
 func draw_city_objects(draw_target: CanvasItem) -> void:
@@ -6169,7 +6197,7 @@ func draw_city_objects(draw_target: CanvasItem) -> void:
 
 
 func draw_city_construction_sites(draw_target: CanvasItem) -> void:
-	for raw_site in WorldData.get_city_construction_site_snapshot():
+	for raw_site in CityConstructionSystem.get_city_construction_site_snapshot():
 		if not raw_site is Dictionary:
 			continue
 
@@ -6209,12 +6237,12 @@ func draw_city_construction_sites(draw_target: CanvasItem) -> void:
 				CITY_CONSTRUCTION_BLUEPRINT_FILL,
 				true
 			)
-			draw_inner_box_border(
-				draw_target,
-				tile_rect,
-				phase_color,
-				float(city_tile_size) * 0.06
-			)
+			CityRenderLayerScript.draw_inner_box_border({
+				"draw_target": draw_target,
+				"rect": tile_rect,
+				"border_color": phase_color,
+				"border_width": float(city_tile_size) * 0.06
+			})
 
 
 func _get_city_construction_phase_color(phase: String) -> Color:
@@ -6313,12 +6341,12 @@ func refresh_active_workplace_zone_preview_cache() -> void:
 	if preview_object.is_empty():
 		return
 
-	workplace_zone_overlay_cache.prepare(
-		preview_object,
-		true,
-		city_world,
-		city_tile_size
-	)
+	workplace_zone_overlay_cache.prepare({
+		"city_object": preview_object,
+		"preview_mode": true,
+		"city_world": city_world,
+		"city_tile_size": city_tile_size,
+	})
 
 
 func refresh_selected_workplace_zone_cache() -> void:
@@ -6332,36 +6360,36 @@ func refresh_selected_workplace_zone_cache() -> void:
 	if not is_city_object_selectable(city_object):
 		return
 
-	workplace_zone_overlay_cache.prepare(
-		city_object,
-		false,
-		city_world,
-		city_tile_size
-	)
+	workplace_zone_overlay_cache.prepare({
+		"city_object": city_object,
+		"preview_mode": false,
+		"city_world": city_world,
+		"city_tile_size": city_tile_size,
+	})
 
 
 func draw_workplace_resource_zone_preview(
 	preview_object: Dictionary,
 	draw_target: CanvasItem
 ) -> bool:
-	return workplace_zone_overlay_cache.draw_cached(
-		preview_object,
-		true,
-		city_world,
-		draw_target
-	)
+	return workplace_zone_overlay_cache.draw_cached({
+		"city_object": preview_object,
+		"preview_mode": true,
+		"city_world": city_world,
+		"draw_target": draw_target,
+	})
 
 
 func draw_selected_workplace_resource_zone(
 	city_object: Dictionary,
 	draw_target: CanvasItem
 ) -> bool:
-	return workplace_zone_overlay_cache.draw_cached(
-		city_object,
-		false,
-		city_world,
-		draw_target
-	)
+	return workplace_zone_overlay_cache.draw_cached({
+		"city_object": city_object,
+		"preview_mode": false,
+		"city_world": city_world,
+		"draw_target": draw_target,
+	})
 #endregion
 
 func draw_active_city_object_placement_preview(
@@ -6418,68 +6446,6 @@ func draw_active_city_object_placement_preview(
 		can_place
 	)
 
-func get_screen_constant_world_width(pixel_width: float) -> float:
-	var active_camera := get_viewport().get_camera_2d()
-
-	if active_camera == null:
-		return pixel_width
-
-	var zoom_x: float = maxf(active_camera.zoom.x, 0.001)
-
-	return pixel_width / zoom_x
-
-func draw_screen_constant_inset_rect_border(
-	draw_target: CanvasItem,
-	rect: Rect2,
-	border_color: Color,
-	inset_amount: float,
-	border_width_pixels: float
-) -> void:
-	if rect.size.x <= 0.0 or rect.size.y <= 0.0:
-		return
-
-	var border_width: float = get_screen_constant_world_width(border_width_pixels)
-
-	var max_x_inset: float = maxf(0.0, rect.size.x * 0.5 - 0.01)
-	var max_y_inset: float = maxf(0.0, rect.size.y * 0.5 - 0.01)
-	var safe_inset: float = minf(inset_amount, minf(max_x_inset, max_y_inset))
-
-	var max_x_width: float = maxf(0.01, rect.size.x - safe_inset * 2.0)
-	var max_y_width: float = maxf(0.01, rect.size.y - safe_inset * 2.0)
-	var safe_width: float = minf(border_width, minf(max_x_width, max_y_width))
-
-	var inner := rect.grow(-safe_inset)
-
-	draw_target.draw_rect(
-		Rect2(inner.position, Vector2(inner.size.x, safe_width)),
-		border_color,
-		true
-	)
-
-	draw_target.draw_rect(
-		Rect2(
-			Vector2(inner.position.x, inner.position.y + inner.size.y - safe_width),
-			Vector2(inner.size.x, safe_width)
-		),
-		border_color,
-		true
-	)
-
-	draw_target.draw_rect(
-		Rect2(inner.position, Vector2(safe_width, inner.size.y)),
-		border_color,
-		true
-	)
-
-	draw_target.draw_rect(
-		Rect2(
-			Vector2(inner.position.x + inner.size.x - safe_width, inner.position.y),
-			Vector2(safe_width, inner.size.y)
-		),
-		border_color,
-		true
-	)
-
 func draw_selected_city_citizen_highlight(
 	draw_target: CanvasItem
 ) -> void:
@@ -6510,17 +6476,14 @@ func draw_selected_city_citizen_highlight(
 	):
 		return
 
-	var highlight_rect := marker_rect.grow(
-		float(city_tile_size) * 0.12
-	)
-
-	draw_screen_constant_inset_rect_border(
-		draw_target,
-		highlight_rect,
-		SELECTED_OBJECT_HIGHLIGHT_COLOR,
-		0.0,
-		2.0
-	)
+	CityRenderLayerScript.draw_screen_constant_inset_rect_border({
+		"draw_target": draw_target,
+		"rect": marker_rect,
+		"border_color": SELECTED_OBJECT_HIGHLIGHT_COLOR,
+		"inset_amount": 0.0,
+		"border_width_pixels": 2.0,
+		"viewport": get_viewport()
+	})
 
 func draw_debug_selected_city_tile_highlight(
 	draw_target: CanvasItem
@@ -6548,13 +6511,14 @@ func draw_debug_selected_city_tile_highlight(
 		)
 	)
 
-	draw_screen_constant_inset_rect_border(
-		draw_target,
-		tile_rect,
-		DEBUG_SELECTED_TILE_HIGHLIGHT_COLOR,
-		0.0,
-		2.0
-	)
+	CityRenderLayerScript.draw_screen_constant_inset_rect_border({
+		"draw_target": draw_target,
+		"rect": tile_rect,
+		"border_color": DEBUG_SELECTED_TILE_HIGHLIGHT_COLOR,
+		"inset_amount": 0.0,
+		"border_width_pixels": 2.0,
+		"viewport": get_viewport()
+	})
 
 func draw_selected_city_object_highlight(
 	draw_target: CanvasItem
@@ -6582,37 +6546,14 @@ func draw_selected_city_object_highlight(
 	):
 		return
 
-	draw_screen_constant_inset_rect_border(
-		draw_target,
-		object_rect,
-		SELECTED_OBJECT_HIGHLIGHT_COLOR,
-		0.0,
-		2.0
-	)
-
-func draw_framed_city_object_rect(
-	draw_target: CanvasItem,
-	rect: Rect2,
-	frame_color: Color,
-	fill_color: Color,
-	frame_thickness: float
-) -> void:
-	if rect.size.x <= 0.0 or rect.size.y <= 0.0:
-		return
-
-	var max_x_thickness: float = maxf(0.01, rect.size.x * 0.5 - 0.01)
-	var max_y_thickness: float = maxf(0.01, rect.size.y * 0.5 - 0.01)
-	var safe_thickness: float = minf(frame_thickness, minf(max_x_thickness, max_y_thickness))
-
-	draw_target.draw_rect(rect, frame_color, true)
-
-	var inner_rect := rect.grow(-safe_thickness)
-
-	if inner_rect.size.x <= 0.0 or inner_rect.size.y <= 0.0:
-		return
-
-	draw_target.draw_rect(inner_rect, fill_color, true)
-
+	CityRenderLayerScript.draw_screen_constant_inset_rect_border({
+		"draw_target": draw_target,
+		"rect": object_rect,
+		"border_color": SELECTED_OBJECT_HIGHLIGHT_COLOR,
+		"inset_amount": 0.0,
+		"border_width_pixels": 2.0,
+		"viewport": get_viewport()
+	})
 
 func draw_city_roads(draw_target: CanvasItem) -> void:
 	for city_object in WorldData.city_objects:
@@ -6669,12 +6610,12 @@ func draw_road_preview(draw_target: CanvasItem) -> void:
 			true
 		)
 
-		draw_inner_box_border(
-			draw_target,
-			rect,
-			CURSOR_LOOK_BORDER_COLOR,
-			border_width
-		)
+		CityRenderLayerScript.draw_inner_box_border({
+			"draw_target": draw_target,
+			"rect": rect,
+			"border_color": CURSOR_LOOK_BORDER_COLOR,
+			"border_width": border_width
+		})
 
 func get_city_hover_highlight_tiles(
 	tile_position: Vector2i
@@ -6695,7 +6636,7 @@ func get_city_hover_highlight_tiles(
 	# Construction sites take precedence over completed objects. This matters
 	# for future expansion blueprints that may overlap their parent building.
 	var construction_site := (
-		WorldData.get_city_construction_site_at_tile(
+		CityConstructionSystem.get_city_construction_site_at_tile(
 			tile_position
 		)
 	)
@@ -6773,75 +6714,6 @@ func _sort_city_hover_tiles_y_then_x(
 	return a.y < b.y
 
 
-func draw_city_hover_footprint_border(
-	draw_target: CanvasItem,
-	footprint_tiles: Array[Vector2i],
-	border_color: Color,
-	border_width: float
-) -> void:
-	if footprint_tiles.is_empty():
-		return
-
-	var footprint_lookup: Dictionary = {}
-
-	for tile_position in footprint_tiles:
-		footprint_lookup[tile_position] = true
-
-	var safe_width := minf(
-		border_width,
-		float(city_tile_size) * 0.5
-	)
-
-	for tile_position in footprint_tiles:
-		var tile_rect := get_city_tile_world_rect(tile_position)
-
-		if not footprint_lookup.has(tile_position + Vector2i.UP):
-			draw_target.draw_rect(
-				Rect2(
-					tile_rect.position,
-					Vector2(tile_rect.size.x, safe_width)
-				),
-				border_color,
-				true
-			)
-
-		if not footprint_lookup.has(tile_position + Vector2i.DOWN):
-			draw_target.draw_rect(
-				Rect2(
-					Vector2(
-						tile_rect.position.x,
-						tile_rect.end.y - safe_width
-					),
-					Vector2(tile_rect.size.x, safe_width)
-				),
-				border_color,
-				true
-			)
-
-		if not footprint_lookup.has(tile_position + Vector2i.LEFT):
-			draw_target.draw_rect(
-				Rect2(
-					tile_rect.position,
-					Vector2(safe_width, tile_rect.size.y)
-				),
-				border_color,
-				true
-			)
-
-		if not footprint_lookup.has(tile_position + Vector2i.RIGHT):
-			draw_target.draw_rect(
-				Rect2(
-					Vector2(
-						tile_rect.end.x - safe_width,
-						tile_rect.position.y
-					),
-					Vector2(safe_width, tile_rect.size.y)
-				),
-				border_color,
-				true
-			)
-
-
 func draw_hovered_city_tile_highlight(
 	draw_target: CanvasItem
 ) -> void:
@@ -6875,63 +6747,13 @@ func draw_hovered_city_tile_highlight(
 	)
 	var border_width: float = float(city_tile_size) * 0.08
 
-	draw_city_hover_footprint_border(
-		draw_target,
-		highlight_tiles,
-		CURSOR_LOOK_BORDER_COLOR,
-		border_width
-	)
-
-func draw_inner_box_border(
-	draw_target: CanvasItem,
-	rect: Rect2,
-	border_color: Color,
-	border_width: float
-) -> void:
-	if rect.size.x <= 0.0 or rect.size.y <= 0.0:
-		return
-
-	var safe_width: float = minf(
-		border_width,
-		minf(rect.size.x * 0.5, rect.size.y * 0.5)
-	)
-
-	safe_width = maxf(safe_width, 0.01)
-
-	draw_target.draw_rect(
-		Rect2(rect.position, Vector2(rect.size.x, safe_width)),
-		border_color,
-		true
-	)
-
-	draw_target.draw_rect(
-		Rect2(
-			Vector2(rect.position.x, rect.position.y + rect.size.y - safe_width),
-			Vector2(rect.size.x, safe_width)
-		),
-		border_color,
-		true
-	)
-
-	draw_target.draw_rect(
-		Rect2(rect.position, Vector2(safe_width, rect.size.y)),
-		border_color,
-		true
-	)
-
-	draw_target.draw_rect(
-		Rect2(
-			Vector2(rect.position.x + rect.size.x - safe_width, rect.position.y),
-			Vector2(safe_width, rect.size.y)
-		),
-		border_color,
-		true
-	)
-
-
-#endregion
-
-#region City foundation and hover coordinates
+	CityRenderLayerScript.draw_tile_footprint_border({
+		"draw_target": draw_target,
+		"footprint_tiles": highlight_tiles,
+		"border_color": CURSOR_LOOK_BORDER_COLOR,
+		"border_width": border_width,
+		"tile_size": city_tile_size
+	})
 
 func ensure_city_foundation_object_exists() -> void:
 	if not WorldData.has_player_city_foundation():
@@ -6952,13 +6774,13 @@ func ensure_city_foundation_object_exists() -> void:
 		print("Could not recover city foundation object.")
 		return
 
-	var foundation_object := WorldData.add_city_object(
-		WorldData.CITY_OBJECT_CITY_CENTER,
-		top_left,
-		size_tiles,
-		"player",
-		city_world
-	)
+	var foundation_object := WorldData.add_city_object({
+		"object_type": WorldData.CITY_OBJECT_CITY_CENTER,
+		"top_left": top_left,
+		"size_tiles": size_tiles,
+		"object_owner": "player",
+		"city_world": city_world,
+	})
 
 	print("Recovered city foundation object: ", foundation_object)
 
@@ -6989,7 +6811,7 @@ func get_city_tile_under_mouse() -> Vector2i:
 
 #endregion
 
-#region Debug panel, navigation, and diagnostics
+#region Debug panel and navigation orchestration
 
 func update_debug_panel_text() -> void:
 	if debug_panel_ui == null:
@@ -7161,11 +6983,11 @@ func request_debug_navigation_path() -> void:
 
 	var result := (
 		CityNavigationSystemScript
-		.find_path_to_any_city_tile(
-			city_world,
-			start_tile,
-			destination_tiles
-		)
+		.find_path_to_any_city_tile({
+			"city_world": city_world,
+			"start_tile": start_tile,
+			"destination_tiles": destination_tiles,
+		})
 	)
 
 	debug_navigation_status = str(
@@ -7299,318 +7121,22 @@ func assign_debug_navigation_path_to_selected_citizen() -> void:
 	)
 
 func get_navigation_debug_text() -> String:
-	if (
-		debug_navigation_status
-		== CityNavigationSystemScript
-		.PATH_STATUS_NOT_REQUESTED
-	):
-		return (
-			"Navigation Test: select or hover a tile/building "
-			+ "and press P"
-		)
-
-	return (
-		"Navigation Test: "
-		+ debug_navigation_status
-		+ " | Start: "
-		+ str(debug_navigation_start_tile)
-		+ " | End: "
-		+ str(debug_navigation_destination_tile)
-		+ "\n"
-		+ "Path Distance: "
-		+ format_debug_navigation_path_cost(
-			debug_navigation_path_cost
-		)
-		+ " | Candidates: "
-		+ str(debug_navigation_candidate_count)
-		+ " | Expanded: "
-		+ str(debug_navigation_expanded_nodes)
-		+ " | Cost: "
-		+ "%.3f ms"
-		% (
-			float(debug_navigation_duration_usec)
-			/ 1000.0
-		)
+	return CityDebugPresentationScript.get_navigation_text(
+		_get_city_debug_presentation_values()
 	)
 
 func format_debug_navigation_path_cost(path_cost: int) -> String:
-	return (
-		"%.3f tiles"
-		% (
-			float(maxi(path_cost, 0))
-			/ float(
-				WorldData.CITY_CITIZEN_CARDINAL_MOVEMENT_COST
-			)
-		)
+	return CityDebugPresentationScript.format_navigation_path_cost(
+		path_cost
 	)
 
-
 func get_simulation_debug_text() -> String:
-	return (
-		SimulationClock.get_debug_text()
-		+ "\n"
-		+ SimulationCoordinator.get_debug_text()
-		+ "\n"
-		+ CityStateValidator.get_summary_text()
-		+ "\n"
-		+ get_navigation_debug_text()
+	return CityDebugPresentationScript.get_simulation_text(
+		_get_city_debug_presentation_values()
 	)
 
 func get_citizen_debug_list_text() -> String:
-	var citizens := WorldData.get_city_citizen_snapshot()
-
-	if citizens.is_empty():
-		return "No citizens."
-
-	var lines := []
-
-	for citizen in citizens:
-		if not citizen is Dictionary:
-			continue
-
-		lines.append(get_citizen_debug_line(citizen))
-
-	return "\n".join(lines)
-
-
-func get_citizen_debug_line(citizen: Dictionary) -> String:
-	var citizen_id := int(citizen.get("id", -1))
-	var citizen_name := str(citizen.get("name", "Citizen " + str(citizen_id)))
-	var home_text := get_citizen_debug_home_text(citizen)
-	var job_text := get_citizen_debug_job_text(citizen)
-	var task_text := get_citizen_debug_task_text(citizen)
-	var state_text := str(citizen.get("state", "unknown"))
-	var raw_position = citizen.get(
-		"city_tile_position",
-		WorldData.INVALID_CITY_TILE_POSITION
-	)
-	var position_text := "invalid"
-	if raw_position is Vector2i:
-		position_text = str(raw_position)
-	var sex_text := (
-		WorldData.get_city_citizen_sex_display_name(
-			str(citizen.get("sex", ""))
-		)
-	)
-	var hunger := int(citizen.get("hunger", 0))
-	var happiness := int(citizen.get("happiness", 0))
-	var inventory_used := get_citizen_debug_inventory_used(citizen)
-	var carry_capacity := int(citizen.get("carry_capacity", 0))
-	var haul_text := get_citizen_debug_haul_text(citizen)
-
-	return (
-		"#" + str(citizen_id)
-		+ " " + citizen_name
-		+ " | " + sex_text
-		+ " | Home: " + home_text
-		+ " | Job: " + job_text
-		+ " | Pos " + position_text
-		+ " | " + state_text
-		+ " | Task: " + task_text
-		+ " | Hunger " + str(hunger)
-		+ " | Happiness " + str(happiness)
-		+ " | Inv " + str(inventory_used) + "/" + str(carry_capacity)
-		+ " | Haul " + haul_text
-	)
-
-
-func get_citizen_debug_haul_text(
-	citizen: Dictionary
-) -> String:
-	var citizen_id := int(citizen.get("id", -1))
-
-	if not WorldData.city_citizen_is_hauling(citizen_id):
-		return "No"
-
-	var haul := WorldData.get_city_citizen_current_haul(citizen_id)
-	var cargo_resources := (
-		WorldData.get_city_citizen_haul_cargo_resources(citizen_id)
-	)
-	var inventory_used := get_citizen_debug_inventory_used(citizen)
-	var haul_capacity := maxi(
-		int(citizen.get("carry_capacity", 0)) - inventory_used,
-		0
-	)
-	var phase := str(
-		haul.get(
-			"phase",
-			WorldData.CITY_CITIZEN_HAUL_PHASE_NONE
-		)
-	)
-
-	return (
-		get_city_resource_manifest_display_text(cargo_resources)
-		+ " "
-		+ str(WorldData.get_city_citizen_haul_cargo_amount(citizen_id))
-		+ "/"
-		+ str(haul_capacity)
-		+ " | "
-		+ get_haul_endpoint_display_text(haul.get("source", {}))
-		+ " -> "
-		+ get_haul_endpoint_display_text(haul.get("destination", {}))
-		+ " | Stops "
-		+ str(maxi(int(haul.get("pickup_stop_count", 0)), 0))
-		+ " | R#"
-		+ str(
-			int(
-				haul.get(
-					"reservation_id",
-					WorldData.INVALID_CITY_CITIZEN_HAUL_RESERVATION_ID
-				)
-			)
-		)
-		+ " | "
-		+ phase
-	)
-
-
-func get_citizen_debug_home_text(citizen: Dictionary) -> String:
-	var home_object_id := int(citizen.get("home_object_id", -1))
-
-	if home_object_id < 0:
-		return "none"
-
-	var home_object := get_city_object_by_id(home_object_id)
-
-	if home_object.is_empty():
-		return "missing #" + str(home_object_id)
-
-	return get_city_object_display_name(home_object) + " #" + str(home_object_id)
-
-
-func get_citizen_debug_job_text(citizen: Dictionary) -> String:
-	var job_object_id := int(citizen.get("job_object_id", -1))
-
-	if job_object_id < 0:
-		return "none"
-
-	var job_object := get_city_object_by_id(job_object_id)
-
-	if job_object.is_empty():
-		return "missing #" + str(job_object_id)
-
-	return get_city_object_display_name(job_object) + " #" + str(job_object_id)
-
-func get_citizen_debug_task_text(citizen: Dictionary) -> String:
-	var raw_current_task = citizen.get("current_task", {})
-
-	if not raw_current_task is Dictionary:
-		return "invalid"
-
-	var current_task: Dictionary = raw_current_task
-	var task_kind := str(
-		current_task.get(
-			"kind",
-			WorldData.CITY_CITIZEN_TASK_KIND_NONE
-		)
-	)
-
-	if task_kind == WorldData.CITY_CITIZEN_TASK_KIND_NONE:
-		return "None"
-
-	var task_phase := str(
-		current_task.get(
-			"phase",
-			WorldData.CITY_CITIZEN_TASK_PHASE_NONE
-		)
-	)
-	var task_text := task_kind.capitalize()
-
-	if task_phase != WorldData.CITY_CITIZEN_TASK_PHASE_NONE:
-		task_text += " (" + task_phase.capitalize() + ")"
-
-	var target_object_id := int(
-		current_task.get("target_object_id", -1)
-	)
-
-	if task_kind == WorldData.CITY_CITIZEN_TASK_KIND_ACQUIRE_FOOD:
-		var food_resource := str(
-			current_task.get(
-				"food_resource_type",
-				WorldData.RESOURCE_NONE
-			)
-		)
-		var food_amount := maxi(
-			int(current_task.get("food_requested_amount", 0)),
-			0
-		)
-
-		if food_amount > 0 and food_resource != WorldData.RESOURCE_NONE:
-			task_text += (
-				" ["
-				+ str(food_amount)
-				+ " "
-				+ food_resource.capitalize()
-				+ "]"
-			)
-
-	if task_kind == WorldData.CITY_CITIZEN_TASK_KIND_HAUL:
-		var raw_current_haul = citizen.get("current_haul", {})
-
-		if raw_current_haul is Dictionary:
-			task_text += (
-				" -> "
-				+ get_haul_endpoint_display_text(
-					raw_current_haul.get("source", {})
-				)
-			)
-
-		return task_text
-
-	if (
-		task_kind
-		== WorldData.CITY_CITIZEN_TASK_KIND_CONSTRUCTION
-		and target_object_id > 0
-	):
-		var construction_site := (
-			WorldData.get_city_construction_site_by_id(
-				target_object_id
-			)
-		)
-
-		if construction_site.is_empty():
-			return (
-				task_text
-				+ " -> missing construction site #"
-				+ str(target_object_id)
-			)
-
-		return (
-			task_text
-			+ " -> "
-			+ WorldData.get_city_object_display_name_for_type(
-				str(construction_site.get("object_type", ""))
-			)
-			+ " Blueprint #"
-			+ str(target_object_id)
-		)
-
-	if target_object_id > 0:
-		var target_object := get_city_object_by_id(
-			target_object_id
-		)
-
-		if target_object.is_empty():
-			task_text += " -> missing #" + str(target_object_id)
-		else:
-			task_text += (
-				" -> "
-				+ get_city_object_display_name(target_object)
-				+ " #"
-				+ str(target_object_id)
-			)
-
-	return task_text
-
-func get_citizen_debug_inventory_used(citizen: Dictionary) -> int:
-	var inventory = citizen.get("inventory", {})
-
-	if not inventory is Dictionary:
-		return 0
-
-	return WorldData.get_resource_container_total_amount(
-		inventory
-	)
+	return CitizenDebugPanelScript.get_debug_list_text()
 
 func toggle_debug_mode() -> void:
 	if debug_panel_ui == null:
@@ -7628,521 +7154,30 @@ func toggle_debug_mode() -> void:
 		print("Debug mode: OFF")
 
 func get_city_debug_panel_text() -> String:
-	var simulation_text := get_simulation_debug_text()
-
-	if city_world == null:
-		return (
-			"DEBUG INFO\n"
-			+ simulation_text
-			+ "\n\n"
-			+ "Scene: City\n"
-			+ "City world: not generated"
-		)
-
-	var base_text := (
-		"DEBUG INFO\n"
-		+ simulation_text
-		+ "\n\n"
-		+ "Scene: City\n"
-		+ "View: "
-		+ get_city_map_mode_name(city_view_mode)
-		+ "\n"
-		+ "Seed: "
-		+ str(city_seed)
-		+ "\nResources (secured/loose/physical): "
-		+ get_city_resource_conservation_debug_text()
-		+ "\n\n"
+	return CityDebugPresentationScript.get_panel_text(
+		_get_city_debug_presentation_values()
 	)
 
-	var inspected_tile := hovered_city_tile
-	var inspector_source := "Cursor hover"
 
-	if has_debug_selected_city_tile():
-		inspected_tile = debug_selected_city_tile
-		inspector_source = "Debug selection"
+func _get_city_debug_presentation_values() -> Dictionary:
+	return {
+		"city_world": city_world,
+		"city_seed": city_seed,
+		"city_view_name": get_city_map_mode_name(city_view_mode),
+		"hovered_city_tile": hovered_city_tile,
+		"debug_selected_city_tile": debug_selected_city_tile,
+		"has_debug_selected_city_tile": has_debug_selected_city_tile(),
+		"selected_city_entity_kind": selected_city_entity_kind,
+		"selected_city_entity_id": selected_city_entity_id,
+		"selected_city_object_id": selected_city_object_id,
+		"navigation_status": debug_navigation_status,
+		"navigation_start_tile": debug_navigation_start_tile,
+		"navigation_destination_tile": debug_navigation_destination_tile,
+		"navigation_candidate_count": debug_navigation_candidate_count,
+		"navigation_expanded_nodes": debug_navigation_expanded_nodes,
+		"navigation_path_cost": debug_navigation_path_cost,
+		"navigation_duration_usec": debug_navigation_duration_usec,
+	}
 
-	var cursor_text := "Outside city"
-
-	if hovered_city_tile != Vector2i(-1, -1):
-		cursor_text = (
-			str(hovered_city_tile.x)
-			+ ", "
-			+ str(hovered_city_tile.y)
-		)
-
-	if inspected_tile == Vector2i(-1, -1):
-		return (
-			base_text
-			+ "Cursor: "
-			+ cursor_text
-			+ "\n"
-			+ "Inspector: "
-			+ inspector_source
-			+ "\n"
-			+ "Tile: none\n\n"
-			+ get_city_debug_selection_text()
-		)
-
-	var tile: Dictionary = city_world.get_tile(
-		inspected_tile.x,
-		inspected_tile.y
-	)
-
-	var fertility_text := "N/A"
-	var fertility := float(
-		tile.get("fertility", -1.0)
-	)
-
-	if fertility >= 0.0:
-		fertility_text = "%.1f" % fertility
-
-	var city_object := (
-		WorldData.get_city_object_at_tile(
-			inspected_tile
-		)
-	)
-
-	return (
-		base_text
-		+ "Cursor: "
-		+ cursor_text
-		+ "\n"
-		+ "Inspector: "
-		+ inspector_source
-		+ "\n"
-		+ "Tile: "
-		+ str(inspected_tile.x)
-		+ ", "
-		+ str(inspected_tile.y)
-		+ "\n"
-		+ "Terrain: "
-		+ str(tile.get("terrain", "unknown"))
-		+ "\n"
-		+ "Biome: "
-		+ str(tile.get("biome", "unknown"))
-		+ "\n"
-		+ "Resource: "
-		+ str(tile.get("resource", "none"))
-		+ "\n\n"
-		+ "Elevation: "
-		+ "%.3f"
-		% float(tile.get("elevation", 0.0))
-		+ "\n"
-		+ "Temperature: "
-		+ "%.3f"
-		% float(tile.get("temperature", 0.0))
-		+ "\n"
-		+ "Precipitation: "
-		+ "%.3f"
-		% float(tile.get("precipitation", 0.0))
-		+ "\n"
-		+ "Fertility: "
-		+ fertility_text
-		+ "\n\n"
-		+ "Land: "
-		+ DebugPanel.bool_to_yes_no(
-			bool(tile.get("is_land", false))
-		)
-		+ "\n"
-		+ "Walkable: "
-		+ DebugPanel.bool_to_yes_no(
-			WorldData.is_city_tile_walkable_for_citizen(
-				city_world,
-				inspected_tile
-			)
-		)
-		+ "\n"
-		+ "Buildable 1x1: "
-		+ DebugPanel.bool_to_yes_no(
-			WorldData.can_place_city_object(
-				city_world,
-				inspected_tile,
-				Vector2i(1, 1)
-			)
-		)
-		+ "\n"
-		+ "Road placeable: "
-		+ DebugPanel.bool_to_yes_no(
-			WorldData.can_place_city_road_tile(
-				city_world,
-				inspected_tile
-			)
-		)
-		+ "\n\n"
-		+ get_city_debug_object_text(
-			city_object
-		)
-		+ get_city_debug_ground_pile_text(
-			inspected_tile
-		)
-		+ get_city_debug_tile_citizen_text(
-			inspected_tile
-		)
-		+ "\n"
-		+ get_city_debug_selection_text()
-	)
-
-func get_city_debug_object_text(
-	city_object: Dictionary
-) -> String:
-	if city_object.is_empty():
-		return (
-			"Object on tile: none\n"
-			+ "Workplace: No\n"
-		)
-
-	var object_type := str(
-		city_object.get("type", "unknown")
-	)
-	var top_left: Vector2i = city_object.get(
-		"top_left",
-		Vector2i(-1, -1)
-	)
-	var size_tiles: Vector2i = city_object.get(
-		"size",
-		Vector2i.ZERO
-	)
-	var object_id_text := "N/A"
-
-	if city_object.has("id"):
-		object_id_text = str(city_object["id"])
-
-	var container_type := (
-		WorldData.get_city_object_container_type(
-			city_object
-		)
-	)
-
-	return (
-		"Object on tile: "
-		+ get_city_object_display_name(
-			city_object
-		)
-		+ "\n"
-		+ "Object type: "
-		+ object_type
-		+ "\n"
-		+ "Object id: "
-		+ object_id_text
-		+ "\n"
-		+ "Workplace: "
-		+ DebugPanel.bool_to_yes_no(
-			WorldData.city_object_is_workplace(
-				city_object
-			)
-		)
-		+ "\n"
-		+ "Owner: "
-		+ str(city_object.get("owner", "none"))
-		+ "\n"
-		+ "Container: "
-		+ get_container_type_display_name(
-			container_type
-		)
-		+ "\n"
-		+ "Object pos: "
-		+ str(top_left.x)
-		+ ", "
-		+ str(top_left.y)
-		+ "\n"
-		+ "Object size: "
-		+ str(size_tiles.x)
-		+ " x "
-		+ str(size_tiles.y)
-		+ "\n"
-	)
-
-func get_city_debug_ground_pile_text(
-	tile_position: Vector2i
-) -> String:
-	var ground_piles := WorldData.get_city_ground_piles_at_tile(
-		tile_position
-	)
-
-	if ground_piles.is_empty():
-		return "Ground piles: none\n"
-
-	var pile_descriptions: Array[String] = []
-
-	for raw_ground_pile in ground_piles:
-		if not raw_ground_pile is Dictionary:
-			continue
-
-		var ground_pile: Dictionary = raw_ground_pile
-		var ground_pile_id := int(ground_pile.get("id", -1))
-		var resource := str(
-			ground_pile.get("resource_type", WorldData.RESOURCE_NONE)
-		)
-		var amount := maxi(int(ground_pile.get("amount", 0)), 0)
-		var source := WorldData.make_city_ground_pile_haul_endpoint(
-			ground_pile_id
-		)
-		var reserved_amount := (
-			WorldData.get_city_haul_endpoint_source_reserved_amount(
-				source,
-				resource
-			)
-		)
-
-		pile_descriptions.append(
-			"#"
-			+ str(ground_pile_id)
-			+ " "
-			+ resource
-			+ " "
-			+ str(amount)
-			+ " (reserved "
-			+ str(reserved_amount)
-			+ ")"
-		)
-
-	return "Ground piles: " + ", ".join(pile_descriptions) + "\n"
-
-
-func get_city_resource_conservation_debug_text() -> String:
-	var resource_descriptions: Array[String] = []
-
-	for resource in get_city_resource_order():
-		resource_descriptions.append(
-			resource
-			+ " "
-			+ str(WorldData.get_total_owned_city_resource_amount(resource))
-			+ "/"
-			+ str(
-				WorldData.get_total_city_ground_pile_resource_amount(
-					resource
-				)
-			)
-			+ "/"
-			+ str(
-				WorldData.get_total_physical_city_resource_amount(
-					resource
-				)
-			)
-		)
-
-	return ", ".join(resource_descriptions)
-
-
-func get_city_debug_tile_citizen_text(
-	tile_position: Vector2i
-) -> String:
-	var standing_ids := (
-		WorldData.get_city_citizen_ids_at_tile(
-			tile_position
-		)
-	)
-	var claiming_ids := []
-	var claim_text := "select a debug tile"
-
-	if (
-		has_debug_selected_city_tile()
-		and tile_position
-		== debug_selected_city_tile
-	):
-		for citizen_id in (
-			WorldData
-			.get_city_active_task_ids_snapshot()
-		):
-			var current_task := (
-				WorldData
-				.get_city_citizen_current_task(
-					citizen_id
-				)
-			)
-
-			if (
-				current_task.get(
-					"target_tile",
-					WorldData
-					.INVALID_CITY_TILE_POSITION
-				)
-				== tile_position
-			):
-				claiming_ids.append(
-					citizen_id
-				)
-
-		claim_text = str(claiming_ids)
-
-	return (
-		"Citizen IDs standing here: "
-		+ str(standing_ids)
-		+ "\n"
-		+ "Citizen task claims: "
-		+ claim_text
-		+ "\n"
-	)
-
-func get_city_debug_selection_text() -> String:
-	if not has_selected_city_entity():
-		return "Selected entity: none\n"
-
-	if (
-		selected_city_entity_kind
-		== CITY_SELECTION_KIND_CITIZEN
-	):
-		var citizen := (
-			WorldData.get_city_citizen_by_id(
-				selected_city_citizen_id
-			)
-		)
-
-		if citizen.is_empty():
-			return "Selected citizen: missing\n"
-
-		var current_task := (
-			WorldData.get_city_citizen_current_task(
-				selected_city_citizen_id
-			)
-		)
-		var task_target_text := "none"
-		var raw_task_target = current_task.get(
-			"target_tile",
-			WorldData.INVALID_CITY_TILE_POSITION
-		)
-
-		if (
-			raw_task_target is Vector2i
-			and raw_task_target
-			!= WorldData.INVALID_CITY_TILE_POSITION
-		):
-			task_target_text = str(
-				raw_task_target
-			)
-
-		var movement_destination_text := "none"
-		var raw_destination = citizen.get(
-			"movement_destination_tile",
-			WorldData.INVALID_CITY_TILE_POSITION
-		)
-
-		if (
-			raw_destination is Vector2i
-			and raw_destination
-			!= WorldData.INVALID_CITY_TILE_POSITION
-		):
-			movement_destination_text = str(
-				raw_destination
-			)
-
-		var failure_text := str(
-			citizen.get(
-				"movement_failure_reason",
-				WorldData
-					.CITY_CITIZEN_MOVEMENT_FAILURE_NONE
-			)
-		)
-		var task_phase := str(
-			current_task.get(
-				"phase",
-				WorldData.CITY_CITIZEN_TASK_PHASE_NONE
-			)
-		)
-
-		if (
-			task_phase
-			== WorldData.CITY_CITIZEN_TASK_PHASE_BLOCKED
-			and failure_text
-			== WorldData
-				.CITY_CITIZEN_MOVEMENT_FAILURE_NONE
-		):
-			failure_text = (
-				"task_blocked "
-				+ "(specific cause is not recorded yet)"
-			)
-
-		var schedule_start := (
-			format_debug_minute_of_day(
-				CitizenDecisionSystem
-				.WORK_SHIFT_START_MINUTE_OF_DAY
-			)
-		)
-		var schedule_end := (
-			format_debug_minute_of_day(
-				CitizenDecisionSystem
-				.WORK_SHIFT_END_MINUTE_OF_DAY
-			)
-		)
-
-		return (
-			"Selected citizen: "
-			+ str(citizen.get("name", "Unknown"))
-			+ "\n"
-			+ "Selected id: "
-			+ str(selected_city_citizen_id)
-			+ "\n"
-			+ "Task: "
-			+ get_citizen_debug_task_text(
-				citizen
-			)
-			+ "\n"
-			+ "Task target: "
-			+ task_target_text
-			+ " | Destination: "
-			+ movement_destination_text
-			+ "\n"
-			+ "Workplace: "
-			+ get_citizen_debug_job_text(
-				citizen
-			)
-			+ "\n"
-			+ "Schedule: Work "
-			+ schedule_start
-			+ "-"
-			+ schedule_end
-			+ " | Active: "
-			+ DebugPanel.bool_to_yes_no(
-				CitizenDecisionSystem
-					.is_work_shift_active()
-			)
-			+ "\n"
-			+ "Failure: "
-			+ failure_text
-			+ "\n"
-		)
-
-	var selected_object := (
-		get_city_object_by_id(
-			selected_city_object_id
-		)
-	)
-
-	if selected_object.is_empty():
-		return "Selected object: missing\n"
-
-	return (
-		"Selected object: "
-		+ get_city_object_display_name(
-			selected_object
-		)
-		+ "\n"
-		+ "Selected id: "
-		+ str(selected_city_object_id)
-		+ "\n"
-	)
-	
-func format_debug_minute_of_day(
-	minute_of_day: int
-) -> String:
-	var safe_minute := clampi(
-		minute_of_day,
-		0,
-		SimulationClock.MINUTES_PER_DAY - 1
-	)
-	var hour := int(
-		safe_minute
-		/ SimulationClock.MINUTES_PER_HOUR
-	)
-	var minute := (
-		safe_minute
-		% SimulationClock.MINUTES_PER_HOUR
-	)
-
-	return (
-		str(hour).pad_zeros(2)
-		+ ":"
-		+ str(minute).pad_zeros(2)
-	)
 
 #endregion
