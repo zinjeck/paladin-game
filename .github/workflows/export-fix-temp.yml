@@ -6,12 +6,16 @@ on:
       - fix/road-hover-citizen-selection
     paths:
       - .github/workflows/export-fix-temp.yml
+  pull_request:
+    branches:
+      - main
 
 permissions:
   contents: read
 
 jobs:
   export:
+    if: github.head_ref == 'fix/road-hover-citizen-selection' || github.ref == 'refs/heads/fix/road-hover-citizen-selection'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
