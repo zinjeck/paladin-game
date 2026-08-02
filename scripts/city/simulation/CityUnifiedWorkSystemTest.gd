@@ -466,8 +466,14 @@ func _test_new_blueprint_rebalances_uncommitted_construction_travel() -> void:
 		blocked_road_id > 0,
 		"The rebalance fixture must create a material-blocked road."
 	)
+	CityWorkSystemScript.synchronize_player_work_board()
+	var blocked_blueprint_switch_count := (
+		CityConstructionSystemScript
+		.rebalance_uncommitted_construction_workers(blocked_road_id)
+	)
 	_expect(
-		_get_assignment_snapshot(left_builder_id)
+		blocked_blueprint_switch_count == 0
+		and _get_assignment_snapshot(left_builder_id)
 		== left_before_blocked_blueprint
 		and _get_assignment_snapshot(second_left_builder_id)
 		== second_left_before_blocked_blueprint
@@ -499,6 +505,15 @@ func _test_new_blueprint_rebalances_uncommitted_construction_travel() -> void:
 	if near_site_id <= 0:
 		return
 
+	# This synthetic material-requiring road bypasses the production road
+	# placement API, so the test must explicitly invoke the same scheduling
+	# boundary that production placement invokes.
+	CityWorkSystemScript.synchronize_player_work_board()
+	var switched_to_near := (
+		CityConstructionSystemScript
+		.rebalance_uncommitted_construction_workers(near_site_id)
+	)
+
 	var near_order := _find_order(
 		CityWorkSystemScript.ORDER_TYPE_CONSTRUCTION_SITE,
 		near_site_id
@@ -514,7 +529,8 @@ func _test_new_blueprint_rebalances_uncommitted_construction_travel() -> void:
 	)
 
 	_expect(
-		str(left_after_near_blueprint.get("kind", ""))
+		switched_to_near == 1
+		and str(left_after_near_blueprint.get("kind", ""))
 		== WorldData.CITY_CITIZEN_TASK_KIND_HAUL
 		and int(left_after_near_blueprint.get("work_order_id", -1))
 		== int(near_order.get("id", -2)),
@@ -719,11 +735,21 @@ func _test_blocked_construction_worker_uses_reachable_existing_alternative() -> 
 		Vector2i(20, 4),
 		1
 	)
+	# The helper intentionally creates a low-level synthetic site; mirror the
+	# production placement boundary before checking blocked reassignment.
+	CityWorkSystemScript.synchronize_player_work_board()
+	var blocked_reassignment_count := (
+		CityConstructionSystemScript
+		.rebalance_uncommitted_construction_workers(
+			int(material_blocked_site.get("id", -1))
+		)
+	)
 	var reassigned_task := WorldData.get_city_citizen_current_task(citizen_id)
 	var reassigned_citizen := WorldData.get_city_citizen_by_id(citizen_id)
 
 	_expect(
 		int(material_blocked_site.get("id", -1)) > 0
+		and blocked_reassignment_count == 1
 		and int(reassigned_task.get("work_order_id", -1))
 		== int(alternative_order.get("id", -2))
 		and str(reassigned_task.get("phase", ""))

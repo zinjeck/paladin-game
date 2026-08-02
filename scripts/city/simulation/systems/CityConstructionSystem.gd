@@ -398,6 +398,11 @@ static func remove_city_construction_site_record(
 
 	var site: Dictionary = WorldData.city_construction_sites[site_index]
 
+	# The site and its parent order are one logical record. Remove the order
+	# in the same operation so completion and direct cancellation leave a
+	# valid state even before the next work-board synchronization.
+	CityWorkSystem.remove_construction_work_order_for_site(site_id)
+
 	for raw_tile in site.get("footprint_tiles", []):
 		if (
 			raw_tile is Vector2i
