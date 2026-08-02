@@ -1,0 +1,39 @@
+name: Apply tile cache consistency fix
+
+on:
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    if: github.head_ref == 'paladin/intensive-debug-performance-cleanup'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Check out cleanup branch
+        uses: actions/checkout@v4
+        with:
+          ref: paladin/intensive-debug-performance-cleanup
+          fetch-depth: 0
+
+      - name: Apply exact fix
+        run: python3 ci/apply_tile_cache_consistency_fix.py
+
+      - name: Commit exact fix
+        shell: bash
+        run: |
+          set -euo pipefail
+          if git diff --quiet && git diff --cached --quiet; then
+            echo "No changes to commit."
+            exit 0
+          fi
+          git config user.name "paladin-ci-bot"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "Keep city map cache consistent with tile data"
+          git push origin HEAD:paladin/intensive-debug-performance-cleanup
