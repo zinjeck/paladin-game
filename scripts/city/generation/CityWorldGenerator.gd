@@ -7,6 +7,8 @@ var source_region_tiles: Array = []
 var source_region_size: int = 0
 var generated_map_atlas_data: Dictionary = {}
 
+const DEFAULT_LOCAL_TILES_PER_WORLD_TILE: int = 64
+
 var detail_noise := FastNoiseLite.new()
 var fertility_noise := FastNoiseLite.new()
 var resource_noise := FastNoiseLite.new()

@@ -413,7 +413,7 @@ func set_session_view_active(is_active: bool) -> void:
 			queue_all_city_render_layers_redraw()
 			city_layers_have_been_presented = true
 
-		update_city_information_panel()
+		city_information_ui.refresh_all()
 		update_debug_panel_text()
 
 

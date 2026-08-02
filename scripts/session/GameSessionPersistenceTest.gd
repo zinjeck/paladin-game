@@ -89,7 +89,7 @@ func _test_persistent_world_city_views() -> void:
 	await get_tree().process_frame
 
 	var initial_world_view = session.world_view
-	var initial_world_id := initial_world_view.get_instance_id()
+	var initial_world_id: int = initial_world_view.get_instance_id()
 	session.show_city_view()
 	await get_tree().process_frame
 
@@ -105,7 +105,7 @@ func _test_persistent_world_city_views() -> void:
 	)
 
 	var city_renderer = session.city_view
-	var first_city_id := session.city_view.get_instance_id()
+	var first_city_id: int = session.city_view.get_instance_id()
 	var all_modes_ready := true
 
 	for mode in MapVisuals.get_all_view_modes():
