@@ -10046,9 +10046,9 @@ static func add_city_object(
 	if object_type == CITY_OBJECT_HOUSE:
 		assign_homeless_citizens_to_available_housing()
 
-	if city_object_is_workplace(city_object):
-		assign_unemployed_citizens_to_available_workplaces()
-
+	# Employment is not a one-shot completion side effect. The persistent
+	# CityEmploymentSystem staffing policy fills and maintains this workplace
+	# on simulation ticks, while preserving future manual assignment control.
 	return city_object
 
 #endregion

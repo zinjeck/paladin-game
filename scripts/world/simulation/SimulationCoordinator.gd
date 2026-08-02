@@ -2,6 +2,7 @@ extends Node
 
 const SIMULATION_SYSTEM_CITIZEN_DECISIONS := "citizen_decisions"
 const SIMULATION_SYSTEM_CITIZEN_NEEDS := "citizen_needs"
+const SIMULATION_SYSTEM_EMPLOYMENT := "employment"
 const SIMULATION_SYSTEM_CITIZEN_MOVEMENT := "citizen_movement"
 const SIMULATION_SYSTEM_CITIZEN_TASKS := "citizen_tasks"
 const SIMULATION_SYSTEM_WORKPLACE_PRODUCTION := "workplace_production"
@@ -11,6 +12,7 @@ const SAMPLE_WINDOW_SIZE: int = 120
 
 const MONITORED_SYSTEM_KEYS: Array[String] = [
 	SIMULATION_SYSTEM_CITIZEN_NEEDS,
+	SIMULATION_SYSTEM_EMPLOYMENT,
 	SIMULATION_SYSTEM_CITIZEN_DECISIONS,
 	SIMULATION_SYSTEM_CITIZEN_MOVEMENT,
 	SIMULATION_SYSTEM_CITIZEN_TASKS,
@@ -19,6 +21,7 @@ const MONITORED_SYSTEM_KEYS: Array[String] = [
 
 const SYSTEM_DISPLAY_NAMES: Dictionary = {
 	SIMULATION_SYSTEM_CITIZEN_NEEDS: "Needs",
+	SIMULATION_SYSTEM_EMPLOYMENT: "Employment",
 	SIMULATION_SYSTEM_CITIZEN_DECISIONS: "Decisions",
 	SIMULATION_SYSTEM_CITIZEN_MOVEMENT: "Movement",
 	SIMULATION_SYSTEM_CITIZEN_TASKS: "Tasks",
@@ -114,6 +117,15 @@ func run_simulation_systems(
 	if should_record_durations:
 		duration_recorder.call(
 			SIMULATION_SYSTEM_CITIZEN_NEEDS,
+			Time.get_ticks_usec() - system_start_usec
+		)
+		system_start_usec = Time.get_ticks_usec()
+
+	CityEmploymentSystem.run_tick(tick_index, minutes_advanced)
+
+	if should_record_durations:
+		duration_recorder.call(
+			SIMULATION_SYSTEM_EMPLOYMENT,
 			Time.get_ticks_usec() - system_start_usec
 		)
 		system_start_usec = Time.get_ticks_usec()

@@ -95,30 +95,6 @@ static func run_tick(
 				citizen_id
 			)
 		)
-		var normal_food_handoff_after_step := false
-
-		if _citizen_should_seek_normal_food(citizen_id):
-			_disable_additional_haul_pickups_for_food(
-				citizen_id,
-				current_task
-			)
-
-			if _task_is_at_normal_food_safe_boundary(
-				citizen_id,
-				current_task
-			):
-				_release_task_for_normal_food(
-					citizen_id,
-					current_task
-				)
-				continue
-
-			normal_food_handoff_after_step = (
-				_task_reaches_normal_food_safe_boundary_after_step(
-					citizen_id,
-					current_task
-				)
-			)
 
 		var task_advance_context := {
 			"citizen_id": citizen_id,
@@ -184,25 +160,42 @@ static func run_tick(
 			_:
 				_clear_invalid_task(citizen_id)
 
-		if normal_food_handoff_after_step:
-			_release_task_for_normal_food(
-				citizen_id,
-				current_task
-			)
 
-
-# Ordinary hunger waits for the current indivisible action, then yields the
-# citizen without dropping physical cargo. The decision pass can assign food
-# on its next tick. Critical hunger keeps its separate immediate gateway below.
+# Hunger never releases work speculatively. The decision system first finds a
+# reachable, unreserved food source, then asks this boundary to release the
+# citizen without losing cargo or partial physical work.
 #endregion
 
 #region Food Interrupt Boundaries
 
-static func _citizen_should_seek_normal_food(citizen_id: int) -> bool:
-	return (
-		CitizenNeedsSystem.citizen_should_seek_food(citizen_id)
-		and not CitizenNeedsSystem.citizen_has_critical_food_need(citizen_id)
+static func prepare_citizen_for_normal_food_interrupt(
+	citizen_id: int
+) -> bool:
+	var citizen := WorldData.get_city_citizen_by_id(citizen_id)
+
+	if citizen.is_empty() or not bool(citizen.get("alive", false)):
+		return false
+
+	var current_task := WorldData.get_city_citizen_current_task(citizen_id)
+	var current_task_kind := str(
+		current_task.get(
+			"kind",
+			WorldData.CITY_CITIZEN_TASK_KIND_NONE
+		)
 	)
+
+	if current_task_kind == WorldData.CITY_CITIZEN_TASK_KIND_NONE:
+		return true
+
+	# A matched food source should end the current haul after its existing
+	# physical obligation. Do not let a cargo-bearing citizen chain another
+	# pickup while waiting for that safe delivery boundary.
+	_disable_additional_haul_pickups_for_food(citizen_id, current_task)
+
+	if not _task_is_at_normal_food_safe_boundary(citizen_id, current_task):
+		return false
+
+	return _release_task_for_normal_food(citizen_id, current_task)
 
 
 static func _task_is_at_normal_food_safe_boundary(
@@ -248,55 +241,6 @@ static func _task_is_at_normal_food_safe_boundary(
 			return true
 
 	return false
-
-
-static func _task_reaches_normal_food_safe_boundary_after_step(
-	citizen_id: int,
-	current_task: Dictionary
-) -> bool:
-	var task_kind := str(
-		current_task.get("kind", WorldData.CITY_CITIZEN_TASK_KIND_NONE)
-	)
-
-	if task_kind == WorldData.CITY_CITIZEN_TASK_KIND_HAUL:
-		return (
-			str(
-				WorldData.get_city_citizen_current_haul(citizen_id).get(
-					"phase",
-					WorldData.CITY_CITIZEN_HAUL_PHASE_NONE
-				)
-			)
-			== WorldData.CITY_CITIZEN_HAUL_PHASE_PICKING_UP
-		)
-
-	if (
-		task_kind != WorldData.CITY_CITIZEN_TASK_KIND_PLAYER_COMMAND
-		and task_kind != WorldData.CITY_CITIZEN_TASK_KIND_WORK
-		and task_kind != WorldData.CITY_CITIZEN_TASK_KIND_CONSTRUCTION
-	):
-		return false
-
-	if (
-		str(current_task.get("phase", ""))
-		!= WorldData.CITY_CITIZEN_TASK_PHASE_PERFORMING
-	):
-		return false
-
-	var boundary_world_minute := int(
-		current_task.get(
-			"next_action_world_minute",
-			WorldData.INVALID_CITY_CITIZEN_TASK_ACTION_WORLD_MINUTE
-		)
-	)
-
-	# Stationary workplace attendance has no longer-running timer; one task
-	# pass is its atomic unit. Timed command, construction, and roaming-work
-	# actions become interruptible only when their recorded boundary is due.
-	return (
-		boundary_world_minute
-		== WorldData.INVALID_CITY_CITIZEN_TASK_ACTION_WORLD_MINUTE
-		or SimulationClock.absolute_world_minutes >= boundary_world_minute
-	)
 
 
 static func _disable_additional_haul_pickups_for_food(
@@ -604,11 +548,6 @@ static func prepare_unemployed_citizen_for_priority_interrupt(
 		or not bool(citizen.get("alive", false))
 		or int(citizen.get("job_object_id", -1)) > 0
 	):
-		return false
-
-	# Do not let the player-order pass reclaim a citizen who just yielded at a
-	# normal food boundary. The later food pass gets the first opportunity.
-	if _citizen_should_seek_normal_food(citizen_id):
 		return false
 
 	var current_task := WorldData.get_city_citizen_current_task(citizen_id)
