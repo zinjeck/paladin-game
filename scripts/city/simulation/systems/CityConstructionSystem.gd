@@ -3020,7 +3020,6 @@ static func rebalance_uncommitted_construction_workers_for_sites(
 			or not bool(citizen.get("alive", false))
 			or int(citizen.get("job_object_id", -1)) > 0
 			or WorldData.get_city_citizen_haul_cargo_amount(citizen_id) > 0
-			or CitizenNeedsSystemScript.citizen_should_seek_food(citizen_id)
 			or not citizen_task_is_interruptible_construction(citizen_id)
 		):
 			continue

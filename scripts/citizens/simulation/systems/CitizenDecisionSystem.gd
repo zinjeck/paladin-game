@@ -212,7 +212,6 @@ static func _process_player_commands() -> void:
 			citizen_id <= 0
 			or not bool(citizen.get("alive", false))
 			or int(citizen.get("job_object_id", -1)) > 0
-			or CitizenNeedsSystem.citizen_should_seek_food(citizen_id)
 		):
 			continue
 
@@ -285,22 +284,6 @@ static func _process_food_needs(critical_only: bool) -> void:
 		if current_task_kind == WorldData.CITY_CITIZEN_TASK_KIND_ACQUIRE_FOOD:
 			continue
 
-		if (
-			not critical_only
-			and (
-				current_task_kind
-				== WorldData.CITY_CITIZEN_TASK_KIND_PLAYER_COMMAND
-				or bool(current_task.get("player_locked", false))
-			)
-		):
-			continue
-
-		if (
-			not is_critical
-			and current_task_kind != WorldData.CITY_CITIZEN_TASK_KIND_NONE
-		):
-			continue
-
 		candidates.append({
 			"citizen_id": citizen_id,
 			"hunger": WorldData.get_city_citizen_hunger(citizen_id),
@@ -350,16 +333,36 @@ static func _process_food_needs(critical_only: bool) -> void:
 			continue
 
 		var current_task := WorldData.get_city_citizen_current_task(citizen_id)
-
-		if (
-			critical_only
-			and str(current_task.get("kind", WorldData.CITY_CITIZEN_TASK_KIND_NONE))
-			!= WorldData.CITY_CITIZEN_TASK_KIND_NONE
-			and not CitizenTaskSystem.prepare_citizen_for_critical_food_interrupt(
-				citizen_id
+		var current_task_kind := str(
+			current_task.get(
+				"kind",
+				WorldData.CITY_CITIZEN_TASK_KIND_NONE
 			)
-		):
-			continue
+		)
+
+		# A food opportunity is proven before any current activity is released.
+		# Normal hunger waits for the next safe physical boundary; critical
+		# hunger keeps its existing emergency interruption gateway.
+		if current_task_kind != WorldData.CITY_CITIZEN_TASK_KIND_NONE:
+			var prepared_for_food := false
+
+			if critical_only:
+				prepared_for_food = (
+					CitizenTaskSystem
+					.prepare_citizen_for_critical_food_interrupt(
+						citizen_id
+					)
+				)
+			else:
+				prepared_for_food = (
+					CitizenTaskSystem
+					.prepare_citizen_for_normal_food_interrupt(
+						citizen_id
+					)
+				)
+
+			if not prepared_for_food:
+				continue
 
 		var task_request := {
 			"kind": WorldData.CITY_CITIZEN_TASK_KIND_ACQUIRE_FOOD,
