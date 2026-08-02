@@ -116,6 +116,7 @@ func show_world_view() -> void:
 	pending_city_switch = false
 	pending_city_request.clear()
 	_set_world_transition_pending(false)
+	_hide_world_region_selection_after_city_entry()
 	_activate_view(world_view)
 
 
@@ -123,6 +124,9 @@ func _ensure_city_view(prepared_payload: Dictionary) -> void:
 	if city_view != null:
 		return
 
+	# Establish the authoritative new-city clock before the expensive renderer
+	# enters the tree. No hidden initialization frame may consume settlement time.
+	_prepare_first_city_entry()
 	city_view = CITY_SCENE.instantiate()
 
 	if city_view.has_method("set_session_prepared_city_payload"):
@@ -161,9 +165,22 @@ func _prepare_first_city_entry() -> void:
 		return
 
 	city_view_has_been_entered = true
-	SimulationClock.set_speed_multiplier(1.0)
+	SimulationClock.start_new_game()
 	SimulationClock.set_simulation_paused(true)
 	_ensure_simulation_speed_controls()
+	_hide_world_region_selection_after_city_entry()
+
+
+func _hide_world_region_selection_after_city_entry() -> void:
+	if not city_view_has_been_entered or world_renderer == null:
+		return
+
+	# WorldRenderer owns this founding-only button. Once the persistent city view
+	# has been entered, region selection is retired for the remainder of session.
+	var region_selection_button = world_renderer.get("select_region_button")
+
+	if region_selection_button is CanvasItem:
+		(region_selection_button as CanvasItem).visible = false
 
 
 func _ensure_simulation_speed_controls() -> void:
