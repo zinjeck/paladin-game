@@ -69,6 +69,12 @@ var build_option_button: Button
 var build_option_icon: Panel
 var city_terrain_texture: ImageTexture
 var city_texture_cache := MapTextureCache.new()
+var city_initialization_duration_usec: int = 0
+var city_generation_duration_usec: int = 0
+var city_map_texture_setup_duration_usec: int = 0
+var city_natural_feature_setup_duration_usec: int = 0
+var city_map_texture_cache_reused_on_entry: bool = false
+var city_natural_feature_cache_reused_on_entry: bool = false
 var city_background_render_layer: CityRenderLayer
 var city_citizen_render_layer: CityRenderLayer
 var city_interaction_render_layer: CityRenderLayer
@@ -193,6 +199,20 @@ var city_citizen_rect_draw_buffer: Array[Rect2] = []
 var city_natural_feature_white_texture: ImageTexture
 var city_tree_mesh: ArrayMesh
 var city_rock_mesh: ArrayMesh
+static var shared_city_natural_feature_white_texture: ImageTexture
+static var shared_city_tree_mesh: ArrayMesh
+static var shared_city_rock_mesh: ArrayMesh
+static var cached_city_natural_feature_source_instance_id: int = 0
+static var cached_city_natural_feature_tile_data_version: int = -1
+static var cached_city_natural_feature_change_version: int = -1
+static var cached_city_natural_feature_seed: int = 0
+static var cached_city_natural_feature_tile_size: int = 0
+static var cached_city_tree_multimesh: MultiMesh
+static var cached_city_rock_multimesh: MultiMesh
+static var cached_city_tree_index_by_tile: Dictionary = {}
+static var cached_city_tree_tile_by_index: Array[Vector2i] = []
+static var cached_city_rock_index_by_tile: Dictionary = {}
+static var cached_city_rock_tile_by_index: Array[Vector2i] = []
 var city_tree_multimesh: MultiMesh
 var city_rock_multimesh: MultiMesh
 var city_tree_multimesh_index_by_tile: Dictionary = {}
@@ -295,11 +315,16 @@ const DEBUG_SELECTED_TILE_HIGHLIGHT_COLOR: Color = (
 #region Lifecycle and input
 
 func _ready() -> void:
+	var initialization_start_usec := Time.get_ticks_usec()
 	texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
 	RenderingServer.set_default_clear_color(Color.BLACK)
 
 	setup_city_texture_cache()
+	var generation_start_usec := Time.get_ticks_usec()
 	generate_city_world()
+	city_generation_duration_usec = (
+		Time.get_ticks_usec() - generation_start_usec
+	)
 	clear_invalid_old_city_foundation_state()
 	ensure_city_foundation_object_exists()
 	WorldData.ensure_city_citizen_spatial_state(
@@ -316,9 +341,17 @@ func _ready() -> void:
 	# The presentation initialized from current authority. Discard any movement
 	# trace left by simulation ticks that ran while this renderer was inactive.
 	WorldData.clear_city_citizen_movement_visual_events()
+	var natural_feature_start_usec := Time.get_ticks_usec()
 	setup_city_natural_feature_rendering()
+	city_natural_feature_setup_duration_usec = (
+		Time.get_ticks_usec() - natural_feature_start_usec
+	)
 	create_city_render_layers()
+	var map_texture_start_usec := Time.get_ticks_usec()
 	rebuild_city_terrain_texture()
+	city_map_texture_setup_duration_usec = (
+		Time.get_ticks_usec() - map_texture_start_usec
+	)
 	create_city_camera()
 	create_city_ui()
 	create_debug_panel()
@@ -326,6 +359,25 @@ func _ready() -> void:
 	SimulationClock.resume_simulation()
 	update_debug_panel_text()
 	queue_all_city_render_layers_redraw()
+	city_initialization_duration_usec = (
+		Time.get_ticks_usec() - initialization_start_usec
+	)
+
+	if WorldData.debug_mode_enabled:
+		print(
+			"City scene initialization (ms): total=",
+			"%.3f" % (float(city_initialization_duration_usec) / 1000.0),
+			", generation=",
+			"%.3f" % (float(city_generation_duration_usec) / 1000.0),
+			", map=",
+			"%.3f" % (float(city_map_texture_setup_duration_usec) / 1000.0),
+			", features=",
+			"%.3f" % (float(city_natural_feature_setup_duration_usec) / 1000.0),
+			", texture_cache_reused=",
+			city_map_texture_cache_reused_on_entry,
+			", feature_cache_reused=",
+			city_natural_feature_cache_reused_on_entry
+		)
 
 
 func _process(delta: float) -> void:
@@ -345,6 +397,13 @@ func _process(delta: float) -> void:
 
 
 func _process_texture_cache_and_camera() -> void:
+	if city_texture_cache != null:
+		var warmup_was_running := city_texture_cache.warmup_running
+		city_texture_cache.process_warmup()
+
+		if warmup_was_running and not city_texture_cache.warmup_running:
+			update_city_map_mode_button_visuals()
+
 	if (
 		camera != null
 		and camera.zoom != observed_city_camera_zoom
@@ -457,6 +516,8 @@ func _collect_city_world_change_flags(
 
 	if not apply_city_surface_feature_changes(surface_feature_changes):
 		rebuild_city_natural_feature_multimeshes()
+	else:
+		store_city_natural_feature_cache()
 
 
 func _collect_world_data_change_flags(
@@ -1828,6 +1889,11 @@ func update_city_map_mode_button_visuals() -> void:
 	for i in range(city_map_mode_buttons.size()):
 		var mode_button := city_map_mode_buttons[i]
 		var mode := get_city_map_mode_for_index(i)
+		var mode_is_ready := (
+			city_texture_cache != null
+			and city_texture_cache.is_mode_ready(city_world, mode)
+		)
+		mode_button.disabled = not mode_is_ready
 
 		if mode == city_view_mode:
 			apply_square_button_style(
@@ -1875,6 +1941,11 @@ func on_city_map_mode_button_pressed(mode: int) -> void:
 
 func set_city_view_mode(mode: int) -> void:
 	if city_view_mode == mode:
+		return
+	if (
+		city_texture_cache == null
+		or not city_texture_cache.is_mode_ready(city_world, mode)
+	):
 		return
 
 	close_city_player_command_menu()
@@ -4940,6 +5011,9 @@ func rebuild_city_terrain_texture() -> void:
 	if city_texture_cache == null:
 		setup_city_texture_cache()
 
+	city_map_texture_cache_reused_on_entry = (
+		has_valid_saved_city_map_texture_cache(city_world)
+	)
 	city_terrain_texture = city_texture_cache.rebuild(city_world, city_view_mode)
 
 
@@ -4955,39 +5029,56 @@ func apply_cached_city_map_mode_texture() -> void:
 #region Rendering and tile drawing
 
 func setup_city_natural_feature_rendering() -> void:
-	var white_image := Image.create(
-		1,
-		1,
-		false,
-		Image.FORMAT_RGBA8
-	)
-	white_image.fill(Color.WHITE)
+	if shared_city_natural_feature_white_texture == null:
+		var white_image := Image.create(
+			1,
+			1,
+			false,
+			Image.FORMAT_RGBA8
+		)
+		white_image.fill(Color.WHITE)
+		shared_city_natural_feature_white_texture = (
+			ImageTexture.create_from_image(white_image)
+		)
+
+	if shared_city_tree_mesh == null:
+		shared_city_tree_mesh = create_city_natural_feature_mesh(
+			PackedVector2Array([
+				Vector2(-0.18, -0.50),
+				Vector2(0.10, -0.35),
+				Vector2(0.48, -0.30),
+				Vector2(0.24, 0.00),
+				Vector2(0.50, 0.43),
+				Vector2(0.10, 0.39),
+				Vector2(-0.18, 0.50),
+				Vector2(-0.30, 0.22),
+				Vector2(-0.50, 0.00),
+				Vector2(-0.25, -0.17),
+			])
+		)
+
+	if shared_city_rock_mesh == null:
+		shared_city_rock_mesh = create_city_natural_feature_mesh(
+			PackedVector2Array([
+				Vector2(-0.5, -0.5),
+				Vector2(0.5, -0.5),
+				Vector2(0.5, 0.5),
+				Vector2(-0.5, 0.5),
+			])
+		)
+
 	city_natural_feature_white_texture = (
-		ImageTexture.create_from_image(white_image)
+		shared_city_natural_feature_white_texture
 	)
-	city_tree_mesh = create_city_natural_feature_mesh(
-		PackedVector2Array([
-			Vector2(-0.18, -0.50),
-			Vector2(0.10, -0.35),
-			Vector2(0.48, -0.30),
-			Vector2(0.24, 0.00),
-			Vector2(0.50, 0.43),
-			Vector2(0.10, 0.39),
-			Vector2(-0.18, 0.50),
-			Vector2(-0.30, 0.22),
-			Vector2(-0.50, 0.00),
-			Vector2(-0.25, -0.17),
-		])
+	city_tree_mesh = shared_city_tree_mesh
+	city_rock_mesh = shared_city_rock_mesh
+
+	city_natural_feature_cache_reused_on_entry = (
+		try_load_city_natural_feature_cache()
 	)
-	city_rock_mesh = create_city_natural_feature_mesh(
-		PackedVector2Array([
-			Vector2(-0.5, -0.5),
-			Vector2(0.5, -0.5),
-			Vector2(0.5, 0.5),
-			Vector2(-0.5, 0.5),
-		])
-	)
-	rebuild_city_natural_feature_multimeshes()
+
+	if not city_natural_feature_cache_reused_on_entry:
+		rebuild_city_natural_feature_multimeshes()
 
 	if city_world != null:
 		observed_city_tile_data_version = (
@@ -4997,6 +5088,71 @@ func setup_city_natural_feature_rendering() -> void:
 			city_world.city_surface_feature_change_version
 		)
 		city_world.consume_city_surface_feature_changes()
+
+
+func try_load_city_natural_feature_cache() -> bool:
+	if city_world == null:
+		return false
+	if (
+		cached_city_natural_feature_source_instance_id
+		!= city_world.get_instance_id()
+		or cached_city_natural_feature_tile_data_version
+		!= city_world.tile_data_version
+		or cached_city_natural_feature_change_version
+		!= city_world.city_surface_feature_change_version
+		or cached_city_natural_feature_seed != city_seed
+		or cached_city_natural_feature_tile_size != city_tile_size
+		or cached_city_tree_multimesh == null
+		or cached_city_rock_multimesh == null
+	):
+		return false
+
+	city_tree_multimesh = cached_city_tree_multimesh
+	city_rock_multimesh = cached_city_rock_multimesh
+	city_tree_multimesh_index_by_tile = (
+		cached_city_tree_index_by_tile
+	)
+	city_tree_multimesh_tile_by_index = (
+		cached_city_tree_tile_by_index
+	)
+	city_rock_multimesh_index_by_tile = (
+		cached_city_rock_index_by_tile
+	)
+	city_rock_multimesh_tile_by_index = (
+		cached_city_rock_tile_by_index
+	)
+	return true
+
+
+func store_city_natural_feature_cache() -> void:
+	if city_world == null:
+		return
+
+	cached_city_natural_feature_source_instance_id = (
+		city_world.get_instance_id()
+	)
+	cached_city_natural_feature_tile_data_version = (
+		city_world.tile_data_version
+	)
+	cached_city_natural_feature_change_version = (
+		city_world.city_surface_feature_change_version
+	)
+	cached_city_natural_feature_seed = city_seed
+	cached_city_natural_feature_tile_size = city_tile_size
+	cached_city_tree_multimesh = city_tree_multimesh
+	cached_city_rock_multimesh = city_rock_multimesh
+	cached_city_tree_index_by_tile = (
+		city_tree_multimesh_index_by_tile
+	)
+	cached_city_tree_tile_by_index = (
+		city_tree_multimesh_tile_by_index
+	)
+	cached_city_rock_index_by_tile = (
+		city_rock_multimesh_index_by_tile
+	)
+	cached_city_rock_tile_by_index = (
+		city_rock_multimesh_tile_by_index
+	)
 
 
 func create_city_natural_feature_mesh(
@@ -5064,175 +5220,142 @@ func rebuild_city_natural_feature_multimeshes() -> void:
 		city_rock_multimesh = null
 		return
 
-	var tree_count := 0
-	var rock_count := 0
+	# Collect feature positions while counting them. The previous implementation
+	# traversed every city tile twice, which doubled a 331,776-tile scan during
+	# every city-scene entry.
+	var tree_tiles: Array[Vector2i] = []
+	var rock_tiles: Array[Vector2i] = []
 
 	for y in range(city_world.height):
 		var row: Array = city_world.tiles[y]
 
 		for x in range(city_world.width):
-			var tile: Dictionary = row[x]
-
-			match WorldData.get_city_surface_feature(tile):
+			match WorldData.get_city_surface_feature(row[x]):
 				WorldData.CITY_SURFACE_FEATURE_TREE:
-					tree_count += 1
+					tree_tiles.append(Vector2i(x, y))
 
 				WorldData.CITY_SURFACE_FEATURE_ROCK:
-					rock_count += 1
+					rock_tiles.append(Vector2i(x, y))
 
 	city_tree_multimesh = create_city_natural_feature_multimesh(
 		city_tree_mesh,
-		tree_count
+		tree_tiles.size()
 	)
 	city_rock_multimesh = create_city_natural_feature_multimesh(
 		city_rock_mesh,
-		rock_count
+		rock_tiles.size()
 	)
 
-	var tree_index := 0
-	var rock_index := 0
 	var tile_size_float := float(city_tile_size)
-	var rock_color := get_resource_color(
-		WorldData.RESOURCE_STONE
-	)
+	var rock_color := get_resource_color(WorldData.RESOURCE_STONE)
 
-	for y in range(city_world.height):
-		var row: Array = city_world.tiles[y]
-
-		for x in range(city_world.width):
-			var tile: Dictionary = row[x]
-			var surface_feature := (
-				WorldData.get_city_surface_feature(tile)
+	for tree_index in range(tree_tiles.size()):
+		var tree_tile := tree_tiles[tree_index]
+		var tree_data: Dictionary = city_world.tiles[tree_tile.y][tree_tile.x]
+		var tile_center := Vector2(
+			(float(tree_tile.x) + 0.5) * tile_size_float,
+			(float(tree_tile.y) + 0.5) * tile_size_float
+		)
+		var rotation_ratio := (
+			CityWorldGeneratorScript.get_deterministic_tile_unit_value(
+				city_seed,
+				tree_tile.x,
+				tree_tile.y,
+				CITY_TREE_ROTATION_SALT
 			)
-			var tile_center := Vector2(
-				(float(x) + 0.5) * tile_size_float,
-				(float(y) + 0.5) * tile_size_float
+		)
+		var scale_ratio := (
+			CityWorldGeneratorScript.get_deterministic_tile_unit_value(
+				city_seed,
+				tree_tile.x,
+				tree_tile.y,
+				CITY_TREE_SCALE_SALT
 			)
-
-			if (
-				surface_feature
-				== WorldData.CITY_SURFACE_FEATURE_TREE
-			):
-				var rotation_ratio := (
-					CityWorldGeneratorScript
-					.get_deterministic_tile_unit_value(
-						city_seed,
-						x,
-						y,
-						CITY_TREE_ROTATION_SALT
-					)
-				)
-				var scale_ratio := (
-					CityWorldGeneratorScript
-					.get_deterministic_tile_unit_value(
-						city_seed,
-						x,
-						y,
-						CITY_TREE_SCALE_SALT
-					)
-				)
-				var color_ratio := (
-					CityWorldGeneratorScript
-					.get_deterministic_tile_unit_value(
-						city_seed,
-						x,
-						y,
-						CITY_TREE_COLOR_SALT
-					)
-				)
-				var canopy_scale := (
-					tile_size_float
-					* CITY_TREE_CANOPY_TILE_SCALE
-					* lerpf(
-						CITY_TREE_MIN_SCALE_VARIATION,
-						CITY_TREE_MAX_SCALE_VARIATION,
-						scale_ratio
-					)
-				)
-				var tree_transform := Transform2D(
-					rotation_ratio * TAU,
-					Vector2.ONE * canopy_scale,
-					0.0,
-					tile_center
-				)
-				var tree_color := get_city_tree_canopy_color(
-					tile,
-					color_ratio
-				)
-
-				city_tree_multimesh.set_instance_transform_2d(
-					tree_index,
-					tree_transform
-				)
-				city_tree_multimesh.set_instance_color(
-					tree_index,
-					tree_color
-				)
-				var tree_tile := Vector2i(x, y)
-				city_tree_multimesh_index_by_tile[tree_tile] = tree_index
-				city_tree_multimesh_tile_by_index.append(tree_tile)
-				tree_index += 1
-				continue
-
-			if (
-				surface_feature
-				!= WorldData.CITY_SURFACE_FEATURE_ROCK
-			):
-				continue
-
-			var offset_x_ratio := (
-				CityWorldGeneratorScript
-				.get_deterministic_tile_unit_value(
-					city_seed,
-					x,
-					y,
-					CITY_ROCK_OFFSET_X_SALT
-				)
+		)
+		var color_ratio := (
+			CityWorldGeneratorScript.get_deterministic_tile_unit_value(
+				city_seed,
+				tree_tile.x,
+				tree_tile.y,
+				CITY_TREE_COLOR_SALT
 			)
-			var offset_y_ratio := (
-				CityWorldGeneratorScript
-				.get_deterministic_tile_unit_value(
-					city_seed,
-					x,
-					y,
-					CITY_ROCK_OFFSET_Y_SALT
-				)
+		)
+		var canopy_scale := (
+			tile_size_float
+			* CITY_TREE_CANOPY_TILE_SCALE
+			* lerpf(
+				CITY_TREE_MIN_SCALE_VARIATION,
+				CITY_TREE_MAX_SCALE_VARIATION,
+				scale_ratio
 			)
-			var rock_offset := Vector2(
-				lerpf(
-					-CITY_ROCK_MAX_CENTER_OFFSET_TILES,
-					CITY_ROCK_MAX_CENTER_OFFSET_TILES,
-					offset_x_ratio
-				),
-				lerpf(
-					-CITY_ROCK_MAX_CENTER_OFFSET_TILES,
-					CITY_ROCK_MAX_CENTER_OFFSET_TILES,
-					offset_y_ratio
-				)
-			) * tile_size_float
-			var rock_scale := (
-				tile_size_float
-				* CITY_ROCK_MARKER_TILE_SCALE
+		)
+
+		city_tree_multimesh.set_instance_transform_2d(
+			tree_index,
+			Transform2D(
+				rotation_ratio * TAU,
+				Vector2.ONE * canopy_scale,
+				0.0,
+				tile_center
 			)
-			var rock_transform := Transform2D(
+		)
+		city_tree_multimesh.set_instance_color(
+			tree_index,
+			get_city_tree_canopy_color(tree_data, color_ratio)
+		)
+		city_tree_multimesh_index_by_tile[tree_tile] = tree_index
+		city_tree_multimesh_tile_by_index.append(tree_tile)
+
+	for rock_index in range(rock_tiles.size()):
+		var rock_tile := rock_tiles[rock_index]
+		var tile_center := Vector2(
+			(float(rock_tile.x) + 0.5) * tile_size_float,
+			(float(rock_tile.y) + 0.5) * tile_size_float
+		)
+		var offset_x_ratio := (
+			CityWorldGeneratorScript.get_deterministic_tile_unit_value(
+				city_seed,
+				rock_tile.x,
+				rock_tile.y,
+				CITY_ROCK_OFFSET_X_SALT
+			)
+		)
+		var offset_y_ratio := (
+			CityWorldGeneratorScript.get_deterministic_tile_unit_value(
+				city_seed,
+				rock_tile.x,
+				rock_tile.y,
+				CITY_ROCK_OFFSET_Y_SALT
+			)
+		)
+		var rock_offset := Vector2(
+			lerpf(
+				-CITY_ROCK_MAX_CENTER_OFFSET_TILES,
+				CITY_ROCK_MAX_CENTER_OFFSET_TILES,
+				offset_x_ratio
+			),
+			lerpf(
+				-CITY_ROCK_MAX_CENTER_OFFSET_TILES,
+				CITY_ROCK_MAX_CENTER_OFFSET_TILES,
+				offset_y_ratio
+			)
+		) * tile_size_float
+		var rock_scale := tile_size_float * CITY_ROCK_MARKER_TILE_SCALE
+
+		city_rock_multimesh.set_instance_transform_2d(
+			rock_index,
+			Transform2D(
 				0.0,
 				Vector2.ONE * rock_scale,
 				0.0,
 				tile_center + rock_offset
 			)
+		)
+		city_rock_multimesh.set_instance_color(rock_index, rock_color)
+		city_rock_multimesh_index_by_tile[rock_tile] = rock_index
+		city_rock_multimesh_tile_by_index.append(rock_tile)
 
-			city_rock_multimesh.set_instance_transform_2d(
-				rock_index,
-				rock_transform
-			)
-			city_rock_multimesh.set_instance_color(
-				rock_index,
-				rock_color
-			)
-			var rock_tile := Vector2i(x, y)
-			city_rock_multimesh_index_by_tile[rock_tile] = rock_index
-			city_rock_multimesh_tile_by_index.append(rock_tile)
-			rock_index += 1
+	store_city_natural_feature_cache()
 
 
 func get_city_tree_canopy_color(

@@ -74,15 +74,29 @@ func generate_city_world(
 	city_world.setup(city_width, city_height, city_seed)
 	var tree_count := 0
 	var rock_count := 0
+	# Reuse the interpolation accumulator for every tile. A default 576 x 576
+	# city previously allocated more than 330,000 profile dictionaries plus two
+	# nested weight dictionaries during one scene transition.
+	var reusable_profile := _make_empty_city_source_profile()
 
 	for y in range(city_world.height):
 		var row: Array = city_world.tiles[y]
 
 		for x in range(city_world.width):
 			var tile: Dictionary = row[x]
-			var profile: Dictionary = get_city_source_profile(x, y, region_size)
+			_populate_city_source_profile(
+				reusable_profile,
+				x,
+				y,
+				region_size
+			)
 
-			copy_city_profile_into_tile(tile, profile, x, y)
+			copy_city_profile_into_tile(
+				tile,
+				reusable_profile,
+				x,
+				y
+			)
 
 			match WorldData.get_city_surface_feature(tile):
 				WorldData.CITY_SURFACE_FEATURE_TREE:
@@ -105,32 +119,18 @@ func generate_city_world(
 	return city_world
 
 
-func get_city_source_profile(city_x: int, city_y: int, region_size: int) -> Dictionary:
-	var source_fx: float = ((float(city_x) + 0.5) / float(city_world.width)) * float(region_size) - 0.5
-	var source_fy: float = ((float(city_y) + 0.5) / float(city_world.height)) * float(region_size) - 0.5
+func get_city_source_profile(
+	city_x: int,
+	city_y: int,
+	region_size: int
+) -> Dictionary:
+	var profile := _make_empty_city_source_profile()
+	_populate_city_source_profile(profile, city_x, city_y, region_size)
+	return profile
 
-	var warp_strength := 0.62
 
-	source_fx += biome_warp_noise.get_noise_2d(city_x, city_y) * warp_strength
-	source_fy += biome_warp_noise.get_noise_2d(city_x + 9173, city_y - 4289) * warp_strength
-
-	source_fx = clamp(source_fx, 0.0, float(region_size - 1))
-	source_fy = clamp(source_fy, 0.0, float(region_size - 1))
-
-	var x0: int = int(floor(source_fx))
-	var y0: int = int(floor(source_fy))
-	var x1: int = min(x0 + 1, region_size - 1)
-	var y1: int = min(y0 + 1, region_size - 1)
-
-	var tx: float = source_fx - float(x0)
-	var ty: float = source_fy - float(y0)
-
-	var w00: float = (1.0 - tx) * (1.0 - ty)
-	var w10: float = tx * (1.0 - ty)
-	var w01: float = (1.0 - tx) * ty
-	var w11: float = tx * ty
-
-	var profile := {
+func _make_empty_city_source_profile() -> Dictionary:
+	return {
 		"elevation": 0.0,
 		"temperature": 0.0,
 		"precipitation": 0.0,
@@ -141,20 +141,99 @@ func get_city_source_profile(city_x: int, city_y: int, region_size: int) -> Dict
 		"river_weight": 0.0,
 		"mountain_weight": 0.0,
 		"biome_weights": {},
-		"resource_weights": {}
+		"resource_weights": {},
 	}
 
-	accumulate_city_source_sample(profile, WorldData.city_start_tiles[y0][x0], w00)
-	accumulate_city_source_sample(profile, WorldData.city_start_tiles[y0][x1], w10)
-	accumulate_city_source_sample(profile, WorldData.city_start_tiles[y1][x0], w01)
-	accumulate_city_source_sample(profile, WorldData.city_start_tiles[y1][x1], w11)
+
+func _reset_city_source_profile(profile: Dictionary) -> void:
+	profile["elevation"] = 0.0
+	profile["temperature"] = 0.0
+	profile["precipitation"] = 0.0
+	profile["fertility"] = 0.0
+	profile["fertility_weight"] = 0.0
+	profile["water_weight"] = 0.0
+	profile["ocean_weight"] = 0.0
+	profile["river_weight"] = 0.0
+	profile["mountain_weight"] = 0.0
+	var biome_weights: Dictionary = profile["biome_weights"]
+	var resource_weights: Dictionary = profile["resource_weights"]
+	biome_weights.clear()
+	resource_weights.clear()
+
+
+func _populate_city_source_profile(
+	profile: Dictionary,
+	city_x: int,
+	city_y: int,
+	region_size: int
+) -> void:
+	_reset_city_source_profile(profile)
+	var source_fx: float = (
+		((float(city_x) + 0.5) / float(city_world.width))
+		* float(region_size)
+		- 0.5
+	)
+	var source_fy: float = (
+		((float(city_y) + 0.5) / float(city_world.height))
+		* float(region_size)
+		- 0.5
+	)
+	var warp_strength := 0.62
+
+	source_fx += (
+		biome_warp_noise.get_noise_2d(city_x, city_y)
+		* warp_strength
+	)
+	source_fy += (
+		biome_warp_noise.get_noise_2d(
+			city_x + 9173,
+			city_y - 4289
+		)
+		* warp_strength
+	)
+
+	source_fx = clamp(source_fx, 0.0, float(region_size - 1))
+	source_fy = clamp(source_fy, 0.0, float(region_size - 1))
+
+	var x0: int = int(floor(source_fx))
+	var y0: int = int(floor(source_fy))
+	var x1: int = mini(x0 + 1, region_size - 1)
+	var y1: int = mini(y0 + 1, region_size - 1)
+	var tx: float = source_fx - float(x0)
+	var ty: float = source_fy - float(y0)
+	var w00: float = (1.0 - tx) * (1.0 - ty)
+	var w10: float = tx * (1.0 - ty)
+	var w01: float = (1.0 - tx) * ty
+	var w11: float = tx * ty
+
+	accumulate_city_source_sample(
+		profile,
+		WorldData.city_start_tiles[y0][x0],
+		w00
+	)
+	accumulate_city_source_sample(
+		profile,
+		WorldData.city_start_tiles[y0][x1],
+		w10
+	)
+	accumulate_city_source_sample(
+		profile,
+		WorldData.city_start_tiles[y1][x0],
+		w01
+	)
+	accumulate_city_source_sample(
+		profile,
+		WorldData.city_start_tiles[y1][x1],
+		w11
+	)
 
 	if float(profile["fertility_weight"]) > 0.0:
-		profile["fertility"] = float(profile["fertility"]) / float(profile["fertility_weight"])
+		profile["fertility"] = (
+			float(profile["fertility"])
+			/ float(profile["fertility_weight"])
+		)
 	else:
 		profile["fertility"] = -1.0
-
-	return profile
 
 
 func accumulate_city_source_sample(

@@ -89,7 +89,42 @@ func _run_smoke_test() -> void:
 		for error in validation.get("errors", []):
 			push_error(str(error))
 
+	var cached_tree_multimesh_id := (
+		renderer.city_tree_multimesh.get_instance_id()
+		if renderer.city_tree_multimesh != null
+		else 0
+	)
+	var cached_rock_multimesh_id := (
+		renderer.city_rock_multimesh.get_instance_id()
+		if renderer.city_rock_multimesh != null
+		else 0
+	)
 	renderer.queue_free()
+	await get_tree().process_frame
+
+	var reloaded_renderer := CITY_SCENE.instantiate() as CityRenderer
+	add_child(reloaded_renderer)
+	SimulationClock.set_simulation_paused(true)
+	await get_tree().process_frame
+	await get_tree().process_frame
+	_expect(
+		reloaded_renderer.city_natural_feature_cache_reused_on_entry
+		and reloaded_renderer.city_tree_multimesh != null
+		and reloaded_renderer.city_rock_multimesh != null
+		and reloaded_renderer.city_tree_multimesh.get_instance_id()
+		== cached_tree_multimesh_id
+		and reloaded_renderer.city_rock_multimesh.get_instance_id()
+		== cached_rock_multimesh_id,
+		"City re-entry must reuse the natural-feature MultiMeshes instead of rescanning the full map."
+	)
+	_expect(
+		reloaded_renderer.city_map_texture_cache_reused_on_entry
+		and reloaded_renderer.has_valid_saved_city_map_texture_cache(
+			reloaded_renderer.city_world
+		),
+		"City re-entry must reuse the completed map texture cache."
+	)
+	reloaded_renderer.queue_free()
 	await get_tree().process_frame
 	WorldData.reset_runtime_session_state()
 
@@ -103,12 +138,29 @@ func _test_city_map_texture_cache(renderer: CityRenderer) -> void:
 	var view_modes: Array[int] = renderer.get_all_city_view_modes()
 	var original_view_mode := renderer.city_view_mode
 	_expect(
+		renderer.city_texture_cache.is_mode_ready(
+			renderer.city_world,
+			original_view_mode
+		)
+		and renderer.city_terrain_texture != null,
+		"The visible city map mode must be ready as soon as the scene becomes interactive."
+	)
+	_expect(
+		renderer.city_texture_cache.warmup_running
+		or renderer.city_texture_cache.mode_textures.size()
+		== view_modes.size(),
+		"Missing city map modes must warm incrementally instead of blocking scene entry."
+	)
+
+	renderer.city_texture_cache.finish_warmup()
+	renderer.update_city_map_mode_button_visuals()
+	_expect(
 		renderer.city_texture_cache.mode_textures.size()
 		== view_modes.size()
 		and renderer.has_valid_saved_city_map_texture_cache(
 			renderer.city_world
 		),
-		"Every city map mode must be cached before the scene is interactive."
+		"City map warmup must eventually publish and persist every map mode."
 	)
 
 	for mode in view_modes:
@@ -1836,36 +1888,6 @@ func _find_clear_road_construction_tiles(
 					return tiles
 
 	return tiles
-
-
-func _find_clear_road_construction_tile(
-	city_world: WorldData
-) -> Vector2i:
-	if city_world == null:
-		return WorldData.INVALID_CITY_TILE_POSITION
-
-	for y in range(city_world.height):
-		for x in range(city_world.width):
-			var tile_position := Vector2i(x, y)
-
-			if (
-				WorldData.can_place_city_road_tile(
-					city_world,
-					tile_position
-				)
-				and WorldData.get_city_surface_feature(
-					city_world.get_tile(x, y)
-				) == WorldData.CITY_SURFACE_FEATURE_NONE
-				and not WorldData.has_city_ground_pile_at_tile(
-					tile_position
-				)
-				and not WorldData.has_living_city_citizen_at_tile(
-					tile_position
-				)
-			):
-				return tile_position
-
-	return WorldData.INVALID_CITY_TILE_POSITION
 
 
 func _find_reachable_construction_rectangle(

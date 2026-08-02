@@ -383,10 +383,20 @@ func _test_world_map_cache(
 	var view_modes: Array[int] = renderer.get_all_world_view_modes()
 	var original_view_mode := int(renderer.view_mode)
 	_expect(
+		renderer.world_texture_cache.is_mode_ready(
+			source_world,
+			original_view_mode
+		)
+		and renderer.world_map_texture != null,
+		"The visible world map mode must be available before interaction."
+	)
+
+	renderer.world_texture_cache.finish_warmup()
+	_expect(
 		renderer.world_texture_cache.mode_textures.size()
 		== view_modes.size()
 		and renderer.has_valid_saved_world_map_texture_cache(source_world),
-		"Every world map mode must be cached before the scene is interactive."
+		"World map warmup must eventually publish and persist every map mode."
 	)
 
 	for mode in view_modes:

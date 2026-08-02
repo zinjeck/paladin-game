@@ -646,7 +646,7 @@ static func _find_best_cargo_construction_demand(
 				"city_world": city_world,
 				"start_tile": start_tile,
 				"destination_tiles": access_tiles,
-				"max_expanded_nodes": _get_city_wide_path_expansion_limit(city_world),
+				"max_expanded_nodes": CityNavigationSystemScript.get_city_wide_path_expansion_limit(city_world),
 				"citizen_id": citizen_id,
 				"heuristic_weight": EXACT_PATH_HEURISTIC_WEIGHT
 			})
@@ -874,7 +874,7 @@ static func _find_nearest_eligible_public_storage_source_in_tier(
 			"city_world": city_world,
 			"start_tile": start_tile,
 			"destination_tiles": source_tiles,
-			"max_expanded_nodes": _get_city_wide_path_expansion_limit(city_world),
+			"max_expanded_nodes": CityNavigationSystemScript.get_city_wide_path_expansion_limit(city_world),
 			"citizen_id": citizen_id,
 			"heuristic_weight": EXACT_PATH_HEURISTIC_WEIGHT
 		})
@@ -1069,7 +1069,7 @@ static func _find_nearest_eligible_destination_in_tier(
 			"city_world": city_world,
 			"start_tile": start_tile,
 			"destination_tiles": destination_tiles,
-			"max_expanded_nodes": _get_city_wide_path_expansion_limit(city_world),
+			"max_expanded_nodes": CityNavigationSystemScript.get_city_wide_path_expansion_limit(city_world),
 			"citizen_id": citizen_id,
 			"heuristic_weight": EXACT_PATH_HEURISTIC_WEIGHT
 		})
@@ -1269,7 +1269,7 @@ static func _find_nearest_eligible_destination_for_resources_in_tier(
 			"city_world": city_world,
 			"start_tile": start_tile,
 			"destination_tiles": destination_tiles,
-			"max_expanded_nodes": _get_city_wide_path_expansion_limit(city_world),
+			"max_expanded_nodes": CityNavigationSystemScript.get_city_wide_path_expansion_limit(city_world),
 			"citizen_id": citizen_id,
 			"heuristic_weight": EXACT_PATH_HEURISTIC_WEIGHT
 		})
@@ -1486,7 +1486,7 @@ static func make_destination_result_for_endpoint_resources(
 			"city_world": city_world,
 			"start_tile": start_tile,
 			"destination_tiles": destination_tiles,
-			"max_expanded_nodes": _get_city_wide_path_expansion_limit(city_world),
+			"max_expanded_nodes": CityNavigationSystemScript.get_city_wide_path_expansion_limit(city_world),
 			"citizen_id": citizen_id,
 			"heuristic_weight": EXACT_PATH_HEURISTIC_WEIGHT
 		})
@@ -1622,7 +1622,7 @@ static func make_destination_result_for_endpoint(
 			"city_world": city_world,
 			"start_tile": start_tile,
 			"destination_tiles": destination_tiles,
-			"max_expanded_nodes": _get_city_wide_path_expansion_limit(city_world),
+			"max_expanded_nodes": CityNavigationSystemScript.get_city_wide_path_expansion_limit(city_world),
 			"citizen_id": citizen_id,
 			"heuristic_weight": EXACT_PATH_HEURISTIC_WEIGHT
 		})
@@ -2224,7 +2224,7 @@ static func _find_best_reachable_source_candidate(
 		"city_world": WorldData.official_city_world,
 		"start_tile": current_tile,
 		"destination_tiles": target_tiles,
-		"max_expanded_nodes": _get_city_wide_path_expansion_limit(
+		"max_expanded_nodes": CityNavigationSystemScript.get_city_wide_path_expansion_limit(
 			WorldData.official_city_world
 		),
 		"citizen_id": citizen_id,
@@ -2266,16 +2266,6 @@ static func _find_best_reachable_source_candidate(
 #endregion
 
 #region Shared Matching Helpers
-
-static func _get_city_wide_path_expansion_limit(
-	city_world: WorldData
-) -> int:
-	if city_world == null:
-		return 1
-
-	# Exact food reachability is a liveness decision, so it must not become
-	# false merely because the city has grown beyond an arbitrary fixed cap.
-	return maxi(city_world.width * city_world.height, 1)
 
 
 static func _get_endpoint_access_tiles(

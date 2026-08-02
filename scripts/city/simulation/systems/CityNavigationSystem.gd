@@ -16,6 +16,7 @@ const PATH_STATUS_RECONSTRUCTION_FAILED := (
 
 const DEFAULT_MAX_EXPANDED_NODES: int = 10_000
 const MAXIMUM_PATH_COST: int = 1_000_000_000
+const EXACT_DESTINATION_HEURISTIC_LIMIT: int = 8
 
 # Roads change traversal time, so ordinary pathfinding uses an admissible
 # weight-one heuristic and optimizes exact estimated travel time.
@@ -130,24 +131,25 @@ static func find_path_to_any_city_tile(values: Dictionary) -> Dictionary:
 	var previous_tile_by_tile: Dictionary = {}
 	var closed_tile_lookup: Dictionary = {}
 
-	var start_heuristic := (
-		_get_minimum_octile_distance(
-			start_tile,
-			destination_tiles
-		)
+	var destination_heuristic := (
+		_make_destination_heuristic(destination_tiles)
+	)
+	var start_heuristic := _get_destination_heuristic(
+		start_tile,
+		destination_heuristic
 	)
 	var safe_heuristic_weight := maxi(
 		heuristic_weight,
 		1
 	)
 
-	_push_open_heap_entry({
-		"open_heap": open_heap,
-		"tile_position": start_tile,
-		"travel_cost": 0,
-		"heuristic": start_heuristic,
-		"heuristic_weight": safe_heuristic_weight
-	})
+	_push_open_heap_entry(
+		open_heap,
+		start_tile,
+		0,
+		start_heuristic,
+		safe_heuristic_weight
+	)
 
 	var expanded_node_count := 0
 	var safe_max_expanded_nodes := maxi(
@@ -289,20 +291,18 @@ static func find_path_to_any_city_tile(values: Dictionary) -> Dictionary:
 				current_tile
 			)
 
-			var neighbor_heuristic := (
-				_get_minimum_octile_distance(
-					neighbor_tile,
-					destination_tiles
-				)
+			var neighbor_heuristic := _get_destination_heuristic(
+				neighbor_tile,
+				destination_heuristic
 			)
 
-			_push_open_heap_entry({
-				"open_heap": open_heap,
-				"tile_position": neighbor_tile,
-				"travel_cost": proposed_travel_cost,
-				"heuristic": neighbor_heuristic,
-				"heuristic_weight": safe_heuristic_weight
-			})
+			_push_open_heap_entry(
+				open_heap,
+				neighbor_tile,
+				proposed_travel_cost,
+				neighbor_heuristic,
+				safe_heuristic_weight
+			)
 
 	result["status"] = PATH_STATUS_UNREACHABLE
 	result["expanded_node_count"] = (
@@ -345,20 +345,70 @@ static func _get_clean_destination_tiles(
 		destination_tiles.append(destination_tile)
 
 	destination_tiles.sort_custom(
-		_sort_city_tiles_y_then_x
+		WorldData._sort_city_tiles_y_then_x
 	)
 
 	return destination_tiles
 
 
-static func _sort_city_tiles_y_then_x(
-	tile_a: Vector2i,
-	tile_b: Vector2i
-) -> bool:
-	if tile_a.y == tile_b.y:
-		return tile_a.x < tile_b.x
+static func _make_destination_heuristic(
+	destination_tiles: Array
+) -> Dictionary:
+	if destination_tiles.size() <= EXACT_DESTINATION_HEURISTIC_LIMIT:
+		return {
+			"use_exact": true,
+			"destination_tiles": destination_tiles,
+		}
 
-	return tile_a.y < tile_b.y
+	var first_tile: Vector2i = destination_tiles[0]
+	var minimum_x := first_tile.x
+	var maximum_x := first_tile.x
+	var minimum_y := first_tile.y
+	var maximum_y := first_tile.y
+
+	for destination_tile in destination_tiles:
+		minimum_x = mini(minimum_x, destination_tile.x)
+		maximum_x = maxi(maximum_x, destination_tile.x)
+		minimum_y = mini(minimum_y, destination_tile.y)
+		maximum_y = maxi(maximum_y, destination_tile.y)
+
+	return {
+		"use_exact": false,
+		"minimum_x": minimum_x,
+		"maximum_x": maximum_x,
+		"minimum_y": minimum_y,
+		"maximum_y": maximum_y,
+	}
+
+
+static func _get_destination_heuristic(
+	tile_position: Vector2i,
+	heuristic: Dictionary
+) -> int:
+	if bool(heuristic.get("use_exact", false)):
+		return _get_minimum_octile_distance(
+			tile_position,
+			heuristic.get("destination_tiles", [])
+		)
+
+	var delta_x := 0
+	var delta_y := 0
+	var minimum_x := int(heuristic.get("minimum_x", tile_position.x))
+	var maximum_x := int(heuristic.get("maximum_x", tile_position.x))
+	var minimum_y := int(heuristic.get("minimum_y", tile_position.y))
+	var maximum_y := int(heuristic.get("maximum_y", tile_position.y))
+
+	if tile_position.x < minimum_x:
+		delta_x = minimum_x - tile_position.x
+	elif tile_position.x > maximum_x:
+		delta_x = tile_position.x - maximum_x
+
+	if tile_position.y < minimum_y:
+		delta_y = minimum_y - tile_position.y
+	elif tile_position.y > maximum_y:
+		delta_y = tile_position.y - maximum_y
+
+	return _get_octile_road_cost(delta_x, delta_y)
 
 
 static func _get_minimum_octile_distance(
@@ -368,48 +418,43 @@ static func _get_minimum_octile_distance(
 	var minimum_distance := MAXIMUM_PATH_COST
 
 	for destination_tile in destination_tiles:
-		var delta_x := absi(
-			destination_tile.x - tile_position.x
-		)
-		var delta_y := absi(
-			destination_tile.y - tile_position.y
-		)
-		var diagonal_steps := mini(delta_x, delta_y)
-		var straight_steps := (
-			maxi(delta_x, delta_y) - diagonal_steps
-		)
-		# The fastest possible terrain is a completed road. Using road costs
-		# keeps the heuristic admissible while allowing A* to prefer a longer
-		# geometric route whenever its actual travel time is lower.
-		var distance := (
-			diagonal_steps
-			* WorldData.CITY_CITIZEN_ROAD_DIAGONAL_MOVEMENT_COST
-			+ straight_steps
-			* WorldData.CITY_CITIZEN_ROAD_CARDINAL_MOVEMENT_COST
-		)
-
 		minimum_distance = mini(
 			minimum_distance,
-			distance
+			_get_octile_road_cost(
+				absi(destination_tile.x - tile_position.x),
+				absi(destination_tile.y - tile_position.y)
+			)
 		)
 
 	return minimum_distance
 
 
-static func _push_open_heap_entry(values: Dictionary) -> void:
-	var open_heap: Array = values.get("open_heap", [])
-	var tile_position: Vector2i = values.get(
-		"tile_position",
-		WorldData.INVALID_CITY_TILE_POSITION
+static func _get_octile_road_cost(delta_x: int, delta_y: int) -> int:
+	var diagonal_steps := mini(delta_x, delta_y)
+	var straight_steps := maxi(delta_x, delta_y) - diagonal_steps
+	# Completed roads are the fastest possible terrain. Using road costs keeps
+	# both the exact and bounding-box heuristics admissible.
+	return (
+		diagonal_steps
+		* WorldData.CITY_CITIZEN_ROAD_DIAGONAL_MOVEMENT_COST
+		+ straight_steps
+		* WorldData.CITY_CITIZEN_ROAD_CARDINAL_MOVEMENT_COST
 	)
-	var travel_cost := int(values.get("travel_cost", 0))
-	var heuristic := int(values.get("heuristic", 0))
-	var heuristic_weight := int(values.get("heuristic_weight", HEURISTIC_WEIGHT))
+
+
+static func _push_open_heap_entry(
+	open_heap: Array,
+	tile_position: Vector2i,
+	travel_cost: int,
+	heuristic: int,
+	heuristic_weight: int
+) -> void:
+	# Direct arguments avoid allocating a Dictionary for every open-set push.
 	var entry := [
 		tile_position,
 		travel_cost + heuristic * heuristic_weight,
 		heuristic,
-		travel_cost
+		travel_cost,
 	]
 
 	open_heap.append(entry)
@@ -417,9 +462,7 @@ static func _push_open_heap_entry(values: Dictionary) -> void:
 	var heap_index := open_heap.size() - 1
 
 	while heap_index > 0:
-		var parent_index := int(
-			(heap_index - 1) / 2
-		)
+		var parent_index := int((heap_index - 1) / 2)
 
 		if not _heap_entry_precedes(
 			open_heap[heap_index],
@@ -539,6 +582,15 @@ static func _reconstruct_path(
 
 	path.reverse()
 	return path
+
+
+static func get_city_wide_path_expansion_limit(
+	city_world: WorldData
+) -> int:
+	if city_world == null:
+		return 1
+
+	return maxi(city_world.width * city_world.height, 1)
 
 
 static func _finish_result(

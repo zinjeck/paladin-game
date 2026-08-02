@@ -16,6 +16,8 @@ const MapTextureCacheStateScript = preload(
 const MapCameraSessionStateScript = preload(
 	"res://scripts/map/MapCameraSessionState.gd"
 )
+const DEFAULT_CITY_SCENE := preload("res://scenes/CityScreen.tscn")
+const DEFAULT_CITY_SCENE_PATH := "res://scenes/CityScreen.tscn"
 const WORLD_CURSOR_LOOK_FILL_COLOR: Color = Color(1.0, 1.0, 1.0, 0.08)
 const WORLD_CURSOR_LOOK_BORDER_COLOR: Color = Color(1.0, 1.0, 1.0, 0.58)
 const WORLD_CURSOR_LOOK_GRID_COLOR: Color = Color(1.0, 1.0, 1.0, 0.20)
@@ -136,6 +138,9 @@ func _draw():
 
 
 func _process(_delta):
+	if world_texture_cache != null:
+		world_texture_cache.process_warmup()
+
 	update_hovered_tile()
 	update_city_name_world_label_transform()
 
@@ -730,6 +735,11 @@ func _input(event):
 
 func set_world_view_mode(new_view_mode: int) -> void:
 	if view_mode == new_view_mode:
+		return
+	if (
+		world_texture_cache == null
+		or not world_texture_cache.is_mode_ready(world, new_view_mode)
+	):
 		return
 
 	view_mode = new_view_mode
@@ -1595,7 +1605,14 @@ func change_to_city_screen() -> void:
 		push_error("City scene path is empty.")
 		return
 
-	var error: Error = get_tree().change_scene_to_file(target_city_scene_path)
+	var error := OK
+
+	if target_city_scene_path == DEFAULT_CITY_SCENE_PATH:
+		# The standard city scene is preloaded with the world renderer, so the
+		# button press does not synchronously parse and load a PackedScene.
+		error = get_tree().change_scene_to_packed(DEFAULT_CITY_SCENE)
+	else:
+		error = get_tree().change_scene_to_file(target_city_scene_path)
 
 	if error != OK:
 		push_error("Could not load city scene: " + target_city_scene_path)
