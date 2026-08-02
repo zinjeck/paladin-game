@@ -4,8 +4,6 @@ on:
   push:
     branches:
       - main
-      - "ci/**"
-      - "paladin/**"
   pull_request:
     branches:
       - main
