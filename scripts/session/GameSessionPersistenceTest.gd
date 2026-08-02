@@ -69,6 +69,8 @@ func _test_background_city_preparation() -> void:
 func _test_persistent_world_city_views() -> void:
 	WorldData.reset_runtime_session_state()
 	SimulationClock.suspend_simulation()
+	SimulationClock.set_speed_multiplier(3.0)
+	SimulationClock.set_simulation_paused(false)
 	var world := _make_world(8, 8, 4301)
 	var locked := WorldData.lock_world_save({
 		"source_world": world,
@@ -90,6 +92,11 @@ func _test_persistent_world_city_views() -> void:
 
 	var initial_world_view = session.world_view
 	var initial_world_id: int = initial_world_view.get_instance_id()
+	_expect(
+		session.simulation_speed_controls == null,
+		"World view must not show speed controls before first city entry."
+	)
+
 	session.show_city_view()
 	await get_tree().process_frame
 
@@ -102,6 +109,50 @@ func _test_persistent_world_city_views() -> void:
 		is_instance_valid(initial_world_view)
 		and initial_world_view.get_instance_id() == initial_world_id,
 		"Entering the city must not destroy or reload the world view."
+	)
+	_expect(
+		session.city_view_has_been_entered,
+		"First city activation must unlock the shared playback controls."
+	)
+	_expect(
+		SimulationClock.simulation_paused,
+		"First city entry must pause the simulation by default."
+	)
+	_expect(
+		is_equal_approx(SimulationClock.speed_multiplier, 1.0),
+		"First city entry must select normal speed beneath the paused state."
+	)
+
+	var speed_controls = session.simulation_speed_controls
+	_expect(
+		speed_controls != null,
+		"First city entry must create the session-wide speed controls."
+	)
+
+	var speed_controls_id := 0
+
+	if speed_controls != null:
+		speed_controls_id = speed_controls.get_instance_id()
+		_expect(
+			speed_controls.buttons.size() == 4,
+			"Playback controls must contain Pause, 1x, 2x, and 3x."
+		)
+		_expect(
+			speed_controls.speed_one_button.text == "1x"
+			and speed_controls.speed_two_button.text == "2x"
+			and speed_controls.speed_three_button.text == "3x",
+			"Playback speed labels must match the accepted design."
+		)
+		_expect(
+			speed_controls.get_selected_mode_name() == "pause",
+			"The pause control must be selected on first city entry."
+		)
+		speed_controls.select_speed(2.0)
+
+	_expect(
+		not SimulationClock.simulation_paused
+		and is_equal_approx(SimulationClock.speed_multiplier, 2.0),
+		"Selecting 2x must resume the shared clock at double speed."
 	)
 
 	var city_renderer = session.city_view
@@ -128,6 +179,21 @@ func _test_persistent_world_city_views() -> void:
 		session.active_view == initial_world_view,
 		"Back must reactivate the existing world view."
 	)
+	_expect(
+		session.simulation_speed_controls != null
+		and session.simulation_speed_controls.visible,
+		"Returning to the world after city entry must retain visible controls."
+	)
+	_expect(
+		session.simulation_speed_controls.get_instance_id()
+		== speed_controls_id,
+		"World and city views must share one playback-control instance."
+	)
+	_expect(
+		not SimulationClock.simulation_paused
+		and is_equal_approx(SimulationClock.speed_multiplier, 2.0),
+		"World return must preserve the city-selected clock speed."
+	)
 
 	session.show_city_view()
 	await get_tree().process_frame
@@ -139,7 +205,29 @@ func _test_persistent_world_city_views() -> void:
 		initial_world_view.get_instance_id() == initial_world_id,
 		"Repeated switching must preserve the same world instance."
 	)
+	_expect(
+		not SimulationClock.simulation_paused
+		and is_equal_approx(SimulationClock.speed_multiplier, 2.0),
+		"Repeated city entry must not reset the shared playback state."
+	)
 
+	if speed_controls != null:
+		speed_controls.select_pause()
+		_expect(
+			SimulationClock.simulation_paused
+			and speed_controls.get_selected_mode_name() == "pause",
+			"Pause must update both the clock and active-button state."
+		)
+		speed_controls.select_speed(3.0)
+		_expect(
+			not SimulationClock.simulation_paused
+			and is_equal_approx(SimulationClock.speed_multiplier, 3.0)
+			and speed_controls.get_selected_mode_name() == "3x",
+			"The final speed button must run the clock at triple speed."
+		)
+
+	SimulationClock.set_simulation_paused(false)
+	SimulationClock.set_speed_multiplier(1.0)
 	session.queue_free()
 	await get_tree().process_frame
 
