@@ -928,6 +928,23 @@ static func synchronize_construction_work_order(site_id: int) -> Dictionary:
 	return get_city_work_order_by_id(order_id)
 
 
+# Construction-site removal is an atomic lifecycle boundary. Removing the
+# matching parent order here prevents validators and schedulers from ever
+# observing a dangling order between site completion/cancellation and the
+# next broad work-board synchronization.
+static func remove_construction_work_order_for_site(site_id: int) -> void:
+	if site_id <= 0:
+		return
+
+	var source_key := _make_construction_source_key(site_id)
+	var order_id := int(
+		WorldData.city_work_order_id_by_source_key.get(source_key, -1)
+	)
+
+	if order_id > 0:
+		_remove_order_record(order_id)
+
+
 static func refresh_work_order_runtimes(raw_order_ids: Array) -> void:
 	var order_id_lookup: Dictionary = {}
 
