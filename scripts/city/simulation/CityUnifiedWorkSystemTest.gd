@@ -21,6 +21,9 @@ const CitizenHaulingSystemScript = preload(
 const CitizenDecisionSystemScript = preload(
 	"res://scripts/citizens/simulation/systems/CitizenDecisionSystem.gd"
 )
+const CitizenNeedsSystemScript = preload(
+	"res://scripts/citizens/simulation/systems/CitizenNeedsSystem.gd"
+)
 
 const TEST_WORLD_SIZE := Vector2i(32, 24)
 const TEST_WORLD_SEED: int = 27_041
@@ -40,10 +43,13 @@ func _ready() -> void:
 	_test_unreachable_blueprint_does_not_churn_construction_travel()
 	_test_rebalance_preserves_active_construction_clearing()
 	_test_unreachable_order_runtime_diagnostics()
+	_test_food_replenishment_cycle_and_whole_item_consumption()
+	_test_household_and_public_food_reserve_targets()
+	_test_normal_home_food_preference_allowance()
 	_test_survival_food_fallback_and_reservation_accounting()
 	_test_unreachable_food_tier_does_not_hide_fallbacks()
 	_test_food_path_limit_covers_full_city()
-	_test_food_candidate_rotation_prevents_budget_starvation()
+	_test_unified_food_search_avoids_budget_starvation()
 	_test_full_storage_construction_relocation_and_cancel_preview()
 	_test_construction_labor_balance()
 	_test_safe_boundary_and_cancellation_preserve_physical_cargo()
@@ -931,6 +937,207 @@ func _test_unreachable_blueprint_does_not_churn_construction_travel() -> void:
 	)
 
 
+func _test_food_replenishment_cycle_and_whole_item_consumption() -> void:
+	_reset_fixture()
+	var citizen := _add_citizen("Food cycle", Vector2i(8, 8))
+	var citizen_id := int(citizen.get("id", -1))
+
+	_expect(
+		WorldData.get_city_food_hunger_restore(WorldData.RESOURCE_FISH) == 20
+		and WorldData.get_city_food_hunger_restore(WorldData.RESOURCE_MEAT) == 20,
+		"Fish and meat must each restore exactly 20 hunger."
+	)
+	_expect(
+		WorldData.CITIZEN_FOOD_SEEK_TRIGGER_HUNGER == 70
+		and WorldData.CITIZEN_EAT_TARGET_HUNGER == 100,
+		"Food seeking must begin at 70 while the eating target remains 100."
+	)
+
+	WorldData.set_city_citizen_hunger_state(citizen_id, 90, 0)
+	_expect(
+		WorldData.add_resource_to_city_citizen_inventory(
+			citizen_id,
+			WorldData.RESOURCE_FISH,
+			1
+		) == 1,
+		"The food-cycle fixture must add one carried fish."
+	)
+	CitizenNeedsSystemScript.eat_personal_food_if_hungry(citizen_id)
+	_expect(
+		WorldData.get_city_citizen_hunger(citizen_id) == 90
+		and WorldData.get_city_citizen_inventory_resource_amount(
+			citizen_id,
+			WorldData.RESOURCE_FISH
+		) == 1,
+		"A citizen at 90 must keep a 20-point food item instead of wasting half."
+	)
+
+	WorldData.set_city_citizen_hunger_state(citizen_id, 80, 0)
+	CitizenNeedsSystemScript.eat_personal_food_if_hungry(citizen_id)
+	_expect(
+		WorldData.get_city_citizen_hunger(citizen_id) == 100
+		and WorldData.get_city_citizen_inventory_resource_amount(
+			citizen_id,
+			WorldData.RESOURCE_FISH
+		) == 0,
+		"The retained item must be eaten at 80 to reach exactly 100."
+	)
+
+	WorldData.set_city_citizen_hunger_state(citizen_id, 70, 0)
+	_expect(
+		CitizenNeedsSystemScript.citizen_should_seek_food(citizen_id)
+		and CitizenNeedsSystemScript.get_citizen_food_need_nutrition(citizen_id)
+		== 30,
+		"A citizen reaching 70 without food must seek 30 nutrition toward 100."
+	)
+	_expect(
+		WorldData.add_resource_to_city_citizen_inventory(
+			citizen_id,
+			WorldData.RESOURCE_FISH,
+			2
+		) == 2,
+		"A 30-point deficit must be coverable by two whole 20-point items."
+	)
+	CitizenNeedsSystemScript.eat_personal_food_if_hungry(citizen_id)
+	_expect(
+		WorldData.get_city_citizen_hunger(citizen_id) == 90
+		and WorldData.get_city_citizen_inventory_resource_amount(
+			citizen_id,
+			WorldData.RESOURCE_FISH
+		) == 1
+		and not CitizenNeedsSystemScript.citizen_should_seek_food(citizen_id),
+		"At 70, one item must raise hunger to 90 while the second remains carried."
+	)
+
+	WorldData.set_city_citizen_hunger_state(citizen_id, 80, 0)
+	CitizenNeedsSystemScript.eat_personal_food_if_hungry(citizen_id)
+	_expect(
+		WorldData.get_city_citizen_hunger(citizen_id) == 100
+		and WorldData.get_city_citizen_inventory_resource_amount(
+			citizen_id,
+			WorldData.RESOURCE_FISH
+		) == 0,
+		"The carried second item must complete the daily 70-to-100 cycle."
+	)
+
+
+func _test_household_and_public_food_reserve_targets() -> void:
+	var city_world := _reset_fixture()
+	var first := _add_citizen("Pantry first", Vector2i(8, 8))
+	var second := _add_citizen("Pantry second", Vector2i(9, 8))
+	var house := WorldData.add_city_object({
+		"object_type": WorldData.CITY_OBJECT_HOUSE,
+		"top_left": Vector2i(4, 4),
+		"size_tiles": WorldData.get_city_object_size_for_type(
+			WorldData.CITY_OBJECT_HOUSE
+		),
+		"object_owner": "player",
+		"city_world": city_world,
+	})
+	var house_id := int(house.get("id", -1))
+	_expect(
+		WorldData.assign_city_citizen_home(int(first.get("id", -1)), house_id)
+		and WorldData.assign_city_citizen_home(
+			int(second.get("id", -1)),
+			house_id
+		),
+		"Both pantry-test citizens must reside in the same house."
+	)
+	house = WorldData.get_city_object_by_id(house_id)
+	_expect(
+		CityResourceMatcherScript.get_city_home_food_target_nutrition(house)
+		== 80
+		and CityResourceMatcherScript.get_city_home_requested_food_units(
+			house,
+			WorldData.RESOURCE_FISH
+		) == 4,
+		"A two-resident home must target one full day: 80 nutrition or four fish."
+	)
+	_expect(
+		CityResourceMatcherScript.get_city_public_food_reserve_target_nutrition()
+		== 40,
+		"Two living citizens must protect a half-day public reserve of 40 nutrition."
+	)
+
+	var stockpile := WorldData.add_city_object({
+		"object_type": WorldData.CITY_OBJECT_STOCKPILE,
+		"top_left": Vector2i(12, 6),
+		"size_tiles": WorldData.get_city_object_size_for_type(
+			WorldData.CITY_OBJECT_STOCKPILE
+		),
+		"object_owner": "player",
+		"city_world": city_world,
+	})
+	var stockpile_id := int(stockpile.get("id", -1))
+	_expect(
+		WorldData.add_resource_to_city_object_storage(
+			stockpile_id,
+			WorldData.RESOURCE_FISH,
+			2
+		) == 2,
+		"The public reserve fixture must store exactly two fish."
+	)
+	first = WorldData.get_city_citizen_by_id(int(first.get("id", -1)))
+	var protected_match := CityResourceMatcherScript.find_best_household_food_source(
+		first,
+		WorldData.RESOURCE_FISH,
+		4
+	)
+	_expect(
+		protected_match.is_empty(),
+		"A pantry delivery must not consume the exact half-day public reserve."
+	)
+
+	_expect(
+		WorldData.add_resource_to_city_object_storage(
+			stockpile_id,
+			WorldData.RESOURCE_FISH,
+			1
+		) == 1,
+		"The pantry fixture must add one fish above the protected reserve."
+	)
+	var surplus_match := CityResourceMatcherScript.find_best_household_food_source(
+		first,
+		WorldData.RESOURCE_FISH,
+		4
+	)
+	_expect(
+		int(surplus_match.get("endpoint", {}).get("id", -1)) == stockpile_id
+		and int(surplus_match.get("available_amount", 0)) == 1,
+		"Only the one public-surplus fish may be offered for pantry delivery."
+	)
+
+
+func _test_normal_home_food_preference_allowance() -> void:
+	var home_result := {
+		"source_id": 1,
+		"path_cost": 125,
+	}
+	var alternative_result := {
+		"source_id": 2,
+		"path_cost": 100,
+	}
+	_expect(
+		int(
+			CityResourceMatcherScript._choose_normal_survival_food_result(
+				home_result,
+				alternative_result
+			).get("source_id", -1)
+		) == 1,
+		"Normal hunger may prefer home when its route is no more than 25% longer."
+	)
+	home_result["path_cost"] = 126
+	_expect(
+		int(
+			CityResourceMatcherScript._choose_normal_survival_food_result(
+				home_result,
+				alternative_result
+			).get("source_id", -1)
+		) == 2,
+		"A source more than 25% closer must beat the normal home preference."
+	)
+
+
 func _test_survival_food_fallback_and_reservation_accounting() -> void:
 	var city_world := _reset_fixture()
 	var first := _add_hungry_citizen("First", Vector2i(8, 9))
@@ -1102,8 +1309,8 @@ func _test_unreachable_food_tier_does_not_hide_fallbacks() -> void:
 		"Eight unreachable stockpiles must not hide reachable workplace food."
 	)
 	_expect(
-		int(survival_workplace_match.get("path_requests_used", 0)) == 2,
-		"Survival matching must spend one exact path request per viable tier."
+		int(survival_workplace_match.get("path_requests_used", 0)) == 1,
+		"Critical survival matching must search all legal sources in one exact path request."
 	)
 
 	var household_workplace_match := (
@@ -1177,7 +1384,7 @@ func _test_food_path_limit_covers_full_city() -> void:
 	)
 
 
-func _test_food_candidate_rotation_prevents_budget_starvation() -> void:
+func _test_unified_food_search_avoids_budget_starvation() -> void:
 	var city_world := _reset_fixture()
 	var first := _add_hungry_citizen("First scan", Vector2i(2, 15))
 	var second := _add_hungry_citizen("Second scan", Vector2i(28, 15))
@@ -1208,8 +1415,8 @@ func _test_food_candidate_rotation_prevents_budget_starvation() -> void:
 		"object_type": WorldData.CITY_OBJECT_FISHING_GROUNDS,
 		"top_left": Vector2i(21, 2),
 		"size_tiles": WorldData.get_city_object_size_for_type(
-						WorldData.CITY_OBJECT_FISHING_GROUNDS
-					),
+			WorldData.CITY_OBJECT_FISHING_GROUNDS
+		),
 		"object_owner": "player",
 		"city_world": city_world,
 	})
@@ -1219,11 +1426,11 @@ func _test_food_candidate_rotation_prevents_budget_starvation() -> void:
 			first_id,
 			int(house.get("id", -1))
 		),
-		"The first hungry citizen must own the isolated pantry tier."
+		"The first hungry citizen must own the isolated pantry source."
 	)
 	_expect(
 		WorldData.remove_city_citizen_home(second_id),
-		"The later hungry citizen must have no private pantry tier."
+		"The later hungry citizen must have no private pantry source."
 	)
 
 	for food_object in [house, stockpile, keep, fishery]:
@@ -1233,7 +1440,7 @@ func _test_food_candidate_rotation_prevents_budget_starvation() -> void:
 				WorldData.RESOURCE_FISH,
 				1
 			) == 1,
-			"Every populated food tier must contain one physical fish."
+			"Every isolated container source must contain one physical fish."
 		)
 
 	var pile_result := WorldData.add_resource_to_city_ground_piles_with_result({
@@ -1242,10 +1449,8 @@ func _test_food_candidate_rotation_prevents_budget_starvation() -> void:
 		"amount_delta": 2,
 	})
 	var pile_id := _first_ground_pile_id(pile_result)
-	_expect(pile_id > 0, "The later citizen needs a reachable final-tier pile.")
+	_expect(pile_id > 0, "The later citizen needs a reachable food pile.")
 
-	# Citizen one is sealed west of x=5. Citizen two and the ground pile are
-	# south-east, while every container tier is sealed north of y=10.
 	for y in range(city_world.height):
 		var vertical_wall_tile := city_world.get_tile(5, y)
 		vertical_wall_tile["terrain"] = WorldData.TERRAIN_MOUNTAIN
@@ -1265,59 +1470,35 @@ func _test_food_candidate_rotation_prevents_budget_starvation() -> void:
 		10,
 		8
 	)
-	var second_short_probe := (
-		CityResourceMatcherScript.find_best_survival_food_source(
-			second,
-			100,
-			10,
-			3
-		)
+	var second_probe := CityResourceMatcherScript.find_best_survival_food_source(
+		second,
+		100,
+		10,
+		3
 	)
 	_expect(
 		int(first_probe.get("source_id", -1)) <= 0
-		and int(first_probe.get("path_requests_used", 0)) == 5,
-		"The first citizen must exhaust all five populated unreachable tiers."
+		and int(first_probe.get("path_requests_used", 0)) == 1,
+		"All unreachable sources must be rejected in one complete path request."
 	)
 	_expect(
-		int(second_short_probe.get("source_id", -1)) <= 0
-		and int(second_short_probe.get("path_requests_used", 0)) == 3,
-		"Three remaining requests must stop just before the later citizen's ground tier."
+		str(second_probe.get("source_kind", ""))
+		== WorldData.CITY_CITIZEN_HAUL_ENDPOINT_KIND_GROUND_PILE
+		and int(second_probe.get("source_id", -1)) == pile_id
+		and int(second_probe.get("path_requests_used", 0)) == 1,
+		"A reachable later citizen must find ground food without tier-budget starvation."
 	)
 
 	CitizenDecisionSystemScript.reset_runtime_state()
 	CitizenDecisionSystemScript._process_food_needs(true)
-	_expect(
-		str(WorldData.get_city_citizen_current_task(first_id).get("kind", ""))
-		== WorldData.CITY_CITIZEN_TASK_KIND_NONE
-		and str(
-			WorldData.get_city_citizen_current_task(second_id).get("kind", "")
-		) == WorldData.CITY_CITIZEN_TASK_KIND_NONE,
-		"The first shared-budget pass must reproduce the later-citizen starvation boundary."
-	)
-
-	WorldData.set_city_citizen_hunger_state(first_id, 40, 0)
-	WorldData.set_city_citizen_hunger_state(second_id, 40, 0)
-	CitizenDecisionSystemScript._process_food_needs(false)
-	_expect(
-		str(WorldData.get_city_citizen_current_task(first_id).get("kind", ""))
-		== WorldData.CITY_CITIZEN_TASK_KIND_NONE
-		and str(
-			WorldData.get_city_citizen_current_task(second_id).get("kind", "")
-		) == WorldData.CITY_CITIZEN_TASK_KIND_NONE,
-		"The normal-food cursor must start independently instead of borrowing the critical cursor."
-	)
-
-	WorldData.set_city_citizen_hunger_state(first_id, 20, 0)
-	WorldData.set_city_citizen_hunger_state(second_id, 20, 0)
-	CitizenDecisionSystemScript._process_food_needs(true)
 	var second_task := WorldData.get_city_citizen_current_task(second_id)
 	_expect(
-		str(second_task.get("kind", ""))
+		str(WorldData.get_city_citizen_current_task(first_id).get("kind", ""))
+		== WorldData.CITY_CITIZEN_TASK_KIND_NONE
+		and str(second_task.get("kind", ""))
 		== WorldData.CITY_CITIZEN_TASK_KIND_ACQUIRE_FOOD
-		and str(second_task.get("food_source_endpoint_kind", ""))
-		== WorldData.CITY_CITIZEN_HAUL_ENDPOINT_KIND_GROUND_PILE
 		and int(second_task.get("target_object_id", -1)) == pile_id,
-		"The rotating critical-food start must let the later citizen search first on the next tick."
+		"The shared critical-food budget must reach the later citizen in the same pass."
 	)
 
 	_expect(
@@ -1325,7 +1506,7 @@ func _test_food_candidate_rotation_prevents_budget_starvation() -> void:
 			second_id,
 			WorldData.CITY_CITIZEN_TASK_SOURCE_AUTONOMY
 		),
-		"The fixture must release the critical food reservation before the normal scan."
+		"The fixture must release the critical food reservation before normal seeking."
 	)
 	WorldData.set_city_citizen_hunger_state(first_id, 40, 0)
 	WorldData.set_city_citizen_hunger_state(second_id, 40, 0)
@@ -1335,7 +1516,7 @@ func _test_food_candidate_rotation_prevents_budget_starvation() -> void:
 		str(second_task.get("kind", ""))
 		== WorldData.CITY_CITIZEN_TASK_KIND_ACQUIRE_FOOD
 		and int(second_task.get("target_object_id", -1)) == pile_id,
-		"The rotating normal-food start must independently reach the later citizen on its next pass."
+		"The shared normal-food budget must also reach the later citizen immediately."
 	)
 
 

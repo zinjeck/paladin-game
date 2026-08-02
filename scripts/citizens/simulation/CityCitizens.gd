@@ -14,10 +14,13 @@ const DEFAULT_CITIZEN_HUNGER := 100
 const DEFAULT_CITIZEN_HAPPINESS := 70
 const CITIZEN_HUNGER_LOSS_PER_DAY := 40
 const CITIZEN_HUNGER_DECAY_DENOMINATOR_MINUTES := 24 * 60
-const CITIZEN_FOOD_CARRY_TRIGGER_HUNGER := 70
-const CITIZEN_EAT_TRIGGER_HUNGER := 50
+const CITIZEN_FOOD_SEEK_TRIGGER_HUNGER := 70
+# Compatibility alias retained for callers that still describe the threshold
+# as the point where citizens begin carrying food. Seeking and eating are now
+# intentionally separate concepts.
+const CITIZEN_FOOD_CARRY_TRIGGER_HUNGER := CITIZEN_FOOD_SEEK_TRIGGER_HUNGER
 const CITIZEN_CRITICAL_FOOD_SEEK_TRIGGER_HUNGER := 30
-const CITIZEN_EAT_TARGET_HUNGER := 90
+const CITIZEN_EAT_TARGET_HUNGER := 100
 const CITY_CITIZEN_STATE_IDLE := "idle"
 const INVALID_CITY_TILE_POSITION := Vector2i(-1, -1)
 # A task records why a citizen is acting. It remains separate from movement,

@@ -56,10 +56,11 @@ const CITY_SURFACE_FEATURE_ROCK := "rock"
 const CITY_FOOD_HUNGER_RESTORE_BY_RESOURCE := (
 	CityResourceCatalogScript.CITY_FOOD_HUNGER_RESTORE_BY_RESOURCE
 )
-# Homes keep a convenience pantry, while public storage retains an equal
-# half-day emergency floor. Integer ratios avoid simulation drift from floats.
+# Homes target one full citizen-day of food per resident. Public storage keeps
+# a separate half-day emergency floor before ordinary pantry replenishment may
+# draw from shared stores. Integer ratios avoid simulation drift from floats.
 const HOUSEHOLD_FOOD_TARGET_DAY_NUMERATOR: int = 1
-const HOUSEHOLD_FOOD_TARGET_DAY_DENOMINATOR: int = 2
+const HOUSEHOLD_FOOD_TARGET_DAY_DENOMINATOR: int = 1
 const PUBLIC_FOOD_RESERVE_TARGET_DAY_NUMERATOR: int = 1
 const PUBLIC_FOOD_RESERVE_TARGET_DAY_DENOMINATOR: int = 2
 
@@ -233,11 +234,11 @@ const CITIZEN_HUNGER_LOSS_PER_DAY := (
 const CITIZEN_HUNGER_DECAY_DENOMINATOR_MINUTES := (
 	CityCitizensScript.CITIZEN_HUNGER_DECAY_DENOMINATOR_MINUTES
 )
+const CITIZEN_FOOD_SEEK_TRIGGER_HUNGER := (
+	CityCitizensScript.CITIZEN_FOOD_SEEK_TRIGGER_HUNGER
+)
 const CITIZEN_FOOD_CARRY_TRIGGER_HUNGER := (
 	CityCitizensScript.CITIZEN_FOOD_CARRY_TRIGGER_HUNGER
-)
-const CITIZEN_EAT_TRIGGER_HUNGER := (
-	CityCitizensScript.CITIZEN_EAT_TRIGGER_HUNGER
 )
 const CITIZEN_CRITICAL_FOOD_SEEK_TRIGGER_HUNGER := (
 	CityCitizensScript.CITIZEN_CRITICAL_FOOD_SEEK_TRIGGER_HUNGER

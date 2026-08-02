@@ -843,7 +843,8 @@ static func _get_outstanding_obligation_task_request(
 		)
 
 	# A carried load is the atomic obligation above. Once it is settled, normal
-	# hunger (31--50) outranks every new scheduled or logistical activity.
+	# food seeking (31--70) outranks every new scheduled or logistical
+	# activity once the carried load reaches its safe delivery boundary.
 	if CitizenNeedsSystem.citizen_should_seek_food(citizen_id):
 		return {}
 
