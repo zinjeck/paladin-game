@@ -20,6 +20,8 @@ These rules are intentional architecture, not temporary optimizations.
 - Static terrain and natural features use retained rendering nodes rather than whole-layer custom redraws.
 - `queue_redraw()` is restricted to the coalescing `CityRenderLayer` boundary and controls whose custom geometry genuinely changed.
 - Selection, hover, debugging, and simulation invalidations must target only the affected render layer.
+- A selected citizen's outline belongs to the citizen layer so it uses the same interpolated position and redraw cadence as the moving marker.
+- Road placement retains an exact one-tile hover outline even while the road cursor icon is active.
 - `ci/audit_gdscript.py` enforces the approved `queue_redraw()` call sites and rejects regressions.
 
 ## Validation
