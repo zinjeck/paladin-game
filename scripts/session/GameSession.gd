@@ -10,14 +10,19 @@ const CITY_SCENE := preload("res://scenes/CityScreen.tscn")
 const CityPreparationServiceScript := preload(
 	"res://scripts/session/CityPreparationService.gd"
 )
+const SimulationSpeedControlsScript := preload(
+	"res://scripts/ui/common/SimulationSpeedControls.gd"
+)
 
 var world_view: Node
 var world_renderer: Node
 var city_view: Node
 var active_view: Node
+var simulation_speed_controls: CanvasLayer
 var city_preparation = CityPreparationServiceScript.new()
 var pending_city_request: Dictionary = {}
 var pending_city_switch: bool = false
+var city_view_has_been_entered: bool = false
 
 
 func _ready() -> void:
@@ -137,12 +142,37 @@ func _ensure_city_view(prepared_payload: Dictionary) -> void:
 
 
 func _activate_view(target_view: Node) -> void:
-	if target_view == null or target_view == active_view:
+	if target_view == null:
+		return
+
+	if target_view == city_view:
+		_prepare_first_city_entry()
+
+	if target_view == active_view:
 		return
 
 	_set_view_active(active_view, false)
 	_set_view_active(target_view, true)
 	active_view = target_view
+
+
+func _prepare_first_city_entry() -> void:
+	if city_view_has_been_entered:
+		return
+
+	city_view_has_been_entered = true
+	SimulationClock.set_speed_multiplier(1.0)
+	SimulationClock.set_simulation_paused(true)
+	_ensure_simulation_speed_controls()
+
+
+func _ensure_simulation_speed_controls() -> void:
+	if simulation_speed_controls != null:
+		return
+
+	simulation_speed_controls = SimulationSpeedControlsScript.new()
+	simulation_speed_controls.name = "SimulationSpeedControls"
+	add_child(simulation_speed_controls)
 
 
 func _set_view_active(view: Node, is_active: bool) -> void:
