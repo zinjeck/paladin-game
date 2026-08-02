@@ -26,6 +26,12 @@ RESOURCE_RE = re.compile(r'(["\'])res://([^"\']+)\1')
 REGION_RE = re.compile(r"^\s*#region\b", re.MULTILINE)
 ENDREGION_RE = re.compile(r"^\s*#endregion\b", re.MULTILINE)
 FUNC_LINE_RE = re.compile(r"^(?:static\s+)?func\s+([A-Za-z_][A-Za-z0-9_]*)\s*\(")
+QUEUE_REDRAW_RE = re.compile(r"\bqueue_redraw\b")
+
+ALLOWED_QUEUE_REDRAW_CALLS = {
+    "scripts/city/rendering/CityRenderLayer.gd": 1,
+    "scripts/ui/city/CityInformationPanel.gd": 2,
+}
 
 
 @dataclass(frozen=True)
@@ -107,6 +113,14 @@ def main() -> int:
             if not resolved.exists():
                 errors.append(f"{relative}: missing resource path res://{resource_path}")
 
+        redraw_call_count = len(QUEUE_REDRAW_RE.findall(text))
+        allowed_redraw_calls = ALLOWED_QUEUE_REDRAW_CALLS.get(relative, 0)
+        if redraw_call_count > allowed_redraw_calls:
+            errors.append(
+                f"{relative}: contains {redraw_call_count} queue_redraw references; "
+                f"only {allowed_redraw_calls} are approved"
+            )
+
         metrics = function_metrics(path, text)
         all_metrics.extend(metrics)
         for metric in metrics:
@@ -131,6 +145,33 @@ def main() -> int:
             for _, resource_path in RESOURCE_RE.findall(text):
                 if not (ROOT / resource_path).exists():
                     errors.append(f"{relative}: missing resource path res://{resource_path}")
+
+    map_cache_path = ROOT / "scripts/map/cache/MapTextureCache.gd"
+    if map_cache_path.exists():
+        map_cache_text = map_cache_path.read_text(encoding="utf-8")
+        forbidden_staggered_terms = (
+            "warmup_running",
+            "process_warmup",
+            "start_warmup",
+            "finish_warmup",
+            "_warmup_next_row",
+            "_warmup_images",
+        )
+        for term in forbidden_staggered_terms:
+            if term in map_cache_text:
+                errors.append(
+                    "scripts/map/cache/MapTextureCache.gd: retired staggered "
+                    f"map loading term remains: {term}"
+                )
+
+    city_renderer_path = ROOT / "scripts/city/rendering/CityRenderer.gd"
+    if city_renderer_path.exists():
+        city_renderer_text = city_renderer_path.read_text(encoding="utf-8")
+        if "change_scene_to_" in city_renderer_text:
+            errors.append(
+                "scripts/city/rendering/CityRenderer.gd: city/world switching must "
+                "use the persistent GameSession, not scene replacement"
+            )
 
     largest_files = []
     for path in scripts:

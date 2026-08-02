@@ -7,7 +7,8 @@ enum RegionCursorState {
 }
 
 var view_mode: int = MapVisuals.ViewMode.BIOME
-var world_map_texture: ImageTexture
+var world_map_texture: Texture2D
+var world_map_sprite: Sprite2D
 var world_texture_cache := MapTextureCache.new()
 
 const MapTextureCacheStateScript = preload(
@@ -16,8 +17,6 @@ const MapTextureCacheStateScript = preload(
 const MapCameraSessionStateScript = preload(
 	"res://scripts/map/MapCameraSessionState.gd"
 )
-const DEFAULT_CITY_SCENE := preload("res://scenes/CityScreen.tscn")
-const DEFAULT_CITY_SCENE_PATH := "res://scenes/CityScreen.tscn"
 const WORLD_CURSOR_LOOK_FILL_COLOR: Color = Color(1.0, 1.0, 1.0, 0.08)
 const WORLD_CURSOR_LOOK_BORDER_COLOR: Color = Color(1.0, 1.0, 1.0, 0.58)
 const WORLD_CURSOR_LOOK_GRID_COLOR: Color = Color(1.0, 1.0, 1.0, 0.20)
@@ -112,6 +111,7 @@ func _ready():
 	RenderingServer.set_default_clear_color(abyss_color)
 
 	setup_world_texture_cache()
+	create_world_map_sprite()
 	create_hover_border_line()
 	create_region_selection_lines()
 	create_city_name_world_label()
@@ -129,14 +129,6 @@ func _ready():
 		SimulationClock.suspend_simulation()
 		world = null
 		print("World screen loaded. Press Generate World.")
-
-func _draw():
-	if world == null:
-		return
-
-	draw_abyss_background()
-	draw_world_map_texture()
-
 
 func _process(_delta):
 	update_hovered_tile()
@@ -171,7 +163,6 @@ func set_session_view_active(is_active: bool) -> void:
 			world_camera.make_current()
 
 	if is_active:
-		request_world_redraw()
 		update_debug_panel_text()
 
 
@@ -182,12 +173,6 @@ func _set_descendant_canvas_layers_visible(root: Node, is_visible: bool) -> void
 
 		_set_descendant_canvas_layers_visible(child, is_visible)
 
-
-func request_world_redraw() -> void:
-	if not session_view_active:
-		return
-
-	queue_redraw()
 
 
 func set_city_transition_pending(is_pending: bool) -> void:
@@ -286,6 +271,24 @@ func cancel_city_preparation() -> void:
 	if session != null and session.has_method("cancel_city_preparation"):
 		session.call("cancel_city_preparation")
 
+func create_world_map_sprite() -> void:
+	world_map_sprite = Sprite2D.new()
+	world_map_sprite.name = "WorldMapSprite"
+	world_map_sprite.centered = false
+	world_map_sprite.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
+	world_map_sprite.z_index = -100
+	add_child(world_map_sprite)
+
+
+func refresh_world_map_sprite() -> void:
+	if world_map_sprite == null:
+		return
+
+	world_map_sprite.texture = world_map_texture
+	world_map_sprite.scale = Vector2.ONE * float(settings.tile_size)
+	world_map_sprite.visible = world != null and world_map_texture != null
+
+
 func connect_simulation_clock_signals() -> void:
 	var time_changed_callable := Callable(
 		self,
@@ -310,7 +313,6 @@ func setup_world_texture_cache() -> void:
 	world_texture_cache.setup({
 		"owner": self,
 		"label": "World",
-		"rows_per_frame": 24,
 		"color_provider": Callable(
 			self,
 			"get_tile_color_for_mode"
@@ -385,7 +387,6 @@ func load_locked_world_save() -> void:
 
 	rebuild_world_map_textures()
 	configure_world_camera()
-	request_world_redraw()
 
 func create_hover_border_line():
 	hover_border_line = Line2D.new()
@@ -888,83 +889,9 @@ func set_world_view_mode(new_view_mode: int) -> void:
 	apply_cached_world_map_texture()
 
 	update_debug_panel_text()
-	request_world_redraw()
 
 func get_all_world_view_modes() -> Array[int]:
 	return MapVisuals.get_all_view_modes()
-
-func draw_world_map_texture() -> void:
-	if world_map_texture == null:
-		return
-
-	var map_rect := Rect2(
-		Vector2.ZERO,
-		Vector2(
-			float(world.width * settings.tile_size),
-			float(world.height * settings.tile_size)
-		)
-	)
-
-	draw_texture_rect(world_map_texture, map_rect, false)
-
-func draw_world_inner_box_border(rect: Rect2, border_color: Color, border_width: float) -> void:
-	if rect.size.x <= 0.0 or rect.size.y <= 0.0:
-		return
-
-	var safe_width: float = minf(
-		border_width,
-		minf(rect.size.x * 0.5, rect.size.y * 0.5)
-	)
-
-	safe_width = maxf(safe_width, 0.01)
-
-	draw_rect(
-		Rect2(rect.position, Vector2(rect.size.x, safe_width)),
-		border_color,
-		true
-	)
-
-	draw_rect(
-		Rect2(
-			Vector2(rect.position.x, rect.position.y + rect.size.y - safe_width),
-			Vector2(rect.size.x, safe_width)
-		),
-		border_color,
-		true
-	)
-
-	draw_rect(
-		Rect2(rect.position, Vector2(safe_width, rect.size.y)),
-		border_color,
-		true
-	)
-
-	draw_rect(
-		Rect2(
-			Vector2(rect.position.x + rect.size.x - safe_width, rect.position.y),
-			Vector2(safe_width, rect.size.y)
-		),
-		border_color,
-		true
-	)
-
-func draw_abyss_background() -> void:
-	var map_width: float = float(world.width * settings.tile_size)
-	var map_height: float = float(world.height * settings.tile_size)
-
-	var abyss_rect: Rect2 = Rect2(
-		Vector2(-abyss_padding_pixels, -abyss_padding_pixels),
-		Vector2(
-			map_width + abyss_padding_pixels * 2.0,
-			map_height + abyss_padding_pixels * 2.0
-		)
-	)
-
-	draw_rect(
-		abyss_rect,
-		abyss_color,
-		true
-	)
 
 func get_tile_color(tile: Dictionary) -> Color:
 	return get_tile_color_for_mode(tile, view_mode)
@@ -986,20 +913,8 @@ func rebuild_world_map_textures() -> void:
 		setup_world_texture_cache()
 
 	world_map_texture = world_texture_cache.rebuild(world, view_mode)
+	refresh_world_map_sprite()
 
-
-func ensure_world_map_texture_for_mode(mode: int) -> void:
-	if world_texture_cache == null:
-		setup_world_texture_cache()
-
-	world_texture_cache.ensure_texture_for_mode(world, mode)
-
-
-func build_world_map_texture_for_mode(mode: int) -> ImageTexture:
-	if world_texture_cache == null:
-		setup_world_texture_cache()
-
-	return world_texture_cache.build_texture_for_mode(world, mode)
 
 
 func apply_cached_world_map_texture() -> void:
@@ -1007,6 +922,7 @@ func apply_cached_world_map_texture() -> void:
 		setup_world_texture_cache()
 
 	world_map_texture = world_texture_cache.get_texture_for_mode(world, view_mode)
+	refresh_world_map_sprite()
 
 func get_world_view_mode_name_for_mode(mode: int) -> String:
 	return MapVisuals.get_view_mode_name(mode)
@@ -1682,7 +1598,6 @@ func on_generate_world_button_pressed() -> void:
 
 	rebuild_world_map_textures()
 	configure_world_camera()
-	request_world_redraw()
 
 func on_play_button_pressed() -> void:
 	if WorldData.has_active_world_save():
@@ -1739,28 +1654,13 @@ func change_to_city_screen() -> void:
 	store_current_world_camera_state()
 	var session := get_game_session_controller()
 
-	if session != null and session.has_method("show_city_view"):
-		session.call("show_city_view", build_city_preparation_request())
+	if session == null or not session.has_method("show_city_view"):
+		push_error(
+			"World-to-city switching requires the persistent GameSession."
+		)
 		return
 
-	var target_city_scene_path := WorldData.official_city_scene_path
-
-	if target_city_scene_path.is_empty():
-		target_city_scene_path = city_scene_path
-
-	if target_city_scene_path.is_empty():
-		push_error("City scene path is empty.")
-		return
-
-	var error := OK
-
-	if target_city_scene_path == DEFAULT_CITY_SCENE_PATH:
-		error = get_tree().change_scene_to_packed(DEFAULT_CITY_SCENE)
-	else:
-		error = get_tree().change_scene_to_file(target_city_scene_path)
-
-	if error != OK:
-		push_error("Could not load city scene: " + target_city_scene_path)
+	session.call("show_city_view", build_city_preparation_request())
 
 
 func set_world_locked_ui() -> void:

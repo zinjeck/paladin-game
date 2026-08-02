@@ -5,6 +5,7 @@ var city_world: WorldData
 var city_seed: int = 0
 var source_region_tiles: Array = []
 var source_region_size: int = 0
+var generated_map_atlas_data: Dictionary = {}
 
 var detail_noise := FastNoiseLite.new()
 var fertility_noise := FastNoiseLite.new()
@@ -16,7 +17,6 @@ var tree_patch_noise := FastNoiseLite.new()
 var tree_clearing_noise := FastNoiseLite.new()
 var rock_patch_noise := FastNoiseLite.new()
 
-const DEFAULT_LOCAL_TILES_PER_WORLD_TILE: int = 64
 const TILE_HASH_MASK: int = 0x7fffffff
 const TILE_HASH_AVALANCHE_MULTIPLIER: int = 0x045d9f3b
 const TREE_SPAWN_ROLL_SALT: int = 101
@@ -73,13 +73,17 @@ static func calculate_city_seed_for_region(
 
 func generate_city_world(
 	local_tiles_per_world_tile: int,
-	requested_city_seed: int
+	requested_city_seed: int,
+	build_map_atlas: bool = false,
+	biome_resource_blend: float = 0.45
 ) -> WorldData:
 	return generate_city_world_from_region(
 		WorldData.city_start_tiles,
 		WorldData.city_start_region_size,
 		local_tiles_per_world_tile,
-		requested_city_seed
+		requested_city_seed,
+		build_map_atlas,
+		biome_resource_blend
 	)
 
 
@@ -87,7 +91,9 @@ func generate_city_world_from_region(
 	region_tiles: Array,
 	region_size: int,
 	local_tiles_per_world_tile: int,
-	requested_city_seed: int
+	requested_city_seed: int,
+	build_map_atlas: bool = false,
+	biome_resource_blend: float = 0.45
 ) -> WorldData:
 	if region_size <= 0 or local_tiles_per_world_tile <= 0:
 		push_error("CityWorldGenerator received an invalid city size.")
@@ -111,8 +117,23 @@ func generate_city_world_from_region(
 
 	city_world = WorldData.new()
 	city_world.setup(city_width, city_height, city_seed)
+	generated_map_atlas_data.clear()
 	var tree_count := 0
 	var rock_count := 0
+	var tree_tiles: Array[Vector2i] = []
+	var rock_tiles: Array[Vector2i] = []
+	var map_modes: Array[int] = []
+	var map_atlas_width := 0
+	var map_atlas_rgba8 := PackedByteArray()
+	var map_colors: Array[Color] = []
+
+	if build_map_atlas:
+		map_modes = MapVisuals.get_all_view_modes()
+		map_atlas_width = city_world.width * map_modes.size()
+		map_atlas_rgba8.resize(
+			map_atlas_width * city_world.height * 4
+		)
+		map_colors.resize(MapVisuals.VIEW_MODE_COLOR_COUNT)
 	# Reuse the interpolation accumulator for every tile. A default 576 x 576
 	# city previously allocated more than 330,000 profile dictionaries plus two
 	# nested weight dictionaries during one scene transition.
@@ -140,13 +161,50 @@ func generate_city_world_from_region(
 			match WorldData.get_city_surface_feature(tile):
 				WorldData.CITY_SURFACE_FEATURE_TREE:
 					tree_count += 1
+					tree_tiles.append(Vector2i(x, y))
 
 				WorldData.CITY_SURFACE_FEATURE_ROCK:
 					rock_count += 1
+					rock_tiles.append(Vector2i(x, y))
 
 			row[x] = tile
 
+			if build_map_atlas:
+				MapVisuals.populate_all_tile_colors(
+					tile,
+					map_colors,
+					biome_resource_blend
+				)
+
+				for mode_index in range(map_modes.size()):
+					var mode_int := map_modes[mode_index]
+					var pixel_index := (
+						y * map_atlas_width
+						+ mode_index * city_world.width
+						+ x
+					) * 4
+					MapVisuals.write_color_rgba8(
+						map_atlas_rgba8,
+						pixel_index,
+						map_colors[mode_int]
+					)
+
 	city_world.mark_tile_data_changed()
+	city_world.prepared_city_tree_tiles = tree_tiles
+	city_world.prepared_city_rock_tiles = rock_tiles
+	city_world.prepared_city_feature_tile_data_version = (
+		city_world.tile_data_version
+	)
+
+	if build_map_atlas:
+		generated_map_atlas_data = {
+			"rgba8": map_atlas_rgba8,
+			"width": city_world.width,
+			"height": city_world.height,
+			"modes": map_modes,
+			"tile_data_version": city_world.tile_data_version,
+			"visual_version": MapVisuals.MAP_VISUAL_CACHE_VERSION,
+		}
 	print(
 		"City natural features generated: ",
 		tree_count,

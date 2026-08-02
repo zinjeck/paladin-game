@@ -2,8 +2,9 @@ extends RefCounted
 class_name CityPreparationService
 
 # Builds the immutable, CPU-heavy portion of first city entry away from the
-# main thread. The finished WorldData and six map-mode Images are handed to the
-# city renderer only after the thread has fully completed.
+# main thread. City terrain, natural-feature indexes, and the complete six-mode
+# RGBA8 atlas are produced in the same tile traversal. The main thread receives
+# one atomic payload and performs only the final GPU resource publication.
 
 var _thread: Thread
 var _active_request: Dictionary = {}
@@ -23,9 +24,6 @@ func request_preparation(request: Dictionary) -> void:
 	if str(_completed_payload.get("signature", "")) == signature:
 		return
 	if is_preparing_signature(signature):
-		# A pending transition may re-request the same preparation after a
-		# cancellation. Re-accept the in-flight result instead of discarding it.
-		_accept_active_result = true
 		return
 
 	if _thread != null and _thread.is_started():
@@ -146,7 +144,8 @@ func _start_request(request: Dictionary) -> void:
 	_accept_active_result = true
 	_thread = Thread.new()
 	var start_error := _thread.start(
-		Callable(self, "_build_payload").bind(_active_request)
+		Callable(self, "_build_payload").bind(_active_request),
+		Thread.PRIORITY_LOW
 	)
 
 	if start_error != OK:
@@ -162,57 +161,27 @@ func _build_payload(request: Dictionary) -> Dictionary:
 		request["region_tiles"],
 		int(request["region_size"]),
 		int(request["local_tiles_per_world_tile"]),
-		int(request["city_seed"])
+		int(request["city_seed"]),
+		true,
+		0.45
 	)
 
-	if city_world == null:
+	if (
+		city_world == null
+		or generator.generated_map_atlas_data.is_empty()
+	):
 		return {
 			"valid": false,
 			"signature": str(request.get("signature", "")),
 		}
-
-	var modes := MapVisuals.get_all_view_modes()
-	var mode_images: Dictionary = {}
-
-	for mode in modes:
-		mode_images[int(mode)] = Image.create(
-			city_world.width,
-			city_world.height,
-			false,
-			Image.FORMAT_RGBA8
-		)
-
-	var reusable_colors: Array[Color] = []
-	reusable_colors.resize(MapVisuals.VIEW_MODE_COLOR_COUNT)
-	var tree_tiles: Array[Vector2i] = []
-	var rock_tiles: Array[Vector2i] = []
-
-	for y in range(city_world.height):
-		var row: Array = city_world.tiles[y]
-
-		for x in range(city_world.width):
-			var tile: Dictionary = row[x]
-			MapVisuals.populate_all_tile_colors(tile, reusable_colors, 0.45)
-
-			for mode in modes:
-				var mode_int := int(mode)
-				var image: Image = mode_images[mode_int]
-				image.set_pixel(x, y, reusable_colors[mode_int])
-
-			match WorldData.get_city_surface_feature(tile):
-				WorldData.CITY_SURFACE_FEATURE_TREE:
-					tree_tiles.append(Vector2i(x, y))
-
-				WorldData.CITY_SURFACE_FEATURE_ROCK:
-					rock_tiles.append(Vector2i(x, y))
 
 	return {
 		"valid": true,
 		"signature": str(request["signature"]),
 		"city_world": city_world,
 		"city_seed": int(request["city_seed"]),
-		"map_images": mode_images,
-		"tree_tiles": tree_tiles,
-		"rock_tiles": rock_tiles,
+		"map_atlas": generator.generated_map_atlas_data,
+		"tree_tiles": city_world.prepared_city_tree_tiles,
+		"rock_tiles": city_world.prepared_city_rock_tiles,
 		"preparation_duration_usec": Time.get_ticks_usec() - start_usec,
 	}

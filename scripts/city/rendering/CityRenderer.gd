@@ -44,7 +44,6 @@ const CityConstructionSystemScript = preload(
 const CityWorkSystemScript = preload(
 	"res://scripts/city/simulation/systems/CityWorkSystem.gd"
 )
-@export_file("*.tscn") var world_scene_path: String = ""
 @export var local_tiles_per_world_tile: int = CityWorldGeneratorScript.DEFAULT_LOCAL_TILES_PER_WORLD_TILE
 @export var city_tile_size: int = 2
 
@@ -52,6 +51,7 @@ var city_world: WorldData
 var city_seed: int = 0
 var session_prepared_city_payload: Dictionary = {}
 var session_view_active: bool = true
+var city_layers_have_been_presented: bool = false
 var camera: Camera2D
 var observed_city_camera_zoom: Vector2 = Vector2.ZERO
 var ui_layer: CanvasLayer
@@ -69,7 +69,8 @@ var resource_icons: Array[ColorRect] = []
 var resource_amount_labels: Array[Label] = []
 var build_option_button: Button
 var build_option_icon: Panel
-var city_terrain_texture: ImageTexture
+var city_terrain_texture: Texture2D
+var city_terrain_sprite: Sprite2D
 var city_texture_cache := MapTextureCache.new()
 var city_initialization_duration_usec: int = 0
 var city_generation_duration_usec: int = 0
@@ -217,6 +218,8 @@ static var cached_city_rock_index_by_tile: Dictionary = {}
 static var cached_city_rock_tile_by_index: Array[Vector2i] = []
 var city_tree_multimesh: MultiMesh
 var city_rock_multimesh: MultiMesh
+var city_tree_multimesh_instance: MultiMeshInstance2D
+var city_rock_multimesh_instance: MultiMeshInstance2D
 var city_tree_multimesh_index_by_tile: Dictionary = {}
 var city_tree_multimesh_tile_by_index: Array[Vector2i] = []
 var city_rock_multimesh_index_by_tile: Dictionary = {}
@@ -349,6 +352,7 @@ func _ready() -> void:
 	city_natural_feature_setup_duration_usec = (
 		Time.get_ticks_usec() - natural_feature_start_usec
 	)
+	create_city_terrain_sprite()
 	create_city_render_layers()
 	var map_texture_start_usec := Time.get_ticks_usec()
 	rebuild_city_terrain_texture()
@@ -402,7 +406,13 @@ func set_session_view_active(is_active: bool) -> void:
 			camera.make_current()
 
 	if is_active:
-		queue_all_city_render_layers_redraw()
+		# The first reveal must populate custom draw layers because the city is
+		# constructed while hidden. Later reveals retain those draw lists and rely
+		# on version-driven invalidation instead of redrawing everything.
+		if not city_layers_have_been_presented:
+			queue_all_city_render_layers_redraw()
+			city_layers_have_been_presented = true
+
 		update_city_information_panel()
 		update_debug_panel_text()
 
@@ -449,7 +459,6 @@ func _process_texture_cache_and_camera() -> void:
 		and camera.zoom != observed_city_camera_zoom
 	):
 		observed_city_camera_zoom = camera.zoom
-		queue_city_citizen_layer_redraw()
 		queue_city_interaction_layer_redraw()
 
 
@@ -536,7 +545,7 @@ func _collect_city_world_change_flags(
 		city_world.consume_city_surface_feature_changes()
 		# Tile-data edits can change biome, terrain, resources, or fertility.
 		# Rebuild the complete atomic cache in one shared pass. No later frame
-		# receives staggered map-mode generation work.
+		# receives deferred map-mode generation work.
 		rebuild_city_terrain_texture()
 		update_city_map_mode_button_visuals()
 		return
@@ -1158,10 +1167,19 @@ func generate_city_world() -> void:
 	var city_world_generator = CityWorldGeneratorScript.new()
 	city_world = city_world_generator.generate_city_world(
 		local_tiles_per_world_tile,
-		city_seed
+		city_seed,
+		true,
+		0.45
 	)
 
 	WorldData.store_city_world_save(city_world, city_seed)
+
+	if not city_texture_cache.install_prepared_atlas(
+		city_world,
+		city_world_generator.generated_map_atlas_data
+	):
+		push_error("Generated city atlas could not be installed atomically.")
+
 	print("Stored official city world.")
 
 
@@ -1173,13 +1191,18 @@ func install_session_prepared_city_map_textures() -> void:
 	if city_world == null or city_texture_cache == null:
 		return
 
-	var raw_images = session_prepared_city_payload.get("map_images")
+	var prepared_atlas = session_prepared_city_payload.get("map_atlas")
 
-	if not raw_images is Dictionary:
+	if not prepared_atlas is Dictionary:
 		return
 
-	if not city_texture_cache.install_prepared_images(city_world, raw_images):
-		push_error("Prepared city map textures were invalid; rebuilding synchronously.")
+	if not city_texture_cache.install_prepared_atlas(
+		city_world,
+		prepared_atlas
+	):
+		push_error(
+			"Prepared city atlas was invalid; rebuilding synchronously."
+		)
 
 #endregion
 
@@ -2025,19 +2048,23 @@ func set_city_view_mode(mode: int) -> void:
 		city_texture_cache == null
 		or not city_texture_cache.is_mode_ready(city_world, mode)
 	):
+		push_error("Requested city map mode is missing from the atomic atlas.")
 		return
 
 	close_city_player_command_menu()
 
+	var trees_were_visible := should_draw_city_trees()
 	city_view_mode = mode
 
 	print("City map mode: ", get_city_map_mode_name(city_view_mode))
 
 	apply_cached_city_map_mode_texture()
-
 	update_city_map_mode_button_visuals()
-	queue_city_background_layer_redraw()
-	queue_city_citizen_layer_redraw()
+
+	# Terrain and natural features are retained nodes, so switching modes only
+	# swaps one atlas view and toggles tree visibility across Resources.
+	if trees_were_visible != should_draw_city_trees():
+		refresh_city_natural_feature_instance_visibility()
 
 func get_city_map_mode_for_index(index: int) -> int:
 	return MapVisuals.get_view_mode_for_index(index)
@@ -4119,26 +4146,14 @@ func on_back_button_pressed() -> void:
 	store_current_city_camera_state()
 	var session := get_game_session_controller()
 
-	if session != null and session.has_method("show_world_view"):
-		session.call("show_world_view")
+	if session == null or not session.has_method("show_world_view"):
+		push_error(
+			"City-to-world switching requires the persistent GameSession."
+		)
 		return
 
-	var return_path := WorldData.official_world_scene_path
+	session.call("show_world_view")
 
-	if return_path.is_empty():
-		return_path = WorldData.city_return_world_scene_path
-
-	if return_path.is_empty():
-		return_path = world_scene_path
-
-	if return_path.is_empty():
-		push_error("World scene path is empty.")
-		return
-
-	var error: Error = get_tree().change_scene_to_file(return_path)
-
-	if error != OK:
-		push_error("Could not load world scene: " + return_path)
 
 func get_city_tile_color(tile: Dictionary) -> Color:
 	return get_city_tile_color_for_mode(tile, city_view_mode)
@@ -4766,13 +4781,17 @@ func set_selected_city_entity(
 		update_selected_entity_panel()
 		return
 
+	var previous_selection_kind := selected_city_entity_kind
 	selected_city_entity_kind = selection_kind
 	selected_city_entity_id = entity_id
 
 	refresh_selected_workplace_zone_cache()
 	update_selected_entity_panel()
 	update_debug_panel_text()
-	queue_all_city_render_layers_redraw()
+	queue_city_selection_visual_change(
+		previous_selection_kind,
+		selected_city_entity_kind
+	)
 
 
 func set_selected_city_object(
@@ -4811,6 +4830,7 @@ func clear_selected_city_entity() -> void:
 		and has_debug_selected_city_tile()
 	):
 		clear_debug_navigation_result()
+	var previous_selection_kind := selected_city_entity_kind
 	selected_city_entity_kind = (
 		CITY_SELECTION_KIND_NONE
 	)
@@ -4818,7 +4838,27 @@ func clear_selected_city_entity() -> void:
 
 	update_selected_entity_panel()
 	update_debug_panel_text()
-	queue_all_city_render_layers_redraw()
+	queue_city_selection_visual_change(
+		previous_selection_kind,
+		selected_city_entity_kind
+	)
+
+
+func queue_city_selection_visual_change(
+	previous_selection_kind: String,
+	current_selection_kind: String
+) -> void:
+	# Only object selection owns a background workplace-zone overlay. All
+	# selection outlines live on the interaction layer, so citizen movement and
+	# the full object layer do not need rebuilding for every click.
+	if (
+		previous_selection_kind == CITY_SELECTION_KIND_OBJECT
+		or current_selection_kind == CITY_SELECTION_KIND_OBJECT
+	):
+		queue_city_background_layer_redraw()
+
+	queue_city_interaction_layer_redraw()
+
 
 func is_city_object_selectable(city_object: Dictionary) -> bool:
 	return not city_object.is_empty()
@@ -5048,7 +5088,6 @@ func setup_city_texture_cache() -> void:
 	city_texture_cache.setup({
 		"owner": self,
 		"label": "City",
-		"rows_per_frame": 16,
 		"color_provider": Callable(
 			self,
 			"get_city_tile_color_for_mode"
@@ -5098,14 +5137,40 @@ func rebuild_city_terrain_texture() -> void:
 	city_map_texture_cache_reused_on_entry = (
 		has_valid_saved_city_map_texture_cache(city_world)
 	)
-	city_terrain_texture = city_texture_cache.rebuild(city_world, city_view_mode)
+	city_terrain_texture = city_texture_cache.rebuild(
+		city_world,
+		city_view_mode
+	)
+	refresh_city_terrain_sprite()
 
 
 func apply_cached_city_map_mode_texture() -> void:
 	if city_texture_cache == null:
 		setup_city_texture_cache()
 
-	city_terrain_texture = city_texture_cache.get_texture_for_mode(city_world, city_view_mode)
+	city_terrain_texture = city_texture_cache.get_texture_for_mode(
+		city_world,
+		city_view_mode
+	)
+	refresh_city_terrain_sprite()
+
+
+func create_city_terrain_sprite() -> void:
+	city_terrain_sprite = Sprite2D.new()
+	city_terrain_sprite.name = "CityTerrainSprite"
+	city_terrain_sprite.centered = false
+	city_terrain_sprite.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
+	city_terrain_sprite.z_index = -100
+	add_child(city_terrain_sprite)
+
+
+func refresh_city_terrain_sprite() -> void:
+	if city_terrain_sprite == null:
+		return
+
+	city_terrain_sprite.texture = city_terrain_texture
+	city_terrain_sprite.scale = Vector2.ONE * float(city_tile_size)
+	city_terrain_sprite.visible = city_terrain_texture != null
 
 
 #endregion
@@ -5156,6 +5221,7 @@ func setup_city_natural_feature_rendering() -> void:
 	)
 	city_tree_mesh = shared_city_tree_mesh
 	city_rock_mesh = shared_city_rock_mesh
+	create_city_natural_feature_instances()
 
 	city_natural_feature_cache_reused_on_entry = (
 		try_load_city_natural_feature_cache()
@@ -5205,6 +5271,7 @@ func try_load_city_natural_feature_cache() -> bool:
 	city_rock_multimesh_tile_by_index = (
 		cached_city_rock_tile_by_index
 	)
+	refresh_city_natural_feature_instances()
 	return true
 
 
@@ -5238,6 +5305,59 @@ func store_city_natural_feature_cache() -> void:
 		city_rock_multimesh_tile_by_index
 	)
 
+
+
+func create_city_natural_feature_instances() -> void:
+	if city_rock_multimesh_instance == null:
+		city_rock_multimesh_instance = MultiMeshInstance2D.new()
+		city_rock_multimesh_instance.name = "CityRockMultiMeshInstance"
+		city_rock_multimesh_instance.texture_filter = (
+			CanvasItem.TEXTURE_FILTER_NEAREST
+		)
+		city_rock_multimesh_instance.z_index = -10
+		add_child(city_rock_multimesh_instance)
+
+	if city_tree_multimesh_instance == null:
+		city_tree_multimesh_instance = MultiMeshInstance2D.new()
+		city_tree_multimesh_instance.name = "CityTreeMultiMeshInstance"
+		city_tree_multimesh_instance.texture_filter = (
+			CanvasItem.TEXTURE_FILTER_NEAREST
+		)
+		city_tree_multimesh_instance.z_index = 11
+		add_child(city_tree_multimesh_instance)
+
+	refresh_city_natural_feature_instances()
+
+
+func refresh_city_natural_feature_instances() -> void:
+	if city_rock_multimesh_instance != null:
+		city_rock_multimesh_instance.multimesh = city_rock_multimesh
+		city_rock_multimesh_instance.texture = (
+			city_natural_feature_white_texture
+		)
+
+	if city_tree_multimesh_instance != null:
+		city_tree_multimesh_instance.multimesh = city_tree_multimesh
+		city_tree_multimesh_instance.texture = (
+			city_natural_feature_white_texture
+		)
+
+	refresh_city_natural_feature_instance_visibility()
+
+
+func refresh_city_natural_feature_instance_visibility() -> void:
+	if city_rock_multimesh_instance != null:
+		city_rock_multimesh_instance.visible = (
+			city_rock_multimesh != null
+			and city_rock_multimesh.visible_instance_count > 0
+		)
+
+	if city_tree_multimesh_instance != null:
+		city_tree_multimesh_instance.visible = (
+			should_draw_city_trees()
+			and city_tree_multimesh != null
+			and city_tree_multimesh.visible_instance_count > 0
+		)
 
 func create_city_natural_feature_mesh(
 	points: PackedVector2Array
@@ -5302,11 +5422,9 @@ func rebuild_city_natural_feature_multimeshes() -> void:
 	if city_world == null:
 		city_tree_multimesh = null
 		city_rock_multimesh = null
+		refresh_city_natural_feature_instances()
 		return
 
-	# First entry can receive these positions from the background preparation
-	# job. Re-entry uses the persistent MultiMesh cache. Only fall back to a map
-	# scan when neither prepared nor cached data exists.
 	var tree_tiles: Array[Vector2i] = []
 	var rock_tiles: Array[Vector2i] = []
 	var prepared_tree_tiles = session_prepared_city_payload.get("tree_tiles")
@@ -5320,7 +5438,15 @@ func rebuild_city_natural_feature_multimeshes() -> void:
 		for raw_tile in prepared_rock_tiles:
 			if raw_tile is Vector2i:
 				rock_tiles.append(raw_tile)
+	elif (
+		city_world.prepared_city_feature_tile_data_version
+		== city_world.tile_data_version
+	):
+		tree_tiles.assign(city_world.prepared_city_tree_tiles)
+		rock_tiles.assign(city_world.prepared_city_rock_tiles)
 	else:
+		# Only later broad tile-data edits require a fallback scan. First entry
+		# receives positions from the same generation pass that built the map atlas.
 		for y in range(city_world.height):
 			var row: Array = city_world.tiles[y]
 
@@ -5341,6 +5467,10 @@ func rebuild_city_natural_feature_multimeshes() -> void:
 		rock_tiles.size()
 	)
 
+	var tree_buffer := PackedFloat32Array()
+	tree_buffer.resize(tree_tiles.size() * 12)
+	var rock_buffer := PackedFloat32Array()
+	rock_buffer.resize(rock_tiles.size() * 12)
 	var tile_size_float := float(city_tile_size)
 	var rock_color := get_resource_color(WorldData.RESOURCE_STONE)
 
@@ -5351,29 +5481,14 @@ func rebuild_city_natural_feature_multimeshes() -> void:
 			(float(tree_tile.x) + 0.5) * tile_size_float,
 			(float(tree_tile.y) + 0.5) * tile_size_float
 		)
-		var rotation_ratio := (
-			CityWorldGeneratorScript.get_deterministic_tile_unit_value(
-				city_seed,
-				tree_tile.x,
-				tree_tile.y,
-				CITY_TREE_ROTATION_SALT
-			)
+		var rotation_ratio := CityWorldGeneratorScript.get_deterministic_tile_unit_value(
+			city_seed, tree_tile.x, tree_tile.y, CITY_TREE_ROTATION_SALT
 		)
-		var scale_ratio := (
-			CityWorldGeneratorScript.get_deterministic_tile_unit_value(
-				city_seed,
-				tree_tile.x,
-				tree_tile.y,
-				CITY_TREE_SCALE_SALT
-			)
+		var scale_ratio := CityWorldGeneratorScript.get_deterministic_tile_unit_value(
+			city_seed, tree_tile.x, tree_tile.y, CITY_TREE_SCALE_SALT
 		)
-		var color_ratio := (
-			CityWorldGeneratorScript.get_deterministic_tile_unit_value(
-				city_seed,
-				tree_tile.x,
-				tree_tile.y,
-				CITY_TREE_COLOR_SALT
-			)
+		var color_ratio := CityWorldGeneratorScript.get_deterministic_tile_unit_value(
+			city_seed, tree_tile.x, tree_tile.y, CITY_TREE_COLOR_SALT
 		)
 		var canopy_scale := (
 			tile_size_float
@@ -5384,18 +5499,16 @@ func rebuild_city_natural_feature_multimeshes() -> void:
 				scale_ratio
 			)
 		)
-
-		city_tree_multimesh.set_instance_transform_2d(
-			tree_index,
-			Transform2D(
-				rotation_ratio * TAU,
-				Vector2.ONE * canopy_scale,
-				0.0,
-				tile_center
-			)
+		var transform := Transform2D(
+			rotation_ratio * TAU,
+			Vector2.ONE * canopy_scale,
+			0.0,
+			tile_center
 		)
-		city_tree_multimesh.set_instance_color(
+		write_city_multimesh_instance_to_buffer(
+			tree_buffer,
 			tree_index,
+			transform,
 			get_city_tree_canopy_color(tree_data, color_ratio)
 		)
 		city_tree_multimesh_index_by_tile[tree_tile] = tree_index
@@ -5407,21 +5520,11 @@ func rebuild_city_natural_feature_multimeshes() -> void:
 			(float(rock_tile.x) + 0.5) * tile_size_float,
 			(float(rock_tile.y) + 0.5) * tile_size_float
 		)
-		var offset_x_ratio := (
-			CityWorldGeneratorScript.get_deterministic_tile_unit_value(
-				city_seed,
-				rock_tile.x,
-				rock_tile.y,
-				CITY_ROCK_OFFSET_X_SALT
-			)
+		var offset_x_ratio := CityWorldGeneratorScript.get_deterministic_tile_unit_value(
+			city_seed, rock_tile.x, rock_tile.y, CITY_ROCK_OFFSET_X_SALT
 		)
-		var offset_y_ratio := (
-			CityWorldGeneratorScript.get_deterministic_tile_unit_value(
-				city_seed,
-				rock_tile.x,
-				rock_tile.y,
-				CITY_ROCK_OFFSET_Y_SALT
-			)
+		var offset_y_ratio := CityWorldGeneratorScript.get_deterministic_tile_unit_value(
+			city_seed, rock_tile.x, rock_tile.y, CITY_ROCK_OFFSET_Y_SALT
 		)
 		var rock_offset := Vector2(
 			lerpf(
@@ -5436,21 +5539,51 @@ func rebuild_city_natural_feature_multimeshes() -> void:
 			)
 		) * tile_size_float
 		var rock_scale := tile_size_float * CITY_ROCK_MARKER_TILE_SCALE
-
-		city_rock_multimesh.set_instance_transform_2d(
-			rock_index,
-			Transform2D(
-				0.0,
-				Vector2.ONE * rock_scale,
-				0.0,
-				tile_center + rock_offset
-			)
+		var transform := Transform2D(
+			0.0,
+			Vector2.ONE * rock_scale,
+			0.0,
+			tile_center + rock_offset
 		)
-		city_rock_multimesh.set_instance_color(rock_index, rock_color)
+		write_city_multimesh_instance_to_buffer(
+			rock_buffer,
+			rock_index,
+			transform,
+			rock_color
+		)
 		city_rock_multimesh_index_by_tile[rock_tile] = rock_index
 		city_rock_multimesh_tile_by_index.append(rock_tile)
 
+	if city_tree_multimesh != null and not tree_buffer.is_empty():
+		city_tree_multimesh.buffer = tree_buffer
+
+	if city_rock_multimesh != null and not rock_buffer.is_empty():
+		city_rock_multimesh.buffer = rock_buffer
+
+	refresh_city_natural_feature_instances()
 	store_city_natural_feature_cache()
+
+
+func write_city_multimesh_instance_to_buffer(
+	buffer: PackedFloat32Array,
+	instance_index: int,
+	transform: Transform2D,
+	color: Color
+) -> void:
+	# A 2D transform occupies two padded vec4 rows, followed by RGBA.
+	var offset := instance_index * 12
+	buffer[offset] = transform.x.x
+	buffer[offset + 1] = transform.y.x
+	buffer[offset + 2] = 0.0
+	buffer[offset + 3] = transform.origin.x
+	buffer[offset + 4] = transform.x.y
+	buffer[offset + 5] = transform.y.y
+	buffer[offset + 6] = 0.0
+	buffer[offset + 7] = transform.origin.y
+	buffer[offset + 8] = color.r
+	buffer[offset + 9] = color.g
+	buffer[offset + 10] = color.b
+	buffer[offset + 11] = color.a
 
 
 func get_city_tree_canopy_color(
@@ -5556,42 +5689,14 @@ func remove_city_natural_feature_multimesh_instance(
 	index_by_tile.erase(tile_position)
 	tile_by_index.pop_back()
 	multimesh.visible_instance_count = tile_by_index.size()
+	refresh_city_natural_feature_instance_visibility()
 	return true
 
-
-func draw_city_rocks(draw_target: CanvasItem) -> void:
-	if (
-		city_rock_multimesh == null
-		or city_rock_multimesh.instance_count <= 0
-		or city_natural_feature_white_texture == null
-	):
-		return
-
-	draw_target.draw_multimesh(
-		city_rock_multimesh,
-		city_natural_feature_white_texture
-	)
 
 
 func should_draw_city_trees() -> bool:
 	return city_view_mode != MapVisuals.ViewMode.RESOURCES
 
-
-func draw_city_trees(draw_target: CanvasItem) -> void:
-	if not should_draw_city_trees():
-		return
-
-	if (
-		city_tree_multimesh == null
-		or city_tree_multimesh.instance_count <= 0
-		or city_natural_feature_white_texture == null
-	):
-		return
-
-	draw_target.draw_multimesh(
-		city_tree_multimesh,
-		city_natural_feature_white_texture
-	)
 
 
 func create_city_render_layers() -> void:
@@ -5600,6 +5705,7 @@ func create_city_render_layers() -> void:
 	city_background_render_layer.setup(
 		Callable(self, "draw_city_background_layer")
 	)
+	city_background_render_layer.z_index = 0
 	add_child(city_background_render_layer)
 
 	city_citizen_render_layer = CityRenderLayerScript.new()
@@ -5607,6 +5713,7 @@ func create_city_render_layers() -> void:
 	city_citizen_render_layer.setup(
 		Callable(self, "draw_city_citizen_layer")
 	)
+	city_citizen_render_layer.z_index = 10
 	add_child(city_citizen_render_layer)
 
 	city_interaction_render_layer = CityRenderLayerScript.new()
@@ -5614,6 +5721,7 @@ func create_city_render_layers() -> void:
 	city_interaction_render_layer.setup(
 		Callable(self, "draw_city_interaction_layer")
 	)
+	city_interaction_render_layer.z_index = 20
 	add_child(city_interaction_render_layer)
 
 
@@ -5621,21 +5729,21 @@ func queue_city_background_layer_redraw() -> void:
 	if not session_view_active:
 		return
 	if city_background_render_layer != null:
-		city_background_render_layer.queue_redraw()
+		city_background_render_layer.request_redraw()
 
 
 func queue_city_citizen_layer_redraw() -> void:
 	if not session_view_active:
 		return
 	if city_citizen_render_layer != null:
-		city_citizen_render_layer.queue_redraw()
+		city_citizen_render_layer.request_redraw()
 
 
 func queue_city_interaction_layer_redraw() -> void:
 	if not session_view_active:
 		return
 	if city_interaction_render_layer != null:
-		city_interaction_render_layer.queue_redraw()
+		city_interaction_render_layer.request_redraw()
 
 
 func queue_all_city_render_layers_redraw() -> void:
@@ -5648,19 +5756,8 @@ func draw_city_background_layer(draw_target: CanvasItem) -> void:
 	if city_world == null:
 		return
 
-	if city_terrain_texture != null:
-		draw_target.draw_texture_rect(
-			city_terrain_texture,
-			Rect2(
-				0.0,
-				0.0,
-				float(city_world.width * city_tile_size),
-				float(city_world.height * city_tile_size)
-			),
-			false
-		)
-
-	draw_city_rocks(draw_target)
+	# CityTerrainSprite and natural-feature MultiMeshInstance2D nodes retain the
+	# static map geometry. This layer redraws only versioned objects and overlays.
 	draw_selected_workplace_zone_background(draw_target)
 	draw_active_workplace_zone_background(draw_target)
 	draw_city_objects(draw_target)
@@ -5675,8 +5772,6 @@ func draw_city_citizen_layer(draw_target: CanvasItem) -> void:
 		return
 
 	draw_city_citizens(draw_target)
-	draw_city_trees(draw_target)
-	draw_selected_city_citizen_highlight(draw_target)
 
 
 func draw_city_interaction_layer(draw_target: CanvasItem) -> void:
@@ -5687,6 +5782,7 @@ func draw_city_interaction_layer(draw_target: CanvasItem) -> void:
 	draw_debug_selected_city_tile_highlight(draw_target)
 	draw_selected_city_object_highlight(draw_target)
 	draw_selected_city_construction_site_highlight(draw_target)
+	draw_selected_city_citizen_highlight(draw_target)
 	draw_city_object_debug_names(draw_target)
 	draw_active_city_object_placement_preview(draw_target)
 	draw_hovered_city_tile_highlight(draw_target)
@@ -7506,7 +7602,8 @@ func toggle_debug_mode() -> void:
 
 	var is_enabled := debug_panel_ui.toggle_enabled()
 	citizen_debug_ui.refresh()
-	queue_all_city_render_layers_redraw()
+	queue_city_background_layer_redraw()
+	queue_city_interaction_layer_redraw()
 
 	if is_enabled:
 		CityStateValidator.validate(true, true)

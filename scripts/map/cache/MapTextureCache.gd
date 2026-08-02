@@ -1,15 +1,14 @@
 extends RefCounted
 class_name MapTextureCache
 
-# Map modes are an atomic cache. Every missing texture is built in one shared
-# tile pass before rebuild() returns, so switching modes is always a cache-only
-# lookup and no later frame receives staggered map-generation work.
+# Map modes are prepared atomically as one horizontal texture atlas. One tile
+# traversal computes every mode, one GPU upload publishes the atlas, and each
+# mode is an AtlasTexture view into that shared resource. No later frame warms
+# map modes and switching modes is always a cache-only texture swap.
 
 var owner: Node
 var label: String = "Map"
-var rows_per_frame: int = 16
 var mode_textures: Dictionary = {}
-var warmup_running: bool = false
 var prepared_source_instance_id: int = 0
 var prepared_source_tile_data_version: int = -1
 
@@ -28,14 +27,16 @@ func setup(values: Dictionary) -> void:
 
 	owner = values["owner"]
 	label = str(values["label"])
-	# Retained for setup compatibility only. The retired per-frame warmup path
-	# does not use a row budget.
-	rows_per_frame = maxi(1, int(values["rows_per_frame"]))
 	color_provider = values["color_provider"]
-	all_colors_provider = values.get("all_colors_provider", Callable())
+	all_colors_provider = values.get(
+		"all_colors_provider",
+		Callable()
+	)
 	modes_provider = values["modes_provider"]
 	mode_name_provider = values["mode_name_provider"]
-	has_valid_saved_cache_provider = values["has_valid_saved_cache_provider"]
+	has_valid_saved_cache_provider = (
+		values["has_valid_saved_cache_provider"]
+	)
 	saved_cache_getter = values["saved_cache_getter"]
 	saved_cache_storer = values["saved_cache_storer"]
 
@@ -44,7 +45,6 @@ func _has_valid_setup_values(values: Dictionary) -> bool:
 	var required_keys: Array[String] = [
 		"owner",
 		"label",
-		"rows_per_frame",
 		"color_provider",
 		"modes_provider",
 		"mode_name_provider",
@@ -55,7 +55,10 @@ func _has_valid_setup_values(values: Dictionary) -> bool:
 
 	for key in required_keys:
 		if not values.has(key):
-			push_error("MapTextureCache.setup is missing required key: " + key)
+			push_error(
+				"MapTextureCache.setup is missing required key: "
+				+ key
+			)
 			return false
 
 	if not values["owner"] is Node:
@@ -73,21 +76,26 @@ func _has_valid_setup_values(values: Dictionary) -> bool:
 
 	for key in callable_keys:
 		if typeof(values[key]) != TYPE_CALLABLE:
-			push_error("MapTextureCache.setup " + key + " must be Callable.")
+			push_error(
+				"MapTextureCache.setup "
+				+ key
+				+ " must be Callable."
+			)
 			return false
 
 	if (
 		values.has("all_colors_provider")
 		and typeof(values["all_colors_provider"]) != TYPE_CALLABLE
 	):
-		push_error("MapTextureCache.setup all_colors_provider must be Callable.")
+		push_error(
+			"MapTextureCache.setup all_colors_provider must be Callable."
+		)
 		return false
 
 	return true
 
 
 func clear() -> void:
-	cancel_warmup()
 	mode_textures.clear()
 	prepared_source_instance_id = 0
 	prepared_source_tile_data_version = -1
@@ -105,21 +113,20 @@ func dispose() -> void:
 	saved_cache_storer = Callable()
 
 
-func rebuild(source_world: WorldData, active_mode: int) -> ImageTexture:
+func rebuild(source_world: WorldData, active_mode: int) -> Texture2D:
 	if source_world == null:
 		clear()
 		return null
 
-	cancel_warmup()
 	load_saved_cache_if_valid(source_world)
 
 	if not prepare_all_textures(source_world):
-		push_error(label + " map textures could not be prepared.")
+		push_error(label + " map texture atlas could not be prepared.")
 		return null
 
 	if WorldData.debug_mode_enabled:
 		print(
-			label + " map textures ready; active mode: ",
+			label + " map atlas ready; active mode: ",
 			get_mode_name(active_mode)
 		)
 
@@ -130,12 +137,15 @@ func load_saved_cache_if_valid(source_world: WorldData) -> void:
 	if source_world == null:
 		clear()
 		return
+
 	if not has_valid_saved_cache_provider.is_valid():
 		clear()
 		return
+
 	if not bool(has_valid_saved_cache_provider.call(source_world)):
-		clear()
+		_discard_textures_for_different_source(source_world)
 		return
+
 	if not saved_cache_getter.is_valid():
 		clear()
 		return
@@ -143,6 +153,12 @@ func load_saved_cache_if_valid(source_world: WorldData) -> void:
 	var saved_cache = saved_cache_getter.call()
 
 	if typeof(saved_cache) != TYPE_DICTIONARY:
+		clear()
+		return
+
+	var all_modes := _get_unique_modes()
+
+	if not _has_complete_texture_set(saved_cache, all_modes):
 		clear()
 		return
 
@@ -163,36 +179,21 @@ func prepare_all_textures(source_world: WorldData) -> bool:
 	if all_modes.is_empty():
 		return false
 
-	var missing_modes := _get_missing_modes(mode_textures, all_modes)
-
-	if missing_modes.is_empty():
-		return _has_complete_texture_set(mode_textures, all_modes)
+	if _has_complete_texture_set(mode_textures, all_modes):
+		return true
 
 	var source_tile_data_version := source_world.tile_data_version
-	var built_textures := _build_textures_for_modes(
+	var prepared_textures := _build_atomic_texture_atlas(
 		source_world,
-		missing_modes,
 		all_modes
 	)
 
 	if source_world.tile_data_version != source_tile_data_version:
-		push_error(label + " map source changed while textures were being prepared.")
+		push_error(
+			label
+			+ " map source changed while its atomic atlas was being prepared."
+		)
 		return false
-	if built_textures.size() != missing_modes.size():
-		return false
-
-	# Publish only after every missing texture is valid. No renderer or saved
-	# cache can observe a partially prepared set.
-	var prepared_textures := mode_textures.duplicate(false)
-
-	for mode in missing_modes:
-		var mode_int := int(mode)
-		var raw_texture = built_textures.get(mode_int)
-
-		if not raw_texture is ImageTexture:
-			return false
-
-		prepared_textures[mode_int] = raw_texture
 
 	if not _has_complete_texture_set(prepared_textures, all_modes):
 		return false
@@ -204,48 +205,41 @@ func prepare_all_textures(source_world: WorldData) -> bool:
 	return true
 
 
-func install_prepared_images(
+func install_prepared_atlas(
 	source_world: WorldData,
-	prepared_images: Dictionary
+	atlas_data: Dictionary
 ) -> bool:
-	if source_world == null:
+	if source_world == null or atlas_data.is_empty():
 		return false
-	if prepared_images.is_empty():
+	if int(atlas_data.get("tile_data_version", -1)) != source_world.tile_data_version:
 		return false
-
-	var all_modes := _get_unique_modes()
-
-	if all_modes.is_empty():
-		return false
-
-	var prepared_textures: Dictionary = {}
-
-	for mode in all_modes:
-		var mode_int := int(mode)
-		var raw_image = prepared_images.get(mode_int)
-
-		if not raw_image is Image:
-			return false
-
-		var image: Image = raw_image
-
-		if (
-			image.get_width() != source_world.width
-			or image.get_height() != source_world.height
-		):
-			return false
-
-		var texture := ImageTexture.create_from_image(image)
-
-		if texture == null:
-			return false
-
-		prepared_textures[mode_int] = texture
-
-	if not _has_complete_texture_set(prepared_textures, all_modes):
+	if (
+		int(atlas_data.get("visual_version", -1))
+		!= MapVisuals.MAP_VISUAL_CACHE_VERSION
+	):
 		return false
 
-	cancel_warmup()
+	var raw_modes = atlas_data.get("modes", [])
+	var raw_bytes = atlas_data.get("rgba8", PackedByteArray())
+
+	if not raw_modes is Array or not raw_bytes is PackedByteArray:
+		return false
+
+	var modes: Array[int] = []
+
+	for raw_mode in raw_modes:
+		modes.append(int(raw_mode))
+
+	var prepared_textures := create_mode_textures_from_rgba8(
+		raw_bytes,
+		int(atlas_data.get("width", 0)),
+		int(atlas_data.get("height", 0)),
+		modes
+	)
+
+	if not _has_complete_texture_set(prepared_textures, _get_unique_modes()):
+		return false
+
 	mode_textures = prepared_textures
 	prepared_source_instance_id = source_world.get_instance_id()
 	prepared_source_tile_data_version = source_world.tile_data_version
@@ -253,20 +247,11 @@ func install_prepared_images(
 	return true
 
 
-func ensure_texture_for_mode(source_world: WorldData, _mode: int) -> void:
-	# Compatibility API: satisfying any request prepares the complete set.
-	prepare_all_textures(source_world)
-
-
-func rebuild_all(source_world: WorldData) -> void:
-	clear()
-	prepare_all_textures(source_world)
-
 
 func get_texture_for_mode(
 	source_world: WorldData,
 	mode: int
-) -> ImageTexture:
+) -> Texture2D:
 	if source_world == null:
 		return null
 
@@ -276,7 +261,10 @@ func get_texture_for_mode(
 	return _get_cached_texture(mode)
 
 
-func is_mode_ready(source_world: WorldData, mode: int) -> bool:
+func is_mode_ready(
+	source_world: WorldData,
+	mode: int
+) -> bool:
 	if source_world == null:
 		return false
 	if (
@@ -288,48 +276,18 @@ func is_mode_ready(source_world: WorldData, mode: int) -> bool:
 	return _get_cached_texture(mode) != null
 
 
-func build_texture_for_mode(
-	source_world: WorldData,
-	mode: int
-) -> ImageTexture:
-	if source_world == null:
-		return null
-	if source_world.width <= 0 or source_world.height <= 0:
-		return null
 
-	var image := Image.create(
-		source_world.width,
+func _build_atomic_texture_atlas(
+	source_world: WorldData,
+	all_modes: Array[int]
+) -> Dictionary:
+	var atlas_width := source_world.width * all_modes.size()
+	var atlas_image := Image.create(
+		atlas_width,
 		source_world.height,
 		false,
 		Image.FORMAT_RGBA8
 	)
-
-	for y in range(source_world.height):
-		var row: Array = source_world.tiles[y]
-
-		for x in range(source_world.width):
-			image.set_pixel(x, y, get_tile_color(row[x], mode))
-
-	return ImageTexture.create_from_image(image)
-
-
-func _build_textures_for_modes(
-	source_world: WorldData,
-	modes_to_build: Array[int],
-	all_modes: Array[int]
-) -> Dictionary:
-	var mode_images: Array[Image] = []
-
-	for _mode in modes_to_build:
-		mode_images.append(
-			Image.create(
-				source_world.width,
-				source_world.height,
-				false,
-				Image.FORMAT_RGBA8
-			)
-		)
-
 	var reusable_colors: Array[Color] = []
 	reusable_colors.resize(_get_mode_color_buffer_size(all_modes))
 	var use_all_colors_provider := all_colors_provider.is_valid()
@@ -343,8 +301,8 @@ func _build_textures_for_modes(
 			if use_all_colors_provider:
 				all_colors_provider.call(tile, reusable_colors)
 
-			for mode_index in range(modes_to_build.size()):
-				var mode_int := int(modes_to_build[mode_index])
+			for mode_index in range(all_modes.size()):
+				var mode_int := all_modes[mode_index]
 				var tile_color := Color.MAGENTA
 
 				if (
@@ -356,20 +314,86 @@ func _build_textures_for_modes(
 				else:
 					tile_color = get_tile_color(tile, mode_int)
 
-				mode_images[mode_index].set_pixel(x, y, tile_color)
+				atlas_image.set_pixel(
+					mode_index * source_world.width + x,
+					y,
+					tile_color
+				)
 
-	var built_textures: Dictionary = {}
+	return create_mode_textures_from_atlas_image(
+		atlas_image,
+		source_world.width,
+		source_world.height,
+		all_modes
+	)
 
-	for mode_index in range(modes_to_build.size()):
-		var mode_int := int(modes_to_build[mode_index])
-		var texture := ImageTexture.create_from_image(mode_images[mode_index])
 
-		if texture == null:
-			return {}
+static func create_mode_textures_from_rgba8(
+	atlas_data: PackedByteArray,
+	map_width: int,
+	map_height: int,
+	modes: Array[int]
+) -> Dictionary:
+	if map_width <= 0 or map_height <= 0 or modes.is_empty():
+		return {}
 
-		built_textures[mode_int] = texture
+	var expected_size := map_width * modes.size() * map_height * 4
 
-	return built_textures
+	if atlas_data.size() != expected_size:
+		push_error(
+			"Map atlas byte size mismatch. Expected "
+			+ str(expected_size)
+			+ ", received "
+			+ str(atlas_data.size())
+			+ "."
+		)
+		return {}
+
+	var atlas_image := Image.create_from_data(
+		map_width * modes.size(),
+		map_height,
+		false,
+		Image.FORMAT_RGBA8,
+		atlas_data
+	)
+	return create_mode_textures_from_atlas_image(
+		atlas_image,
+		map_width,
+		map_height,
+		modes
+	)
+
+
+static func create_mode_textures_from_atlas_image(
+	atlas_image: Image,
+	map_width: int,
+	map_height: int,
+	modes: Array[int]
+) -> Dictionary:
+	if atlas_image == null:
+		return {}
+	if map_width <= 0 or map_height <= 0 or modes.is_empty():
+		return {}
+
+	var atlas_texture := ImageTexture.create_from_image(atlas_image)
+
+	if atlas_texture == null:
+		return {}
+
+	var textures: Dictionary = {}
+
+	for mode_index in range(modes.size()):
+		var mode_texture := AtlasTexture.new()
+		mode_texture.atlas = atlas_texture
+		mode_texture.region = Rect2(
+			float(mode_index * map_width),
+			0.0,
+			float(map_width),
+			float(map_height)
+		)
+		textures[modes[mode_index]] = mode_texture
+
+	return textures
 
 
 func _get_unique_modes() -> Array[int]:
@@ -388,32 +412,23 @@ func _get_unique_modes() -> Array[int]:
 	return unique_modes
 
 
-func _get_missing_modes(
-	texture_cache: Dictionary,
-	all_modes: Array[int]
-) -> Array[int]:
-	var missing_modes: Array[int] = []
-
-	for mode_int in all_modes:
-		if (
-			not texture_cache.has(mode_int)
-			or not texture_cache[mode_int] is ImageTexture
-		):
-			missing_modes.append(mode_int)
-
-	return missing_modes
-
-
 func _has_complete_texture_set(
 	texture_cache: Dictionary,
 	all_modes: Array[int] = []
 ) -> bool:
 	if all_modes.is_empty():
 		all_modes = _get_unique_modes()
+
 	if all_modes.is_empty():
 		return false
 
-	return _get_missing_modes(texture_cache, all_modes).is_empty()
+	for mode_int in all_modes:
+		if not texture_cache.has(mode_int):
+			return false
+		if not texture_cache[mode_int] is Texture2D:
+			return false
+
+	return true
 
 
 func _get_mode_color_buffer_size(all_modes: Array[int]) -> int:
@@ -425,53 +440,31 @@ func _get_mode_color_buffer_size(all_modes: Array[int]) -> int:
 	return buffer_size
 
 
-func _discard_textures_for_different_source(source_world: WorldData) -> void:
-	if mode_textures.is_empty():
-		return
+func _discard_textures_for_different_source(
+	source_world: WorldData
+) -> void:
 	if (
 		prepared_source_instance_id == source_world.get_instance_id()
-		and prepared_source_tile_data_version == source_world.tile_data_version
+		and prepared_source_tile_data_version
+		== source_world.tile_data_version
 	):
 		return
 
 	mode_textures.clear()
-	prepared_source_instance_id = 0
-	prepared_source_tile_data_version = -1
+	prepared_source_instance_id = source_world.get_instance_id()
+	prepared_source_tile_data_version = source_world.tile_data_version
 
 
-func _get_cached_texture(mode: int) -> ImageTexture:
+func _get_cached_texture(mode: int) -> Texture2D:
 	if not mode_textures.has(mode):
 		return null
 
 	var raw_texture = mode_textures[mode]
 
-	if not raw_texture is ImageTexture:
+	if not raw_texture is Texture2D:
 		return null
 
-	return raw_texture as ImageTexture
-
-
-# Compatibility shims for old callers and tests. They never retain a source or
-# schedule work for future frames.
-func start_warmup(source_world: WorldData) -> void:
-	warmup_running = false
-	prepare_all_textures(source_world)
-
-
-func process_warmup() -> void:
-	warmup_running = false
-
-
-func cancel_warmup() -> void:
-	warmup_running = false
-
-
-func finish_warmup() -> void:
-	warmup_running = false
-
-
-func is_warmup_still_valid(_source_world: WorldData) -> bool:
-	return false
+	return raw_texture as Texture2D
 
 
 func get_tile_color(tile: Dictionary, mode: int) -> Color:

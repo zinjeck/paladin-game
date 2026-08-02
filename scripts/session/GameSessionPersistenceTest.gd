@@ -46,7 +46,7 @@ func _test_background_city_preparation() -> void:
 
 	if not payload.is_empty():
 		var prepared_world = payload.get("city_world")
-		var prepared_images = payload.get("map_images")
+		var prepared_atlas = payload.get("map_atlas")
 		_expect(
 			prepared_world is WorldData
 			and prepared_world.width == 4
@@ -54,17 +54,14 @@ func _test_background_city_preparation() -> void:
 			"Background preparation must build the requested city dimensions."
 		)
 		_expect(
-			prepared_images is Dictionary
-			and prepared_images.size() == MapVisuals.get_all_view_modes().size(),
-			"Background preparation must build every map mode together."
+			prepared_atlas is Dictionary
+			and prepared_atlas.get("rgba8") is PackedByteArray
+			and int(prepared_atlas.get("width", 0)) == 4
+			and int(prepared_atlas.get("height", 0)) == 4
+			and prepared_atlas.get("modes", []).size()
+			== MapVisuals.get_all_view_modes().size(),
+			"Background preparation must build one complete atomic map atlas."
 		)
-
-		if prepared_images is Dictionary:
-			for mode in MapVisuals.get_all_view_modes():
-				_expect(
-					prepared_images.get(mode) is Image,
-					"Every prepared map mode must be an Image."
-				)
 
 	service.shutdown()
 
@@ -121,8 +118,8 @@ func _test_persistent_world_city_views() -> void:
 		)
 
 	_expect(
-		all_modes_ready and not city_renderer.city_texture_cache.warmup_running,
-		"City entry must publish all map modes atomically with no staggered warmup."
+		all_modes_ready,
+		"City entry must publish all map modes atomically before activation."
 	)
 
 	session.show_world_view()

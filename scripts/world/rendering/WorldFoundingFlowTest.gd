@@ -4,44 +4,31 @@ const WORLD_SCENE := preload("res://scenes/WorldScene.tscn")
 const WORLD_RENDERER_SCRIPT := preload(
 	"res://scripts/world/rendering/WorldRenderer.gd"
 )
-const TEST_SCENE_PATH := (
-	"res://scripts/world/rendering/WorldFoundingFlowTest.tscn"
-)
 const TEST_WORLD_SIZE := Vector2i(32, 32)
 const TEST_WORLD_SEED: int = 58_031
 const TEST_REGION_CENTER := Vector2i(12, 12)
 const TEST_CITY_NAME := "Asterfall"
 const TEST_CULTURE_NAME := "Valen"
 
-static var awaiting_play_transition: bool = false
-static var carried_failure_count: int = 0
 static var expected_region_top_left := Vector2i(-1, -1)
 static var expected_region_center := Vector2i(-1, -1)
 static var expected_world_texture_instance_ids: Dictionary = {}
 
 var failure_count: int = 0
+var city_view_request_count: int = 0
 
 
 func _ready() -> void:
-	if awaiting_play_transition:
-		awaiting_play_transition = false
-		failure_count = carried_failure_count
-		await _run_locked_world_reload_test()
-		_finish_test()
-		return
-
 	await _run_world_founding_flow_test()
-
-	if awaiting_play_transition:
-		return
-
 	_finish_test()
+
+
+func show_city_view(_request: Dictionary = {}) -> void:
+	city_view_request_count += 1
 
 
 func _finish_test() -> void:
 	WorldData.reset_runtime_session_state()
-	awaiting_play_transition = false
-	carried_failure_count = 0
 	expected_region_top_left = Vector2i(-1, -1)
 	expected_region_center = Vector2i(-1, -1)
 	expected_world_texture_instance_ids.clear()
@@ -299,14 +286,12 @@ func _run_world_founding_flow_test() -> void:
 	_select_and_save(renderer, TEST_CITY_NAME, TEST_CULTURE_NAME)
 	expected_region_top_left = renderer.selected_region_top_left
 	expected_region_center = renderer.selected_region_center
-	renderer.city_scene_path = TEST_SCENE_PATH
-	carried_failure_count = failure_count
-	awaiting_play_transition = true
-	get_tree().create_timer(5.0).timeout.connect(
-		_on_play_transition_timeout
-	)
 	renderer.on_play_button_pressed()
 
+	_expect(
+		city_view_request_count == 1,
+		"Play must request the retained city view from the session host."
+	)
 	_expect(
 		WorldData.has_active_world_save()
 		and WorldData.get_official_city_name() == TEST_CITY_NAME
@@ -318,7 +303,8 @@ func _run_world_founding_flow_test() -> void:
 		WorldData.get_culture_snapshot().size() == 1,
 		"The Play commit must create exactly one culture record."
 	)
-	carried_failure_count = failure_count
+
+	await _run_locked_world_reload_test()
 
 
 func _run_locked_world_reload_test() -> void:
@@ -392,26 +378,42 @@ func _test_world_map_cache(
 	)
 
 	_expect(
-		not renderer.world_texture_cache.warmup_running
-		and renderer.world_texture_cache.mode_textures.size()
+		renderer.world_texture_cache.mode_textures.size()
 		== view_modes.size()
 		and renderer.has_valid_saved_world_map_texture_cache(source_world),
 		"World map preparation must atomically publish and persist every mode."
 	)
+
+	var shared_atlas: Texture2D
 
 	for mode in view_modes:
 		var raw_texture = renderer.world_texture_cache.mode_textures.get(
 			mode
 		)
 		_expect(
-			raw_texture is ImageTexture,
-			"Every world map mode must have a ready ImageTexture."
+			raw_texture is Texture2D,
+			"Every world map mode must have a ready atlas texture view."
 		)
 
-		if not raw_texture is ImageTexture:
+		if not raw_texture is Texture2D:
 			continue
 
-		var texture: ImageTexture = raw_texture
+		var texture: Texture2D = raw_texture
+		_expect(
+			texture is AtlasTexture,
+			"Every map mode must be a view into the shared atlas."
+		)
+
+		if texture is AtlasTexture:
+			var atlas_view := texture as AtlasTexture
+
+			if shared_atlas == null:
+				shared_atlas = atlas_view.atlas
+			else:
+				_expect(
+					atlas_view.atlas == shared_atlas,
+					"All map modes must share one GPU atlas upload."
+				)
 		var texture_instance_id := texture.get_instance_id()
 
 		if expect_saved_texture_reuse:
@@ -461,16 +463,6 @@ func _colors_match_rgba8(a: Color, b: Color) -> bool:
 		and absf(a.b - b.b) <= tolerance
 		and absf(a.a - b.a) <= tolerance
 	)
-
-
-func _on_play_transition_timeout() -> void:
-	if not awaiting_play_transition:
-		return
-
-	awaiting_play_transition = false
-	failure_count = carried_failure_count
-	_expect(false, "The Play handler did not transition to the configured city scene.")
-	_finish_test()
 
 
 func _select_and_save(renderer, city_name: String, culture_name: String) -> void:
