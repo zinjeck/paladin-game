@@ -11,7 +11,7 @@ const HOURS_PER_DAY: int = 24
 const MINUTES_PER_DAY: int = MINUTES_PER_HOUR * HOURS_PER_DAY
 
 const DEFAULT_START_DAY: int = 1
-const DEFAULT_START_HOUR: int = 8
+const DEFAULT_START_HOUR: int = 6
 const DEFAULT_START_MINUTE: int = 0
 
 const DEFAULT_MINUTES_PER_TICK: int = 2
