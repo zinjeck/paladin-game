@@ -4848,15 +4848,22 @@ func queue_city_selection_visual_change(
 	previous_selection_kind: String,
 	current_selection_kind: String
 ) -> void:
-	# Only object selection owns a background workplace-zone overlay. All
-	# selection outlines live on the interaction layer, so citizen movement and
-	# the full object layer do not need rebuilding for every click.
+	# Object selection owns a background workplace-zone overlay. Citizen
+	# selection lives with the moving citizen geometry so its outline is rebuilt
+	# from the same interpolated position as the marker.
 	if (
 		previous_selection_kind == CITY_SELECTION_KIND_OBJECT
 		or current_selection_kind == CITY_SELECTION_KIND_OBJECT
 	):
 		queue_city_background_layer_redraw()
 
+	if (
+		previous_selection_kind == CITY_SELECTION_KIND_CITIZEN
+		or current_selection_kind == CITY_SELECTION_KIND_CITIZEN
+	):
+		queue_city_citizen_layer_redraw()
+
+	# Selection also changes whether the generic hovered-tile outline is shown.
 	queue_city_interaction_layer_redraw()
 
 
@@ -5772,6 +5779,7 @@ func draw_city_citizen_layer(draw_target: CanvasItem) -> void:
 		return
 
 	draw_city_citizens(draw_target)
+	draw_selected_city_citizen_highlight(draw_target)
 
 
 func draw_city_interaction_layer(draw_target: CanvasItem) -> void:
@@ -5782,7 +5790,6 @@ func draw_city_interaction_layer(draw_target: CanvasItem) -> void:
 	draw_debug_selected_city_tile_highlight(draw_target)
 	draw_selected_city_object_highlight(draw_target)
 	draw_selected_city_construction_site_highlight(draw_target)
-	draw_selected_city_citizen_highlight(draw_target)
 	draw_city_object_debug_names(draw_target)
 	draw_active_city_object_placement_preview(draw_target)
 	draw_hovered_city_tile_highlight(draw_target)
@@ -7091,6 +7098,11 @@ func get_city_hover_highlight_tiles(
 
 	fallback_tiles.append(tile_position)
 
+	# Road placement always targets one exact tile under the cursor. Do not
+	# expand the white cursor outline to an existing building footprint.
+	if is_road_placement_active:
+		return fallback_tiles
+
 	# Construction sites take precedence over completed objects. This matters
 	# for future expansion blueprints that may overlap their parent building.
 	var construction_site := (
@@ -7175,9 +7187,10 @@ func _sort_city_hover_tiles_y_then_x(
 func draw_hovered_city_tile_highlight(
 	draw_target: CanvasItem
 ) -> void:
-	# A placement ghost is not yet a world entity. Its own validity preview is
-	# the only cursor feedback until the player commits it.
-	if is_uncommitted_city_placement_preview_active():
+	# Building ghosts already cover their complete placement footprint. Roads
+	# deliberately keep the white one-tile cursor outline in addition to the
+	# small road icon so the exact target tile remains visible.
+	if has_active_city_object_placement():
 		return
 
 	if is_city_player_command_mode_active():
@@ -7197,7 +7210,10 @@ func draw_hovered_city_tile_highlight(
 	if is_object_selection_dragging:
 		return
 
-	if has_selected_city_entity():
+	if (
+		has_selected_city_entity()
+		and not is_road_placement_active
+	):
 		return
 
 	var highlight_tiles := get_city_hover_highlight_tiles(

@@ -67,6 +67,7 @@ func _run_smoke_test() -> void:
 
 	_test_city_map_texture_cache(renderer)
 	_test_city_information_panel_initial(renderer)
+	_test_road_hover_highlight(renderer)
 	_test_city_natural_features(renderer)
 	_test_ground_pile_coalescing(renderer)
 	await _test_focused_layer_invalidation(renderer)
@@ -240,6 +241,24 @@ func _colors_match_rgba8(a: Color, b: Color) -> bool:
 		and absf(a.b - b.b) <= tolerance
 		and absf(a.a - b.a) <= tolerance
 	)
+
+
+func _test_road_hover_highlight(renderer: CityRenderer) -> void:
+	var original_road_active := renderer.is_road_placement_active
+	var original_hovered_tile := renderer.hovered_city_tile
+	var test_tile := Vector2i(0, 0)
+
+	renderer.is_road_placement_active = true
+	renderer.hovered_city_tile = test_tile
+
+	var highlight_tiles := renderer.get_city_hover_highlight_tiles(test_tile)
+	_expect(
+		highlight_tiles == [test_tile],
+		"Road placement must retain an exact one-tile hover highlight."
+	)
+
+	renderer.is_road_placement_active = original_road_active
+	renderer.hovered_city_tile = original_hovered_tile
 
 
 func _test_city_information_panel_initial(
@@ -541,9 +560,9 @@ func _test_focused_layer_invalidation(
 	await get_tree().process_frame
 	_expect(
 		background_draw_count == background_before
-		and citizen_draw_count == citizen_before
+		and citizen_draw_count == citizen_before + 1
 		and interaction_draw_count == interaction_before + 1,
-		"Citizen selection must redraw only its interaction highlight."
+		"Citizen selection must redraw its moving marker layer and hover overlay."
 	)
 
 	background_before = background_draw_count
@@ -557,9 +576,9 @@ func _test_focused_layer_invalidation(
 	await get_tree().process_frame
 	_expect(
 		background_draw_count == background_before + 1
-		and citizen_draw_count == citizen_before
+		and citizen_draw_count == citizen_before + 1
 		and interaction_draw_count == interaction_before + 1,
-		"Object selection must redraw only its zone and interaction layers."
+		"Leaving citizen selection must clear its moving-layer outline while object selection redraws its zone and interaction layers."
 	)
 	renderer.set_process(true)
 
