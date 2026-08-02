@@ -1,0 +1,29 @@
+name: Temporary current branch export
+
+on:
+  push:
+    branches:
+      - paladin/intensive-debug-performance-cleanup
+    paths:
+      - .github/workflows/audit-export-temp.yml
+
+permissions:
+  contents: read
+
+jobs:
+  export:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Package current branch
+        shell: bash
+        run: |
+          set -euo pipefail
+          tar --exclude=.git -czf /tmp/paladin-current-branch.tar.gz .
+      - name: Upload current branch
+        uses: actions/upload-artifact@v4
+        with:
+          name: paladin-current-branch
+          path: /tmp/paladin-current-branch.tar.gz
+          retention-days: 1
