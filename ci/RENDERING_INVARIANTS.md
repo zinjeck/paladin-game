@@ -14,6 +14,7 @@ These rules are intentional architecture, not temporary optimizations.
 - The active world and city renderers remain owned by the same `GameSession` instance.
 - Switching between them changes visibility and processing state. It must not replace or reload either scene.
 - First-city CPU preparation may run while the world remains interactive, but the city is revealed only after its complete map atlas is ready.
+- Completed non-road object information panels are attached to the selected object's camera-transformed world position. Roads remain selectable without opening an information panel, while citizen information retains its screen-space HUD layout.
 
 ## Redraw policy
 
