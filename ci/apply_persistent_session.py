@@ -11,8 +11,8 @@ PAYLOAD_DIR = ROOT / "ci" / "persistent_session_payload"
 EXPECTED_SHA256 = "da360e369fe197171509804048f17a8686fa08fb37c772dee581ff719487b7d4"
 
 parts = sorted(PAYLOAD_DIR.glob("part*.txt"))
-if len(parts) != 2:
-    raise RuntimeError(f"Expected 2 payload parts, found {len(parts)}")
+if len(parts) != 4:
+    raise RuntimeError(f"Expected 4 payload parts, found {len(parts)}")
 
 encoded = "".join(part.read_text(encoding="utf-8").strip() for part in parts)
 patch = gzip.decompress(base64.b64decode(encoded))
