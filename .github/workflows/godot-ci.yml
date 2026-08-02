@@ -33,11 +33,11 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          cat .github/food-pass-part-* | base64 -d > /tmp/food-pass.patch
+          base64 -d .github/food-pass.patch.gz.b64 | gzip -d > /tmp/food-pass.patch
           git apply --check /tmp/food-pass.patch
           git apply /tmp/food-pass.patch
           git show origin/main:.github/workflows/godot-ci.yml > .github/workflows/godot-ci.yml
-          rm -f .github/food-pass-part-* .github/workflows/apply-balanced-food-pass.yml
+          rm -f .github/food-pass-part-* .github/food-pass.patch.gz.b64 .github/workflows/apply-balanced-food-pass.yml
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add -A
