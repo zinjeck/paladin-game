@@ -1,0 +1,42 @@
+name: Apply audited failure fixes
+
+on:
+  push:
+    branches:
+      - ci/godot-testing
+    paths:
+      - ci/apply_audit_fixes.py
+      - .github/workflows/apply-audit-fixes.yml
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    name: Apply exact audited edits
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Check out CI branch
+        uses: actions/checkout@v4
+        with:
+          ref: ci/godot-testing
+          fetch-depth: 0
+
+      - name: Apply exact edits
+        run: python3 ci/apply_audit_fixes.py
+
+      - name: Commit audited edits
+        shell: bash
+        run: |
+          set -euo pipefail
+          if git diff --quiet && git diff --cached --quiet; then
+            echo "No changes to commit."
+            exit 0
+          fi
+          git config user.name "paladin-ci-bot"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "Fix construction lifecycle and rebalance test fixtures"
+          git push origin HEAD:ci/godot-testing
