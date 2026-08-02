@@ -23,7 +23,7 @@ jobs:
           fetch-depth: 0
 
       - name: Apply exact edits
-        run: python3 ci/apply_audit_fixes.py
+        run: python3 ci/apply_audit_fixes_v2.py
 
       - name: Commit audited edits
         shell: bash
