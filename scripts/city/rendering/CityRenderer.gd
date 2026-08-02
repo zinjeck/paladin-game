@@ -494,6 +494,11 @@ func _collect_city_world_change_flags(
 			city_world.city_surface_feature_change_version
 		)
 		city_world.consume_city_surface_feature_changes()
+		# Tile-data edits can change biome, terrain, resources, or fertility.
+		# Rebuild only the visible mode synchronously, then warm the remaining
+		# map textures incrementally so the display and saved cache cannot go stale.
+		rebuild_city_terrain_texture()
+		update_city_map_mode_button_visuals()
 		return
 
 	if (

@@ -89,6 +89,16 @@ func _run_smoke_test() -> void:
 		for error in validation.get("errors", []):
 			push_error(str(error))
 
+	# Several fixtures deliberately edit authoritative tile data. Complete the
+	# resulting incremental refresh before testing scene re-entry so the cache
+	# represents the latest city version rather than an intentionally stale one.
+	renderer.city_texture_cache.finish_warmup()
+	renderer.update_city_map_mode_button_visuals()
+	_expect(
+		renderer.has_valid_saved_city_map_texture_cache(renderer.city_world),
+		"The latest tile-data version must finish with a complete saved map cache."
+	)
+
 	var cached_tree_multimesh_id := (
 		renderer.city_tree_multimesh.get_instance_id()
 		if renderer.city_tree_multimesh != null
