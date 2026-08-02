@@ -63,7 +63,7 @@ static func citizen_should_seek_food(citizen_id: int) -> bool:
 	)
 
 	return (
-		hunger <= WorldData.CITIZEN_EAT_TRIGGER_HUNGER
+		hunger <= WorldData.CITIZEN_FOOD_SEEK_TRIGGER_HUNGER
 		and get_citizen_food_need_nutrition(citizen_id) > 0
 		and available_food_capacity > 0
 	)
@@ -281,22 +281,25 @@ static func _get_legal_food_source_endpoints_at_citizen(
 static func _eat_personal_food_if_hungry(citizen_id: int) -> void:
 	var hunger := WorldData.get_city_citizen_hunger(citizen_id)
 
-	if hunger > WorldData.CITIZEN_EAT_TRIGGER_HUNGER:
-		return
-
 	for resource in WorldData.get_city_food_resource_types():
 		var hunger_restore := WorldData.get_city_food_hunger_restore(resource)
 
 		if hunger_restore <= 0:
 			continue
 
-		while (
-			hunger < WorldData.CITIZEN_EAT_TARGET_HUNGER
-			and WorldData.get_city_citizen_inventory_resource_amount(
-				citizen_id,
-				resource
-			) > 0
-		):
+		while WorldData.get_city_citizen_inventory_resource_amount(
+			citizen_id,
+			resource
+		) > 0:
+			# Food remains a whole physical item. Citizens only consume it when
+			# every point of nutrition fits, so no restoration is discarded by
+			# clamping. A citizen at 90 therefore keeps a 20-point item until 80.
+			if (
+				hunger + hunger_restore
+				> WorldData.CITIZEN_EAT_TARGET_HUNGER
+			):
+				break
+
 			var removed_amount := (
 				WorldData.remove_resource_from_city_citizen_inventory(
 					citizen_id,
@@ -312,10 +315,7 @@ static func _eat_personal_food_if_hungry(citizen_id: int) -> void:
 			var hunger_remainder := int(
 				citizen.get("hunger_decay_remainder", 0)
 			)
-			var next_hunger := mini(
-				hunger + hunger_restore,
-				WorldData.MAX_CITIZEN_HUNGER
-			)
+			var next_hunger := hunger + hunger_restore
 
 			if not WorldData.set_city_citizen_hunger_state(
 				citizen_id,

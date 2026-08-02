@@ -9,41 +9,13 @@ on:
       - main
 
 permissions:
-  contents: write
+  contents: read
 
 concurrency:
   group: godot-ci-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
-  apply-food-pass:
-    name: Apply balanced food pass
-    if: github.event_name == 'pull_request' && github.head_ref == 'paladin/balanced-food-household-cycle'
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-
-    steps:
-      - name: Check out food branch
-        uses: actions/checkout@v4
-        with:
-          ref: paladin/balanced-food-household-cycle
-          fetch-depth: 0
-
-      - name: Apply patch and remove temporary machinery
-        shell: bash
-        run: |
-          set -euo pipefail
-          base64 -d .github/food-pass.patch.gz.b64 | gzip -d > /tmp/food-pass.patch
-          git apply --check /tmp/food-pass.patch
-          git apply /tmp/food-pass.patch
-          git show origin/main:.github/workflows/godot-ci.yml > .github/workflows/godot-ci.yml
-          rm -f .github/food-pass-part-* .github/food-pass.patch.gz.b64 .github/workflows/apply-balanced-food-pass.yml
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add -A
-          git commit -m "Balance hunger, household pantries, and food production"
-          git push origin HEAD:paladin/balanced-food-household-cycle
-
   test:
     name: Godot 4.4.1 headless tests
     runs-on: ubuntu-latest

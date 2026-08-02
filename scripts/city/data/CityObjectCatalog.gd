@@ -331,15 +331,16 @@ static func setup_city_object_definitions() -> void:
 			"workplace_kind": WORKPLACE_KIND_GATHERING,
 			"worker_capacity": 4,
 			"output_resource": CityResourceCatalogScript.RESOURCE_FISH,
-			# Fish restores one citizen-day of hunger. Three worker-hours per
-			# fish lets four fully productive workers make 12 fish during the
-			# current nine-hour shift, matching the 33% food-labor target.
+			# Fish restores half a citizen-day of hunger. Two worker-hours per
+			# fish lets four fully productive workers make 18 fish during the
+			# current nine-hour shift, feeding eight citizens with a modest
+			# reserve-building surplus.
 			"production_recipe": {
 				"inputs": {},
 				"outputs": {
 					CityResourceCatalogScript.RESOURCE_FISH: 1,
 				},
-				"work_units_per_batch": 180_000,
+				"work_units_per_batch": 120_000,
 			},
 			"resource_source_policy": {
 				"mode": WORKPLACE_RESOURCE_SOURCE_MODE_FOOTPRINT_REACH,

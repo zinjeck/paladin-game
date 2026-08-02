@@ -13,8 +13,8 @@ const RESOURCE_LUMBER := "lumber"
 const RESOURCE_STONE := "stone"
 
 const CITY_FOOD_HUNGER_RESTORE_BY_RESOURCE := {
-	RESOURCE_FISH: 40,
-	RESOURCE_MEAT: 40,
+	RESOURCE_FISH: 20,
+	RESOURCE_MEAT: 20,
 }
 
 static var _city_resource_types: Array[String] = [

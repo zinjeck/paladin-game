@@ -879,8 +879,8 @@ func _test_resource_catalog_and_bulk_totals() -> void:
 		WorldData.get_city_food_hunger_restore(
 			WorldData.RESOURCE_MEAT
 		)
-		== 40,
-		"Meat nutrition must remain 40."
+		== 20,
+		"Meat nutrition must remain 20."
 	)
 
 	var fishery_definition := WorldData.get_city_object_definition(
@@ -908,8 +908,8 @@ func _test_resource_catalog_and_bulk_totals() -> void:
 		{}
 	)
 	_expect(
-		int(fishery_recipe.get("work_units_per_batch", 0)) == 180_000,
-		"Fishing Grounds must require three worker-hours per fish."
+		int(fishery_recipe.get("work_units_per_batch", 0)) == 120_000,
+		"Fishing Grounds must require two worker-hours per fish."
 	)
 
 

@@ -12,6 +12,13 @@ const PURPOSE_SURVIVAL_FOOD := "survival_food"
 const PURPOSE_HOUSEHOLD_FOOD := "household_food"
 const PURPOSE_CONSTRUCTION_SUPPLY := "construction_supply"
 const EXACT_PATH_HEURISTIC_WEIGHT: int = 1
+const PATH_COST_PERCENT_BASE: int = 100
+const NORMAL_HOME_PATH_COST_PERCENT: int = 125
+const SURVIVAL_SOURCE_PREFERENCE_HOME: int = 0
+const SURVIVAL_SOURCE_PREFERENCE_STOCKPILE: int = 1
+const SURVIVAL_SOURCE_PREFERENCE_KEEP: int = 2
+const SURVIVAL_SOURCE_PREFERENCE_WORKPLACE: int = 3
+const SURVIVAL_SOURCE_PREFERENCE_GROUND_PILE: int = 4
 
 # Resource destinations are scored through one configurable policy boundary.
 # The future priority UI can alter these values without rewriting hauling,
@@ -69,8 +76,8 @@ static func get_city_home_food_target_nutrition(
 	)
 
 
-# Compatibility name retained for existing UI/debug callers. The policy is now
-# a half-day pantry target rather than a full private day of food.
+# Compatibility name retained for existing UI/debug callers. The household
+# policy now genuinely targets one full citizen-day of food per resident.
 
 static func get_city_home_one_day_food_target_nutrition(
 	home: Dictionary
@@ -1830,16 +1837,30 @@ static func find_best_survival_food_source(
 	):
 		return {}
 
-	var current_tile: Vector2i = raw_current_tile
-	var path_requests_used := 0
+	var home_candidates: Array[Dictionary] = []
+	var alternative_candidates: Array[Dictionary] = []
+	var source_groups := _get_survival_source_groups(citizen)
+	var source_preference_ranks: Array[int] = [
+		SURVIVAL_SOURCE_PREFERENCE_HOME,
+		SURVIVAL_SOURCE_PREFERENCE_STOCKPILE,
+		SURVIVAL_SOURCE_PREFERENCE_KEEP,
+		SURVIVAL_SOURCE_PREFERENCE_WORKPLACE,
+		SURVIVAL_SOURCE_PREFERENCE_GROUND_PILE,
+	]
 
-	for source_group in _get_survival_source_groups(citizen):
-		if path_requests_used >= maximum_path_requests:
-			break
+	for group_index in range(source_groups.size()):
+		var raw_source_group = source_groups[group_index]
 
-		var candidates: Array[Dictionary] = []
+		if not raw_source_group is Array:
+			continue
 
-		for raw_endpoint in source_group:
+		var source_preference_rank := (
+			source_preference_ranks[group_index]
+			if group_index < source_preference_ranks.size()
+			else source_preference_ranks.size()
+		)
+
+		for raw_endpoint in raw_source_group:
 			if not raw_endpoint is Dictionary:
 				continue
 
@@ -1847,26 +1868,104 @@ static func find_best_survival_food_source(
 				citizen_id,
 				raw_endpoint,
 				desired_nutrition,
-				available_capacity
+				available_capacity,
+				source_preference_rank
 			)
 
-			if not candidate.is_empty():
-				candidates.append(candidate)
+			if candidate.is_empty():
+				continue
 
-		var best_result := _find_best_reachable_source_candidate(
+			if source_preference_rank == SURVIVAL_SOURCE_PREFERENCE_HOME:
+				home_candidates.append(candidate)
+			else:
+				alternative_candidates.append(candidate)
+
+	var current_tile: Vector2i = raw_current_tile
+	var is_critical := (
+		WorldData.get_city_citizen_hunger(citizen_id)
+		<= WorldData.CITIZEN_CRITICAL_FOOD_SEEK_TRIGGER_HUNGER
+	)
+
+	# Critical hunger ignores routine source preferences and takes the fastest
+	# reachable legal food. With only one path request available, normal hunger
+	# also falls back to this complete search rather than hiding valid sources.
+	if (
+		is_critical
+		or home_candidates.is_empty()
+		or alternative_candidates.is_empty()
+		or maximum_path_requests < 2
+	):
+		var all_candidates: Array[Dictionary] = []
+		all_candidates.append_array(home_candidates)
+		all_candidates.append_array(alternative_candidates)
+		return _find_best_reachable_source_candidate(
 			citizen_id,
 			current_tile,
-			candidates
-		)
-		path_requests_used += int(
-			best_result.get("path_requests_used", 0)
+			all_candidates
 		)
 
-		if int(best_result.get("source_id", -1)) > 0:
-			best_result["path_requests_used"] = path_requests_used
-			return best_result
+	# Normal hunger compares the resident's pantry against every other legal
+	# source. Home wins when its exact route is at most 25% longer, preserving a
+	# useful household routine without sending citizens across the city past a
+	# much closer stockpile, workplace, or ground pile.
+	var alternative_result := _find_best_reachable_source_candidate(
+		citizen_id,
+		current_tile,
+		alternative_candidates
+	)
+	var path_requests_used := int(
+		alternative_result.get("path_requests_used", 0)
+	)
+	var home_result: Dictionary = {}
+
+	if path_requests_used < maximum_path_requests:
+		home_result = _find_best_reachable_source_candidate(
+			citizen_id,
+			current_tile,
+			home_candidates
+		)
+		path_requests_used += int(home_result.get("path_requests_used", 0))
+
+	var best_result := _choose_normal_survival_food_result(
+		home_result,
+		alternative_result
+	)
+
+	if not best_result.is_empty():
+		best_result["path_requests_used"] = path_requests_used
+		return best_result
 
 	return {"path_requests_used": path_requests_used}
+
+
+static func _choose_normal_survival_food_result(
+	home_result: Dictionary,
+	alternative_result: Dictionary
+) -> Dictionary:
+	var home_is_valid := int(home_result.get("source_id", -1)) > 0
+	var alternative_is_valid := int(
+		alternative_result.get("source_id", -1)
+	) > 0
+
+	if not home_is_valid:
+		return alternative_result.duplicate(true)
+
+	if not alternative_is_valid:
+		return home_result.duplicate(true)
+
+	var home_cost := maxi(int(home_result.get("path_cost", 0)), 0)
+	var alternative_cost := maxi(
+		int(alternative_result.get("path_cost", 0)),
+		0
+	)
+
+	if (
+		home_cost * PATH_COST_PERCENT_BASE
+		<= alternative_cost * NORMAL_HOME_PATH_COST_PERCENT
+	):
+		return home_result.duplicate(true)
+
+	return alternative_result.duplicate(true)
 
 
 static func find_best_household_food_source(
@@ -1887,6 +1986,7 @@ static func find_best_household_food_source(
 		or WorldData.get_city_food_hunger_restore(resource) <= 0
 		or requested_amount <= 0
 		or maximum_path_requests <= 0
+		or get_city_public_food_surplus_nutrition() <= 0
 	):
 		return {}
 
@@ -2071,7 +2171,8 @@ static func _make_survival_endpoint_candidate(
 	citizen_id: int,
 	endpoint: Dictionary,
 	desired_nutrition: int,
-	available_capacity: int
+	available_capacity: int,
+	source_preference_rank: int
 ) -> Dictionary:
 	var best_resource := WorldData.RESOURCE_NONE
 	var requested_amount := 0
@@ -2124,6 +2225,7 @@ static func _make_survival_endpoint_candidate(
 		"object_id": int(endpoint.get("id", -1)),
 		"resource_type": best_resource,
 		"requested_amount": requested_amount,
+		"source_preference_rank": source_preference_rank,
 		"candidate_access_tiles": target_tiles,
 	}
 
@@ -2393,6 +2495,16 @@ static func _source_result_is_better(
 
 	if candidate_cost != best_cost:
 		return candidate_cost < best_cost
+
+	var candidate_preference := int(
+		candidate.get("source_preference_rank", 1_000_000)
+	)
+	var best_preference := int(
+		current_best.get("source_preference_rank", 1_000_000)
+	)
+
+	if candidate_preference != best_preference:
+		return candidate_preference < best_preference
 
 	var candidate_endpoint = candidate.get("endpoint", {})
 	var best_endpoint = current_best.get("endpoint", {})
