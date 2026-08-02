@@ -30,3 +30,4 @@ These rules define the current physical food loop and must remain consistent acr
 
 - A fully productive four-worker Fishing Grounds completes one fish per two worker-hours.
 - Across the current nine-hour shift, that is 18 fish, enough to feed eight citizens at two fish per day while leaving a modest reserve-building surplus.
+- All production, carrying, pantry stocking, and consumption continue to move whole physical resource units.
