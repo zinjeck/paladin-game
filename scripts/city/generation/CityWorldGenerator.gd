@@ -3,6 +3,8 @@ class_name CityWorldGenerator
 
 var city_world: WorldData
 var city_seed: int = 0
+var source_region_tiles: Array = []
+var source_region_size: int = 0
 
 var detail_noise := FastNoiseLite.new()
 var fertility_noise := FastNoiseLite.new()
@@ -14,6 +16,7 @@ var tree_patch_noise := FastNoiseLite.new()
 var tree_clearing_noise := FastNoiseLite.new()
 var rock_patch_noise := FastNoiseLite.new()
 
+const DEFAULT_LOCAL_TILES_PER_WORLD_TILE: int = 64
 const TILE_HASH_MASK: int = 0x7fffffff
 const TILE_HASH_AVALANCHE_MULTIPLIER: int = 0x045d9f3b
 const TREE_SPAWN_ROLL_SALT: int = 101
@@ -49,13 +52,22 @@ const TUNDRA_ROCK_BASE_CHANCE: float = 0.0032
 const DESERT_ROCK_BASE_CHANCE: float = 0.0026
 
 static func calculate_city_seed() -> int:
-	var center: Vector2i = WorldData.city_start_region_center
+	return calculate_city_seed_for_region(
+		WorldData.city_start_world_seed,
+		WorldData.city_start_region_center,
+		WorldData.city_start_region_size
+	)
 
-	var seed_value: int = int(WorldData.city_start_world_seed)
-	seed_value += int(center.x * 73856093)
-	seed_value += int(center.y * 19349663)
-	seed_value += int(WorldData.city_start_region_size * 83492791)
 
+static func calculate_city_seed_for_region(
+	world_seed: int,
+	region_center: Vector2i,
+	region_size: int
+) -> int:
+	var seed_value: int = world_seed
+	seed_value += int(region_center.x * 73856093)
+	seed_value += int(region_center.y * 19349663)
+	seed_value += int(region_size * 83492791)
 	return seed_value
 
 
@@ -63,7 +75,34 @@ func generate_city_world(
 	local_tiles_per_world_tile: int,
 	requested_city_seed: int
 ) -> WorldData:
-	var region_size: int = WorldData.city_start_region_size
+	return generate_city_world_from_region(
+		WorldData.city_start_tiles,
+		WorldData.city_start_region_size,
+		local_tiles_per_world_tile,
+		requested_city_seed
+	)
+
+
+func generate_city_world_from_region(
+	region_tiles: Array,
+	region_size: int,
+	local_tiles_per_world_tile: int,
+	requested_city_seed: int
+) -> WorldData:
+	if region_size <= 0 or local_tiles_per_world_tile <= 0:
+		push_error("CityWorldGenerator received an invalid city size.")
+		return null
+	if region_tiles.size() != region_size:
+		push_error("CityWorldGenerator region row count does not match region_size.")
+		return null
+
+	for row in region_tiles:
+		if not row is Array or row.size() != region_size:
+			push_error("CityWorldGenerator region columns do not match region_size.")
+			return null
+
+	source_region_tiles = region_tiles
+	source_region_size = region_size
 	var city_width: int = region_size * local_tiles_per_world_tile
 	var city_height: int = region_size * local_tiles_per_world_tile
 
@@ -208,22 +247,22 @@ func _populate_city_source_profile(
 
 	accumulate_city_source_sample(
 		profile,
-		WorldData.city_start_tiles[y0][x0],
+		source_region_tiles[y0][x0],
 		w00
 	)
 	accumulate_city_source_sample(
 		profile,
-		WorldData.city_start_tiles[y0][x1],
+		source_region_tiles[y0][x1],
 		w10
 	)
 	accumulate_city_source_sample(
 		profile,
-		WorldData.city_start_tiles[y1][x0],
+		source_region_tiles[y1][x0],
 		w01
 	)
 	accumulate_city_source_sample(
 		profile,
-		WorldData.city_start_tiles[y1][x1],
+		source_region_tiles[y1][x1],
 		w11
 	)
 

@@ -89,10 +89,8 @@ func _run_smoke_test() -> void:
 		for error in validation.get("errors", []):
 			push_error(str(error))
 
-	# Several fixtures deliberately edit authoritative tile data. Complete the
-	# resulting incremental refresh before testing scene re-entry so the cache
-	# represents the latest city version rather than an intentionally stale one.
-	renderer.city_texture_cache.finish_warmup()
+	# Several fixtures deliberately edit authoritative tile data. The complete
+	# atomic cache must already represent that latest version before re-entry.
 	renderer.update_city_map_mode_button_visuals()
 	_expect(
 		renderer.has_valid_saved_city_map_texture_cache(renderer.city_world),
@@ -138,10 +136,8 @@ func _run_smoke_test() -> void:
 	await get_tree().process_frame
 	WorldData.reset_runtime_session_state()
 
-	# Let any canceled texture-cache coroutine resume and release its in-flight
-	# WorldData/Image references before this short-lived test process exits.
-	for _frame_index in range(4):
-		await get_tree().process_frame
+	# No deferred map-generation work may remain after the renderer is freed.
+	await get_tree().process_frame
 
 
 func _test_city_map_texture_cache(renderer: CityRenderer) -> void:
@@ -156,21 +152,18 @@ func _test_city_map_texture_cache(renderer: CityRenderer) -> void:
 		"The visible city map mode must be ready as soon as the scene becomes interactive."
 	)
 	_expect(
-		renderer.city_texture_cache.warmup_running
-		or renderer.city_texture_cache.mode_textures.size()
+		not renderer.city_texture_cache.warmup_running
+		and renderer.city_texture_cache.mode_textures.size()
 		== view_modes.size(),
-		"Missing city map modes must warm incrementally instead of blocking scene entry."
+		"Every city map mode must be ready in the same atomic preparation pass."
 	)
 
-	renderer.city_texture_cache.finish_warmup()
 	renderer.update_city_map_mode_button_visuals()
 	_expect(
-		renderer.city_texture_cache.mode_textures.size()
-		== view_modes.size()
-		and renderer.has_valid_saved_city_map_texture_cache(
+		renderer.has_valid_saved_city_map_texture_cache(
 			renderer.city_world
 		),
-		"City map warmup must eventually publish and persist every map mode."
+		"Atomic city map preparation must persist the complete mode set."
 	)
 
 	for mode in view_modes:

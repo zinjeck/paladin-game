@@ -9,7 +9,12 @@ class SlimNeedMeter:
 
 	var value: float = 0.0:
 		set(new_value):
-			value = clampf(new_value, 0.0, 100.0)
+			var clamped_value := clampf(new_value, 0.0, 100.0)
+
+			if is_equal_approx(value, clamped_value):
+				return
+
+			value = clamped_value
 			queue_redraw()
 
 	var background_color: Color

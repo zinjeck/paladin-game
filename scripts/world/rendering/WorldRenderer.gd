@@ -102,6 +102,8 @@ var founding_name_label_width: float = 155.0
 var founding_customization_space_height: float = 250.0
 var city_name_world_label_size: Vector2 = Vector2(480.0, 34.0)
 var city_name_world_label_screen_gap: float = 8.0
+var session_view_active: bool = true
+var city_transition_pending: bool = false
 
 func _ready():
 	texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
@@ -127,7 +129,6 @@ func _ready():
 		SimulationClock.suspend_simulation()
 		world = null
 		print("World screen loaded. Press Generate World.")
-		queue_redraw()
 
 func _draw():
 	if world == null:
@@ -138,9 +139,6 @@ func _draw():
 
 
 func _process(_delta):
-	if world_texture_cache != null:
-		world_texture_cache.process_warmup()
-
 	update_hovered_tile()
 	update_city_name_world_label_transform()
 
@@ -149,6 +147,144 @@ func _exit_tree() -> void:
 
 	if world_texture_cache != null:
 		world_texture_cache.dispose()
+
+
+func set_session_view_active(is_active: bool) -> void:
+	session_view_active = is_active
+	visible = is_active
+	process_mode = (
+		Node.PROCESS_MODE_INHERIT
+		if is_active
+		else Node.PROCESS_MODE_DISABLED
+	)
+	_set_descendant_canvas_layers_visible(self, is_active)
+
+	var world_camera: Camera2D = null
+
+	if get_parent() != null:
+		world_camera = get_parent().get_node_or_null("Camera2D") as Camera2D
+
+	if world_camera != null:
+		world_camera.enabled = is_active
+
+		if is_active:
+			world_camera.make_current()
+
+	if is_active:
+		request_world_redraw()
+		update_debug_panel_text()
+
+
+func _set_descendant_canvas_layers_visible(root: Node, is_visible: bool) -> void:
+	for child in root.get_children():
+		if child is CanvasLayer:
+			(child as CanvasLayer).visible = is_visible
+
+		_set_descendant_canvas_layers_visible(child, is_visible)
+
+
+func request_world_redraw() -> void:
+	if not session_view_active:
+		return
+
+	queue_redraw()
+
+
+func set_city_transition_pending(is_pending: bool) -> void:
+	city_transition_pending = is_pending
+
+	if play_button == null:
+		return
+
+	if is_pending:
+		play_button.text = "Preparing City..."
+		play_button.disabled = true
+		return
+
+	refresh_founding_ui_state()
+
+	if WorldData.has_active_world_save():
+		play_button.text = "City"
+
+
+func get_game_session_controller() -> Node:
+	var current: Node = self
+
+	while current != null:
+		if current.is_in_group("game_session"):
+			return current
+
+		current = current.get_parent()
+
+	return null
+
+
+func build_city_preparation_request() -> Dictionary:
+	if world == null or not has_selected_region():
+		return {}
+
+	var region_tiles: Array = []
+
+	for local_y in range(region_size_tiles):
+		var row: Array = []
+
+		for local_x in range(region_size_tiles):
+			var world_x := selected_region_top_left.x + local_x
+			var world_y := selected_region_top_left.y + local_y
+
+			if not world.is_in_bounds(world_x, world_y):
+				return {}
+
+			row.append(world.get_tile(world_x, world_y).duplicate(true))
+
+		region_tiles.append(row)
+
+	var local_tiles_per_world_tile := (
+		CityWorldGenerator.DEFAULT_LOCAL_TILES_PER_WORLD_TILE
+	)
+	var city_seed := CityWorldGenerator.calculate_city_seed_for_region(
+		world.seed,
+		selected_region_center,
+		region_size_tiles
+	)
+	var signature := "%s:%s:%s:%s:%s:%s:%s" % [
+		world.seed,
+		world.tile_data_version,
+		selected_region_top_left.x,
+		selected_region_top_left.y,
+		region_size_tiles,
+		local_tiles_per_world_tile,
+		city_seed,
+	]
+
+	return {
+		"signature": signature,
+		"region_tiles": region_tiles,
+		"region_size": region_size_tiles,
+		"local_tiles_per_world_tile": local_tiles_per_world_tile,
+		"city_seed": city_seed,
+	}
+
+
+func request_city_preparation() -> void:
+	var session := get_game_session_controller()
+
+	if session == null or not session.has_method("prepare_city_view"):
+		return
+
+	var request := build_city_preparation_request()
+
+	if request.is_empty():
+		return
+
+	session.call("prepare_city_view", request)
+
+
+func cancel_city_preparation() -> void:
+	var session := get_game_session_controller()
+
+	if session != null and session.has_method("cancel_city_preparation"):
+		session.call("cancel_city_preparation")
 
 func connect_simulation_clock_signals() -> void:
 	var time_changed_callable := Callable(
@@ -165,6 +301,9 @@ func on_simulation_time_changed(
 	_hour: int,
 	_minute: int
 ) -> void:
+	if not session_view_active:
+		return
+
 	update_debug_panel_text()
 
 func setup_world_texture_cache() -> void:
@@ -246,7 +385,7 @@ func load_locked_world_save() -> void:
 
 	rebuild_world_map_textures()
 	configure_world_camera()
-	queue_redraw()
+	request_world_redraw()
 
 func create_hover_border_line():
 	hover_border_line = Line2D.new()
@@ -749,7 +888,7 @@ func set_world_view_mode(new_view_mode: int) -> void:
 	apply_cached_world_map_texture()
 
 	update_debug_panel_text()
-	queue_redraw()
+	request_world_redraw()
 
 func get_all_world_view_modes() -> Array[int]:
 	return MapVisuals.get_all_view_modes()
@@ -1429,6 +1568,7 @@ func on_founding_panel_save_button_pressed() -> void:
 	refresh_founding_ui_state()
 
 	print("Founding identity saved for city: ", saved_city_name)
+	request_city_preparation()
 
 
 func clear_provisional_founding_identity() -> void:
@@ -1504,6 +1644,8 @@ func on_select_region_button_pressed() -> void:
 	print("Region selection mode enabled.")
 
 func on_generate_world_button_pressed() -> void:
+	cancel_city_preparation()
+
 	if WorldData.has_active_world_save():
 		print("Generate blocked: this save already has an official world.")
 		return
@@ -1540,7 +1682,7 @@ func on_generate_world_button_pressed() -> void:
 
 	rebuild_world_map_textures()
 	configure_world_camera()
-	queue_redraw()
+	request_world_redraw()
 
 func on_play_button_pressed() -> void:
 	if WorldData.has_active_world_save():
@@ -1595,7 +1737,12 @@ func on_play_button_pressed() -> void:
 
 func change_to_city_screen() -> void:
 	store_current_world_camera_state()
-	
+	var session := get_game_session_controller()
+
+	if session != null and session.has_method("show_city_view"):
+		session.call("show_city_view", build_city_preparation_request())
+		return
+
 	var target_city_scene_path := WorldData.official_city_scene_path
 
 	if target_city_scene_path.is_empty():
@@ -1608,14 +1755,13 @@ func change_to_city_screen() -> void:
 	var error := OK
 
 	if target_city_scene_path == DEFAULT_CITY_SCENE_PATH:
-		# The standard city scene is preloaded with the world renderer, so the
-		# button press does not synchronously parse and load a PackedScene.
 		error = get_tree().change_scene_to_packed(DEFAULT_CITY_SCENE)
 	else:
 		error = get_tree().change_scene_to_file(target_city_scene_path)
 
 	if error != OK:
 		push_error("Could not load city scene: " + target_city_scene_path)
+
 
 func set_world_locked_ui() -> void:
 	close_founding_panel()

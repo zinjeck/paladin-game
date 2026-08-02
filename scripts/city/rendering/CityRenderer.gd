@@ -45,11 +45,13 @@ const CityWorkSystemScript = preload(
 	"res://scripts/city/simulation/systems/CityWorkSystem.gd"
 )
 @export_file("*.tscn") var world_scene_path: String = ""
-@export var local_tiles_per_world_tile: int = 64
+@export var local_tiles_per_world_tile: int = CityWorldGeneratorScript.DEFAULT_LOCAL_TILES_PER_WORLD_TILE
 @export var city_tile_size: int = 2
 
 var city_world: WorldData
 var city_seed: int = 0
+var session_prepared_city_payload: Dictionary = {}
+var session_view_active: bool = true
 var camera: Camera2D
 var observed_city_camera_zoom: Vector2 = Vector2.ZERO
 var ui_layer: CanvasLayer
@@ -325,6 +327,7 @@ func _ready() -> void:
 	city_generation_duration_usec = (
 		Time.get_ticks_usec() - generation_start_usec
 	)
+	install_session_prepared_city_map_textures()
 	clear_invalid_old_city_foundation_state()
 	ensure_city_foundation_object_exists()
 	WorldData.ensure_city_citizen_spatial_state(
@@ -379,6 +382,50 @@ func _ready() -> void:
 			city_natural_feature_cache_reused_on_entry
 		)
 
+	session_prepared_city_payload.clear()
+
+
+func set_session_view_active(is_active: bool) -> void:
+	session_view_active = is_active
+	visible = is_active
+	process_mode = (
+		Node.PROCESS_MODE_INHERIT
+		if is_active
+		else Node.PROCESS_MODE_DISABLED
+	)
+	_set_descendant_canvas_layers_visible(self, is_active)
+
+	if camera != null:
+		camera.enabled = is_active
+
+		if is_active:
+			camera.make_current()
+
+	if is_active:
+		queue_all_city_render_layers_redraw()
+		update_city_information_panel()
+		update_debug_panel_text()
+
+
+func _set_descendant_canvas_layers_visible(root: Node, is_visible: bool) -> void:
+	for child in root.get_children():
+		if child is CanvasLayer:
+			(child as CanvasLayer).visible = is_visible
+
+		_set_descendant_canvas_layers_visible(child, is_visible)
+
+
+func get_game_session_controller() -> Node:
+	var current: Node = self
+
+	while current != null:
+		if current.is_in_group("game_session"):
+			return current
+
+		current = current.get_parent()
+
+	return null
+
 
 func _process(delta: float) -> void:
 	_process_texture_cache_and_camera()
@@ -397,13 +444,6 @@ func _process(delta: float) -> void:
 
 
 func _process_texture_cache_and_camera() -> void:
-	if city_texture_cache != null:
-		var warmup_was_running := city_texture_cache.warmup_running
-		city_texture_cache.process_warmup()
-
-		if warmup_was_running and not city_texture_cache.warmup_running:
-			update_city_map_mode_button_visuals()
-
 	if (
 		camera != null
 		and camera.zoom != observed_city_camera_zoom
@@ -495,8 +535,8 @@ func _collect_city_world_change_flags(
 		)
 		city_world.consume_city_surface_feature_changes()
 		# Tile-data edits can change biome, terrain, resources, or fertility.
-		# Rebuild only the visible mode synchronously, then warm the remaining
-		# map textures incrementally so the display and saved cache cannot go stale.
+		# Rebuild the complete atomic cache in one shared pass. No later frame
+		# receives staggered map-mode generation work.
 		rebuild_city_terrain_texture()
 		update_city_map_mode_button_visuals()
 		return
@@ -995,6 +1035,12 @@ func on_simulation_time_changed(
 	_hour: int,
 	_minute: int
 ) -> void:
+	if not session_view_active:
+		# Hidden persistent views should not run presentation work. Discard the
+		# transient movement trace; activation resynchronizes from authority.
+		WorldData.clear_city_citizen_movement_visual_events()
+		return
+
 	city_information_ui.refresh_time()
 
 	var movement_visual_changed := (
@@ -1088,6 +1134,15 @@ func add_debug_resource_to_selected_stockpile(resource: String, amount_delta: in
 #region City generation
 
 func generate_city_world() -> void:
+	var prepared_world = session_prepared_city_payload.get("city_world")
+
+	if prepared_world is WorldData:
+		city_world = prepared_world
+		city_seed = int(session_prepared_city_payload.get("city_seed", 0))
+		WorldData.store_city_world_save(city_world, city_seed)
+		print("Installed asynchronously prepared city world.")
+		return
+
 	if WorldData.has_active_city_save():
 		city_world = WorldData.official_city_world
 		city_seed = WorldData.official_city_seed
@@ -1108,6 +1163,23 @@ func generate_city_world() -> void:
 
 	WorldData.store_city_world_save(city_world, city_seed)
 	print("Stored official city world.")
+
+
+func set_session_prepared_city_payload(payload: Dictionary) -> void:
+	session_prepared_city_payload = payload
+
+
+func install_session_prepared_city_map_textures() -> void:
+	if city_world == null or city_texture_cache == null:
+		return
+
+	var raw_images = session_prepared_city_payload.get("map_images")
+
+	if not raw_images is Dictionary:
+		return
+
+	if not city_texture_cache.install_prepared_images(city_world, raw_images):
+		push_error("Prepared city map textures were invalid; rebuilding synchronously.")
 
 #endregion
 
@@ -1898,6 +1970,8 @@ func update_city_map_mode_button_visuals() -> void:
 			city_texture_cache != null
 			and city_texture_cache.is_mode_ready(city_world, mode)
 		)
+		# Atomic cache preparation means all map buttons become available
+		# together. A missing mode is a cache failure, not deferred work.
 		mode_button.disabled = not mode_is_ready
 
 		if mode == city_view_mode:
@@ -4043,6 +4117,11 @@ func layout_back_button(viewport_size: Vector2) -> void:
 
 func on_back_button_pressed() -> void:
 	store_current_city_camera_state()
+	var session := get_game_session_controller()
+
+	if session != null and session.has_method("show_world_view"):
+		session.call("show_world_view")
+		return
 
 	var return_path := WorldData.official_world_scene_path
 
@@ -5225,22 +5304,33 @@ func rebuild_city_natural_feature_multimeshes() -> void:
 		city_rock_multimesh = null
 		return
 
-	# Collect feature positions while counting them. The previous implementation
-	# traversed every city tile twice, which doubled a 331,776-tile scan during
-	# every city-scene entry.
+	# First entry can receive these positions from the background preparation
+	# job. Re-entry uses the persistent MultiMesh cache. Only fall back to a map
+	# scan when neither prepared nor cached data exists.
 	var tree_tiles: Array[Vector2i] = []
 	var rock_tiles: Array[Vector2i] = []
+	var prepared_tree_tiles = session_prepared_city_payload.get("tree_tiles")
+	var prepared_rock_tiles = session_prepared_city_payload.get("rock_tiles")
 
-	for y in range(city_world.height):
-		var row: Array = city_world.tiles[y]
+	if prepared_tree_tiles is Array and prepared_rock_tiles is Array:
+		for raw_tile in prepared_tree_tiles:
+			if raw_tile is Vector2i:
+				tree_tiles.append(raw_tile)
 
-		for x in range(city_world.width):
-			match WorldData.get_city_surface_feature(row[x]):
-				WorldData.CITY_SURFACE_FEATURE_TREE:
-					tree_tiles.append(Vector2i(x, y))
+		for raw_tile in prepared_rock_tiles:
+			if raw_tile is Vector2i:
+				rock_tiles.append(raw_tile)
+	else:
+		for y in range(city_world.height):
+			var row: Array = city_world.tiles[y]
 
-				WorldData.CITY_SURFACE_FEATURE_ROCK:
-					rock_tiles.append(Vector2i(x, y))
+			for x in range(city_world.width):
+				match WorldData.get_city_surface_feature(row[x]):
+					WorldData.CITY_SURFACE_FEATURE_TREE:
+						tree_tiles.append(Vector2i(x, y))
+
+					WorldData.CITY_SURFACE_FEATURE_ROCK:
+						rock_tiles.append(Vector2i(x, y))
 
 	city_tree_multimesh = create_city_natural_feature_multimesh(
 		city_tree_mesh,
@@ -5528,16 +5618,22 @@ func create_city_render_layers() -> void:
 
 
 func queue_city_background_layer_redraw() -> void:
+	if not session_view_active:
+		return
 	if city_background_render_layer != null:
 		city_background_render_layer.queue_redraw()
 
 
 func queue_city_citizen_layer_redraw() -> void:
+	if not session_view_active:
+		return
 	if city_citizen_render_layer != null:
 		city_citizen_render_layer.queue_redraw()
 
 
 func queue_city_interaction_layer_redraw() -> void:
+	if not session_view_active:
+		return
 	if city_interaction_render_layer != null:
 		city_interaction_render_layer.queue_redraw()
 
