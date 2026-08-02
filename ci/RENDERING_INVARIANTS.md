@@ -21,3 +21,8 @@ These rules are intentional architecture, not temporary optimizations.
 - `queue_redraw()` is restricted to the coalescing `CityRenderLayer` boundary and controls whose custom geometry genuinely changed.
 - Selection, hover, debugging, and simulation invalidations must target only the affected render layer.
 - `ci/audit_gdscript.py` enforces the approved `queue_redraw()` call sites and rejects regressions.
+
+## Validation
+
+- Godot import must compile the persistent world, city, session, and test boundaries before the pull request can pass.
+- Automated tests must prove that all map modes are ready together and that repeated world/city switches retain the same scene instances.
