@@ -10,6 +10,9 @@ const CityNavigationSystemScript = preload(
 const CitizenHaulingSystemScript = preload(
 	"res://scripts/citizens/simulation/systems/CitizenHaulingSystem.gd"
 )
+const CitizenNeedsSystemScript = preload(
+	"res://scripts/citizens/simulation/systems/CitizenNeedsSystem.gd"
+)
 const CityResourceMatcherScript = preload(
 	"res://scripts/city/simulation/systems/CityResourceMatcher.gd"
 )
@@ -23,6 +26,8 @@ const PROGRESS_BASE_WORK_MINUTES := (
 	WorldData.CITY_PLAYER_COMMAND_WORK_DURATION_MINUTES
 )
 const EXACT_PATH_HEURISTIC_WEIGHT: int = 1
+const REBALANCE_MINIMUM_PATH_SAVINGS_TILES: int = 3
+const REBALANCE_MINIMUM_RELATIVE_SAVINGS_PERCENT: int = 25
 
 
 #region Construction Site Registry Operations
@@ -774,24 +779,27 @@ static func create_rectangular_site(values: Dictionary) -> Dictionary:
 		site = WorldData.get_city_construction_site_by_id(
 			int(site.get("id", -1))
 		)
+		rebalance_uncommitted_construction_workers(
+			int(site.get("id", -1))
+		)
 
 	return site
 
 
-static func create_road_site(
+static func create_road_sites(
 	raw_tile_positions: Array,
 	object_owner: String = "player",
 	city_world: WorldData = null
-) -> Dictionary:
+) -> Array[Dictionary]:
 	var resolved_world := city_world
 
 	if resolved_world == null:
 		resolved_world = WorldData.official_city_world
 
 	if resolved_world == null:
-		return {}
+		return []
 
-	var footprint_tiles: Array[Vector2i] = []
+	var clean_tiles: Array[Vector2i] = []
 	var tile_lookup: Dictionary = {}
 
 	for raw_tile in raw_tile_positions:
@@ -810,62 +818,107 @@ static func create_road_site(
 			continue
 
 		tile_lookup[tile_position] = true
-		footprint_tiles.append(tile_position)
+		clean_tiles.append(tile_position)
 
-	footprint_tiles.sort_custom(_sort_tiles_y_then_x)
+	clean_tiles.sort_custom(_sort_tiles_y_then_x)
 
-	if footprint_tiles.is_empty():
-		return {}
-
-	if not WorldData.can_place_city_construction_footprint(
-		resolved_world,
-		footprint_tiles
-	):
-		return {}
-
-	var top_left := footprint_tiles[0]
-	var bottom_right := footprint_tiles[0]
-
-	for tile_position in footprint_tiles:
-		top_left.x = mini(top_left.x, tile_position.x)
-		top_left.y = mini(top_left.y, tile_position.y)
-		bottom_right.x = maxi(bottom_right.x, tile_position.x)
-		bottom_right.y = maxi(bottom_right.y, tile_position.y)
+	if clean_tiles.is_empty():
+		return []
 
 	var definition := WorldData.get_city_object_definition(
 		WorldData.CITY_OBJECT_ROAD
 	)
-	var site := create_city_construction_site({
-		"target_kind": WorldData.CITY_CONSTRUCTION_TARGET_NEW,
-		"object_type": WorldData.CITY_OBJECT_ROAD,
-		"shape_mode": WorldData.CITY_OBJECT_SHAPE_TILE_AREA,
-		"top_left": top_left,
-		"size": bottom_right - top_left + Vector2i.ONE,
-		"footprint_tiles": footprint_tiles,
-		"owner": object_owner,
-		"material_recipe": _get_scaled_material_recipe(
-			definition,
-			footprint_tiles.size()
-		),
-		"required_labor_minutes": _get_scaled_labor_minutes(
-			definition,
-			footprint_tiles.size()
-		),
-		"maximum_workers": int(
-			definition.get("construction_max_workers", 1)
-		),
-		"work_positions": footprint_tiles,
-	})
+	var created_sites: Array[Dictionary] = []
+	var created_site_ids: Array[int] = []
 
-	if not site.is_empty():
-		refresh_city_construction_site(
-			int(site.get("id", -1))
-		)
-		site = WorldData.get_city_construction_site_by_id(
-			int(site.get("id", -1))
+	# The drag rectangle is only an input gesture. Once confirmed, every tile
+	# becomes a fully independent construction site with its own claim,
+	# progress, cancellation state, and eventual completed road object.
+	for tile_position in clean_tiles:
+		var site := create_city_construction_site({
+			"target_kind": WorldData.CITY_CONSTRUCTION_TARGET_NEW,
+			"object_type": WorldData.CITY_OBJECT_ROAD,
+			"shape_mode": WorldData.CITY_OBJECT_SHAPE_TILE_AREA,
+			"top_left": tile_position,
+			"size": Vector2i.ONE,
+			"footprint_tiles": [tile_position],
+			"owner": object_owner,
+			"material_recipe": _get_scaled_material_recipe(
+				definition,
+				1
+			),
+			"required_labor_minutes": _get_scaled_labor_minutes(
+				definition,
+				1
+			),
+			"maximum_workers": int(
+				definition.get("construction_max_workers", 1)
+			),
+			"work_positions": [tile_position],
+		})
+
+		if site.is_empty():
+			continue
+
+		var site_id := int(site.get("id", -1))
+		refresh_city_construction_site(site_id)
+		site = WorldData.get_city_construction_site_by_id(site_id)
+
+		if site.is_empty():
+			continue
+
+		created_sites.append(site)
+		created_site_ids.append(site_id)
+
+	if created_sites.is_empty():
+		return []
+
+	# Build all work-board entries in one pass, then compare existing
+	# uncommitted builders against the complete set of newly painted road tiles.
+	# CityWorkSystem batches road routing, so this does not run A* per tile.
+	CityWorkSystem.synchronize_player_work_board()
+	rebalance_uncommitted_construction_workers_for_sites(created_site_ids)
+
+	var refreshed_sites: Array[Dictionary] = []
+
+	for site_id in created_site_ids:
+		var refreshed_site := (
+			WorldData.get_city_construction_site_by_id(site_id)
 		)
 
-	return site
+		if not refreshed_site.is_empty():
+			refreshed_sites.append(refreshed_site)
+
+	return refreshed_sites
+
+
+# Compatibility wrapper for callers that intentionally create one road tile.
+# Multi-tile placement must use create_road_sites() so no caller accidentally
+# recreates a shared, stroke-sized road construction object.
+static func create_road_site(
+	raw_tile_positions: Array,
+	object_owner: String = "player",
+	city_world: WorldData = null
+) -> Dictionary:
+	var clean_tile_count := 0
+
+	for raw_tile in raw_tile_positions:
+		if raw_tile is Vector2i:
+			clean_tile_count += 1
+
+	if clean_tile_count != 1:
+		return {}
+
+	var created_sites := create_road_sites(
+		raw_tile_positions,
+		object_owner,
+		city_world
+	)
+
+	if created_sites.size() != 1:
+		return {}
+
+	return created_sites[0]
 
 
 #endregion
@@ -1462,6 +1515,164 @@ static func get_best_assignable_player_work_for_citizen_and_site(
 	return {}
 
 
+# Production roads have no material-delivery phase, which lets every active
+# road tile share one exact route search while retaining independent site IDs,
+# claims, progress, and completion. Synthetic/materialized road fixtures fall
+# back to ordinary per-site selection.
+static func get_best_assignable_batchable_road_work_for_citizen(
+	citizen_id: int,
+	raw_site_ids: Array
+) -> Dictionary:
+	var citizen := WorldData.get_city_citizen_by_id(citizen_id)
+
+	if (
+		citizen.is_empty()
+		or not bool(citizen.get("alive", false))
+		or int(citizen.get("job_object_id", -1)) > 0
+	):
+		return {}
+
+	var raw_current_tile = citizen.get(
+		"city_tile_position",
+		WorldData.INVALID_CITY_TILE_POSITION
+	)
+
+	if not raw_current_tile is Vector2i:
+		return {}
+
+	var site_id_lookup: Dictionary = {}
+
+	for raw_site_id in raw_site_ids:
+		var site_id := int(raw_site_id)
+
+		if site_id > 0:
+			site_id_lookup[site_id] = true
+
+	var site_ids: Array = site_id_lookup.keys()
+	site_ids.sort()
+	var best_candidate: Dictionary = {}
+	var labor_site_id_by_position: Dictionary = {}
+	var labor_positions: Array[Vector2i] = []
+
+	for raw_site_id in site_ids:
+		var site_id := int(raw_site_id)
+		var site := WorldData.get_city_construction_site_by_id(site_id)
+		var raw_recipe = site.get("material_recipe", {})
+
+		if (
+			site.is_empty()
+			or str(site.get("object_type", ""))
+			!= WorldData.CITY_OBJECT_ROAD
+			or not raw_recipe is Dictionary
+			or not raw_recipe.is_empty()
+		):
+			continue
+
+		match str(site.get("phase", "")):
+			WorldData.CITY_CONSTRUCTION_PHASE_CLEARING:
+				var cleanup_candidate := (
+					_get_best_clearing_cleanup_candidate(
+						citizen,
+						site
+					)
+				)
+
+				if _candidate_is_better(
+					cleanup_candidate,
+					best_candidate
+				):
+					best_candidate = cleanup_candidate
+
+			WorldData.CITY_CONSTRUCTION_PHASE_LABOR:
+				if _get_active_laborer_count(site_id) >= maxi(
+					int(site.get("maximum_workers", 1)),
+					1
+				):
+					continue
+
+				var claimed_positions := (
+					_get_claimed_labor_positions(site_id)
+				)
+
+				for position in (
+					WorldData.get_city_construction_site_work_positions(
+						site
+					)
+				):
+					if (
+						claimed_positions.has(position)
+						or not WorldData.is_city_tile_walkable_for_citizen(
+							WorldData.official_city_world,
+							position,
+							citizen_id
+						)
+					):
+						continue
+
+					if not labor_site_id_by_position.has(position):
+						labor_site_id_by_position[position] = site_id
+						labor_positions.append(position)
+
+	if labor_positions.is_empty():
+		return best_candidate
+
+	labor_positions.sort_custom(WorldData._sort_city_tiles_y_then_x)
+	var path_result := (
+		CityNavigationSystemScript.find_path_to_any_city_tile({
+			"city_world": WorldData.official_city_world,
+			"start_tile": raw_current_tile,
+			"destination_tiles": labor_positions,
+			"max_expanded_nodes": _get_city_wide_path_expansion_limit(
+				WorldData.official_city_world
+			),
+			"citizen_id": citizen_id,
+			"heuristic_weight": EXACT_PATH_HEURISTIC_WEIGHT,
+		})
+	)
+
+	if not bool(path_result.get("success", false)):
+		return best_candidate
+
+	var raw_target_tile = path_result.get(
+		"destination_tile",
+		WorldData.INVALID_CITY_TILE_POSITION
+	)
+
+	if (
+		not raw_target_tile is Vector2i
+		or not labor_site_id_by_position.has(raw_target_tile)
+	):
+		return best_candidate
+
+	var target_tile: Vector2i = raw_target_tile
+	var selected_site_id := int(
+		labor_site_id_by_position.get(target_tile, -1)
+	)
+	var selected_site := WorldData.get_city_construction_site_by_id(
+		selected_site_id
+	)
+	var path_cost := maxi(int(path_result.get("path_cost", 0)), 0)
+	var labor_candidate := {
+		"player_work_kind": PLAYER_WORK_KIND_LABOR,
+		"construction_site_id": selected_site_id,
+		"issued_world_minute": int(
+			selected_site.get("issued_world_minute", 0)
+		),
+		"estimated_path_cost": path_cost,
+		"selection_score": (
+			path_cost - _get_fairness_bonus(selected_site)
+		),
+		"target_tile": target_tile,
+		"assignment_path": path_result.get("path", []).duplicate(),
+		"tie_break_key": str(target_tile),
+	}
+
+	if _candidate_is_better(labor_candidate, best_candidate):
+		best_candidate = labor_candidate
+
+	return best_candidate
+
+
 static func _get_best_clearing_cleanup_candidate(
 	citizen: Dictionary,
 	site: Dictionary
@@ -1612,6 +1823,10 @@ static func _get_best_clearing_cleanup_candidate(
 			"estimated_path_cost": path_cost,
 			"selection_score": path_cost - _get_fairness_bonus(site),
 			"task_request": task_request,
+			"assignment_path": task_request.get(
+				"selection_path",
+				[]
+			).duplicate(),
 			"tie_break_key": (
 				"cleanup:"
 				+ str(ground_pile_id)
@@ -1904,6 +2119,10 @@ static func _get_best_delivery_candidate(
 					path_cost - _get_fairness_bonus(site)
 				),
 				"task_request": task_request,
+				"assignment_path": task_request.get(
+					"selection_path",
+					[]
+				).duplicate(),
 				"tie_break_key": (
 					str(source.get("kind", ""))
 					+ ":"
@@ -1995,6 +2214,7 @@ static func _get_labor_candidate(
 		"estimated_path_cost": path_cost,
 		"selection_score": path_cost - _get_fairness_bonus(site),
 		"target_tile": raw_target_tile,
+		"assignment_path": path_result.get("path", []).duplicate(),
 		"tie_break_key": str(raw_target_tile),
 	}
 
@@ -2751,6 +2971,720 @@ static func _haul_references_site(
 #endregion
 
 #region Construction Interrupts and Shared Helpers
+
+
+# A newly placed blueprint can improve an uncommitted construction trip, but
+# it must never erase every assignment merely to ask the scheduler again.
+# Workers are compared and switched one at a time so live claims, delivery
+# reservations, and useful parallel capacity shape every following choice.
+static func rebalance_uncommitted_construction_workers(
+	triggering_site_id: int
+) -> int:
+	return rebalance_uncommitted_construction_workers_for_sites(
+		[triggering_site_id]
+	)
+
+
+# A painted road creates many independent sites at once. Rebalancing accepts
+# the whole batch so a worker can compare against the nearest useful tile while
+# still receiving a task owned by exactly one construction site.
+static func rebalance_uncommitted_construction_workers_for_sites(
+	raw_triggering_site_ids: Array
+) -> int:
+	var triggering_site_id_lookup: Dictionary = {}
+
+	for raw_site_id in raw_triggering_site_ids:
+		var site_id := int(raw_site_id)
+
+		if (
+			site_id > 0
+			and not WorldData.get_city_construction_site_by_id(
+				site_id
+			).is_empty()
+		):
+			triggering_site_id_lookup[site_id] = true
+
+	if (
+		triggering_site_id_lookup.is_empty()
+		or WorldData.city_construction_sites.size() <= 1
+	):
+		return 0
+
+	var triggering_site_ids: Array = triggering_site_id_lookup.keys()
+	triggering_site_ids.sort()
+	var triggering_order_ids: Array[int] = []
+	var triggering_order_id_lookup: Dictionary = {}
+	var existing_order_by_site_id: Dictionary = {}
+
+	for raw_order_id in WorldData.city_work_orders.keys():
+		var existing_order := CityWorkSystem.get_city_work_order_by_id(
+			int(raw_order_id)
+		)
+
+		if (
+			not existing_order.is_empty()
+			and str(existing_order.get("order_type", ""))
+			== CityWorkSystem.ORDER_TYPE_CONSTRUCTION_SITE
+		):
+			existing_order_by_site_id[
+				int(existing_order.get("source_id", -1))
+			] = existing_order
+
+	for raw_site_id in triggering_site_ids:
+		var site_id := int(raw_site_id)
+		var raw_triggering_order = existing_order_by_site_id.get(
+			site_id,
+			{}
+		)
+		var triggering_order: Dictionary = (
+			raw_triggering_order
+			if raw_triggering_order is Dictionary
+			else {}
+		)
+
+		if triggering_order.is_empty():
+			triggering_order = (
+				CityWorkSystem.synchronize_construction_work_order(
+					site_id
+				)
+			)
+
+		if triggering_order.is_empty():
+			continue
+
+		var triggering_order_id := int(
+			triggering_order.get("id", -1)
+		)
+
+		if triggering_order_id > 0:
+			triggering_order_ids.append(triggering_order_id)
+			triggering_order_id_lookup[triggering_order_id] = true
+
+	if triggering_order_ids.is_empty():
+		return 0
+
+	var affected_order_ids: Dictionary = (
+		triggering_order_id_lookup.duplicate()
+	)
+	var citizen_ids: Array[int] = []
+
+	for raw_citizen in WorldData.city_citizens:
+		if raw_citizen is Dictionary:
+			var citizen_id := int(raw_citizen.get("id", -1))
+
+			if citizen_id > 0:
+				citizen_ids.append(citizen_id)
+
+	citizen_ids.sort()
+	var switched_count := 0
+
+	for citizen_id in citizen_ids:
+		var citizen := WorldData.get_city_citizen_by_id(citizen_id)
+
+		if (
+			citizen.is_empty()
+			or not bool(citizen.get("alive", false))
+			or int(citizen.get("job_object_id", -1)) > 0
+			or WorldData.get_city_citizen_haul_cargo_amount(citizen_id) > 0
+			or CitizenNeedsSystemScript.citizen_should_seek_food(citizen_id)
+			or not citizen_task_is_interruptible_construction(citizen_id)
+		):
+			continue
+
+		var current_task := WorldData.get_city_citizen_current_task(
+			citizen_id
+		)
+		var task_kind := str(current_task.get("kind", ""))
+
+		# A delivery owns a real source/destination reservation even before
+		# pickup. Clearing or spilling it here would recreate the very churn
+		# this comparison pass is meant to prevent.
+		if task_kind == WorldData.CITY_CITIZEN_TASK_KIND_HAUL:
+			continue
+
+		var task_phase := str(
+			current_task.get(
+				"phase",
+				WorldData.CITY_CITIZEN_TASK_PHASE_NONE
+			)
+		)
+
+		# Performing commands are actively clearing and performing
+		# construction is inside its bounded labor unit. Both are physical
+		# commitment boundaries.
+		if task_phase == WorldData.CITY_CITIZEN_TASK_PHASE_PERFORMING:
+			continue
+
+		if task_phase not in [
+			WorldData.CITY_CITIZEN_TASK_PHASE_PENDING,
+			WorldData.CITY_CITIZEN_TASK_PHASE_TRAVELING,
+			WorldData.CITY_CITIZEN_TASK_PHASE_BLOCKED,
+		]:
+			continue
+
+		var current_order_id := int(
+			current_task.get("work_order_id", -1)
+		)
+
+		if triggering_order_id_lookup.has(current_order_id):
+			continue
+
+		var current_order := CityWorkSystem.get_city_work_order_by_id(
+			current_order_id
+		)
+
+		if (
+			current_order.is_empty()
+			or str(current_order.get("order_type", ""))
+			!= CityWorkSystem.ORDER_TYPE_CONSTRUCTION_SITE
+		):
+			continue
+
+		var current_is_blocked := (
+			task_phase == WorldData.CITY_CITIZEN_TASK_PHASE_BLOCKED
+			or str(citizen.get("movement_state", ""))
+			== WorldData.CITY_CITIZEN_MOVEMENT_STATE_BLOCKED
+		)
+		var current_path_cost := -1
+
+		if not current_is_blocked:
+			current_path_cost = _get_current_construction_path_cost(
+				citizen_id,
+				current_task
+			)
+			current_is_blocked = current_path_cost < 0
+
+		var candidate := {}
+
+		if current_is_blocked:
+			# Blocked citizens reconsider all other reachable construction work.
+			candidate = (
+				CityWorkSystem
+				.get_best_construction_job_for_citizen_excluding_order(
+					citizen_id,
+					current_order_id
+				)
+			)
+		else:
+			# Healthy assignments compare only against this newly introduced
+			# batch, preventing unrelated old sites from causing a global shuffle.
+			candidate = (
+				CityWorkSystem.get_best_player_job_for_citizen_and_orders(
+					citizen_id,
+					triggering_order_ids
+				)
+			)
+
+		if not _construction_reassignment_is_worthwhile(
+			current_order,
+			current_path_cost,
+			current_is_blocked,
+			candidate
+		):
+			continue
+
+		var restore_state := (
+			_make_construction_rebalance_restore_state(
+				current_task,
+				citizen
+			)
+		)
+
+		if (
+			restore_state.is_empty()
+			or not WorldData.clear_city_citizen_task(
+				citizen_id,
+				WorldData.CITY_CITIZEN_TASK_SOURCE_PLAYER
+			)
+		):
+			continue
+
+		WorldData.cancel_city_citizen_movement(citizen_id)
+
+		if (
+			CityWorkSystem.assign_player_job(citizen_id, candidate)
+			and _start_rebalanced_construction_assignment(
+				citizen_id,
+				candidate
+			)
+		):
+			switched_count += 1
+			affected_order_ids[current_order_id] = true
+			affected_order_ids[int(candidate.get("work_order_id", -1))] = true
+			continue
+
+		# Release any partially installed replacement claim or reservation,
+		# then continue the previous trip from the citizen's current tile.
+		WorldData.clear_city_citizen_task(
+			citizen_id,
+			WorldData.CITY_CITIZEN_TASK_SOURCE_PLAYER
+		)
+		WorldData.cancel_city_citizen_movement(citizen_id)
+
+		if not _restore_construction_rebalance_assignment(
+			citizen_id,
+			restore_state
+		):
+			push_warning(
+				"Construction rebalance could not restore citizen "
+				+ str(citizen_id)
+				+ " after the replacement assignment became invalid."
+			)
+
+	if switched_count > 0:
+		CityWorkSystem.refresh_work_order_runtimes(
+			affected_order_ids.keys()
+		)
+
+	return switched_count
+
+
+static func _get_current_construction_path_cost(
+	citizen_id: int,
+	current_task: Dictionary
+) -> int:
+	var citizen := WorldData.get_city_citizen_by_id(citizen_id)
+	var raw_current_tile = citizen.get(
+		"city_tile_position",
+		WorldData.INVALID_CITY_TILE_POSITION
+	)
+
+	if (
+		citizen.is_empty()
+		or not raw_current_tile is Vector2i
+		or WorldData.official_city_world == null
+	):
+		return -1
+
+	var remaining_movement_path := _get_remaining_citizen_movement_path(
+		citizen
+	)
+	var raw_task_target_tile = current_task.get(
+		"target_tile",
+		WorldData.INVALID_CITY_TILE_POSITION
+	)
+
+	# A live route is already an exact measurement from the citizen's current
+	# position. Reuse it instead of asking navigation to solve the same trip
+	# again for every blueprint placement.
+	if (
+		str(current_task.get("phase", ""))
+		== WorldData.CITY_CITIZEN_TASK_PHASE_TRAVELING
+		and raw_task_target_tile is Vector2i
+		and not remaining_movement_path.is_empty()
+		and remaining_movement_path.back() == raw_task_target_tile
+	):
+		return _get_city_movement_path_cost(remaining_movement_path)
+
+	var destination_tiles: Array = []
+	var raw_target_tile = raw_task_target_tile
+
+	match str(current_task.get("kind", "")):
+		WorldData.CITY_CITIZEN_TASK_KIND_CONSTRUCTION:
+			var site := WorldData.get_city_construction_site_by_id(
+				int(current_task.get("target_object_id", -1))
+			)
+			var work_positions := (
+				WorldData.get_city_construction_site_work_positions(site)
+			)
+
+			if raw_target_tile is Vector2i and work_positions.has(
+				raw_target_tile
+			):
+				destination_tiles.append(raw_target_tile)
+			else:
+				destination_tiles = work_positions
+
+		WorldData.CITY_CITIZEN_TASK_KIND_PLAYER_COMMAND:
+			var command := WorldData.get_city_player_command_by_id(
+				int(current_task.get("target_object_id", -1))
+			)
+			var work_tiles := CityWorkSystem.get_city_player_command_work_tiles(
+				command,
+				citizen_id
+			)
+
+			if raw_target_tile is Vector2i and work_tiles.has(raw_target_tile):
+				destination_tiles.append(raw_target_tile)
+			else:
+				destination_tiles = work_tiles
+
+	if destination_tiles.is_empty():
+		return -1
+
+	var path_result := CityNavigationSystemScript.find_path_to_any_city_tile({
+		"city_world": WorldData.official_city_world,
+		"start_tile": raw_current_tile,
+		"destination_tiles": destination_tiles,
+		"max_expanded_nodes": _get_city_wide_path_expansion_limit(
+			WorldData.official_city_world
+		),
+		"citizen_id": citizen_id,
+		"heuristic_weight": EXACT_PATH_HEURISTIC_WEIGHT,
+	})
+
+	if not bool(path_result.get("success", false)):
+		return -1
+
+	return maxi(int(path_result.get("path_cost", 0)), 0)
+
+
+static func _get_remaining_citizen_movement_path(
+	citizen: Dictionary
+) -> Array:
+	if (
+		str(citizen.get("movement_state", ""))
+		!= WorldData.CITY_CITIZEN_MOVEMENT_STATE_MOVING
+	):
+		return []
+
+	var raw_path = citizen.get("movement_path", [])
+	var raw_current_tile = citizen.get(
+		"city_tile_position",
+		WorldData.INVALID_CITY_TILE_POSITION
+	)
+
+	if not raw_path is Array or not raw_current_tile is Vector2i:
+		return []
+
+	var path: Array = raw_path
+	var path_index := int(citizen.get("movement_path_index", 0))
+
+	if (
+		path_index <= 0
+		or path_index >= path.size()
+		or path[path_index - 1] != raw_current_tile
+	):
+		return []
+
+	var remaining_path: Array = [raw_current_tile]
+
+	for index in range(path_index, path.size()):
+		if not path[index] is Vector2i:
+			return []
+
+		remaining_path.append(path[index])
+
+	return remaining_path
+
+
+static func _get_city_movement_path_cost(path: Array) -> int:
+	if path.is_empty():
+		return -1
+
+	var path_cost := 0
+
+	for index in range(1, path.size()):
+		if not path[index - 1] is Vector2i or not path[index] is Vector2i:
+			return -1
+
+		var step_cost := WorldData.get_city_citizen_movement_step_cost(
+			path[index - 1],
+			path[index]
+		)
+
+		if step_cost <= 0:
+			return -1
+
+		path_cost += step_cost
+
+	return path_cost
+
+
+static func _construction_reassignment_is_worthwhile(
+	current_order: Dictionary,
+	current_path_cost: int,
+	current_is_blocked: bool,
+	candidate: Dictionary
+) -> bool:
+	if candidate.is_empty():
+		return false
+
+	if current_is_blocked:
+		return true
+
+	var current_priority := int(
+		current_order.get("priority_rank", CityWorkSystem.PRIORITY_NORMAL)
+	)
+	var candidate_priority := int(
+		candidate.get("priority_rank", CityWorkSystem.PRIORITY_NORMAL)
+	)
+
+	if candidate_priority != current_priority:
+		return candidate_priority > current_priority
+
+	var candidate_path_cost := maxi(
+		int(candidate.get("estimated_path_cost", 0)),
+		0
+	)
+
+	if current_path_cost <= 0 or candidate_path_cost >= current_path_cost:
+		return false
+
+	var path_savings := current_path_cost - candidate_path_cost
+	var minimum_absolute_savings := (
+		REBALANCE_MINIMUM_PATH_SAVINGS_TILES
+		* WorldData.CITY_CITIZEN_CARDINAL_MOVEMENT_COST
+	)
+	var clears_absolute_dead_band := (
+		path_savings >= minimum_absolute_savings
+	)
+	var clears_relative_dead_band := (
+		path_savings * 100
+		>= current_path_cost
+		* REBALANCE_MINIMUM_RELATIVE_SAVINGS_PERCENT
+	)
+
+	# This dead band is the hysteresis: fairness/age cannot reverse a switch,
+	# and repeated placements cannot bounce equal-priority workers unless a
+	# route has become materially better from their new current position.
+	return clears_absolute_dead_band and clears_relative_dead_band
+
+
+static func _start_rebalanced_construction_assignment(
+	citizen_id: int,
+	candidate: Dictionary
+) -> bool:
+	var raw_assignment_path = candidate.get("assignment_path", [])
+	var citizen := WorldData.get_city_citizen_by_id(citizen_id)
+	var raw_current_tile = citizen.get(
+		"city_tile_position",
+		WorldData.INVALID_CITY_TILE_POSITION
+	)
+
+	if (
+		not raw_assignment_path is Array
+		or raw_assignment_path.is_empty()
+		or citizen.is_empty()
+		or not raw_current_tile is Vector2i
+	):
+		return false
+
+	var assignment_path: Array = raw_assignment_path
+
+	if assignment_path[0] != raw_current_tile:
+		return false
+
+	var work_kind := str(candidate.get("player_work_kind", ""))
+	var raw_target_tile = candidate.get(
+		"target_tile",
+		WorldData.INVALID_CITY_TILE_POSITION
+	)
+	var haul: Dictionary = {}
+
+	if work_kind == PLAYER_WORK_KIND_DELIVERY:
+		haul = WorldData.get_city_citizen_current_haul(citizen_id)
+		raw_target_tile = haul.get(
+			"source_tile",
+			WorldData.INVALID_CITY_TILE_POSITION
+		)
+
+	if (
+		not raw_target_tile is Vector2i
+		or assignment_path.back() != raw_target_tile
+		or not WorldData.set_city_citizen_task_activity_state({
+			"citizen_id": citizen_id,
+			"target_tile": raw_target_tile,
+		})
+	):
+		return false
+
+	if assignment_path.size() <= 1:
+		WorldData.cancel_city_citizen_movement(citizen_id)
+
+		if work_kind == PLAYER_WORK_KIND_DELIVERY:
+			haul["phase"] = WorldData.CITY_CITIZEN_HAUL_PHASE_PICKING_UP
+			haul["source_tile"] = raw_target_tile
+
+			return (
+				WorldData.set_city_citizen_current_haul(citizen_id, haul)
+				and WorldData.set_city_citizen_task_phase(
+					citizen_id,
+					WorldData.CITY_CITIZEN_TASK_PHASE_PERFORMING
+				)
+			)
+
+		# Labor and commands are already at their work tile. Their normal task
+		# state machine begins the bounded physical action on the next clock tick.
+		return true
+
+	if not WorldData.assign_city_citizen_movement_order(
+		citizen_id,
+		assignment_path
+	):
+		return false
+
+	if work_kind == PLAYER_WORK_KIND_DELIVERY:
+		haul["phase"] = (
+			WorldData.CITY_CITIZEN_HAUL_PHASE_TRAVELING_TO_SOURCE
+		)
+		haul["source_tile"] = raw_target_tile
+
+		if not WorldData.set_city_citizen_current_haul(citizen_id, haul):
+			return false
+
+	return WorldData.set_city_citizen_task_phase(
+		citizen_id,
+		WorldData.CITY_CITIZEN_TASK_PHASE_TRAVELING
+	)
+
+
+static func _make_construction_rebalance_restore_state(
+	current_task: Dictionary,
+	citizen: Dictionary
+) -> Dictionary:
+	var restore_candidate := (
+		_make_construction_rebalance_restore_candidate(current_task)
+	)
+
+	if restore_candidate.is_empty():
+		return {}
+
+	return {
+		"candidate": restore_candidate,
+		"task": current_task.duplicate(true),
+		"remaining_movement_path": (
+			_get_remaining_citizen_movement_path(citizen)
+		),
+	}
+
+
+static func _restore_construction_rebalance_assignment(
+	citizen_id: int,
+	restore_state: Dictionary
+) -> bool:
+	var raw_candidate = restore_state.get("candidate", {})
+	var raw_task = restore_state.get("task", {})
+
+	if not raw_candidate is Dictionary or not raw_task is Dictionary:
+		return false
+
+	var restore_candidate: Dictionary = raw_candidate
+	var task: Dictionary = raw_task
+
+	if (
+		restore_candidate.is_empty()
+		or task.is_empty()
+		or not CityWorkSystem.assign_player_job(
+			citizen_id,
+			restore_candidate
+		)
+	):
+		return false
+
+	var raw_target_tile = task.get(
+		"target_tile",
+		WorldData.INVALID_CITY_TILE_POSITION
+	)
+
+	if (
+		raw_target_tile is Vector2i
+		and not WorldData.set_city_citizen_task_activity_state({
+			"citizen_id": citizen_id,
+			"target_tile": raw_target_tile,
+			"previous_target_tile": task.get(
+				"previous_target_tile",
+				WorldData.INVALID_CITY_TILE_POSITION
+			),
+			"next_action_world_minute": int(
+				task.get(
+					"next_action_world_minute",
+					WorldData
+					.INVALID_CITY_CITIZEN_TASK_ACTION_WORLD_MINUTE
+				)
+			),
+			"relocation_count": int(task.get("relocation_count", 0)),
+		})
+	):
+		return false
+
+	var raw_remaining_path = restore_state.get(
+		"remaining_movement_path",
+		[]
+	)
+
+	if (
+		raw_remaining_path is Array
+		and raw_remaining_path.size() > 1
+		and not WorldData.assign_city_citizen_movement_order(
+			citizen_id,
+			raw_remaining_path
+		)
+	):
+		WorldData.set_city_citizen_task_phase(
+			citizen_id,
+			WorldData.CITY_CITIZEN_TASK_PHASE_PENDING
+		)
+		return false
+
+	var restored_phase := str(
+		task.get(
+			"phase",
+			WorldData.CITY_CITIZEN_TASK_PHASE_PENDING
+		)
+	)
+
+	if (
+		restored_phase == WorldData.CITY_CITIZEN_TASK_PHASE_TRAVELING
+		and (
+			not raw_remaining_path is Array
+			or raw_remaining_path.size() <= 1
+		)
+	):
+		restored_phase = WorldData.CITY_CITIZEN_TASK_PHASE_PENDING
+
+	return WorldData.set_city_citizen_task_phase(
+		citizen_id,
+		restored_phase
+	)
+
+
+static func _make_construction_rebalance_restore_candidate(
+	current_task: Dictionary
+) -> Dictionary:
+	var work_order_id := int(current_task.get("work_order_id", -1))
+	var job_id := str(current_task.get("job_id", ""))
+
+	if work_order_id <= 0 or job_id.is_empty():
+		return {}
+
+	match str(current_task.get("kind", "")):
+		WorldData.CITY_CITIZEN_TASK_KIND_CONSTRUCTION:
+			var raw_target_tile = current_task.get(
+				"target_tile",
+				WorldData.INVALID_CITY_TILE_POSITION
+			)
+
+			if not raw_target_tile is Vector2i:
+				return {}
+
+			return {
+				"player_work_kind": PLAYER_WORK_KIND_LABOR,
+				"construction_site_id": int(
+					current_task.get("target_object_id", -1)
+				),
+				"target_tile": raw_target_tile,
+				"work_order_id": work_order_id,
+				"job_id": job_id,
+			}
+
+		WorldData.CITY_CITIZEN_TASK_KIND_PLAYER_COMMAND:
+			var command := WorldData.get_city_player_command_by_id(
+				int(current_task.get("target_object_id", -1))
+			)
+
+			if command.is_empty():
+				return {}
+
+			return {
+				"player_work_kind": "command",
+				"id": int(command.get("id", -1)),
+				"work_order_id": work_order_id,
+				"job_id": job_id,
+			}
+
+	return {}
+
 
 static func citizen_task_is_interruptible_construction(
 	citizen_id: int

@@ -17,9 +17,9 @@ const PATH_STATUS_RECONSTRUCTION_FAILED := (
 const DEFAULT_MAX_EXPANDED_NODES: int = 10_000
 const MAXIMUM_PATH_COST: int = 1_000_000_000
 
-# Prefer prompt, bounded route execution over proving that every ordinary route
-# is mathematically shortest. Exact-distance callers explicitly pass weight 1.
-const HEURISTIC_WEIGHT: int = 2
+# Roads change traversal time, so ordinary pathfinding uses an admissible
+# weight-one heuristic and optimizes exact estimated travel time.
+const HEURISTIC_WEIGHT: int = 1
 
 const HEAP_TILE_INDEX: int = 0
 const HEAP_TOTAL_COST_INDEX: int = 1
@@ -378,11 +378,14 @@ static func _get_minimum_octile_distance(
 		var straight_steps := (
 			maxi(delta_x, delta_y) - diagonal_steps
 		)
+		# The fastest possible terrain is a completed road. Using road costs
+		# keeps the heuristic admissible while allowing A* to prefer a longer
+		# geometric route whenever its actual travel time is lower.
 		var distance := (
 			diagonal_steps
-			* WorldData.CITY_CITIZEN_DIAGONAL_MOVEMENT_COST
+			* WorldData.CITY_CITIZEN_ROAD_DIAGONAL_MOVEMENT_COST
 			+ straight_steps
-			* WorldData.CITY_CITIZEN_CARDINAL_MOVEMENT_COST
+			* WorldData.CITY_CITIZEN_ROAD_CARDINAL_MOVEMENT_COST
 		)
 
 		minimum_distance = mini(

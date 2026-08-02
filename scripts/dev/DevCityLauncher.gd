@@ -4,6 +4,8 @@ class_name DevCityLauncher
 const DEV_WORLD_SEED: int = 223456789
 const DEV_REGION_SIZE: int = 9
 const DEV_REGION_OCEAN_RATIO_LIMIT: float = 0.90
+const DEV_CITY_NAME := "Dev City"
+const DEV_CULTURE_NAME := "Dev Culture"
 
 
 static func launch_dev_city(
@@ -38,14 +40,20 @@ static func launch_dev_city(
 		int(DEV_REGION_SIZE / 2)
 	)
 
-	WorldData.lock_world_save({
+	var world_lock_succeeded := WorldData.lock_world_save({
 		"source_world": dev_world,
 		"region_top_left": region_top_left,
 		"region_center": region_center,
 		"region_size": DEV_REGION_SIZE,
 		"world_scene_path": main_menu_scene_path,
 		"city_scene_path": city_scene_path,
+		"city_name": DEV_CITY_NAME,
+		"culture_name": DEV_CULTURE_NAME,
 	})
+
+	if not world_lock_succeeded:
+		push_error("Could not lock the dev world and founding identity.")
+		return
 
 	print("Launching dev city.")
 	print("Dev world seed: ", dev_world.seed)

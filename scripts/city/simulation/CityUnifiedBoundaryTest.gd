@@ -18,12 +18,16 @@ const CitizenTaskSystemScript = preload(
 const CitizenHaulingSystemScript = preload(
 	"res://scripts/citizens/simulation/systems/CitizenHaulingSystem.gd"
 )
+const CityCitizenStateValidatorScript = preload(
+	"res://scripts/city/simulation/validators/CityCitizenStateValidator.gd"
+)
 
 const TEST_WORLD_SIZE := Vector2i(32, 24)
 const TEST_WORLD_SEED: int = 41_207
 const AUTONOMOUS_CLEANUP_PRIORITY: int = 90
 
 var failure_count: int = 0
+var test_primary_culture_id: int = -1
 
 
 func _ready() -> void:
@@ -31,6 +35,8 @@ func _ready() -> void:
 	_test_normal_order_waits_for_picked_up_cargo_delivery()
 	_test_critical_hunger_interrupts_cargo_safely()
 	_test_construction_labor_releases_at_atomic_boundary()
+	_test_world_founding_identity_commit_boundaries()
+	_test_culture_identity_validation()
 	WorldData.reset_runtime_session_state()
 
 	if failure_count > 0:
@@ -471,6 +477,225 @@ func _test_construction_labor_releases_at_atomic_boundary() -> void:
 	)
 
 
+func _test_culture_identity_validation() -> void:
+	print("Boundary test: citizen culture identity")
+	_reset_fixture()
+
+	for founder_index in range(WorldData.STARTING_CITY_POPULATION):
+		var founder := _add_citizen(
+			Vector2i(3 + founder_index, 4)
+		)
+		_expect(
+			not founder.is_empty(),
+			"The culture fixture must create every founding citizen."
+		)
+
+	var alternate_culture := WorldData.create_culture(
+		"Boundary Alternate Culture"
+	)
+	var alternate_culture_id := int(
+		alternate_culture.get("id", -1)
+	)
+	var citizen := WorldData.add_city_citizen(
+		"",
+		Vector2i(5, 5),
+		WorldData.CITY_CITIZEN_SEX_FEMALE,
+		alternate_culture_id
+	)
+
+	_expect(
+		alternate_culture_id > 0
+		and alternate_culture_id != test_primary_culture_id
+		and not citizen.is_empty(),
+		"The culture fixture must create a citizen from a valid alternate culture."
+	)
+
+	if citizen.is_empty():
+		return
+
+	var errors: Array[String] = []
+	CityCitizenStateValidatorScript._validate_city_citizen_culture_state(
+		errors,
+		WorldData.city_citizen_index_by_id
+	)
+	_expect(
+		errors.is_empty(),
+		"A citizen may validly differ from the city's primary culture."
+	)
+
+	citizen.erase("culture_id")
+	errors.clear()
+	CityCitizenStateValidatorScript._validate_city_citizen_culture_state(
+		errors,
+		WorldData.city_citizen_index_by_id
+	)
+	_expect(
+		_culture_errors_contain(errors, "missing culture_id"),
+		"Culture validation must reject a missing citizen culture_id."
+	)
+
+	citizen["culture_id"] = "not an integer"
+	errors.clear()
+	CityCitizenStateValidatorScript._validate_city_citizen_culture_state(
+		errors,
+		WorldData.city_citizen_index_by_id
+	)
+	_expect(
+		_culture_errors_contain(errors, "non-integer culture_id"),
+		"Culture validation must reject a non-integer citizen culture_id."
+	)
+
+	citizen["culture_id"] = 0
+	errors.clear()
+	CityCitizenStateValidatorScript._validate_city_citizen_culture_state(
+		errors,
+		WorldData.city_citizen_index_by_id
+	)
+	_expect(
+		_culture_errors_contain(errors, "nonpositive culture_id"),
+		"Culture validation must reject a nonpositive citizen culture_id."
+	)
+
+	var nonexistent_culture_id := 1_000_000
+
+	while WorldData.has_culture_id(nonexistent_culture_id):
+		nonexistent_culture_id += 1
+
+	citizen["culture_id"] = nonexistent_culture_id
+	errors.clear()
+	CityCitizenStateValidatorScript._validate_city_citizen_culture_state(
+		errors,
+		WorldData.city_citizen_index_by_id
+	)
+	_expect(
+		_culture_errors_contain(errors, "references nonexistent culture"),
+		"Culture validation must reject an unresolved citizen culture_id."
+	)
+
+	citizen["culture_id"] = alternate_culture_id
+	errors.clear()
+	CityCitizenStateValidatorScript._validate_city_citizen_culture_state(
+		errors,
+		WorldData.city_citizen_index_by_id
+	)
+	_expect(
+		errors.is_empty(),
+		"Restoring the alternate culture must restore valid culture state."
+	)
+
+	var founding_citizen := WorldData.get_city_citizen_by_id(1)
+	founding_citizen["culture_id"] = alternate_culture_id
+	errors.clear()
+	CityCitizenStateValidatorScript._validate_city_citizen_culture_state(
+		errors,
+		WorldData.city_citizen_index_by_id
+	)
+	_expect(
+		_culture_errors_contain(
+			errors,
+			"does not reference the city's primary culture"
+		),
+		"A later alternate-culture citizen must not disable founder-culture validation."
+	)
+	founding_citizen["culture_id"] = test_primary_culture_id
+
+
+func _test_world_founding_identity_commit_boundaries() -> void:
+	print("Boundary test: world founding identity commit")
+	WorldData.reset_runtime_session_state()
+	SimulationClock.start_new_game()
+
+	var source_world := WorldData.new()
+	source_world.setup(16, 16, TEST_WORLD_SEED)
+	var region_top_left := Vector2i(2, 2)
+	var region_center := Vector2i(6, 6)
+	var lock_values := {
+		"source_world": source_world,
+		"region_top_left": region_top_left,
+		"region_center": region_center,
+		"region_size": 9,
+		"world_scene_path": "res://scenes/WorldScene.tscn",
+		"city_scene_path": "res://scenes/CityScreen.tscn",
+		"city_name": "  Boundary Founding City  ",
+		"culture_name": "  Boundary Founding Culture  ",
+	}
+	_expect(
+		not WorldData.has_active_world_save()
+		and WorldData.get_culture_snapshot().is_empty()
+		and WorldData.get_official_city_name().is_empty()
+		and WorldData.get_official_founding_culture_id()
+		== WorldData.INVALID_CULTURE_ID
+		and not WorldData.has_city_start_region(),
+		"A fresh runtime must begin without authoritative founding state."
+	)
+
+	_expect(
+		WorldData.lock_world_save(lock_values),
+		"A complete world and founding identity must lock successfully."
+	)
+	var founding_culture_id := (
+		WorldData.get_official_founding_culture_id()
+	)
+	_expect(
+		WorldData.get_official_city_name() == "Boundary Founding City"
+		and WorldData.get_official_founding_culture_name()
+		== "Boundary Founding Culture"
+		and WorldData.get_culture_snapshot().size() == 1
+		and founding_culture_id > 0
+		and WorldData.has_city_start_region(),
+		"A successful lock must atomically store trimmed identity and one culture."
+	)
+
+	_expect(
+		WorldData.lock_world_save(lock_values)
+		and WorldData.get_culture_snapshot().size() == 1
+		and WorldData.get_official_founding_culture_id()
+		== founding_culture_id,
+		"An identical relock must be idempotent and create no second culture."
+	)
+
+	var conflicting_lock_values: Dictionary = lock_values.duplicate(true)
+	conflicting_lock_values["city_name"] = "Conflicting City"
+	_expect(
+		not WorldData.lock_world_save(conflicting_lock_values)
+		and WorldData.get_official_city_name() == "Boundary Founding City"
+		and WorldData.get_culture_snapshot().size() == 1
+		and WorldData.get_official_founding_culture_id()
+		== founding_culture_id,
+		"A conflicting relock must fail without changing committed identity."
+	)
+
+	WorldData.reset_player_city_state()
+	WorldData.reset_city_session_state()
+	_expect(
+		WorldData.has_active_world_save()
+		and WorldData.has_official_founding_identity()
+		and WorldData.get_culture_snapshot().size() == 1,
+		"City-state resets must preserve the locked world's founding identity."
+	)
+
+	WorldData.reset_runtime_session_state()
+	_expect(
+		not WorldData.has_active_world_save()
+		and not WorldData.has_official_founding_identity()
+		and WorldData.get_culture_snapshot().is_empty()
+		and WorldData.next_culture_id == 1
+		and not WorldData.has_city_start_region(),
+		"A full runtime reset must clear founding identity and culture records."
+	)
+
+
+func _culture_errors_contain(
+	errors: Array[String],
+	expected_text: String
+) -> bool:
+	for error_text in errors:
+		if error_text.contains(expected_text):
+			return true
+
+	return false
+
+
 func _reset_fixture() -> WorldData:
 	WorldData.reset_runtime_session_state()
 	SimulationClock.start_new_game()
@@ -489,10 +714,17 @@ func _reset_fixture() -> WorldData:
 
 	city_world.mark_tile_data_changed()
 	WorldData.store_city_world_save(city_world, TEST_WORLD_SEED)
+	var primary_culture := WorldData.create_culture(
+		"Boundary Test Culture"
+	)
+	test_primary_culture_id = int(primary_culture.get("id", -1))
+	WorldData.official_city_name = "Boundary Test City"
+	WorldData.official_founding_culture_id = test_primary_culture_id
 	WorldData.player_city_founded = true
 	WorldData.player_city_data = {
 		"id": 1,
 		"name": "Boundary Test City",
+		"primary_culture_id": test_primary_culture_id,
 		"city_world_seed": TEST_WORLD_SEED,
 		"city_map_size": TEST_WORLD_SIZE,
 		"can_build": true,
@@ -505,7 +737,8 @@ func _add_citizen(tile_position: Vector2i) -> Dictionary:
 	return WorldData.add_city_citizen(
 		"",
 		tile_position,
-		WorldData.CITY_CITIZEN_SEX_FEMALE
+		WorldData.CITY_CITIZEN_SEX_FEMALE,
+		test_primary_culture_id
 	)
 
 

@@ -6,6 +6,9 @@ const CityConstructionSystemScript = preload(
 const CityResourceMatcherScript = preload(
 	"res://scripts/city/simulation/systems/CityResourceMatcher.gd"
 )
+const CityNavigationSystemScript = preload(
+	"res://scripts/city/simulation/systems/CityNavigationSystem.gd"
+)
 const CityWorkSystemScript = preload(
 	"res://scripts/city/simulation/systems/CityWorkSystem.gd"
 )
@@ -24,19 +27,28 @@ const TEST_WORLD_SEED: int = 27_041
 const NORMAL_FOOD_TASK_PRIORITY: int = 85
 
 var failure_count: int = 0
+var test_culture_id: int = -1
 
 
 func _ready() -> void:
+	_test_roads_optimize_travel_time()
+	_test_independent_road_tiles_batch_scheduling()
 	_test_parent_orders_and_two_level_fairness()
+	_test_new_blueprint_rebalances_uncommitted_construction_travel()
+	_test_blocked_construction_worker_uses_reachable_existing_alternative()
+	_test_unreachable_blueprint_does_not_churn_construction_travel()
+	_test_rebalance_preserves_active_construction_clearing()
 	_test_unreachable_order_runtime_diagnostics()
 	_test_survival_food_fallback_and_reservation_accounting()
 	_test_unreachable_food_tier_does_not_hide_fallbacks()
 	_test_food_path_limit_covers_full_city()
 	_test_food_candidate_rotation_prevents_budget_starvation()
 	_test_full_storage_construction_relocation_and_cancel_preview()
+	_test_construction_labor_balance()
 	_test_safe_boundary_and_cancellation_preserve_physical_cargo()
 	_test_cargo_ready_demand_preempts_soft_claim()
 	_test_resource_demand_priorities_are_adjustable()
+	_test_off_shift_homeless_idle_wander()
 	WorldData.reset_runtime_session_state()
 
 	if failure_count > 0:
@@ -48,6 +60,133 @@ func _ready() -> void:
 
 	print("Unified work system tests passed.")
 	get_tree().quit(0)
+
+
+func _test_roads_optimize_travel_time() -> void:
+	var city_world := _reset_fixture()
+	var start_tile := Vector2i(2, 2)
+	var destination_tile := Vector2i(10, 2)
+	var road_tiles: Array[Vector2i] = []
+
+	for x in range(2, 11):
+		var road_tile := Vector2i(x, 3)
+		road_tiles.append(road_tile)
+		_expect(
+			not WorldData.add_city_road_object(
+				[road_tile],
+				"player",
+				city_world
+			).is_empty(),
+			"The travel-time fixture must create each completed road tile independently."
+		)
+
+	var result := CityNavigationSystemScript.find_path_to_any_city_tile({
+		"city_world": city_world,
+		"start_tile": start_tile,
+		"destination_tiles": [destination_tile],
+	})
+	var path: Array = result.get("path", [])
+	var used_road := false
+
+	for raw_tile in path:
+		if raw_tile is Vector2i and road_tiles.has(raw_tile):
+			used_road = true
+			break
+
+	var direct_normal_cost := (
+		(destination_tile.x - start_tile.x)
+		* WorldData.CITY_CITIZEN_CARDINAL_MOVEMENT_COST
+	)
+	_expect(
+		bool(result.get("success", false))
+		and used_road
+		and int(result.get("path_cost", direct_normal_cost))
+		< direct_normal_cost,
+		"Pathfinding must prefer a longer road route when its travel time is lower."
+	)
+	_expect(
+		WorldData.get_city_citizen_movement_step_cost(
+			start_tile,
+			Vector2i(2, 3)
+		) == WorldData.CITY_CITIZEN_ROAD_CARDINAL_MOVEMENT_COST,
+		"Completed roads must halve cardinal movement cost."
+	)
+
+
+func _test_independent_road_tiles_batch_scheduling() -> void:
+	var city_world := _reset_fixture()
+	var first_citizen := _add_citizen("Road One", Vector2i(2, 2))
+	var second_citizen := _add_citizen("Road Two", Vector2i(2, 3))
+	var road_tiles: Array[Vector2i] = [
+		Vector2i(8, 2),
+		Vector2i(3, 2),
+		Vector2i(6, 2),
+	]
+	var road_sites := CityConstructionSystemScript.create_road_sites(
+		road_tiles,
+		"player",
+		city_world
+	)
+	_expect(
+		road_sites.size() == road_tiles.size(),
+		"A painted road must expose one independent scheduler site per tile."
+	)
+
+	if road_sites.size() != road_tiles.size():
+		return
+
+	var site_id_by_tile: Dictionary = {}
+
+	for road_site in road_sites:
+		var footprint_tiles = road_site.get("footprint_tiles", [])
+
+		if footprint_tiles is Array and footprint_tiles.size() == 1:
+			site_id_by_tile[footprint_tiles[0]] = int(
+				road_site.get("id", -1)
+			)
+
+	var first_citizen_id := int(first_citizen.get("id", -1))
+	var first_candidate := (
+		CityWorkSystemScript.get_best_player_job_for_citizen(
+			first_citizen_id
+		)
+	)
+	var nearest_site_id := int(
+		site_id_by_tile.get(Vector2i(3, 2), -1)
+	)
+	_expect(
+		nearest_site_id > 0
+		and int(first_candidate.get("construction_site_id", -1))
+		== nearest_site_id
+		and int(first_candidate.get("work_order_id", -1)) > 0,
+		"Batched road routing must return the nearest actionable tile with that tile's own site and order IDs."
+	)
+	_expect(
+		CityWorkSystemScript.assign_player_job(
+			first_citizen_id,
+			first_candidate
+		),
+		"The first road worker must claim exactly one independent road tile."
+	)
+	var first_task := WorldData.get_city_citizen_current_task(
+		first_citizen_id
+	)
+	_expect(
+		int(first_task.get("target_object_id", -1)) == nearest_site_id,
+		"A road labor task must remain owned by one tile site, never the painted stroke."
+	)
+
+	var second_candidate := (
+		CityWorkSystemScript.get_best_player_job_for_citizen(
+			int(second_citizen.get("id", -1))
+		)
+	)
+	_expect(
+		int(second_candidate.get("construction_site_id", -1)) > 0
+		and int(second_candidate.get("construction_site_id", -1))
+		!= nearest_site_id,
+		"A claimed one-worker road tile must make the next citizen choose another independent tile."
+	)
 
 
 func _test_unreachable_order_runtime_diagnostics() -> void:
@@ -172,14 +311,6 @@ func _test_parent_orders_and_two_level_fairness() -> void:
 	if site_id <= 0:
 		return
 
-	_expect(
-		CityConstructionSystem.add_resource_to_city_construction_site(
-			site_id,
-			WorldData.RESOURCE_STONE,
-			1
-		) == 1,
-		"The road site must accept its one physical stone."
-	)
 	CityConstructionSystemScript.refresh_city_construction_site(site_id)
 	CityWorkSystemScript.synchronize_player_work_board()
 
@@ -259,6 +390,455 @@ func _test_parent_orders_and_two_level_fairness() -> void:
 	_expect(
 		int(aged_choice.get("work_order_id", -1)) == group_order_id,
 		"A neglected parent must eventually receive attention despite being farther away."
+	)
+
+
+func _test_new_blueprint_rebalances_uncommitted_construction_travel() -> void:
+	var city_world := _reset_fixture()
+	var left_builder := _add_citizen("Left Builder", Vector2i(3, 5))
+	var second_left_builder := _add_citizen(
+		"Second Left Builder",
+		Vector2i(3, 7)
+	)
+	var right_builder := _add_citizen("Right Builder", Vector2i(22, 6))
+	var citizens: Array[Dictionary] = [
+		left_builder,
+		second_left_builder,
+		right_builder,
+	]
+	var far_tile := Vector2i(25, 6)
+	var far_tiles: Array[Vector2i] = [
+		far_tile,
+		far_tile + Vector2i.RIGHT,
+		far_tile + Vector2i.RIGHT * 2,
+	]
+	var far_site := _create_ready_labor_site(far_tiles, 3)
+	var far_site_id := int(far_site.get("id", -1))
+	_expect(
+		far_site_id > 0,
+		"The construction-rebalance fixture must create the initial far site."
+	)
+
+	if far_site_id <= 0:
+		return
+
+	CityWorkSystemScript.synchronize_player_work_board()
+	var far_order := _find_order(
+		CityWorkSystemScript.ORDER_TYPE_CONSTRUCTION_SITE,
+		far_site_id
+	)
+
+	for citizen in citizens:
+		var citizen_id := int(citizen.get("id", -1))
+		var far_candidate := (
+			CityWorkSystemScript.get_best_player_job_for_citizen(citizen_id)
+		)
+		_expect(
+			int(far_candidate.get("work_order_id", -1))
+			== int(far_order.get("id", -2))
+			and CityWorkSystemScript.assign_player_job(
+				citizen_id,
+				far_candidate
+			),
+			"Every builder must initially accept the only available far site."
+		)
+
+	CitizenTaskSystemScript.run_tick(0, 1)
+	var left_builder_id := int(left_builder.get("id", -1))
+	var second_left_builder_id := int(second_left_builder.get("id", -1))
+	var right_builder_id := int(right_builder.get("id", -1))
+	var left_before_blocked_blueprint := _get_assignment_snapshot(
+		left_builder_id
+	)
+	var second_left_before_blocked_blueprint := _get_assignment_snapshot(
+		second_left_builder_id
+	)
+	var right_before_blocked_blueprint := _get_assignment_snapshot(
+		right_builder_id
+	)
+	var blocked_road := _create_material_blocked_site(
+		Vector2i(5, 5),
+		1
+	)
+	var blocked_road_id := int(blocked_road.get("id", -1))
+
+	_expect(
+		blocked_road_id > 0,
+		"The rebalance fixture must create a material-blocked road."
+	)
+	_expect(
+		_get_assignment_snapshot(left_builder_id)
+		== left_before_blocked_blueprint
+		and _get_assignment_snapshot(second_left_builder_id)
+		== second_left_before_blocked_blueprint
+		and _get_assignment_snapshot(right_builder_id)
+		== right_before_blocked_blueprint,
+		"A material-blocked blueprint must not stop or restart existing trips."
+	)
+
+	var stone_result := WorldData.add_resource_to_city_ground_piles_with_result({
+		"tile_position": Vector2i(4, 7),
+		"resource": WorldData.RESOURCE_STONE,
+		"amount_delta": 1,
+	})
+	_expect(
+		_first_ground_pile_id(stone_result) > 0,
+		"The rebalance fixture must expose one reachable construction stone."
+	)
+	var near_site := _create_material_blocked_site(
+		Vector2i(7, 6),
+		1
+	)
+	var near_site_id := int(near_site.get("id", -1))
+
+	_expect(
+		near_site_id > 0,
+		"The construction-rebalance fixture must create a reachable nearby site."
+	)
+
+	if near_site_id <= 0:
+		return
+
+	var near_order := _find_order(
+		CityWorkSystemScript.ORDER_TYPE_CONSTRUCTION_SITE,
+		near_site_id
+	)
+	var left_after_near_blueprint := WorldData.get_city_citizen_current_task(
+		left_builder_id
+	)
+	var left_after_near_citizen := WorldData.get_city_citizen_by_id(
+		left_builder_id
+	)
+	var left_after_near_haul := WorldData.get_city_citizen_current_haul(
+		left_builder_id
+	)
+
+	_expect(
+		str(left_after_near_blueprint.get("kind", ""))
+		== WorldData.CITY_CITIZEN_TASK_KIND_HAUL
+		and int(left_after_near_blueprint.get("work_order_id", -1))
+		== int(near_order.get("id", -2)),
+		"The left-side builder must switch and receive the nearby delivery in the same call."
+	)
+	_expect(
+		str(left_after_near_blueprint.get("phase", ""))
+		== WorldData.CITY_CITIZEN_TASK_PHASE_TRAVELING
+		and str(left_after_near_haul.get("phase", ""))
+		== WorldData.CITY_CITIZEN_HAUL_PHASE_TRAVELING_TO_SOURCE
+		and str(left_after_near_citizen.get("movement_state", ""))
+		== WorldData.CITY_CITIZEN_MOVEMENT_STATE_MOVING
+		and left_after_near_citizen.get(
+			"movement_destination_tile",
+			WorldData.INVALID_CITY_TILE_POSITION
+		) == left_after_near_haul.get(
+			"source_tile",
+			WorldData.INVALID_CITY_TILE_POSITION
+		),
+		"A redirected worker must begin the replacement route in the same simulation step."
+	)
+	_expect(
+		_get_assignment_snapshot(second_left_builder_id)
+		== second_left_before_blocked_blueprint,
+		"The first switch must reserve the one-site capacity before the next left-side worker is evaluated."
+	)
+	_expect(
+		_get_assignment_snapshot(right_builder_id)
+		== right_before_blocked_blueprint,
+		"The right-side builder must continue toward the already-near far site without path churn."
+	)
+
+	var stable_left_assignment := _get_assignment_snapshot(left_builder_id)
+	var stable_second_left_assignment := _get_assignment_snapshot(
+		second_left_builder_id
+	)
+	var stable_right_assignment := _get_assignment_snapshot(right_builder_id)
+
+	for _repeat in range(3):
+		CityConstructionSystemScript.rebalance_uncommitted_construction_workers(
+			near_site_id
+		)
+
+	_expect(
+		_get_assignment_snapshot(left_builder_id) == stable_left_assignment
+		and _get_assignment_snapshot(second_left_builder_id)
+		== stable_second_left_assignment
+		and _get_assignment_snapshot(right_builder_id)
+		== stable_right_assignment,
+		"Repeated evaluation of one blueprint must not bounce either citizen."
+	)
+
+	var marginal_site := _create_ready_labor_site(
+		[Vector2i(24, 8)],
+		1
+	)
+	var marginal_site_id := int(marginal_site.get("id", -1))
+	var switched_to_marginal := (
+		CityConstructionSystemScript
+		.rebalance_uncommitted_construction_workers(marginal_site_id)
+	)
+	_expect(
+		switched_to_marginal == 0
+		and _get_assignment_snapshot(right_builder_id)
+		== stable_right_assignment,
+		"A roughly one-tile saving must remain inside the equal-priority hysteresis dead band."
+	)
+
+	WorldData.set_city_citizen_task_phase(
+		right_builder_id,
+		WorldData.CITY_CITIZEN_TASK_PHASE_BLOCKED
+	)
+	var blocked_switch_count := (
+		CityConstructionSystemScript
+		.rebalance_uncommitted_construction_workers(marginal_site_id)
+	)
+	var right_after_blocked_switch := (
+		WorldData.get_city_citizen_current_task(right_builder_id)
+	)
+	var marginal_order := _find_order(
+		CityWorkSystemScript.ORDER_TYPE_CONSTRUCTION_SITE,
+		marginal_site_id
+	)
+	_expect(
+		blocked_switch_count == 1
+		and str(right_after_blocked_switch.get("kind", ""))
+		!= WorldData.CITY_CITIZEN_TASK_KIND_NONE
+		and int(right_after_blocked_switch.get("work_order_id", -1))
+		== int(marginal_order.get("id", -2)),
+		"A blocked worker must switch to a reachable site immediately despite the normal distance threshold."
+	)
+
+	var right_after_switch := _get_assignment_snapshot(right_builder_id)
+
+	for _repeat in range(3):
+		CityConstructionSystemScript.rebalance_uncommitted_construction_workers(
+			far_site_id
+		)
+
+	_expect(
+		_get_assignment_snapshot(right_builder_id) == right_after_switch,
+		"Equal-priority placement must not reverse a completed switch through age or neglect weighting."
+	)
+
+	WorldData.set_city_citizen_task_phase(
+		right_builder_id,
+		WorldData.CITY_CITIZEN_TASK_PHASE_PERFORMING
+	)
+	WorldData.set_city_citizen_task_phase(
+		second_left_builder_id,
+		WorldData.CITY_CITIZEN_TASK_PHASE_PERFORMING
+	)
+	var performing_task := _get_assignment_snapshot(right_builder_id)
+	var second_performing_task := _get_assignment_snapshot(
+		second_left_builder_id
+	)
+	var protected_delivery := _get_assignment_snapshot(left_builder_id)
+	var protected_haul := WorldData.get_city_citizen_current_haul(
+		left_builder_id
+	)
+	var protected_reservation_id := int(
+		protected_haul.get("reservation_id", -1)
+	)
+	var protected_reservation := WorldData.get_city_haul_reservation(
+		protected_reservation_id
+	)
+	var urgent_site := _create_ready_labor_site([Vector2i(22, 7)], 1)
+	var urgent_site_id := int(urgent_site.get("id", -1))
+	CityWorkSystemScript.synchronize_player_work_board()
+	var urgent_order := _find_order(
+		CityWorkSystemScript.ORDER_TYPE_CONSTRUCTION_SITE,
+		urgent_site_id
+	)
+	_expect(
+		CityWorkSystemScript.set_order_priority(
+			int(urgent_order.get("id", -1)),
+			CityWorkSystemScript.PRIORITY_HIGH
+		),
+		"The commitment fixture must raise the attractive alternative's priority."
+	)
+	var protected_switch_count := (
+		CityConstructionSystemScript
+		.rebalance_uncommitted_construction_workers(urgent_site_id)
+	)
+	_expect(
+		protected_switch_count == 0
+		and _get_assignment_snapshot(right_builder_id) == performing_task
+		and _get_assignment_snapshot(second_left_builder_id)
+		== second_performing_task,
+		"Rebalancing must never interrupt active construction labor, even for higher-priority work."
+	)
+	_expect(
+		_get_assignment_snapshot(left_builder_id) == protected_delivery
+		and protected_reservation_id > 0
+		and WorldData.get_city_haul_reservation(
+			protected_reservation_id
+		) == protected_reservation,
+		"Rebalancing must preserve an empty-handed construction delivery and its reservation."
+	)
+
+
+func _test_blocked_construction_worker_uses_reachable_existing_alternative() -> void:
+	var city_world := _reset_fixture()
+	var citizen := _add_citizen("Blocked Builder", Vector2i(2, 4))
+	var citizen_id := int(citizen.get("id", -1))
+	var current_site := _create_ready_labor_site([Vector2i(8, 4)], 1)
+	var alternative_site := _create_ready_labor_site([Vector2i(4, 8)], 1)
+	var current_site_id := int(current_site.get("id", -1))
+	var alternative_site_id := int(alternative_site.get("id", -1))
+	CityWorkSystemScript.synchronize_player_work_board()
+	var current_order := _find_order(
+		CityWorkSystemScript.ORDER_TYPE_CONSTRUCTION_SITE,
+		current_site_id
+	)
+	var alternative_order := _find_order(
+		CityWorkSystemScript.ORDER_TYPE_CONSTRUCTION_SITE,
+		alternative_site_id
+	)
+	var current_candidate := (
+		CityWorkSystemScript.get_player_job_for_citizen_and_order(
+			citizen_id,
+			int(current_order.get("id", -1))
+		)
+	)
+
+	_expect(
+		current_site_id > 0
+		and alternative_site_id > 0
+		and CityWorkSystemScript.assign_player_job(
+			citizen_id,
+			current_candidate
+		),
+		"The blocked-rebalance fixture must assign its original construction site."
+	)
+	CitizenTaskSystemScript.run_tick(0, 1)
+	WorldData.cancel_city_citizen_movement(citizen_id)
+	WorldData.set_city_citizen_task_phase(
+		citizen_id,
+		WorldData.CITY_CITIZEN_TASK_PHASE_BLOCKED
+	)
+	var material_blocked_site := _create_material_blocked_site(
+		Vector2i(20, 4),
+		1
+	)
+	var reassigned_task := WorldData.get_city_citizen_current_task(citizen_id)
+	var reassigned_citizen := WorldData.get_city_citizen_by_id(citizen_id)
+
+	_expect(
+		int(material_blocked_site.get("id", -1)) > 0
+		and int(reassigned_task.get("work_order_id", -1))
+		== int(alternative_order.get("id", -2))
+		and str(reassigned_task.get("phase", ""))
+		== WorldData.CITY_CITIZEN_TASK_PHASE_TRAVELING
+		and str(reassigned_citizen.get("movement_state", ""))
+		== WorldData.CITY_CITIZEN_MOVEMENT_STATE_MOVING,
+		"A blocked worker must choose a reachable existing construction alternative even when the new blueprint cannot start."
+	)
+
+
+func _test_rebalance_preserves_active_construction_clearing() -> void:
+	var city_world := _reset_fixture()
+	var citizen := _add_citizen("Active Clearer", Vector2i(9, 8))
+	var citizen_id := int(citizen.get("id", -1))
+	var tree_tile := Vector2i(10, 8)
+	city_world.get_tile(tree_tile.x, tree_tile.y)["surface_feature"] = (
+		WorldData.CITY_SURFACE_FEATURE_TREE
+	)
+	var clearing_site := CityConstructionSystemScript.create_road_site(
+		[tree_tile],
+		"player",
+		city_world
+	)
+	var clearing_site_id := int(clearing_site.get("id", -1))
+	CityWorkSystemScript.synchronize_player_work_board()
+	var clearing_candidate := (
+		CityWorkSystemScript.get_best_player_job_for_citizen(citizen_id)
+	)
+	_expect(
+		clearing_site_id > 0
+		and str(clearing_candidate.get("player_work_kind", "")) == "command"
+		and CityWorkSystemScript.assign_player_job(
+			citizen_id,
+			clearing_candidate
+		),
+		"The active-clearing fixture must assign its construction obstruction command."
+	)
+	CitizenTaskSystemScript.run_tick(0, 1)
+	var performing_task := WorldData.get_city_citizen_current_task(citizen_id)
+	_expect(
+		str(performing_task.get("phase", ""))
+		== WorldData.CITY_CITIZEN_TASK_PHASE_PERFORMING,
+		"The construction clearer must cross the physical performing boundary."
+	)
+	var performing_snapshot := _get_assignment_snapshot(citizen_id)
+	var command_before := WorldData.get_city_player_command_by_id(
+		int(performing_task.get("target_object_id", -1))
+	)
+	var urgent_site := _create_ready_labor_site([Vector2i(9, 10)], 1)
+	var urgent_site_id := int(urgent_site.get("id", -1))
+	CityWorkSystemScript.synchronize_player_work_board()
+	var urgent_order := _find_order(
+		CityWorkSystemScript.ORDER_TYPE_CONSTRUCTION_SITE,
+		urgent_site_id
+	)
+	CityWorkSystemScript.set_order_priority(
+		int(urgent_order.get("id", -1)),
+		CityWorkSystemScript.PRIORITY_HIGH
+	)
+	var switched_count := (
+		CityConstructionSystemScript
+		.rebalance_uncommitted_construction_workers(urgent_site_id)
+	)
+	_expect(
+		switched_count == 0
+		and _get_assignment_snapshot(citizen_id) == performing_snapshot
+		and WorldData.get_city_player_command_by_id(
+			int(performing_task.get("target_object_id", -1))
+		) == command_before,
+		"Rebalancing must preserve active construction clearing and its command claim."
+	)
+
+
+func _test_unreachable_blueprint_does_not_churn_construction_travel() -> void:
+	var city_world := _reset_fixture()
+	var citizen := _add_citizen("Reachable Builder", Vector2i(2, 4))
+	var citizen_id := int(citizen.get("id", -1))
+	var current_site := _create_ready_labor_site([Vector2i(6, 4)], 1)
+	var current_site_id := int(current_site.get("id", -1))
+	CityWorkSystemScript.synchronize_player_work_board()
+	var current_candidate := (
+		CityWorkSystemScript.get_best_player_job_for_citizen(citizen_id)
+	)
+	_expect(
+		current_site_id > 0
+		and CityWorkSystemScript.assign_player_job(
+			citizen_id,
+			current_candidate
+		),
+		"The unreachable-blueprint fixture must assign its reachable current site."
+	)
+	CitizenTaskSystemScript.run_tick(0, 1)
+	var assignment_before := _get_assignment_snapshot(citizen_id)
+
+	for y in range(city_world.height):
+		var barrier_tile := city_world.get_tile(10, y)
+		barrier_tile["terrain"] = WorldData.TERRAIN_WATER
+		barrier_tile["biome"] = WorldData.BIOME_OCEAN
+		barrier_tile["is_land"] = false
+		barrier_tile.erase("surface_feature")
+
+	var unreachable_site := _create_ready_labor_site(
+		[Vector2i(18, 4)],
+		1
+	)
+	var unreachable_site_id := int(unreachable_site.get("id", -1))
+	var switched_count := (
+		CityConstructionSystemScript
+		.rebalance_uncommitted_construction_workers(unreachable_site_id)
+	)
+	_expect(
+		unreachable_site_id > 0
+		and switched_count == 0
+		and _get_assignment_snapshot(citizen_id) == assignment_before,
+		"An unreachable blueprint must leave the current task and movement path untouched."
 	)
 
 
@@ -815,14 +1395,42 @@ func _test_full_storage_construction_relocation_and_cancel_preview() -> void:
 	)
 
 
+func _test_construction_labor_balance() -> void:
+	var expected_building_minutes := {
+		WorldData.CITY_OBJECT_HOUSE: 135,
+		WorldData.CITY_OBJECT_STOCKPILE: 90,
+		WorldData.CITY_OBJECT_FISHING_GROUNDS: 180,
+	}
+
+	for object_type in expected_building_minutes.keys():
+		var definition := WorldData.get_city_object_definition(
+			str(object_type)
+		)
+		_expect(
+			int(definition.get("construction_labor_minutes", -1))
+			== int(expected_building_minutes[object_type]),
+			"Building hammer-and-nails labor must retain its faster balance value."
+		)
+
+	var road_definition := WorldData.get_city_object_definition(
+		WorldData.CITY_OBJECT_ROAD
+	)
+	_expect(
+		int(road_definition.get("construction_labor_minutes", -1)) == 8
+		and road_definition.get("construction_materials", {}).is_empty()
+		and int(road_definition.get("construction_max_workers", -1)) == 1
+		and WorldData.CITY_CONSTRUCTION_LABOR_ATOMIC_MINUTES == 30,
+		"Roads must remain fast, labor-only, single-tile construction jobs without changing the scheduler boundary."
+	)
+
+
 func _test_safe_boundary_and_cancellation_preserve_physical_cargo() -> void:
 	var city_world := _reset_fixture()
 	var citizen := _add_citizen("Carrier", Vector2i(7, 7))
 	var citizen_id := int(citizen.get("id", -1))
-	var road_site := CityConstructionSystemScript.create_road_site(
-		[Vector2i(9, 7)],
-		"player",
-		city_world
+	var road_site := _create_material_blocked_site(
+		Vector2i(9, 7),
+		2
 	)
 	var site_id := int(road_site.get("id", -1))
 	_expect(site_id > 0, "The cancellation fixture must create a road site.")
@@ -1198,6 +1806,132 @@ func _test_resource_demand_priorities_are_adjustable() -> void:
 	CityResourceMatcherScript.reset_resource_demand_category_priorities()
 
 
+func _test_off_shift_homeless_idle_wander() -> void:
+	var city_world := _reset_fixture()
+	CitizenDecisionSystemScript.reset_runtime_state()
+	var keep := WorldData.add_city_object({
+		"object_type": WorldData.CITY_OBJECT_CITY_CENTER,
+		"top_left": Vector2i(2, 2),
+		"size_tiles": WorldData.get_city_object_size_for_type(
+			WorldData.CITY_OBJECT_CITY_CENTER
+		),
+		"object_owner": "player",
+		"city_world": city_world,
+	})
+	_expect(
+		not keep.is_empty(),
+		"The idle-wander fixture must create a civic anchor."
+	)
+
+	if keep.is_empty():
+		return
+
+	var starting_tile := Vector2i(26, 16)
+	var citizen := _add_citizen("Off Shift Wanderer", starting_tile)
+	var citizen_id := int(citizen.get("id", -1))
+	var fishery := WorldData.add_city_object({
+		"object_type": WorldData.CITY_OBJECT_FISHING_GROUNDS,
+		"top_left": Vector2i(21, 14),
+		"size_tiles": WorldData.get_city_object_size_for_type(
+			WorldData.CITY_OBJECT_FISHING_GROUNDS
+		),
+		"object_owner": "player",
+		"city_world": city_world,
+	})
+	var fishery_id := int(fishery.get("id", -1))
+	_expect(
+		fishery_id > 0
+		and WorldData.assign_city_citizen_job(citizen_id, fishery_id),
+		"The off-shift wanderer must retain a distant Fishery job."
+	)
+	_expect(
+		int(citizen.get("home_object_id", -1)) < 0,
+		"The off-shift wander fixture citizen must remain homeless."
+	)
+	var idle_anchor := CitizenDecisionSystemScript._get_idle_anchor_tile(
+		citizen,
+		starting_tile
+	)
+	_expect(
+		idle_anchor == starting_tile,
+		"A homeless citizen far from the Keep must receive a local idle anchor."
+	)
+
+	SimulationClock.start_new_game(1, 1, 0)
+	var movement_was_assigned := false
+
+	# Force only the decision deadline, not the deterministic choice. Repeated
+	# choices include the intended brief standing periods before a short walk.
+	for _attempt in range(12):
+		CitizenDecisionSystemScript._next_idle_decision_minute_by_citizen_id[
+			citizen_id
+		] = SimulationClock.absolute_world_minutes
+		CitizenDecisionSystemScript._process_bounded_idle_behaviors(false)
+		citizen = WorldData.get_city_citizen_by_id(citizen_id)
+
+		if (
+			str(citizen.get("movement_state", ""))
+			== WorldData.CITY_CITIZEN_MOVEMENT_STATE_MOVING
+		):
+			movement_was_assigned = true
+			break
+
+	_expect(
+		movement_was_assigned,
+		"A homeless off-shift citizen must eventually begin a short idle walk."
+	)
+	_expect(
+		int(citizen.get("job_object_id", -1)) == fishery_id
+		and str(
+			WorldData.get_city_citizen_current_task(citizen_id).get(
+				"kind",
+				""
+			)
+		) == WorldData.CITY_CITIZEN_TASK_KIND_NONE
+		and WorldData.get_city_citizen_haul_cargo_amount(citizen_id) == 0,
+		"Idle wandering must preserve the Fishery job without creating a task or cargo."
+	)
+
+	if not movement_was_assigned:
+		return
+
+	var movement_path: Array = citizen.get("movement_path", [])
+	var destination: Vector2i = movement_path.back()
+	var destination_distance := (
+		absi(destination.x - starting_tile.x)
+		+ absi(destination.y - starting_tile.y)
+	)
+	_expect(
+		movement_path.size() >= 2
+		and movement_path.size()
+		<= CitizenDecisionSystemScript.IDLE_MAXIMUM_PATH_STEPS + 1
+		and destination_distance > 0
+		and destination_distance
+		<= CitizenDecisionSystemScript.IDLE_MAXIMUM_DESTINATION_DISTANCE,
+		"Idle movement must remain a short local walk, not a replacement task."
+	)
+
+	SimulationClock.start_new_game(1, 8, 0)
+	CitizenDecisionSystemScript._queue_all_eligible_scheduled_tasks(
+		CitizenDecisionSystemScript.SCHEDULE_PHASE_WORK_SHIFT
+	)
+	CitizenDecisionSystemScript._process_decision_queue(
+		CitizenDecisionSystemScript.SCHEDULE_PHASE_WORK_SHIFT
+	)
+	citizen = WorldData.get_city_citizen_by_id(citizen_id)
+	_expect(
+		str(
+			WorldData.get_city_citizen_current_task(citizen_id).get(
+				"kind",
+				""
+			)
+		) == WorldData.CITY_CITIZEN_TASK_KIND_WORK
+		and str(citizen.get("movement_state", ""))
+		== WorldData.CITY_CITIZEN_MOVEMENT_STATE_IDLE,
+		"The 08:00 work schedule must immediately replace idle movement."
+	)
+
+
 func _reset_fixture() -> WorldData:
 	WorldData.reset_runtime_session_state()
 	CityResourceMatcherScript.reset_resource_demand_category_priorities()
@@ -1215,6 +1949,10 @@ func _reset_fixture() -> WorldData:
 
 	city_world.mark_tile_data_changed()
 	WorldData.store_city_world_save(city_world, TEST_WORLD_SEED)
+	var test_culture := WorldData.create_culture(
+		"Work System Test Culture"
+	)
+	test_culture_id = int(test_culture.get("id", -1))
 	return city_world
 
 
@@ -1223,7 +1961,8 @@ func _add_citizen(_display_name: String, tile_position: Vector2i) -> Dictionary:
 	return WorldData.add_city_citizen(
 		"",
 		tile_position,
-		WorldData.CITY_CITIZEN_SEX_FEMALE
+		WorldData.CITY_CITIZEN_SEX_FEMALE,
+		test_culture_id
 	)
 
 
@@ -1277,6 +2016,89 @@ func _first_ground_pile_id(add_result: Dictionary) -> int:
 			return int(raw_placement.get("ground_pile_id", -1))
 
 	return -1
+
+
+func _create_material_blocked_site(
+	tile_position: Vector2i,
+	stone_amount: int
+) -> Dictionary:
+	var site := CityConstructionSystemScript.create_city_construction_site({
+		"target_kind": WorldData.CITY_CONSTRUCTION_TARGET_NEW,
+		"object_type": WorldData.CITY_OBJECT_ROAD,
+		"shape_mode": WorldData.CITY_OBJECT_SHAPE_TILE_AREA,
+		"top_left": tile_position,
+		"size": Vector2i.ONE,
+		"footprint_tiles": [tile_position],
+		"owner": "player",
+		"material_recipe": {
+			WorldData.RESOURCE_STONE: maxi(stone_amount, 1),
+		},
+		"required_labor_minutes": 8,
+		"maximum_workers": 1,
+		"work_positions": [tile_position],
+	})
+	var site_id := int(site.get("id", -1))
+
+	if site_id <= 0:
+		return {}
+
+	CityConstructionSystemScript.refresh_city_construction_site(site_id)
+	return WorldData.get_city_construction_site_by_id(site_id)
+
+
+func _create_ready_labor_site(
+	footprint_tiles: Array,
+	maximum_workers: int
+) -> Dictionary:
+	if footprint_tiles.is_empty():
+		return {}
+
+	var top_left: Vector2i = footprint_tiles[0]
+	var bottom_right: Vector2i = footprint_tiles[0]
+
+	for tile_position in footprint_tiles:
+		top_left.x = mini(top_left.x, tile_position.x)
+		top_left.y = mini(top_left.y, tile_position.y)
+		bottom_right.x = maxi(bottom_right.x, tile_position.x)
+		bottom_right.y = maxi(bottom_right.y, tile_position.y)
+
+	var site := CityConstructionSystemScript.create_city_construction_site({
+		"target_kind": WorldData.CITY_CONSTRUCTION_TARGET_NEW,
+		"object_type": WorldData.CITY_OBJECT_ROAD,
+		"shape_mode": WorldData.CITY_OBJECT_SHAPE_TILE_AREA,
+		"top_left": top_left,
+		"size": bottom_right - top_left + Vector2i.ONE,
+		"footprint_tiles": footprint_tiles,
+		"owner": "player",
+		"material_recipe": {},
+		"required_labor_minutes": 600,
+		"maximum_workers": maximum_workers,
+		"work_positions": footprint_tiles,
+	})
+	var site_id := int(site.get("id", -1))
+
+	if site_id <= 0:
+		return {}
+
+	CityConstructionSystemScript.refresh_city_construction_site(site_id)
+	return WorldData.get_city_construction_site_by_id(site_id)
+
+
+func _get_assignment_snapshot(citizen_id: int) -> Dictionary:
+	var citizen := WorldData.get_city_citizen_by_id(citizen_id)
+
+	return {
+		"task": WorldData.get_city_citizen_current_task(citizen_id),
+		"haul": WorldData.get_city_citizen_current_haul(citizen_id),
+		"cargo": WorldData.get_city_citizen_haul_cargo(citizen_id),
+		"movement_state": str(citizen.get("movement_state", "")),
+		"movement_path": citizen.get("movement_path", []).duplicate(),
+		"movement_path_index": int(citizen.get("movement_path_index", 0)),
+		"movement_destination_tile": citizen.get(
+			"movement_destination_tile",
+			WorldData.INVALID_CITY_TILE_POSITION
+		),
+	}
 
 
 func _find_order(order_type: String, source_id: int) -> Dictionary:

@@ -323,6 +323,11 @@ static func _validate_city_citizen_demographics(
 	errors: Array[String],
 	citizen_lookup: Dictionary
 ) -> void:
+	_validate_city_citizen_culture_state(
+		errors,
+		citizen_lookup
+	)
+
 	var global_name_owners: Dictionary = {}
 
 	_validate_city_citizen_name_pool({
@@ -470,6 +475,147 @@ static func _validate_city_citizen_demographics(
 					+ str(female_count)
 					+ " female citizens."
 			)
+
+
+static func _validate_city_citizen_culture_state(
+	errors: Array[String],
+	citizen_lookup: Dictionary
+) -> void:
+	for citizen_id in citizen_lookup.keys():
+		var citizen_index := int(citizen_lookup[citizen_id])
+		var citizen: Dictionary = WorldData.city_citizens[citizen_index]
+
+		if not citizen.has("culture_id"):
+			errors.append(
+				"Citizen "
+				+ str(citizen_id)
+				+ " is missing culture_id."
+			)
+			continue
+
+		var raw_culture_id = citizen.get("culture_id")
+
+		if typeof(raw_culture_id) != TYPE_INT:
+			errors.append(
+				"Citizen "
+				+ str(citizen_id)
+				+ " has a non-integer culture_id."
+			)
+			continue
+
+		var culture_id: int = raw_culture_id
+
+		if culture_id <= 0:
+			errors.append(
+				"Citizen "
+				+ str(citizen_id)
+				+ " has a nonpositive culture_id."
+			)
+			continue
+
+		if not WorldData.has_culture_id(culture_id):
+			errors.append(
+				"Citizen "
+				+ str(citizen_id)
+				+ " references nonexistent culture "
+				+ str(culture_id)
+				+ "."
+			)
+
+	if not WorldData.player_city_founded:
+		return
+
+	var primary_culture_id := WorldData.INVALID_CULTURE_ID
+
+	if not WorldData.player_city_data.has("primary_culture_id"):
+		errors.append(
+			"Founded player city is missing primary_culture_id."
+		)
+	elif (
+		typeof(
+			WorldData.player_city_data.get("primary_culture_id")
+		)
+		!= TYPE_INT
+	):
+		errors.append(
+			"Founded player city has a non-integer primary_culture_id."
+		)
+	else:
+		primary_culture_id = int(
+			WorldData.player_city_data.get("primary_culture_id")
+		)
+
+		if primary_culture_id <= 0:
+			errors.append(
+				"Founded player city has a nonpositive primary_culture_id."
+			)
+		elif not WorldData.has_culture_id(primary_culture_id):
+			errors.append(
+				"Founded player city references nonexistent culture "
+				+ str(primary_culture_id)
+				+ "."
+			)
+
+	if not WorldData.has_official_founding_identity():
+		errors.append(
+			"Founded player city has no official founding identity."
+		)
+	else:
+		var player_city_name := str(
+			WorldData.player_city_data.get("name", "")
+		)
+
+		if player_city_name != WorldData.get_official_city_name():
+			errors.append(
+				"Founded player city name disagrees with the official city name."
+			)
+
+		if (
+			primary_culture_id > 0
+			and WorldData.get_official_founding_culture_id()
+			!= primary_culture_id
+		):
+			errors.append(
+				"Founded player city culture disagrees with the official founding culture."
+			)
+
+		if (
+			primary_culture_id > 0
+			and WorldData.has_culture_id(primary_culture_id)
+			and WorldData.get_culture_name_by_id(primary_culture_id)
+			!= WorldData.get_official_founding_culture_name()
+		):
+			errors.append(
+				"Founded player city culture name disagrees with the official founding culture name."
+			)
+
+	if not (
+		primary_culture_id > 0
+		and WorldData.next_city_citizen_id
+		> WorldData.STARTING_CITY_POPULATION
+	):
+		return
+
+	for citizen_id in range(1, WorldData.STARTING_CITY_POPULATION + 1):
+		if not citizen_lookup.has(citizen_id):
+			errors.append(
+				"Founding citizen "
+				+ str(citizen_id)
+				+ " is missing from the citizen registry."
+			)
+			continue
+
+		var citizen_index := int(citizen_lookup[citizen_id])
+		var citizen: Dictionary = WorldData.city_citizens[citizen_index]
+
+		if citizen.get("culture_id") == primary_culture_id:
+			continue
+
+		errors.append(
+			"Founding citizen "
+			+ str(citizen_id)
+			+ " does not reference the city's primary culture."
+		)
 
 
 static func _validate_city_citizen_need_state(

@@ -11,7 +11,8 @@ enum ViewMode {
 }
 
 const INVALID_VIEW_MODE: int = -1
-const MAP_VISUAL_CACHE_VERSION: int = 2
+const MAP_VISUAL_CACHE_VERSION: int = 3
+const VIEW_MODE_COLOR_COUNT: int = 6
 
 static func get_all_view_modes() -> Array[int]:
 	var modes: Array[int] = [
@@ -24,6 +25,28 @@ static func get_all_view_modes() -> Array[int]:
 	]
 
 	return modes
+
+
+static func populate_all_tile_colors(
+	tile: Dictionary,
+	output_colors: Array[Color],
+	biome_resource_blend: float = 0.0
+) -> void:
+	# The caller owns and reuses this output array across tiles. Keeping the
+	# per-mode functions as the single color authority guarantees that the
+	# atomic all-mode bake stays pixel-equivalent to an individual mode build.
+	if output_colors.size() < VIEW_MODE_COLOR_COUNT:
+		output_colors.resize(VIEW_MODE_COLOR_COUNT)
+
+	output_colors[ViewMode.BIOME] = get_biome_mode_color(
+		tile,
+		biome_resource_blend
+	)
+	output_colors[ViewMode.ELEVATION] = get_elevation_color(tile)
+	output_colors[ViewMode.TEMPERATURE] = get_temperature_color(tile)
+	output_colors[ViewMode.PRECIPITATION] = get_precipitation_color(tile)
+	output_colors[ViewMode.RESOURCES] = get_resource_overlay_color(tile)
+	output_colors[ViewMode.FERTILITY] = get_fertility_overlay_color(tile)
 
 
 static func get_view_mode_for_index(index: int) -> int:

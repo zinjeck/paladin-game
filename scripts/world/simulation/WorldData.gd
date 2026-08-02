@@ -7,6 +7,9 @@ class_name WorldData
 const CityCitizensScript = preload(
 	"res://scripts/citizens/simulation/CityCitizens.gd"
 )
+const CultureDataScript = preload(
+	"res://scripts/world/simulation/CultureData.gd"
+)
 const CityResourceCatalogScript = preload(
 	"res://scripts/city/data/CityResourceCatalog.gd"
 )
@@ -83,6 +86,14 @@ static var official_city_seed: int = 0
 static var player_city_founded: bool = false
 static var player_city_data: Dictionary = {}
 static var debug_mode_enabled: bool = false
+
+const INVALID_CULTURE_ID: int = CultureDataScript.INVALID_CULTURE_ID
+const MAX_FOUNDING_NAME_LENGTH: int = 40
+static var cultures: Array = []
+static var culture_index_by_id: Dictionary = {}
+static var next_culture_id: int = 1
+static var official_city_name: String = ""
+static var official_founding_culture_id: int = INVALID_CULTURE_ID
 
 
 static var official_selected_region_center: Vector2i = Vector2i(-1, -1)
@@ -422,6 +433,15 @@ const CITY_CITIZEN_CARDINAL_MOVEMENT_COST := (
 )
 const CITY_CITIZEN_DIAGONAL_MOVEMENT_COST := (
 	CityCitizensScript.CITY_CITIZEN_DIAGONAL_MOVEMENT_COST
+)
+const CITY_ROAD_MOVEMENT_SPEED_MULTIPLIER := (
+	CityCitizensScript.CITY_ROAD_MOVEMENT_SPEED_MULTIPLIER
+)
+const CITY_CITIZEN_ROAD_CARDINAL_MOVEMENT_COST := (
+	CityCitizensScript.CITY_CITIZEN_ROAD_CARDINAL_MOVEMENT_COST
+)
+const CITY_CITIZEN_ROAD_DIAGONAL_MOVEMENT_COST := (
+	CityCitizensScript.CITY_CITIZEN_ROAD_DIAGONAL_MOVEMENT_COST
 )
 const CITY_CITIZEN_MOVEMENT_PROGRESS_PER_TILE := (
 	CityCitizensScript.CITY_CITIZEN_MOVEMENT_PROGRESS_PER_TILE
@@ -954,33 +974,209 @@ func consume_city_surface_feature_changes() -> Array[Dictionary]:
 
 #region Session Save and City Foundation State
 
+
+static func normalize_official_city_name(city_name: String) -> String:
+	return city_name.strip_edges()
+
+
+static func is_valid_founding_name(name: String) -> bool:
+	var normalized_name := name.strip_edges()
+
+	return (
+		not normalized_name.is_empty()
+		and normalized_name.length() <= MAX_FOUNDING_NAME_LENGTH
+	)
+
+
+static func get_culture_index_by_id(culture_id: int) -> int:
+	if culture_id <= 0 or not culture_index_by_id.has(culture_id):
+		return -1
+
+	var culture_index := int(culture_index_by_id[culture_id])
+
+	if culture_index < 0 or culture_index >= cultures.size():
+		return -1
+
+	var raw_culture = cultures[culture_index]
+
+	if not raw_culture is Dictionary:
+		return -1
+
+	var culture: Dictionary = raw_culture
+
+	if (
+		int(culture.get("id", INVALID_CULTURE_ID)) != culture_id
+		or not CultureDataScript.is_valid_culture_record(culture)
+	):
+		return -1
+
+	return culture_index
+
+
+static func has_culture_id(culture_id: int) -> bool:
+	return get_culture_index_by_id(culture_id) >= 0
+
+
+static func is_valid_culture_id(culture_id: int) -> bool:
+	return has_culture_id(culture_id)
+
+
+static func get_culture_by_id(culture_id: int) -> Dictionary:
+	var culture_index := get_culture_index_by_id(culture_id)
+
+	if culture_index < 0:
+		return {}
+
+	return cultures[culture_index].duplicate(true)
+
+
+static func get_culture_name_by_id(culture_id: int) -> String:
+	var culture := get_culture_by_id(culture_id)
+
+	if culture.is_empty():
+		return ""
+
+	return str(culture.get("name", ""))
+
+
+static func get_culture_snapshot() -> Array:
+	var culture_snapshot: Array = []
+
+	for raw_culture in cultures:
+		if not raw_culture is Dictionary:
+			continue
+
+		culture_snapshot.append(raw_culture.duplicate(true))
+
+	return culture_snapshot
+
+
+static func create_culture(culture_name: String) -> Dictionary:
+	var culture := CultureDataScript.make_culture({
+		"id": next_culture_id,
+		"name": culture_name,
+	})
+
+	if culture.is_empty():
+		return {}
+
+	var culture_id := int(culture["id"])
+
+	if culture_index_by_id.has(culture_id):
+		push_error(
+			"Cannot create culture because ID "
+			+ str(culture_id)
+			+ " is already registered."
+		)
+		return {}
+
+	cultures.append(culture)
+	culture_index_by_id[culture_id] = cultures.size() - 1
+	next_culture_id += 1
+
+	return culture.duplicate(true)
+
+
+static func reset_founding_identity_state() -> void:
+	official_city_name = ""
+	official_founding_culture_id = INVALID_CULTURE_ID
+	cultures.clear()
+	culture_index_by_id.clear()
+	next_culture_id = 1
+
+
+static func get_official_city_name() -> String:
+	return official_city_name
+
+
+static func get_official_founding_culture_id() -> int:
+	return official_founding_culture_id
+
+
+static func get_official_founding_culture() -> Dictionary:
+	return get_culture_by_id(official_founding_culture_id)
+
+
+static func get_official_founding_culture_name() -> String:
+	return get_culture_name_by_id(official_founding_culture_id)
+
+
+static func has_official_founding_identity() -> bool:
+	return (
+		is_valid_founding_name(official_city_name)
+		and official_city_name
+		== normalize_official_city_name(official_city_name)
+		and has_culture_id(official_founding_culture_id)
+	)
+
+
+static func _make_city_start_region_tiles(
+	source_world: WorldData,
+	region_top_left: Vector2i,
+	region_size: int
+) -> Array:
+	if source_world == null or region_size <= 0:
+		return []
+
+	var region_bottom_right := (
+		region_top_left
+		+ Vector2i(region_size - 1, region_size - 1)
+	)
+
+	if (
+		not source_world.is_in_bounds(
+			region_top_left.x,
+			region_top_left.y
+		)
+		or not source_world.is_in_bounds(
+			region_bottom_right.x,
+			region_bottom_right.y
+		)
+	):
+		return []
+
+	var region_tiles: Array = []
+
+	for y_offset in range(region_size):
+		var row: Array = []
+
+		for x_offset in range(region_size):
+			var tile_x: int = region_top_left.x + x_offset
+			var tile_y: int = region_top_left.y + y_offset
+			var source_tile := (
+				source_world.get_tile(tile_x, tile_y).duplicate(true)
+			)
+
+			source_tile["source_world_x"] = tile_x
+			source_tile["source_world_y"] = tile_y
+			row.append(source_tile)
+
+		region_tiles.append(row)
+
+	return region_tiles
+
+
 static func store_city_start_region(
 	source_world: WorldData,
 	region_top_left: Vector2i,
 	region_center: Vector2i,
 	region_size: int
-) -> void:
+) -> bool:
+	var region_tiles := _make_city_start_region_tiles(
+		source_world,
+		region_top_left,
+		region_size
+	)
+
+	if region_tiles.is_empty():
+		return false
+
 	city_start_world_seed = source_world.seed
 	city_start_region_center = region_center
 	city_start_region_top_left = region_top_left
 	city_start_region_size = region_size
-	city_start_tiles.clear()
-
-	for y_offset in range(region_size):
-		var row := []
-
-		for x_offset in range(region_size):
-			var tile_x: int = region_top_left.x + x_offset
-			var tile_y: int = region_top_left.y + y_offset
-
-			var source_tile: Dictionary = source_world.get_tile(tile_x, tile_y).duplicate(true)
-
-			source_tile["source_world_x"] = tile_x
-			source_tile["source_world_y"] = tile_y
-
-			row.append(source_tile)
-
-		city_start_tiles.append(row)
+	city_start_tiles = region_tiles
+	return true
 
 
 static func has_city_start_region() -> bool:
@@ -992,7 +1188,7 @@ static func has_city_start_region() -> bool:
 
 	return true
 
-static func lock_world_save(values: Dictionary) -> void:
+static func lock_world_save(values: Dictionary) -> bool:
 	var required_keys: Array[String] = [
 		"source_world",
 		"region_top_left",
@@ -1000,6 +1196,8 @@ static func lock_world_save(values: Dictionary) -> void:
 		"region_size",
 		"world_scene_path",
 		"city_scene_path",
+		"city_name",
+		"culture_name",
 	]
 
 	for key in required_keys:
@@ -1008,49 +1206,160 @@ static func lock_world_save(values: Dictionary) -> void:
 				"WorldData.lock_world_save is missing required key: "
 				+ key
 			)
-			return
+			return false
 
 	if not values["source_world"] is WorldData:
 		push_error(
 			"WorldData.lock_world_save source_world must be WorldData."
 		)
-		return
+		return false
 
 	if not values["region_top_left"] is Vector2i:
 		push_error(
 			"WorldData.lock_world_save region_top_left must be Vector2i."
 		)
-		return
+		return false
 
 	if not values["region_center"] is Vector2i:
 		push_error(
 			"WorldData.lock_world_save region_center must be Vector2i."
 		)
-		return
+		return false
+
+	if not values["region_size"] is int:
+		push_error(
+			"WorldData.lock_world_save region_size must be an integer."
+		)
+		return false
+
+	if not values["world_scene_path"] is String:
+		push_error(
+			"WorldData.lock_world_save world_scene_path must be a String."
+		)
+		return false
+
+	if not values["city_scene_path"] is String:
+		push_error(
+			"WorldData.lock_world_save city_scene_path must be a String."
+		)
+		return false
+
+	if not values["city_name"] is String:
+		push_error(
+			"WorldData.lock_world_save city_name must be a String."
+		)
+		return false
+
+	if not values["culture_name"] is String:
+		push_error(
+			"WorldData.lock_world_save culture_name must be a String."
+		)
+		return false
 
 	var source_world: WorldData = values["source_world"]
 	var region_top_left: Vector2i = values["region_top_left"]
 	var region_center: Vector2i = values["region_center"]
-	var region_size := int(values["region_size"])
-	var world_scene_path := str(values["world_scene_path"])
-	var city_scene_path := str(values["city_scene_path"])
+	var region_size: int = values["region_size"]
+	var world_scene_path: String = values["world_scene_path"]
+	var city_scene_path: String = values["city_scene_path"]
+	var raw_city_name: String = values["city_name"]
+	var raw_culture_name: String = values["culture_name"]
+	var city_name := normalize_official_city_name(raw_city_name)
+	var culture_name := CultureDataScript.normalize_culture_name(
+		raw_culture_name
+	)
 
-	save_locked = true
+	if region_size <= 0:
+		push_error("WorldData.lock_world_save region_size must be positive.")
+		return false
+
+	var expected_region_center := (
+		region_top_left
+		+ Vector2i(int(region_size / 2), int(region_size / 2))
+	)
+
+	if region_center != expected_region_center:
+		push_error(
+			"WorldData.lock_world_save region_center is inconsistent "
+			+ "with region_top_left and region_size."
+		)
+		return false
+
+	if world_scene_path.strip_edges().is_empty():
+		push_error(
+			"WorldData.lock_world_save world_scene_path must not be blank."
+		)
+		return false
+
+	if city_scene_path.strip_edges().is_empty():
+		push_error(
+			"WorldData.lock_world_save city_scene_path must not be blank."
+		)
+		return false
+
+	if not is_valid_founding_name(city_name):
+		push_error(
+			"WorldData.lock_world_save city_name must contain 1 to "
+			+ str(MAX_FOUNDING_NAME_LENGTH)
+			+ " visible characters."
+		)
+		return false
+
+	if not is_valid_founding_name(culture_name):
+		push_error(
+			"WorldData.lock_world_save culture_name must contain 1 to "
+			+ str(MAX_FOUNDING_NAME_LENGTH)
+			+ " visible characters."
+		)
+		return false
+
+	var prepared_region_tiles := _make_city_start_region_tiles(
+		source_world,
+		region_top_left,
+		region_size
+	)
+
+	if prepared_region_tiles.is_empty():
+		push_error(
+			"WorldData.lock_world_save selected region is outside the world."
+		)
+		return false
+
+	if save_locked:
+		return (
+			has_active_world_save()
+			and official_world == source_world
+			and official_selected_region_center == region_center
+			and official_selected_region_top_left == region_top_left
+			and official_region_size == region_size
+			and official_world_scene_path == world_scene_path
+			and official_city_scene_path == city_scene_path
+			and official_city_name == city_name
+			and get_official_founding_culture_name() == culture_name
+		)
+
+	var founding_culture := create_culture(culture_name)
+
+	if founding_culture.is_empty():
+		return false
 
 	official_world = source_world
 	official_selected_region_center = region_center
 	official_selected_region_top_left = region_top_left
 	official_region_size = region_size
-
 	official_world_scene_path = world_scene_path
 	official_city_scene_path = city_scene_path
+	official_city_name = city_name
+	official_founding_culture_id = int(founding_culture["id"])
 
-	store_city_start_region(
-		source_world,
-		region_top_left,
-		region_center,
-		region_size
-	)
+	city_start_world_seed = source_world.seed
+	city_start_region_center = region_center
+	city_start_region_top_left = region_top_left
+	city_start_region_size = region_size
+	city_start_tiles = prepared_region_tiles
+
+	save_locked = true
+	return true
 
 
 static func has_active_world_save() -> bool:
@@ -1066,13 +1375,25 @@ static func store_city_world_save(city_world: WorldData, city_seed: int) -> void
 	official_city_world = city_world
 	official_city_seed = city_seed
 	MapTextureCacheStateScript.clear_city_cache()
-	
+
 static func found_player_city(values: Dictionary) -> void:
 	if player_city_founded:
 		return
 
+	if not has_active_world_save():
+		push_error(
+			"Cannot found the player city before the world save is locked."
+		)
+		return
+
+	if not has_official_founding_identity():
+		push_error(
+			"Cannot found the player city without a committed city name "
+			+ "and founding culture."
+		)
+		return
+
 	var required_keys: Array[String] = [
-		"city_name",
 		"city_world_seed",
 		"city_map_size",
 	]
@@ -1112,11 +1433,11 @@ static func found_player_city(values: Dictionary) -> void:
 		)
 		return
 
-	var city_name := str(values["city_name"])
 	var city_world_seed := int(values["city_world_seed"])
 	var city_map_size: Vector2i = values["city_map_size"]
 	var foundation_top_left: Vector2i = foundation_top_left_value
 	var foundation_size: Vector2i = foundation_size_value
+	var primary_culture_id := official_founding_culture_id
 
 	player_city_founded = true
 	player_city_foundation_top_left = foundation_top_left
@@ -1124,7 +1445,8 @@ static func found_player_city(values: Dictionary) -> void:
 
 	player_city_data = {
 		"id": 1,
-		"name": city_name,
+		"name": official_city_name,
+		"primary_culture_id": primary_culture_id,
 		"city_world_seed": city_world_seed,
 		"city_map_size": city_map_size,
 		"foundation_top_left": foundation_top_left,
@@ -5791,7 +6113,7 @@ static func get_city_citizen_name_pool_for_sex(
 
 static func city_citizen_name_pools_are_ready() -> bool:
 	return CityCitizensScript.city_citizen_name_pools_are_ready()
-	
+
 static func get_city_citizen_count_by_sex(
 	citizen_sex: String
 ) -> int:
@@ -5849,17 +6171,55 @@ static func make_random_city_citizen_first_name(
 	)
 
 
+static func resolve_city_citizen_culture_id(
+	requested_culture_id: int = INVALID_CULTURE_ID
+) -> int:
+	if has_culture_id(requested_culture_id):
+		return requested_culture_id
+
+	if requested_culture_id != INVALID_CULTURE_ID:
+		return INVALID_CULTURE_ID
+
+	if not player_city_founded:
+		return INVALID_CULTURE_ID
+
+	var primary_culture_value = player_city_data.get(
+		"primary_culture_id",
+		INVALID_CULTURE_ID
+	)
+
+	if not primary_culture_value is int:
+		return INVALID_CULTURE_ID
+
+	var primary_culture_id: int = primary_culture_value
+
+	if not has_culture_id(primary_culture_id):
+		return INVALID_CULTURE_ID
+
+	return primary_culture_id
+
+
 static func make_city_citizen(
 	display_name: String = "",
 	initial_city_tile_position: Vector2i = (
 		INVALID_CITY_TILE_POSITION
 	),
-	citizen_sex: String = ""
+	citizen_sex: String = "",
+	culture_id: int = INVALID_CULTURE_ID
 ) -> Dictionary:
+	var resolved_culture_id := resolve_city_citizen_culture_id(culture_id)
+
+	if not has_culture_id(resolved_culture_id):
+		push_error(
+			"Cannot create a city citizen without a valid culture ID."
+		)
+		return {}
+
 	var citizen := CityCitizensScript.make_city_citizen({
 		"id": next_city_citizen_id,
 		"display_name": display_name,
 		"sex": citizen_sex,
+		"culture_id": resolved_culture_id,
 		"city_tile_position": initial_city_tile_position,
 		"inventory": make_empty_citizen_inventory(),
 		"name_seed": get_city_citizen_name_seed(),
@@ -5877,12 +6237,14 @@ static func add_city_citizen(
 	initial_city_tile_position: Vector2i = (
 		INVALID_CITY_TILE_POSITION
 	),
-	citizen_sex: String = ""
+	citizen_sex: String = "",
+	culture_id: int = INVALID_CULTURE_ID
 ) -> Dictionary:
 	var citizen := make_city_citizen(
 		display_name,
 		initial_city_tile_position,
-		citizen_sex
+		citizen_sex,
+		culture_id
 	)
 
 	if citizen.is_empty():
@@ -5937,6 +6299,27 @@ static func initialize_starting_city_population() -> int:
 		)
 		return 0
 
+	var primary_culture_value = player_city_data.get(
+		"primary_culture_id",
+		INVALID_CULTURE_ID
+	)
+
+	if not primary_culture_value is int:
+		push_error(
+			"Cannot initialize starting citizens because the city's "
+			+ "primary culture ID is not an integer."
+		)
+		return 0
+
+	var primary_culture_id: int = primary_culture_value
+
+	if not has_culture_id(primary_culture_id):
+		push_error(
+			"Cannot initialize starting citizens because the city's "
+			+ "primary culture does not exist."
+		)
+		return 0
+
 	var city_world: WorldData = official_city_world
 
 	if city_world == null:
@@ -5983,7 +6366,8 @@ static func initialize_starting_city_population() -> int:
 		var citizen := add_city_citizen(
 			"",
 			spawn_tile,
-			citizen_sex
+			citizen_sex,
+			primary_culture_id
 		)
 
 		if citizen.is_empty():
@@ -8031,6 +8415,39 @@ static func get_city_citizen_by_id(citizen_id: int) -> Dictionary:
 
 	return raw_citizen
 
+
+static func get_city_citizen_culture_id(citizen_id: int) -> int:
+	var citizen := get_city_citizen_by_id(citizen_id)
+
+	if citizen.is_empty():
+		return INVALID_CULTURE_ID
+
+	var culture_id_value = citizen.get(
+		"culture_id",
+		INVALID_CULTURE_ID
+	)
+
+	if not culture_id_value is int:
+		return INVALID_CULTURE_ID
+
+	var culture_id: int = culture_id_value
+
+	if not has_culture_id(culture_id):
+		return INVALID_CULTURE_ID
+
+	return culture_id
+
+
+static func get_city_citizen_culture(citizen_id: int) -> Dictionary:
+	return get_culture_by_id(get_city_citizen_culture_id(citizen_id))
+
+
+static func get_city_citizen_culture_name(citizen_id: int) -> String:
+	return get_culture_name_by_id(
+		get_city_citizen_culture_id(citizen_id)
+	)
+
+
 static func get_city_citizen_display_name(citizen_id: int) -> String:
 	var citizen := get_city_citizen_by_id(citizen_id)
 
@@ -9122,6 +9539,25 @@ static func _city_object_boundary_tile_allows_entry(
 	return false
 
 
+static func is_completed_city_road_tile(
+	tile_position: Vector2i
+) -> bool:
+	var object_id := int(
+		city_occupied_tiles.get(tile_position, -1)
+	)
+
+	if object_id <= 0:
+		return false
+
+	var city_object := get_city_object_by_id(object_id)
+
+	return (
+		not city_object.is_empty()
+		and str(city_object.get("type", ""))
+		== CITY_OBJECT_ROAD
+	)
+
+
 static func get_city_citizen_movement_step_cost(
 	from_tile: Vector2i,
 	to_tile: Vector2i
@@ -9135,8 +9571,18 @@ static func get_city_citizen_movement_step_cost(
 	if delta_x == 0 and delta_y == 0:
 		return 0
 
+	var destination_is_road := is_completed_city_road_tile(
+		to_tile
+	)
+
 	if delta_x == 1 and delta_y == 1:
+		if destination_is_road:
+			return CITY_CITIZEN_ROAD_DIAGONAL_MOVEMENT_COST
+
 		return CITY_CITIZEN_DIAGONAL_MOVEMENT_COST
+
+	if destination_is_road:
+		return CITY_CITIZEN_ROAD_CARDINAL_MOVEMENT_COST
 
 	return CITY_CITIZEN_CARDINAL_MOVEMENT_COST
 
@@ -9162,7 +9608,10 @@ static func can_city_citizen_traverse_step(
 	):
 		return false
 
-	if step_cost == CITY_CITIZEN_DIAGONAL_MOVEMENT_COST:
+	var delta_x := absi(to_tile.x - from_tile.x)
+	var delta_y := absi(to_tile.y - from_tile.y)
+
+	if delta_x == 1 and delta_y == 1:
 		var horizontal_side_tile := Vector2i(
 			to_tile.x,
 			from_tile.y
@@ -10791,7 +11240,10 @@ static func add_city_road_object(
 
 		clean_tiles.append(tile_position)
 
-	if clean_tiles.is_empty():
+	# A road object is exactly one tile. Drag strokes are decomposed into
+	# independent construction sites before completion, and this guard prevents
+	# any future caller from quietly recreating stroke-sized road objects.
+	if clean_tiles.size() != 1:
 		return {}
 
 	var feature_world := city_world
@@ -10849,6 +11301,7 @@ static func reset_world_session_state() -> void:
 	official_city_scene_path = ""
 	city_return_world_scene_path = ""
 
+	reset_founding_identity_state()
 	reset_city_start_region_state()
 	reset_world_camera_state()
 	MapTextureCacheStateScript.clear_world_cache()

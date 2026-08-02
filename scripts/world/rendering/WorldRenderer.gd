@@ -62,6 +62,7 @@ var selected_region_top_left := Vector2i(-1, -1)
 
 var region_cursor_line: Line2D
 var selected_region_line: Line2D
+var city_name_world_label: Label
 
 var region_cursor_valid_color := Color(1.0, 0.0, 1.0, 0.95)
 var region_cursor_invalid_color := Color(1.0, 0.0, 0.0, 0.95)
@@ -75,6 +76,31 @@ var debug_panel_position: Vector2 = Vector2.ZERO
 var debug_panel_padding: Vector2 = Vector2(12.0, 10.0)
 var debug_panel_min_size: Vector2 = Vector2(260.0, 80.0)
 
+var founding_modal_overlay: Control
+var founding_ui_layer: CanvasLayer
+var founding_panel: PanelContainer
+var founding_city_name_line_edit: LineEdit
+var founding_culture_name_line_edit: LineEdit
+var founding_panel_back_button: Button
+var founding_panel_save_button: Button
+var founding_blocked_camera: Camera2D
+var founding_camera_process_was_enabled: bool = false
+var founding_camera_input_was_enabled: bool = false
+
+var founding_panel_open: bool = false
+var draft_city_name: String = ""
+var draft_culture_name: String = ""
+var saved_city_name: String = ""
+var saved_culture_name: String = ""
+var has_provisional_founding_identity: bool = false
+
+var founding_panel_size: Vector2 = Vector2(680.0, 500.0)
+var founding_panel_button_size: Vector2 = Vector2(150.0, 44.0)
+var founding_name_label_width: float = 155.0
+var founding_customization_space_height: float = 250.0
+var city_name_world_label_size: Vector2 = Vector2(480.0, 34.0)
+var city_name_world_label_screen_gap: float = 8.0
+
 func _ready():
 	texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
 	add_to_group("world_renderer")
@@ -84,11 +110,13 @@ func _ready():
 	setup_world_texture_cache()
 	create_hover_border_line()
 	create_region_selection_lines()
+	create_city_name_world_label()
 	create_debug_panel()
 	connect_simulation_clock_signals()
 	create_world_start_background()
 	create_world_bottom_buttons()
 	create_select_region_button()
+	create_founding_panel()
 
 	if WorldData.has_active_world_save():
 		SimulationClock.resume_simulation()
@@ -108,12 +136,12 @@ func _draw():
 
 
 func _process(_delta):
-	if world_texture_cache != null:
-		world_texture_cache.process_warmup()
-
 	update_hovered_tile()
+	update_city_name_world_label_transform()
 
 func _exit_tree() -> void:
+	set_founding_camera_input_blocked(false)
+
 	if world_texture_cache != null:
 		world_texture_cache.dispose()
 
@@ -142,6 +170,10 @@ func setup_world_texture_cache() -> void:
 		"color_provider": Callable(
 			self,
 			"get_tile_color_for_mode"
+		),
+		"all_colors_provider": Callable(
+			self,
+			"populate_all_world_tile_colors"
 		),
 		"modes_provider": Callable(
 			self,
@@ -179,6 +211,8 @@ func store_saved_world_map_texture_cache(source_world: WorldData, texture_cache:
 
 func load_locked_world_save() -> void:
 	world = WorldData.official_world
+	close_founding_panel()
+	clear_provisional_founding_identity()
 
 	selected_region_center = WorldData.official_selected_region_center
 	selected_region_top_left = WorldData.official_selected_region_top_left
@@ -198,6 +232,7 @@ func load_locked_world_save() -> void:
 	update_selected_region_line()
 	update_cursor_visuals()
 	set_world_locked_ui()
+	refresh_city_name_world_label()
 
 	if has_method("update_debug_panel_text"):
 		call("update_debug_panel_text")
@@ -234,6 +269,31 @@ func create_region_selection_lines() -> void:
 	selected_region_line.visible = false
 	selected_region_line.z_index = 102
 	add_child(selected_region_line)
+
+
+func create_city_name_world_label() -> void:
+	city_name_world_label = Label.new()
+	city_name_world_label.name = "CityNameWorldLabel"
+	city_name_world_label.visible = false
+	city_name_world_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	city_name_world_label.focus_mode = Control.FOCUS_NONE
+	city_name_world_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	city_name_world_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	city_name_world_label.size = city_name_world_label_size
+	city_name_world_label.z_index = 110
+
+	city_name_world_label.add_theme_color_override(
+		"font_color",
+		Color(0.96, 0.98, 1.0, 1.0)
+	)
+	city_name_world_label.add_theme_color_override(
+		"font_outline_color",
+		Color(0.02, 0.02, 0.04, 0.98)
+	)
+	city_name_world_label.add_theme_constant_override("outline_size", 4)
+	city_name_world_label.add_theme_font_size_override("font_size", 20)
+
+	add_child(city_name_world_label)
 
 func create_debug_panel() -> void:
 	debug_panel_ui = DebugPanel.new()
@@ -372,6 +432,12 @@ func update_hovered_tile() -> void:
 	if world == null:
 		hide_all_cursor_lines()
 		return
+	if founding_panel_open:
+		if hover_border_line != null:
+			hover_border_line.visible = false
+		if region_cursor_line != null:
+			region_cursor_line.visible = false
+		return
 
 	var new_hovered_tile: Vector2i = get_mouse_tile()
 
@@ -425,6 +491,13 @@ func update_hover_border_line() -> void:
 	hover_border_line.visible = true
 
 func update_cursor_visuals() -> void:
+	if founding_panel_open:
+		if hover_border_line != null:
+			hover_border_line.visible = false
+		if region_cursor_line != null:
+			region_cursor_line.visible = false
+		return
+
 	if region_cursor_state == RegionCursorState.REGION_PLACE:
 		if hover_border_line != null:
 			hover_border_line.visible = false
@@ -466,6 +539,7 @@ func update_selected_region_line() -> void:
 
 	if selected_region_top_left.x < 0 or selected_region_top_left.y < 0:
 		selected_region_line.visible = false
+		refresh_city_name_world_label()
 		return
 
 	var region_rect: Rect2 = get_region_rect(selected_region_top_left)
@@ -474,6 +548,61 @@ func update_selected_region_line() -> void:
 	selected_region_line.width = selected_region_border_width
 	set_line_to_rect(selected_region_line, region_rect)
 	selected_region_line.visible = true
+	update_city_name_world_label_transform()
+
+
+func refresh_city_name_world_label() -> void:
+	if city_name_world_label == null:
+		return
+
+	var display_name := ""
+
+	if WorldData.has_active_world_save():
+		display_name = WorldData.get_official_city_name().strip_edges()
+	elif has_valid_provisional_founding_identity():
+		display_name = saved_city_name.strip_edges()
+
+	city_name_world_label.text = display_name
+	city_name_world_label.visible = (
+		has_selected_region()
+		and not display_name.is_empty()
+	)
+
+	update_city_name_world_label_transform()
+
+
+func update_city_name_world_label_transform() -> void:
+	if city_name_world_label == null:
+		return
+	if not city_name_world_label.visible:
+		return
+	if not has_selected_region():
+		city_name_world_label.visible = false
+		return
+
+	var active_camera := get_viewport().get_camera_2d()
+	var camera_zoom := Vector2.ONE
+
+	if active_camera != null:
+		camera_zoom = Vector2(
+			maxf(active_camera.zoom.x, 0.001),
+			maxf(active_camera.zoom.y, 0.001)
+		)
+
+	var inverse_zoom := Vector2(
+		1.0 / camera_zoom.x,
+		1.0 / camera_zoom.y
+	)
+	var region_rect := get_region_rect(selected_region_top_left)
+	var scaled_label_size := city_name_world_label_size * inverse_zoom
+	var scaled_gap := city_name_world_label_screen_gap * inverse_zoom.y
+
+	city_name_world_label.size = city_name_world_label_size
+	city_name_world_label.scale = inverse_zoom
+	city_name_world_label.position = Vector2(
+		region_rect.get_center().x - scaled_label_size.x * 0.5,
+		region_rect.position.y - scaled_label_size.y - scaled_gap
+	)
 
 
 func hide_all_cursor_lines() -> void:
@@ -575,6 +704,9 @@ func is_ocean_region_tile(tile: Dictionary) -> bool:
 	return false
 
 func _input(event):
+	if founding_panel_open:
+		return
+
 	if event is InputEventKey and event.pressed and not event.echo:
 		var key_event: InputEventKey = event
 
@@ -604,11 +736,7 @@ func set_world_view_mode(new_view_mode: int) -> void:
 
 	print("View: ", get_view_mode_name())
 
-	if world_texture_cache != null:
-		world_texture_cache.cancel_warmup()
-
 	apply_cached_world_map_texture()
-	start_world_texture_warmup()
 
 	update_debug_panel_text()
 	queue_redraw()
@@ -696,6 +824,14 @@ func get_tile_color(tile: Dictionary) -> Color:
 func get_tile_color_for_mode(tile: Dictionary, mode: int) -> Color:
 	return MapVisuals.get_tile_color_for_mode(tile, mode, 0.0)
 
+
+func populate_all_world_tile_colors(
+	tile: Dictionary,
+	output_colors: Array[Color]
+) -> void:
+	MapVisuals.populate_all_tile_colors(tile, output_colors, 0.0)
+
+
 func rebuild_world_map_textures() -> void:
 	if world_texture_cache == null:
 		setup_world_texture_cache()
@@ -708,13 +844,6 @@ func ensure_world_map_texture_for_mode(mode: int) -> void:
 		setup_world_texture_cache()
 
 	world_texture_cache.ensure_texture_for_mode(world, mode)
-
-
-func start_world_texture_warmup() -> void:
-	if world_texture_cache == null:
-		setup_world_texture_cache()
-
-	world_texture_cache.start_warmup(world)
 
 
 func build_world_map_texture_for_mode(mode: int) -> ImageTexture:
@@ -918,6 +1047,436 @@ func create_select_region_button() -> void:
 	select_region_button.pressed.connect(on_select_region_button_pressed)
 
 
+func create_founding_panel() -> void:
+	if world_ui_layer == null:
+		return
+
+	founding_ui_layer = CanvasLayer.new()
+	founding_ui_layer.name = "FoundingUILayer"
+	founding_ui_layer.layer = 110
+	add_child(founding_ui_layer)
+
+	founding_modal_overlay = Control.new()
+	founding_modal_overlay.name = "FoundingModalOverlay"
+	founding_modal_overlay.mouse_filter = Control.MOUSE_FILTER_STOP
+	founding_modal_overlay.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	founding_modal_overlay.z_index = 200
+	founding_modal_overlay.visible = false
+	founding_ui_layer.add_child(founding_modal_overlay)
+
+	founding_panel = PanelContainer.new()
+	founding_panel.name = "FoundingPanel"
+	founding_panel.mouse_filter = Control.MOUSE_FILTER_STOP
+	founding_panel.anchor_left = 0.5
+	founding_panel.anchor_right = 0.5
+	founding_panel.anchor_top = 0.5
+	founding_panel.anchor_bottom = 0.5
+	founding_panel.offset_left = -founding_panel_size.x * 0.5
+	founding_panel.offset_right = founding_panel_size.x * 0.5
+	founding_panel.offset_top = -founding_panel_size.y * 0.5
+	founding_panel.offset_bottom = founding_panel_size.y * 0.5
+	founding_panel.add_theme_stylebox_override(
+		"panel",
+		create_founding_panel_style()
+	)
+	founding_modal_overlay.add_child(founding_panel)
+
+	var content_margin := MarginContainer.new()
+	content_margin.mouse_filter = Control.MOUSE_FILTER_PASS
+	content_margin.add_theme_constant_override("margin_left", 30)
+	content_margin.add_theme_constant_override("margin_right", 30)
+	content_margin.add_theme_constant_override("margin_top", 26)
+	content_margin.add_theme_constant_override("margin_bottom", 26)
+	founding_panel.add_child(content_margin)
+
+	var content_column := VBoxContainer.new()
+	content_column.mouse_filter = Control.MOUSE_FILTER_PASS
+	content_column.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	content_column.add_theme_constant_override("separation", 18)
+	content_margin.add_child(content_column)
+
+	var city_name_row := HBoxContainer.new()
+	city_name_row.custom_minimum_size = Vector2(0.0, 46.0)
+	city_name_row.mouse_filter = Control.MOUSE_FILTER_PASS
+	city_name_row.add_theme_constant_override("separation", 18)
+	content_column.add_child(city_name_row)
+
+	city_name_row.add_child(create_founding_field_label("City Name"))
+	founding_city_name_line_edit = create_founding_name_line_edit(
+		"Enter a city name"
+	)
+	founding_city_name_line_edit.name = "FoundingCityNameLineEdit"
+	city_name_row.add_child(founding_city_name_line_edit)
+
+	var culture_name_row := HBoxContainer.new()
+	culture_name_row.custom_minimum_size = Vector2(0.0, 46.0)
+	culture_name_row.mouse_filter = Control.MOUSE_FILTER_PASS
+	culture_name_row.add_theme_constant_override("separation", 18)
+	content_column.add_child(culture_name_row)
+
+	culture_name_row.add_child(create_founding_field_label("Culture Name"))
+	founding_culture_name_line_edit = create_founding_name_line_edit(
+		"Enter a culture name"
+	)
+	founding_culture_name_line_edit.name = "FoundingCultureNameLineEdit"
+	culture_name_row.add_child(founding_culture_name_line_edit)
+
+	var reserved_customization_space := Control.new()
+	reserved_customization_space.name = "ReservedCultureCustomizationSpace"
+	reserved_customization_space.custom_minimum_size = Vector2(
+		0.0,
+		founding_customization_space_height
+	)
+	reserved_customization_space.mouse_filter = Control.MOUSE_FILTER_PASS
+	reserved_customization_space.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	content_column.add_child(reserved_customization_space)
+
+	var button_row := HBoxContainer.new()
+	button_row.custom_minimum_size = Vector2(0.0, founding_panel_button_size.y)
+	button_row.mouse_filter = Control.MOUSE_FILTER_PASS
+	content_column.add_child(button_row)
+
+	founding_panel_back_button = create_world_action_button(
+		"Back",
+		Color(1.0, 0.25, 0.25, 0.32),
+		Color(1.0, 0.38, 0.38, 0.48),
+		Color(1.0, 0.18, 0.18, 0.62)
+	)
+	founding_panel_back_button.name = "FoundingPanelBackButton"
+	founding_panel_back_button.custom_minimum_size = founding_panel_button_size
+	founding_panel_back_button.focus_mode = Control.FOCUS_ALL
+	button_row.add_child(founding_panel_back_button)
+
+	var button_spacer := Control.new()
+	button_spacer.mouse_filter = Control.MOUSE_FILTER_PASS
+	button_spacer.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	button_row.add_child(button_spacer)
+
+	founding_panel_save_button = create_world_action_button(
+		"Save",
+		Color(0.25, 1.0, 0.35, 0.32),
+		Color(0.40, 1.0, 0.48, 0.48),
+		Color(0.15, 0.78, 0.24, 0.62)
+	)
+	founding_panel_save_button.name = "FoundingPanelSaveButton"
+	founding_panel_save_button.custom_minimum_size = founding_panel_button_size
+	founding_panel_save_button.focus_mode = Control.FOCUS_ALL
+	button_row.add_child(founding_panel_save_button)
+
+	founding_city_name_line_edit.text_changed.connect(
+		on_founding_name_text_changed
+	)
+	founding_culture_name_line_edit.text_changed.connect(
+		on_founding_name_text_changed
+	)
+	founding_city_name_line_edit.text_submitted.connect(
+		on_founding_name_text_submitted
+	)
+	founding_culture_name_line_edit.text_submitted.connect(
+		on_founding_name_text_submitted
+	)
+	founding_panel_back_button.pressed.connect(
+		on_founding_panel_back_button_pressed
+	)
+	founding_panel_save_button.pressed.connect(
+		on_founding_panel_save_button_pressed
+	)
+	founding_modal_overlay.gui_input.connect(
+		on_founding_modal_overlay_gui_input
+	)
+	founding_panel.gui_input.connect(on_founding_panel_gui_input)
+
+	refresh_founding_ui_state()
+
+
+func create_founding_panel_style() -> StyleBoxFlat:
+	var style := StyleBoxFlat.new()
+	style.bg_color = Color(0.025, 0.03, 0.055, 0.94)
+	style.border_color = Color(0.72, 0.78, 0.94, 0.72)
+	style.set_border_width_all(2)
+	style.set_corner_radius_all(9)
+	style.shadow_color = Color(0.0, 0.0, 0.0, 0.72)
+	style.shadow_size = 14
+
+	return style
+
+
+func create_founding_field_label(label_text: String) -> Label:
+	var label := Label.new()
+	label.text = label_text
+	label.custom_minimum_size = Vector2(founding_name_label_width, 0.0)
+	label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	label.add_theme_color_override("font_color", Color(0.95, 0.97, 1.0, 1.0))
+	label.add_theme_constant_override("outline_size", 2)
+	label.add_theme_color_override(
+		"font_outline_color",
+		Color(0.0, 0.0, 0.0, 0.85)
+	)
+	label.add_theme_font_size_override("font_size", 20)
+
+	return label
+
+
+func create_founding_name_line_edit(placeholder: String) -> LineEdit:
+	var line_edit := LineEdit.new()
+	line_edit.placeholder_text = placeholder
+	line_edit.max_length = WorldData.MAX_FOUNDING_NAME_LENGTH
+	line_edit.custom_minimum_size = Vector2(0.0, 46.0)
+	line_edit.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	line_edit.mouse_filter = Control.MOUSE_FILTER_STOP
+	line_edit.focus_mode = Control.FOCUS_ALL
+	line_edit.add_theme_font_size_override("font_size", 19)
+	line_edit.add_theme_color_override("font_color", Color.WHITE)
+	line_edit.add_theme_color_override(
+		"font_placeholder_color",
+		Color(0.72, 0.74, 0.80, 0.72)
+	)
+	line_edit.add_theme_stylebox_override(
+		"normal",
+		create_founding_line_edit_style(Color(0.08, 0.09, 0.14, 0.92))
+	)
+	line_edit.add_theme_stylebox_override(
+		"focus",
+		create_founding_line_edit_style(Color(0.12, 0.10, 0.20, 0.96), true)
+	)
+
+	return line_edit
+
+
+func create_founding_line_edit_style(
+	background_color: Color,
+	is_focused: bool = false
+) -> StyleBoxFlat:
+	var style := StyleBoxFlat.new()
+	style.bg_color = background_color
+	style.border_color = (
+		Color(0.82, 0.58, 1.0, 0.95)
+		if is_focused
+		else Color(0.72, 0.78, 0.94, 0.62)
+	)
+	style.set_border_width_all(2 if is_focused else 1)
+	style.set_corner_radius_all(5)
+	style.content_margin_left = 12.0
+	style.content_margin_right = 12.0
+	style.content_margin_top = 7.0
+	style.content_margin_bottom = 7.0
+
+	return style
+
+
+func on_founding_name_text_changed(_new_text: String) -> void:
+	if founding_city_name_line_edit == null:
+		return
+	if founding_culture_name_line_edit == null:
+		return
+
+	draft_city_name = founding_city_name_line_edit.text
+	draft_culture_name = founding_culture_name_line_edit.text
+	refresh_founding_ui_state()
+
+
+func on_founding_name_text_submitted(_submitted_text: String) -> void:
+	if not founding_panel_open:
+		return
+	if not are_founding_draft_names_valid():
+		return
+
+	on_founding_panel_save_button_pressed()
+
+
+func on_founding_modal_overlay_gui_input(event: InputEvent) -> void:
+	if event is InputEventMouse and founding_modal_overlay != null:
+		founding_modal_overlay.accept_event()
+
+
+func on_founding_panel_gui_input(event: InputEvent) -> void:
+	if event is InputEventMouse and founding_panel != null:
+		founding_panel.accept_event()
+
+
+func open_founding_panel() -> void:
+	if WorldData.has_active_world_save():
+		return
+	if not has_selected_region():
+		return
+	if founding_modal_overlay == null:
+		return
+
+	if has_valid_provisional_founding_identity():
+		draft_city_name = saved_city_name
+		draft_culture_name = saved_culture_name
+
+	founding_city_name_line_edit.text = draft_city_name
+	founding_culture_name_line_edit.text = draft_culture_name
+	founding_city_name_line_edit.caret_column = draft_city_name.length()
+	founding_culture_name_line_edit.caret_column = draft_culture_name.length()
+
+	founding_panel_open = true
+	founding_modal_overlay.visible = true
+	set_founding_camera_input_blocked(true)
+	update_cursor_visuals()
+	refresh_founding_ui_state()
+	call_deferred("grab_founding_city_name_focus_if_open")
+
+
+func grab_founding_city_name_focus_if_open() -> void:
+	if not founding_panel_open:
+		return
+	if founding_city_name_line_edit == null:
+		return
+	if not founding_city_name_line_edit.is_inside_tree():
+		return
+
+	founding_city_name_line_edit.grab_focus()
+
+
+func close_founding_panel() -> void:
+	founding_panel_open = false
+	set_founding_camera_input_blocked(false)
+
+	if founding_modal_overlay != null:
+		founding_modal_overlay.visible = false
+
+	if founding_city_name_line_edit != null:
+		founding_city_name_line_edit.release_focus()
+
+	if founding_culture_name_line_edit != null:
+		founding_culture_name_line_edit.release_focus()
+
+
+func set_founding_camera_input_blocked(is_blocked: bool) -> void:
+	if is_blocked:
+		if founding_blocked_camera != null:
+			return
+
+		var active_camera := get_viewport().get_camera_2d()
+
+		if active_camera == null:
+			return
+
+		founding_blocked_camera = active_camera
+		founding_camera_process_was_enabled = active_camera.is_processing()
+		founding_camera_input_was_enabled = active_camera.is_processing_input()
+		active_camera.set_process(false)
+		active_camera.set_process_input(false)
+		return
+
+	if founding_blocked_camera == null:
+		return
+
+	if is_instance_valid(founding_blocked_camera):
+		founding_blocked_camera.set_process(
+			founding_camera_process_was_enabled
+		)
+		founding_blocked_camera.set_process_input(
+			founding_camera_input_was_enabled
+		)
+
+	founding_blocked_camera = null
+	founding_camera_process_was_enabled = false
+	founding_camera_input_was_enabled = false
+
+
+func on_founding_panel_back_button_pressed() -> void:
+	if WorldData.has_active_world_save():
+		return
+	if not founding_panel_open:
+		return
+
+	clear_selected_region()
+	region_cursor_state = RegionCursorState.REGION_PLACE
+	update_cursor_visuals()
+	refresh_founding_ui_state()
+
+	print("Founding cancelled. Region cursor restored.")
+
+
+func on_founding_panel_save_button_pressed() -> void:
+	if WorldData.has_active_world_save():
+		return
+	if not founding_panel_open:
+		return
+
+	draft_city_name = founding_city_name_line_edit.text
+	draft_culture_name = founding_culture_name_line_edit.text
+
+	if not are_founding_draft_names_valid():
+		refresh_founding_ui_state()
+		return
+
+	saved_city_name = draft_city_name.strip_edges()
+	saved_culture_name = draft_culture_name.strip_edges()
+	draft_city_name = saved_city_name
+	draft_culture_name = saved_culture_name
+	has_provisional_founding_identity = true
+
+	founding_city_name_line_edit.text = saved_city_name
+	founding_culture_name_line_edit.text = saved_culture_name
+
+	close_founding_panel()
+	update_cursor_visuals()
+	refresh_founding_ui_state()
+
+	print("Founding identity saved for city: ", saved_city_name)
+
+
+func clear_provisional_founding_identity() -> void:
+	draft_city_name = ""
+	draft_culture_name = ""
+	saved_city_name = ""
+	saved_culture_name = ""
+	has_provisional_founding_identity = false
+
+	if founding_city_name_line_edit != null:
+		founding_city_name_line_edit.text = ""
+
+	if founding_culture_name_line_edit != null:
+		founding_culture_name_line_edit.text = ""
+
+
+func are_founding_draft_names_valid() -> bool:
+	return (
+		not draft_city_name.strip_edges().is_empty()
+		and not draft_culture_name.strip_edges().is_empty()
+	)
+
+
+func has_valid_provisional_founding_identity() -> bool:
+	return (
+		has_provisional_founding_identity
+		and not saved_city_name.strip_edges().is_empty()
+		and not saved_culture_name.strip_edges().is_empty()
+	)
+
+
+func is_provisional_founding_play_ready() -> bool:
+	return (
+		world != null
+		and has_selected_region()
+		and is_region_valid(selected_region_top_left)
+		and not founding_panel_open
+		and has_valid_provisional_founding_identity()
+	)
+
+
+func refresh_founding_ui_state() -> void:
+	if founding_panel_save_button != null:
+		founding_panel_save_button.disabled = (
+			not are_founding_draft_names_valid()
+		)
+
+	if WorldData.has_active_world_save():
+		set_play_button_region_ready(true)
+	else:
+		set_play_button_region_ready(is_provisional_founding_play_ready())
+
+	if select_region_button != null and not WorldData.has_active_world_save():
+		select_region_button.disabled = has_selected_region()
+
+	refresh_city_name_world_label()
+
+
 func on_select_region_button_pressed() -> void:
 	if WorldData.has_active_world_save():
 		print("Selection blocked: this save already has an official starting region.")
@@ -925,9 +1484,12 @@ func on_select_region_button_pressed() -> void:
 	
 	if world == null:
 		return
+	if has_selected_region() or founding_panel_open:
+		return
 
 	region_cursor_state = RegionCursorState.REGION_PLACE
 	update_cursor_visuals()
+	refresh_founding_ui_state()
 
 	print("Region selection mode enabled.")
 
@@ -961,7 +1523,7 @@ func on_generate_world_button_pressed() -> void:
 	if select_region_button != null:
 		select_region_button.visible = true
 
-	set_play_button_region_ready(false)
+	refresh_founding_ui_state()
 
 	if has_method("update_debug_panel_text"):
 		call("update_debug_panel_text")
@@ -979,8 +1541,10 @@ func on_play_button_pressed() -> void:
 		print("Play blocked: no world generated.")
 		return
 
-	if not has_selected_region():
-		print("Play blocked: select a starting region first.")
+	if not is_provisional_founding_play_ready():
+		print(
+			"Play blocked: select a valid region and save both founding names first."
+		)
 		return
 
 	if city_scene_path.is_empty():
@@ -992,16 +1556,25 @@ func on_play_button_pressed() -> void:
 	if get_tree().current_scene != null:
 		current_world_scene_path = get_tree().current_scene.scene_file_path
 
-	WorldData.lock_world_save({
+	var lock_succeeded := WorldData.lock_world_save({
 		"source_world": world,
 		"region_top_left": selected_region_top_left,
 		"region_center": selected_region_center,
 		"region_size": region_size_tiles,
 		"world_scene_path": current_world_scene_path,
 		"city_scene_path": city_scene_path,
+		"city_name": saved_city_name,
+		"culture_name": saved_culture_name,
 	})
 
+	if not lock_succeeded:
+		push_error("Could not commit the world founding identity.")
+		refresh_founding_ui_state()
+		return
+
+	clear_provisional_founding_identity()
 	set_world_locked_ui()
+	refresh_city_name_world_label()
 
 	print("Official world locked.")
 	print("World seed: ", world.seed)
@@ -1028,6 +1601,7 @@ func change_to_city_screen() -> void:
 		push_error("Could not load city scene: " + target_city_scene_path)
 
 func set_world_locked_ui() -> void:
+	close_founding_panel()
 	set_button_locked_disabled(generate_world_button)
 	set_button_locked_disabled(select_region_button)
 
@@ -1035,6 +1609,8 @@ func set_world_locked_ui() -> void:
 
 	if play_button != null:
 		play_button.text = "City"
+
+	refresh_city_name_world_label()
 
 
 func set_button_locked_disabled(button: Button) -> void:
@@ -1080,6 +1656,8 @@ func create_world_start_background() -> void:
 func _unhandled_input(event: InputEvent) -> void:
 	if world == null:
 		return
+	if founding_panel_open:
+		return
 
 	if event is InputEventMouseButton and event.pressed:
 		var mouse_event: InputEventMouseButton = event
@@ -1093,6 +1671,20 @@ func _unhandled_input(event: InputEvent) -> void:
 func handle_left_mouse_click() -> void:
 	if WorldData.has_active_world_save():
 		return
+	if founding_panel_open:
+		return
+
+	if region_cursor_state == RegionCursorState.REGION_SELECTED:
+		if (
+			has_selected_region()
+			and has_valid_provisional_founding_identity()
+			and get_region_rect(selected_region_top_left).has_point(
+				get_global_mouse_position()
+			)
+		):
+			open_founding_panel()
+		return
+
 	if region_cursor_state != RegionCursorState.REGION_PLACE:
 		return
 
@@ -1107,6 +1699,7 @@ func handle_left_mouse_click() -> void:
 
 	selected_region_center = hovered_tile
 	selected_region_top_left = region_top_left
+	clear_provisional_founding_identity()
 
 	region_cursor_state = RegionCursorState.REGION_SELECTED
 
@@ -1115,7 +1708,8 @@ func handle_left_mouse_click() -> void:
 
 	update_selected_region_line()
 	update_cursor_visuals()
-	set_play_button_region_ready(true)
+	open_founding_panel()
+	refresh_founding_ui_state()
 
 	print("Selected region centered at tile: ", selected_region_center)
 
@@ -1123,13 +1717,15 @@ func handle_left_mouse_click() -> void:
 func handle_right_mouse_click() -> void:
 	if WorldData.has_active_world_save():
 		return
+	if founding_panel_open:
+		return
 	
 	if has_selected_region():
 		clear_selected_region()
 
 		region_cursor_state = RegionCursorState.REGION_PLACE
 		update_cursor_visuals()
-		set_play_button_region_ready(false)
+		refresh_founding_ui_state()
 
 		print("Region deselected. Region cursor restored.")
 		return
@@ -1141,16 +1737,20 @@ func handle_right_mouse_click() -> void:
 			region_cursor_line.visible = false
 
 		update_cursor_visuals()
-		set_play_button_region_ready(false)
+		refresh_founding_ui_state()
 
 		print("Region selection cancelled.")
 
 func clear_selected_region() -> void:
+	close_founding_panel()
 	selected_region_center = Vector2i(-1, -1)
 	selected_region_top_left = Vector2i(-1, -1)
+	clear_provisional_founding_identity()
 
 	if selected_region_line != null:
 		selected_region_line.visible = false
+
+	refresh_founding_ui_state()
 
 func configure_world_camera() -> void:
 	var current_camera: Camera2D = get_viewport().get_camera_2d()

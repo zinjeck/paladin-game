@@ -111,10 +111,15 @@ const CITY_CITIZEN_MOVEMENT_FAILURE_REPATH_FAILED := (
 	"repath_failed"
 )
 
-# Movement progress uses deterministic scaled distance units. One cardinal
-# tile is 10,000 units; one diagonal tile approximates sqrt(2) times that.
+# Movement progress uses deterministic scaled travel-cost units. An ordinary
+# cardinal tile costs 10,000; a diagonal approximates sqrt(2) times that.
 const CITY_CITIZEN_CARDINAL_MOVEMENT_COST := 10_000
 const CITY_CITIZEN_DIAGONAL_MOVEMENT_COST := 14_142
+# Completed roads halve traversal time, which is equivalent to doubling
+# citizen movement speed while walking onto a road tile.
+const CITY_ROAD_MOVEMENT_SPEED_MULTIPLIER := 2
+const CITY_CITIZEN_ROAD_CARDINAL_MOVEMENT_COST := 5_000
+const CITY_CITIZEN_ROAD_DIAGONAL_MOVEMENT_COST := 7_071
 # Compatibility alias for systems that mean one cardinal tile of distance.
 const CITY_CITIZEN_MOVEMENT_PROGRESS_PER_TILE := (
 	CITY_CITIZEN_CARDINAL_MOVEMENT_COST
@@ -1028,6 +1033,16 @@ static func make_city_citizen(
 		)
 		return {}
 
+	var raw_culture_id = values.get("culture_id")
+
+	if typeof(raw_culture_id) != TYPE_INT or int(raw_culture_id) <= 0:
+		push_error(
+			"Cannot create city citizen without a valid positive culture ID."
+		)
+		return {}
+
+	var culture_id: int = raw_culture_id
+
 	var normalized_sex := normalize_city_citizen_sex(
 		str(values.get("sex", ""))
 	)
@@ -1102,6 +1117,7 @@ static func make_city_citizen(
 		"id": citizen_id,
 		"name": citizen_name,
 		"sex": normalized_sex,
+		"culture_id": culture_id,
 		"alive": true,
 		"hunger": clampi(
 			int(values.get("hunger", DEFAULT_CITIZEN_HUNGER)),

@@ -343,6 +343,7 @@ static func make_public_storage_haul_task_request(
 		WorldData.CITY_CITIZEN_HAUL_PHASE_PENDING_SOURCE
 	)
 	var source_tile: Vector2i = WorldData.INVALID_CITY_TILE_POSITION
+	var selection_path: Array = []
 
 	if cargo_amount > 0:
 		requested_amount = maxi(requested_amount, cargo_amount)
@@ -410,6 +411,11 @@ static func make_public_storage_haul_task_request(
 		if not bool(source_path_result.get("success", false)):
 			return {}
 
+		var raw_source_path = source_path_result.get("path", [])
+
+		if not raw_source_path is Array:
+			return {}
+
 		var raw_source_tile = source_path_result.get(
 			"destination_tile",
 			WorldData.INVALID_CITY_TILE_POSITION
@@ -418,6 +424,7 @@ static func make_public_storage_haul_task_request(
 		if not raw_source_tile is Vector2i:
 			return {}
 
+		selection_path = raw_source_path.duplicate()
 		source_tile = raw_source_tile
 		destination_result = CityResourceMatcherScript.find_nearest_eligible_destination({
 			"city_world": city_world,
@@ -501,6 +508,7 @@ static func make_public_storage_haul_task_request(
 				.CITY_CITIZEN_HAUL_REASON_GROUND_PILE_CLEANUP
 			),
 		}),
+		"selection_path": selection_path,
 	}
 
 
@@ -650,6 +658,11 @@ static func make_directed_haul_task_request(
 	if not bool(source_path_result.get("success", false)):
 		return {}
 
+	var raw_source_path = source_path_result.get("path", [])
+
+	if not raw_source_path is Array:
+		return {}
+
 	var raw_source_tile = source_path_result.get(
 		"destination_tile",
 		WorldData.INVALID_CITY_TILE_POSITION
@@ -709,6 +722,7 @@ static func make_directed_haul_task_request(
 			int(source_path_result.get("path_cost", 0))
 			+ int(destination_result.get("path_cost", 0))
 		),
+		"selection_path": raw_source_path.duplicate(),
 	}
 
 

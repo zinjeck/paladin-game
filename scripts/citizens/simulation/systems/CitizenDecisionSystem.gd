@@ -60,9 +60,9 @@ const MAX_RECOVERY_SCANS_PER_TICK: int = 64
 
 # Idle locomotion is deliberately local and sparse. It gives citizens visible
 # life without turning the absence of a task into an expensive journey.
-const IDLE_STAND_CHANCE_PERCENT: int = 55
-const IDLE_MINIMUM_WAIT_MINUTES: int = 10
-const IDLE_MAXIMUM_WAIT_MINUTES: int = 30
+const IDLE_STAND_CHANCE_PERCENT: int = 35
+const IDLE_MINIMUM_WAIT_MINUTES: int = 5
+const IDLE_MAXIMUM_WAIT_MINUTES: int = 15
 const IDLE_ANCHOR_RADIUS_TILES: int = 4
 const IDLE_MAXIMUM_DESTINATION_DISTANCE: int = 4
 const IDLE_MAXIMUM_PATH_STEPS: int = 6
@@ -2273,8 +2273,23 @@ static func _get_idle_anchor_tile(
 	var life_anchor := _get_citizen_life_anchor_tile(citizen)
 
 	if life_anchor != WorldData.INVALID_CITY_TILE_POSITION:
-		_idle_anchor_tile_by_citizen_id[citizen_id] = life_anchor
-		return life_anchor
+		var distance_from_life_anchor := (
+			absi(current_tile.x - life_anchor.x)
+			+ absi(current_tile.y - life_anchor.y)
+		)
+
+		# A destination can be both local to the citizen and inside the life-
+		# anchor radius only while these two search radii overlap. Homeless
+		# workers can finish a shift far from the Keep; anchoring them to that
+		# distant civic point would otherwise leave them with no candidates and
+		# visually frozen until the next work shift.
+		if (
+			distance_from_life_anchor
+			<= IDLE_ANCHOR_RADIUS_TILES
+			+ IDLE_MAXIMUM_DESTINATION_DISTANCE
+		):
+			_idle_anchor_tile_by_citizen_id[citizen_id] = life_anchor
+			return life_anchor
 
 	var raw_anchor_tile = _idle_anchor_tile_by_citizen_id.get(
 		citizen_id,

@@ -165,7 +165,9 @@ static func _prepare_active_mover_path(context: Dictionary) -> bool:
 		and movement_path_index < movement_path.size()
 		and current_step_cost > 0
 		and movement_progress >= 0
-		and movement_progress < current_step_cost
+		# A road may complete beneath an already-moving citizen and halve the
+		# current step cost between ticks. Let the normal advancement loop consume
+		# that now-sufficient progress instead of invalidating the path.
 		and movement_speed > 0
 		and repath_attempt_count >= 0
 		and repath_attempt_count

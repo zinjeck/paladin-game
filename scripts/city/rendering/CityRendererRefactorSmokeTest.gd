@@ -13,6 +13,8 @@ const CityConstructionSystemScript = preload(
 const CityNavigationSystemScript = preload(
 	"res://scripts/city/simulation/systems/CityNavigationSystem.gd"
 )
+const TEST_CITY_NAME := "Smoke Test City"
+const TEST_CULTURE_NAME := "Smoke Test Culture"
 
 var failure_count: int = 0
 var background_draw_count: int = 0
@@ -63,11 +65,14 @@ func _run_smoke_test() -> void:
 		"Interaction render layer must exist."
 	)
 
+	_test_city_map_texture_cache(renderer)
+	_test_city_information_panel_initial(renderer)
 	_test_city_natural_features(renderer)
 	_test_ground_pile_coalescing(renderer)
 	await _test_focused_layer_invalidation(renderer)
 	_test_resource_catalog_and_bulk_totals()
 	_place_and_validate_city_fixture(renderer)
+	await _test_city_information_panel_live_data(renderer)
 	_test_universal_construction_core(renderer)
 
 	renderer.queue_all_city_render_layers_redraw()
@@ -92,6 +97,316 @@ func _run_smoke_test() -> void:
 	# WorldData/Image references before this short-lived test process exits.
 	for _frame_index in range(4):
 		await get_tree().process_frame
+
+
+func _test_city_map_texture_cache(renderer: CityRenderer) -> void:
+	var view_modes: Array[int] = renderer.get_all_city_view_modes()
+	var original_view_mode := renderer.city_view_mode
+	_expect(
+		renderer.city_texture_cache.mode_textures.size()
+		== view_modes.size()
+		and renderer.has_valid_saved_city_map_texture_cache(
+			renderer.city_world
+		),
+		"Every city map mode must be cached before the scene is interactive."
+	)
+
+	for mode in view_modes:
+		var raw_texture = renderer.city_texture_cache.mode_textures.get(
+			mode
+		)
+		_expect(
+			raw_texture is ImageTexture,
+			"Every city map mode must have a ready ImageTexture."
+		)
+
+		if not raw_texture is ImageTexture:
+			continue
+
+		var texture: ImageTexture = raw_texture
+		renderer.set_city_view_mode(mode)
+		_expect(
+			renderer.city_terrain_texture == texture,
+			"Switching city map modes must be a cache-only texture lookup."
+		)
+
+		var sample_tile_position := Vector2i(
+			int(renderer.city_world.width / 2),
+			int(renderer.city_world.height / 2)
+		)
+		var source_tile := renderer.city_world.get_tile(
+			sample_tile_position.x,
+			sample_tile_position.y
+		)
+		var expected_color := renderer.get_city_tile_color_for_mode(
+			source_tile,
+			mode
+		)
+		var actual_color := texture.get_image().get_pixelv(
+			sample_tile_position
+		)
+		_expect(
+			_colors_match_rgba8(actual_color, expected_color),
+			"Batched city map colors must match the single-mode color contract."
+		)
+
+	renderer.set_city_view_mode(original_view_mode)
+
+
+func _colors_match_rgba8(a: Color, b: Color) -> bool:
+	var tolerance := 1.0 / 255.0 + 0.0001
+	return (
+		absf(a.r - b.r) <= tolerance
+		and absf(a.g - b.g) <= tolerance
+		and absf(a.b - b.b) <= tolerance
+		and absf(a.a - b.a) <= tolerance
+	)
+
+
+func _test_city_information_panel_initial(
+	renderer: CityRenderer
+) -> void:
+	var city_ui = renderer.city_information_ui
+
+	_expect(
+		city_ui != null and city_ui.panel != null,
+		"City information panel must exist."
+	)
+
+	if city_ui == null or city_ui.panel == null:
+		return
+
+	_expect(
+		city_ui.panel.get_parent() == renderer.ui_root,
+		"City information panel must live in the screen-space UI root."
+	)
+	_expect(
+		city_ui.panel.position.is_equal_approx(
+			city_ui.PANEL_POSITION
+		)
+		and city_ui.panel.position.is_zero_approx(),
+		"City information panel must attach to the exact upper-left corner."
+	)
+	_expect(
+		city_ui.panel.size.x > city_ui.panel.size.y,
+		"City information panel must be rectangular and wider than tall."
+	)
+	_expect(
+		city_ui.city_name_label.text == TEST_CITY_NAME,
+		"City information panel must show the committed city name."
+	)
+	_expect(
+		city_ui.date_time_label.text
+		== SimulationClock.get_time_display_text(),
+		"City information panel must show the current day and time."
+	)
+	_expect(
+		city_ui.season_label.text.is_empty(),
+		"City information panel season cell must remain blank."
+	)
+	_expect(
+		city_ui.hunger_label.text == "Hun"
+		and city_ui.happiness_label.text == "Hap",
+		"City information panel must use the Hun and Hap labels."
+	)
+	_expect(
+		city_ui.population_button.text == "Pop\n0"
+		and city_ui.jobs_button.text == "Jobs"
+		and city_ui.reserved_button.text.is_empty(),
+		"City information buttons must begin with the requested text."
+	)
+	_expect(
+		is_zero_approx(city_ui.hunger_bar.value)
+		and is_zero_approx(city_ui.happiness_bar.value),
+		"An empty city must show fully depleted need meters."
+	)
+	_expect(
+		not city_ui.hunger_label.visible
+		and not city_ui.happiness_label.visible
+		and not city_ui.hunger_bar.visible
+		and not city_ui.happiness_bar.visible,
+		"Hun and Hap readouts must stay hidden until the City Keep is placed."
+	)
+	_expect(
+		city_ui.hunger_bar.size.y <= 4.0
+		and city_ui.happiness_bar.size.y <= 4.0,
+		"Hun and Hap meters must remain slim strips."
+	)
+	_expect(
+		city_ui.population_button.position.x
+		== city_ui.jobs_button.position.x
+		and city_ui.jobs_button.position.x
+		== city_ui.reserved_button.position.x
+		and city_ui.population_button.position.y
+		< city_ui.jobs_button.position.y
+		and city_ui.jobs_button.position.y
+		< city_ui.reserved_button.position.y,
+		"City information buttons must form one right-side stack."
+	)
+	_expect(
+		city_ui.date_time_label.get_parent().position.y
+		== city_ui.season_label.get_parent().position.y
+		and city_ui.hunger_label.get_parent().position.y
+		== city_ui.happiness_label.get_parent().position.y,
+		"Date/season and Hun/Hap must each share a row."
+	)
+	_expect(
+		city_ui.panel.mouse_filter == Control.MOUSE_FILTER_STOP
+		and city_ui.population_button.mouse_filter
+		== Control.MOUSE_FILTER_STOP
+		and city_ui.jobs_button.mouse_filter
+		== Control.MOUSE_FILTER_STOP
+		and city_ui.reserved_button.mouse_filter
+		== Control.MOUSE_FILTER_STOP,
+		"Panel surfaces must block map clicks underneath them."
+	)
+	_expect(
+		city_ui.city_name_label.mouse_filter
+		== Control.MOUSE_FILTER_IGNORE
+		and city_ui.date_time_label.mouse_filter
+		== Control.MOUSE_FILTER_IGNORE
+		and city_ui.season_label.mouse_filter
+		== Control.MOUSE_FILTER_IGNORE
+		and city_ui.hunger_bar.mouse_filter
+		== Control.MOUSE_FILTER_IGNORE
+		and city_ui.happiness_bar.mouse_filter
+		== Control.MOUSE_FILTER_IGNORE,
+		"City information text and meters must not consume input."
+	)
+	_expect(
+		city_ui.population_button.pressed.get_connections().is_empty()
+		and city_ui.jobs_button.pressed.get_connections().is_empty()
+		and city_ui.reserved_button.pressed.get_connections().is_empty(),
+		"City information buttons must remain inert in this pass."
+	)
+
+	var panel_style := (
+		city_ui.panel.get_theme_stylebox("panel") as StyleBoxFlat
+	)
+	_expect(
+		panel_style != null
+		and is_equal_approx(panel_style.bg_color.r, panel_style.bg_color.g)
+		and is_equal_approx(panel_style.bg_color.g, panel_style.bg_color.b),
+		"City information panel must use a neutral grey fill."
+	)
+	_expect(
+		city_ui.hunger_bar.background_color.r
+		> city_ui.hunger_bar.background_color.g
+		and city_ui.hunger_bar.fill_color.g
+		> city_ui.hunger_bar.fill_color.r,
+		"Need meters must expose a red remainder and green filled segment."
+	)
+
+	var original_world_minutes := SimulationClock.absolute_world_minutes
+	SimulationClock.absolute_world_minutes = 2 * 24 * 60 + 9 * 60 + 7
+	SimulationClock.emit_time_changed()
+	_expect(
+		city_ui.date_time_label.text == "Day 3, 09:07",
+		"Clock signals must refresh the city information date immediately."
+	)
+	SimulationClock.absolute_world_minutes = original_world_minutes
+	SimulationClock.emit_time_changed()
+
+	var panel_position_before: Vector2 = city_ui.panel.position
+	var panel_size_before: Vector2 = city_ui.panel.size
+	var original_zoom := renderer.camera.zoom
+	renderer.camera.zoom = original_zoom * 0.75
+	renderer.update_city_ui_layout()
+	_expect(
+		city_ui.panel.position.is_equal_approx(panel_position_before)
+		and city_ui.panel.size.is_equal_approx(panel_size_before),
+		"Camera zoom must not move or scale the city information panel."
+	)
+	renderer.camera.zoom = original_zoom
+	renderer.update_city_ui_layout()
+	_expect(
+		renderer.object_info_panel.position.y + 0.01
+		>= city_ui.get_reserved_bottom_y(),
+		"Object details must lay out below the fixed city information panel; "
+		+ "got y=" + str(renderer.object_info_panel.position.y)
+		+ " below reserved y=" + str(city_ui.get_reserved_bottom_y()) + "."
+	)
+
+
+func _test_city_information_panel_live_data(
+	renderer: CityRenderer
+) -> void:
+	var city_ui = renderer.city_information_ui
+	var citizen_count := WorldData.get_city_population_count()
+
+	_expect(
+		city_ui.population_button.text == "Pop\n" + str(citizen_count),
+		"Founding must refresh the population button immediately."
+	)
+	_expect(
+		city_ui.hunger_label.visible
+		and city_ui.happiness_label.visible
+		and city_ui.hunger_bar.visible
+		and city_ui.happiness_bar.visible,
+		"Founding must reveal both citizen-need readouts immediately."
+	)
+	_expect(
+		is_equal_approx(city_ui.hunger_bar.value, 100.0)
+		and is_equal_approx(city_ui.happiness_bar.value, 70.0),
+		"Founders' average hunger and happiness must appear in the meters."
+	)
+
+	if citizen_count <= 0:
+		return
+
+	var first_citizen: Dictionary = WorldData.city_citizens[0]
+	var first_citizen_id := int(first_citizen.get("id", -1))
+	var original_hunger := int(first_citizen.get("hunger", 100))
+	var original_hunger_remainder := int(
+		first_citizen.get("hunger_decay_remainder", 0)
+	)
+	var original_happiness := int(first_citizen.get("happiness", 70))
+	var original_hunger_total := 0.0
+	var original_happiness_total := 0.0
+
+	for raw_citizen in WorldData.city_citizens:
+		var citizen: Dictionary = raw_citizen
+		original_hunger_total += float(citizen.get("hunger", 100))
+		original_happiness_total += float(
+			citizen.get("happiness", 70)
+		)
+
+	first_citizen["happiness"] = 30
+	WorldData.city_citizens[0] = first_citizen
+	_expect(
+		WorldData.set_city_citizen_hunger_state(
+			first_citizen_id,
+			40,
+			original_hunger_remainder
+		),
+		"Need-meter fixture must update the first citizen's hunger."
+	)
+	await get_tree().process_frame
+
+	var expected_hunger := (
+		original_hunger_total - float(original_hunger) + 40.0
+	) / float(citizen_count)
+	var expected_happiness := (
+		original_happiness_total - float(original_happiness) + 30.0
+	) / float(citizen_count)
+	_expect(
+		is_equal_approx(city_ui.hunger_bar.value, expected_hunger)
+		and is_equal_approx(
+			city_ui.happiness_bar.value,
+			expected_happiness
+		),
+		"Citizen version changes must refresh both average need meters."
+	)
+
+	first_citizen = WorldData.city_citizens[0]
+	first_citizen["happiness"] = original_happiness
+	WorldData.city_citizens[0] = first_citizen
+	WorldData.set_city_citizen_hunger_state(
+		first_citizen_id,
+		original_hunger,
+		original_hunger_remainder
+	)
+	await get_tree().process_frame
 
 
 func _test_focused_layer_invalidation(
@@ -379,14 +694,20 @@ func _prepare_dev_city_region() -> void:
 	)
 
 	SimulationClock.start_new_game()
-	WorldData.lock_world_save({
+	var world_lock_succeeded := WorldData.lock_world_save({
 		"source_world": dev_world,
 		"region_top_left": region_top_left,
 		"region_center": region_center,
 		"region_size": DevCityLauncher.DEV_REGION_SIZE,
 		"world_scene_path": "res://scenes/MainMenu.tscn",
 		"city_scene_path": "res://scenes/CityScreen.tscn",
+		"city_name": TEST_CITY_NAME,
+		"culture_name": TEST_CULTURE_NAME,
 	})
+	_expect(
+		world_lock_succeeded,
+		"The smoke-test world and founding identity must lock."
+	)
 
 
 func _test_resource_catalog_and_bulk_totals() -> void:
@@ -747,10 +1068,44 @@ func _place_and_validate_city_fixture(
 
 	renderer.after_city_center_placed(keep)
 
+	var primary_culture_id := int(
+		WorldData.player_city_data.get(
+			"primary_culture_id",
+			WorldData.INVALID_CULTURE_ID
+		)
+	)
+	_expect(
+		str(WorldData.player_city_data.get("name", ""))
+		== TEST_CITY_NAME,
+		"City Keep placement must use the committed official city name."
+	)
+	_expect(
+		primary_culture_id
+		== WorldData.get_official_founding_culture_id()
+		and WorldData.get_culture_name_by_id(primary_culture_id)
+		== TEST_CULTURE_NAME,
+		"The founded city's primary culture must resolve to the committed culture."
+	)
+
 	_expect(
 		WorldData.get_city_population_count()
 		== WorldData.STARTING_CITY_POPULATION,
 		"Founding must still create the starting population."
+	)
+
+	var all_founders_share_primary_culture := true
+
+	for raw_citizen in WorldData.city_citizens:
+		if (
+			not raw_citizen is Dictionary
+			or raw_citizen.get("culture_id") != primary_culture_id
+		):
+			all_founders_share_primary_culture = false
+			break
+
+	_expect(
+		all_founders_share_primary_culture,
+		"Every starting citizen must reference the city's primary culture."
 	)
 
 	var keep_id := int(keep.get("id", -1))
@@ -1303,42 +1658,65 @@ func _test_universal_construction_core(
 		"Completed construction must consume every reserved pile."
 	)
 
-	var road_tile := _find_clear_road_construction_tile(
-		renderer.city_world
+	var road_tiles := _find_clear_road_construction_tiles(
+		renderer.city_world,
+		3
 	)
 	_expect(
-		road_tile != WorldData.INVALID_CITY_TILE_POSITION,
-		"A clear road construction tile must exist."
+		road_tiles.size() == 3,
+		"Three clear road construction tiles must exist."
 	)
 
-	if road_tile == WorldData.INVALID_CITY_TILE_POSITION:
+	if road_tiles.size() != 3:
 		return
 
-	var stone_before := (
-		WorldData.get_total_city_ground_pile_resource_amount(
-			WorldData.RESOURCE_STONE
-		)
-	)
-	var road_site := CityConstructionSystemScript.create_road_site(
-		[road_tile],
+	var road_sites := CityConstructionSystemScript.create_road_sites(
+		road_tiles,
 		"player",
 		renderer.city_world
 	)
-	var road_site_id := int(road_site.get("id", -1))
-
-	_expect(road_site_id > 0, "Road placement must create a blueprint.")
 	_expect(
-		not renderer.is_city_construction_site_selectable(road_site),
-		"Road blueprints must remain outside building-panel selection."
+		road_sites.size() == road_tiles.size(),
+		"A painted road must become one independent construction site per tile."
 	)
 
-	if road_site_id <= 0:
+	if road_sites.size() != road_tiles.size():
 		return
 
+	var site_id_lookup: Dictionary = {}
+
+	for site_index in range(road_sites.size()):
+		var road_site: Dictionary = road_sites[site_index]
+		var road_site_id := int(road_site.get("id", -1))
+		var footprint_tiles = road_site.get("footprint_tiles", [])
+		site_id_lookup[road_site_id] = true
+		_expect(
+			road_site_id > 0
+			and footprint_tiles is Array
+			and footprint_tiles.size() == 1
+			and footprint_tiles[0] == road_tiles[site_index]
+			and road_site.get("material_recipe", {}).is_empty()
+			and int(road_site.get("required_labor_minutes", -1)) == 8
+			and int(road_site.get("maximum_workers", -1)) == 1,
+			"Each road tile must own a labor-only, one-worker, eight-minute blueprint."
+		)
+		_expect(
+			renderer.is_city_construction_site_selectable(road_site),
+			"Each road blueprint tile must expose its own progress selection."
+		)
+
+	_expect(
+		site_id_lookup.size() == road_sites.size(),
+		"Every painted road tile must receive a distinct construction-site ID."
+	)
+
+	var selected_road_site: Dictionary = road_sites[1]
+	var selected_road_site_id := int(selected_road_site.get("id", -1))
+	var selected_road_tile: Vector2i = road_tiles[1]
 	var road_progress := (
 		CityConstructionSystemScript
 		.get_city_construction_site_progress_summary(
-			road_site_id
+			selected_road_site_id
 		)
 	)
 	_expect(
@@ -1351,40 +1729,113 @@ func _test_universal_construction_core(
 			)
 		)
 		and int(road_progress.get("progress_percent", -1)) == 0,
-		"An unobstructed site must begin at zero without phantom clearing work."
+		"An unobstructed road tile must begin at zero without phantom clearing work."
 	)
-
 	_expect(
 		CityConstructionSystem.add_resource_to_city_construction_site(
-			road_site_id,
+			selected_road_site_id,
 			WorldData.RESOURCE_STONE,
 			1
-		) == 1,
-		"A road blueprint must accept its physical material."
+		) == 0,
+		"Road construction must reject materials because it is labor-only."
+	)
+	_expect(
+		CityWorkSystem.get_cancel_preview_tiles([selected_road_tile])
+		== [selected_road_tile],
+		"Cancel Task must resolve only the road blueprint tile inside the box."
 	)
 	_expect(
 		CityConstructionSystemScript.cancel_city_construction_site(
-			road_site_id
+			selected_road_site_id
 		),
-		"Construction cancellation must succeed."
+		"Canceling one road tile must succeed independently."
 	)
 	_expect(
-		WorldData.get_total_city_ground_pile_resource_amount(
-			WorldData.RESOURCE_STONE
-		) == stone_before + 1,
-		"Cancellation must preserve delivered resources in place."
+		WorldData.get_city_construction_site_by_id(
+			selected_road_site_id
+		).is_empty()
+		and not WorldData.get_city_construction_site_by_id(
+			int(road_sites[0].get("id", -1))
+		).is_empty()
+		and not WorldData.get_city_construction_site_by_id(
+			int(road_sites[2].get("id", -1))
+		).is_empty(),
+		"Canceling one road tile must leave the neighboring painted tiles intact."
 	)
 
-	for raw_ground_pile in WorldData.get_city_ground_pile_snapshot():
-		if not raw_ground_pile is Dictionary:
-			continue
-
-		_expect(
-			WorldData.get_city_ground_pile_construction_site_id(
-				raw_ground_pile
-			) != road_site_id,
-			"Cancellation must release construction pile ownership."
+	var completed_site_id := int(road_sites[0].get("id", -1))
+	var completed_site := WorldData.get_city_construction_site_by_id(
+		completed_site_id
+	)
+	completed_site["completed_labor_minutes"] = int(
+		completed_site.get("required_labor_minutes", 0)
+	)
+	_expect(
+		CityConstructionSystemScript.update_city_construction_site(
+			completed_site
+		),
+		"The road completion fixture must store full tile labor."
+	)
+	var completed_road := (
+		CityConstructionSystemScript.complete_city_construction_site(
+			completed_site_id
 		)
+	)
+	_expect(
+		not completed_road.is_empty()
+		and renderer.is_city_object_selectable(completed_road)
+		and WorldData.get_city_object_footprint_tiles(
+			completed_road
+		) == [road_tiles[0]],
+		"A completed road tile must become one selectable one-tile object."
+	)
+	_expect(
+		WorldData.get_city_citizen_movement_step_cost(
+			road_tiles[0] + Vector2i.LEFT,
+			road_tiles[0]
+		) == WorldData.CITY_CITIZEN_ROAD_CARDINAL_MOVEMENT_COST,
+		"Entering a completed road tile must cost half a normal cardinal step."
+	)
+
+	CityConstructionSystemScript.cancel_city_construction_site(
+		int(road_sites[2].get("id", -1))
+	)
+
+
+func _find_clear_road_construction_tiles(
+	city_world: WorldData,
+	required_count: int
+) -> Array[Vector2i]:
+	var tiles: Array[Vector2i] = []
+
+	if city_world == null or required_count <= 0:
+		return tiles
+
+	for y in range(city_world.height):
+		for x in range(city_world.width):
+			var tile_position := Vector2i(x, y)
+
+			if (
+				WorldData.can_place_city_road_tile(
+					city_world,
+					tile_position
+				)
+				and WorldData.get_city_surface_feature(
+					city_world.get_tile(x, y)
+				) == WorldData.CITY_SURFACE_FEATURE_NONE
+				and not WorldData.has_city_ground_pile_at_tile(
+					tile_position
+				)
+				and not WorldData.has_living_city_citizen_at_tile(
+					tile_position
+				)
+			):
+				tiles.append(tile_position)
+
+				if tiles.size() >= required_count:
+					return tiles
+
+	return tiles
 
 
 func _find_clear_road_construction_tile(

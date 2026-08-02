@@ -907,7 +907,66 @@ static func synchronize_player_work_board() -> void:
 		)
 
 
+static func synchronize_construction_work_order(site_id: int) -> Dictionary:
+	var site := WorldData.get_city_construction_site_by_id(site_id)
+
+	if site.is_empty():
+		return {}
+
+	var source_key := _make_construction_source_key(site_id)
+	var order_id := _ensure_order_for_source({
+		"source_key": source_key,
+		"order_type": ORDER_TYPE_CONSTRUCTION_SITE,
+		"source_id": site_id,
+		"created_world_minute": int(site.get("issued_world_minute", 0)),
+	})
+
+	if order_id <= 0:
+		return {}
+
+	refresh_work_order_runtimes([order_id])
+	return get_city_work_order_by_id(order_id)
+
+
+static func refresh_work_order_runtimes(raw_order_ids: Array) -> void:
+	var order_id_lookup: Dictionary = {}
+
+	for raw_order_id in raw_order_ids:
+		var order_id := int(raw_order_id)
+
+		if order_id > 0 and WorldData.city_work_orders.has(order_id):
+			order_id_lookup[order_id] = true
+
+	if order_id_lookup.is_empty():
+		return
+
+	var command_snapshot := get_city_player_command_snapshot()
+	var ground_pile_snapshot := WorldData.get_city_ground_pile_snapshot()
+	var order_ids: Array = order_id_lookup.keys()
+	order_ids.sort()
+
+	for raw_order_id in order_ids:
+		_refresh_order_runtime(
+			int(raw_order_id),
+			command_snapshot,
+			ground_pile_snapshot
+		)
+
+
 static func get_best_player_job_for_citizen(citizen_id: int) -> Dictionary:
+	return get_best_player_job_for_citizen_and_orders(
+		citizen_id,
+		WorldData.city_work_orders.keys()
+	)
+
+
+# Independent road tiles retain independent construction sites and work-order
+# IDs, but route evaluation is batched. A long painted road therefore costs one
+# road-candidate search per citizen rather than one A* search per tile.
+static func get_best_player_job_for_citizen_and_orders(
+	citizen_id: int,
+	raw_order_ids: Array
+) -> Dictionary:
 	var citizen := WorldData.get_city_citizen_by_id(citizen_id)
 
 	if (
@@ -917,9 +976,18 @@ static func get_best_player_job_for_citizen(citizen_id: int) -> Dictionary:
 	):
 		return {}
 
-	var best_selection: Dictionary = {}
-	var order_ids: Array = WorldData.city_work_orders.keys()
+	var order_id_lookup: Dictionary = {}
+
+	for raw_order_id in raw_order_ids:
+		var order_id := int(raw_order_id)
+
+		if order_id > 0 and WorldData.city_work_orders.has(order_id):
+			order_id_lookup[order_id] = true
+
+	var order_ids: Array = order_id_lookup.keys()
 	order_ids.sort()
+	var best_selection: Dictionary = {}
+	var batchable_road_order_id_by_site_id: Dictionary = {}
 
 	for raw_order_id in order_ids:
 		var order_id := int(raw_order_id)
@@ -931,6 +999,12 @@ static func get_best_player_job_for_citizen(citizen_id: int) -> Dictionary:
 		):
 			continue
 
+		if _construction_order_uses_batchable_road_site(order):
+			batchable_road_order_id_by_site_id[
+				int(order.get("source_id", -1))
+			] = order_id
+			continue
+
 		var candidate := _get_best_job_candidate_for_order(
 			citizen_id,
 			order
@@ -939,20 +1013,301 @@ static func get_best_player_job_for_citizen(citizen_id: int) -> Dictionary:
 		if candidate.is_empty():
 			continue
 
-		var attention_score := _get_parent_attention_score(
-			order,
-			candidate
-		)
-		candidate["work_order_id"] = order_id
-		candidate["parent_attention_score"] = attention_score
-		candidate["priority_rank"] = int(
-			order.get("priority_rank", PRIORITY_NORMAL)
+		candidate = _decorate_candidate_for_order(
+			candidate,
+			order
 		)
 
 		if _selection_is_better(candidate, best_selection):
 			best_selection = candidate
 
+	var road_candidate := _get_best_batchable_road_candidate(
+		citizen_id,
+		batchable_road_order_id_by_site_id
+	)
+
+	if _selection_is_better(road_candidate, best_selection):
+		best_selection = road_candidate
+
 	return best_selection
+
+
+static func _decorate_candidate_for_order(
+	candidate: Dictionary,
+	order: Dictionary
+) -> Dictionary:
+	if candidate.is_empty() or order.is_empty():
+		return {}
+
+	var decorated := candidate.duplicate(true)
+	decorated["work_order_id"] = int(order.get("id", -1))
+	decorated["priority_rank"] = int(
+		order.get("priority_rank", PRIORITY_NORMAL)
+	)
+	decorated["parent_attention_score"] = (
+		_get_parent_attention_score(order, decorated)
+	)
+	return decorated
+
+
+static func _construction_order_uses_batchable_road_site(
+	order: Dictionary
+) -> bool:
+	if (
+		order.is_empty()
+		or str(order.get("order_type", ""))
+		!= ORDER_TYPE_CONSTRUCTION_SITE
+	):
+		return false
+
+	var site := WorldData.get_city_construction_site_by_id(
+		int(order.get("source_id", -1))
+	)
+	var raw_recipe = site.get("material_recipe", {})
+
+	return (
+		not site.is_empty()
+		and str(site.get("object_type", ""))
+		== WorldData.CITY_OBJECT_ROAD
+		and raw_recipe is Dictionary
+		and raw_recipe.is_empty()
+	)
+
+
+static func _get_best_batchable_road_candidate(
+	citizen_id: int,
+	order_id_by_site_id: Dictionary
+) -> Dictionary:
+	if order_id_by_site_id.is_empty():
+		return {}
+
+	var site_ids: Array = order_id_by_site_id.keys()
+	site_ids.sort()
+	var best_candidate := (
+		_get_best_command_candidate_for_construction_sites(
+			citizen_id,
+			order_id_by_site_id
+		)
+	)
+	var construction_candidate := (
+		CityConstructionSystemScript
+		.get_best_assignable_batchable_road_work_for_citizen(
+			citizen_id,
+			site_ids
+		)
+	)
+
+	if not construction_candidate.is_empty():
+		var kind := str(
+			construction_candidate.get("player_work_kind", "")
+		)
+		var tie_break_key := str(
+			construction_candidate.get("tie_break_key", "")
+		)
+		construction_candidate["job_id"] = (
+			kind + ":" + tie_break_key
+		)
+
+		if _job_candidate_is_better(
+			construction_candidate,
+			best_candidate
+		):
+			best_candidate = construction_candidate
+
+	if best_candidate.is_empty():
+		return {}
+
+	var selected_site_id := int(
+		best_candidate.get("construction_site_id", -1)
+	)
+	var selected_order_id := int(
+		order_id_by_site_id.get(selected_site_id, -1)
+	)
+	var selected_order := get_city_work_order_by_id(selected_order_id)
+
+	if selected_order.is_empty():
+		return {}
+
+	best_candidate["progress_unlocking"] = (
+		_candidate_unlocks_progress(selected_order, best_candidate)
+	)
+	return _decorate_candidate_for_order(
+		best_candidate,
+		selected_order
+	)
+
+
+# Clearing commands for independent road tiles are routed as one destination
+# set. The returned command still carries its exact construction_site_id, so
+# assignment, cancellation, claims, and completion remain tile-local.
+static func _get_best_command_candidate_for_construction_sites(
+	citizen_id: int,
+	order_id_by_site_id: Dictionary
+) -> Dictionary:
+	var citizen := WorldData.get_city_citizen_by_id(citizen_id)
+	var raw_citizen_tile = citizen.get(
+		"city_tile_position",
+		WorldData.INVALID_CITY_TILE_POSITION
+	)
+
+	if citizen.is_empty() or not raw_citizen_tile is Vector2i:
+		return {}
+
+	var citizen_tile: Vector2i = raw_citizen_tile
+	var command_by_id: Dictionary = {}
+	var command_ids_by_work_tile: Dictionary = {}
+	var work_tile_lookup: Dictionary = {}
+
+	for raw_command in get_city_player_command_snapshot():
+		if not raw_command is Dictionary:
+			continue
+
+		var command: Dictionary = raw_command
+		var construction_site_id := int(
+			command.get("construction_site_id", -1)
+		)
+
+		if (
+			not order_id_by_site_id.has(construction_site_id)
+			or not city_player_command_is_assignable(command)
+		):
+			continue
+
+		var command_id := int(command.get("id", -1))
+		var work_tiles := get_city_player_command_work_tiles(
+			command,
+			citizen_id
+		)
+
+		if command_id <= 0 or work_tiles.is_empty():
+			continue
+
+		command_by_id[command_id] = command
+
+		for work_tile in work_tiles:
+			work_tile_lookup[work_tile] = true
+			var command_ids: Array = command_ids_by_work_tile.get(
+				work_tile,
+				[]
+			)
+
+			if not command_ids.has(command_id):
+				command_ids.append(command_id)
+				command_ids.sort()
+				command_ids_by_work_tile[work_tile] = command_ids
+
+	if work_tile_lookup.is_empty():
+		return {}
+
+	var work_tiles: Array = work_tile_lookup.keys()
+	work_tiles.sort_custom(_sort_tiles_y_then_x)
+	var path_result := CityNavigationSystemScript.find_path_to_any_city_tile({
+		"city_world": WorldData.official_city_world,
+		"start_tile": citizen_tile,
+		"destination_tiles": work_tiles,
+		"max_expanded_nodes": _get_city_wide_path_expansion_limit(
+			WorldData.official_city_world
+		),
+		"citizen_id": citizen_id,
+		"heuristic_weight": EXACT_COMMAND_PATH_HEURISTIC_WEIGHT,
+	})
+
+	if not bool(path_result.get("success", false)):
+		return {}
+
+	var raw_destination_tile = path_result.get(
+		"destination_tile",
+		WorldData.INVALID_CITY_TILE_POSITION
+	)
+
+	if not raw_destination_tile is Vector2i:
+		return {}
+
+	var matching_command_ids: Array = command_ids_by_work_tile.get(
+		raw_destination_tile,
+		[]
+	)
+
+	if matching_command_ids.is_empty():
+		return {}
+
+	matching_command_ids.sort()
+	var selected_command_id := int(matching_command_ids[0])
+	var raw_selected_command = command_by_id.get(selected_command_id, {})
+
+	if not raw_selected_command is Dictionary:
+		return {}
+
+	var candidate: Dictionary = raw_selected_command.duplicate(true)
+	candidate["player_work_kind"] = "command"
+	candidate["job_id"] = "command:" + str(selected_command_id)
+	candidate["estimated_path_cost"] = maxi(
+		int(path_result.get("path_cost", 0)),
+		0
+	)
+	candidate["target_tile"] = raw_destination_tile
+	candidate["assignment_path"] = path_result.get("path", []).duplicate()
+	candidate["tie_break_key"] = str(selected_command_id)
+	return candidate
+
+
+static func get_player_job_for_citizen_and_order(
+	citizen_id: int,
+	order_id: int
+) -> Dictionary:
+	var citizen := WorldData.get_city_citizen_by_id(citizen_id)
+
+	if (
+		citizen.is_empty()
+		or not bool(citizen.get("alive", false))
+		or int(citizen.get("job_object_id", -1)) > 0
+	):
+		return {}
+
+	var order := get_city_work_order_by_id(order_id)
+
+	if (
+		order.is_empty()
+		or str(order.get("state", "")) == ORDER_STATE_CANCELLED
+	):
+		return {}
+
+	var candidate := _get_best_job_candidate_for_order(citizen_id, order)
+
+	if candidate.is_empty():
+		return {}
+
+	return _decorate_candidate_for_order(candidate, order)
+
+
+static func get_best_construction_job_for_citizen_excluding_order(
+	citizen_id: int,
+	excluded_order_id: int
+) -> Dictionary:
+	var construction_order_ids: Array[int] = []
+	var order_ids: Array = WorldData.city_work_orders.keys()
+	order_ids.sort()
+
+	for raw_order_id in order_ids:
+		var order_id := int(raw_order_id)
+
+		if order_id == excluded_order_id:
+			continue
+
+		var order := get_city_work_order_by_id(order_id)
+
+		if (
+			not order.is_empty()
+			and str(order.get("order_type", ""))
+			== ORDER_TYPE_CONSTRUCTION_SITE
+			and str(order.get("state", "")) != ORDER_STATE_CANCELLED
+		):
+			construction_order_ids.append(order_id)
+
+	return get_best_player_job_for_citizen_and_orders(
+		citizen_id,
+		construction_order_ids
+	)
 
 
 static func assign_player_job(
@@ -1319,6 +1674,12 @@ static func _apply_runtime_worker_actionability(
 			jobs,
 			BLOCKED_REASON_NO_ELIGIBLE_WORKER
 		)
+		return
+
+	# Reachability for material-free road sites is evaluated in one batched
+	# route search during actual candidate selection. Repeating A* once for
+	# every independent tile here would reintroduce the old road-placement hitch.
+	if _construction_order_uses_batchable_road_site(order):
 		return
 
 	var candidate_order := order.duplicate(true)
@@ -2145,6 +2506,7 @@ static func _get_best_command_candidate(
 		0
 	)
 	candidate["target_tile"] = raw_destination_tile
+	candidate["assignment_path"] = path_result.get("path", []).duplicate()
 	candidate["tie_break_key"] = str(selected_command_id)
 	return candidate
 

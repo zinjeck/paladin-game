@@ -292,10 +292,6 @@ func update(delta: float) -> bool:
 			0.001
 		)
 	)
-	var cardinal_cost: float = maxf(
-		float(WorldData.CITY_CITIZEN_CARDINAL_MOVEMENT_COST),
-		1.0
-	)
 	var visual_state_changed: bool = false
 
 	for raw_citizen_id in transition_by_citizen_id.keys():
@@ -336,15 +332,14 @@ func update(delta: float) -> bool:
 			),
 			1.0
 		)
-		var distance_remaining: float = (
+		var movement_budget: float = (
 			delta
 			* simulation_speed
 			* movement_speed
 			* world_minutes_per_real_second
-			/ cardinal_cost
 		)
 
-		while distance_remaining > 0.0 and not waypoints.is_empty():
+		while movement_budget > 0.0 and not waypoints.is_empty():
 			var raw_target = waypoints[0]
 
 			if not raw_target is Vector2:
@@ -359,16 +354,29 @@ func update(delta: float) -> bool:
 				waypoints.pop_front()
 				continue
 
-			if distance_remaining >= segment_distance:
+			var movement_cost_per_world_unit := (
+				_get_segment_movement_cost_per_world_unit(
+					current_position,
+					target
+				)
+			)
+			var segment_cost := (
+				segment_distance * movement_cost_per_world_unit
+			)
+
+			if movement_budget >= segment_cost:
 				current_position = target
-				distance_remaining -= segment_distance
+				movement_budget -= segment_cost
 				waypoints.pop_front()
 			else:
+				var distance_to_advance := (
+					movement_budget / movement_cost_per_world_unit
+				)
 				current_position = current_position.move_toward(
 					target,
-					distance_remaining
+					distance_to_advance
 				)
-				distance_remaining = 0.0
+				movement_budget = 0.0
 
 		visual_position_by_citizen_id[citizen_id] = current_position
 
@@ -422,6 +430,63 @@ func get_transitioning_citizen_ids_snapshot() -> Array[int]:
 
 	citizen_ids.sort()
 	return citizen_ids
+
+
+func _get_segment_movement_cost_per_world_unit(
+	from_position: Vector2,
+	to_position: Vector2
+) -> float:
+	var delta := to_position - from_position
+	var direction := Vector2i(
+		int(signf(delta.x)),
+		int(signf(delta.y))
+	)
+
+	if direction == Vector2i.ZERO:
+		return maxf(
+			float(WorldData.CITY_CITIZEN_CARDINAL_MOVEMENT_COST),
+			1.0
+		)
+
+	var target_tile := Vector2i(
+		_get_segment_destination_coordinate(to_position.x, direction.x),
+		_get_segment_destination_coordinate(to_position.y, direction.y)
+	)
+	var source_tile := target_tile - direction
+	var step_cost := WorldData.get_city_citizen_movement_step_cost(
+		source_tile,
+		target_tile
+	)
+
+	if step_cost <= 0:
+		step_cost = (
+			WorldData.CITY_CITIZEN_DIAGONAL_MOVEMENT_COST
+			if direction.x != 0 and direction.y != 0
+			else WorldData.CITY_CITIZEN_CARDINAL_MOVEMENT_COST
+		)
+
+	var full_step_distance := Vector2(direction).length()
+
+	return maxf(
+		float(step_cost) / maxf(full_step_distance, 1.0),
+		1.0
+	)
+
+
+func _get_segment_destination_coordinate(
+	coordinate: float,
+	direction: int
+) -> int:
+	if is_equal_approx(coordinate, roundf(coordinate)):
+		return roundi(coordinate)
+
+	if direction > 0:
+		return ceili(coordinate)
+
+	if direction < 0:
+		return floori(coordinate)
+
+	return roundi(coordinate)
 
 
 func _synchronize_citizen_position(

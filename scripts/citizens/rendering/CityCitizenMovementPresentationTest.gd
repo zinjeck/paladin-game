@@ -19,6 +19,7 @@ func _ready() -> void:
 	_test_repath_after_old_corner_keeps_that_corner_first()
 	_test_completed_replacement_route_returns_to_repath_origin()
 	_test_visual_event_buffer_is_tick_scoped_and_take_once()
+	_test_completed_road_doubles_visual_travel_speed()
 
 	if failure_count > 0:
 		push_error(
@@ -415,6 +416,84 @@ func _test_visual_event_buffer_is_tick_scoped_and_take_once() -> void:
 		"Movement visual events must be consumable only once."
 	)
 	WorldData.clear_city_citizen_movement_visual_events()
+
+
+func _test_completed_road_doubles_visual_travel_speed() -> void:
+	WorldData.reset_runtime_session_state()
+	var city_world := WorldData.new()
+	city_world.setup(4, 3, 91_733)
+
+	for y in range(city_world.height):
+		for x in range(city_world.width):
+			var tile := city_world.get_tile(x, y)
+			tile["terrain"] = WorldData.TERRAIN_LAND
+			tile["biome"] = WorldData.BIOME_PLAIN
+			tile["is_land"] = true
+
+	WorldData.store_city_world_save(city_world, 91_733)
+	_expect(
+		not WorldData.add_city_road_object(
+			[Vector2i(1, 0)],
+			"player",
+			city_world
+		).is_empty(),
+		"The visual-speed fixture must create one completed road tile."
+	)
+
+	var road_presentation = PresentationScript.new()
+	var normal_presentation = PresentationScript.new()
+	var road_before := _make_moving_citizen(
+		20,
+		Vector2i(0, 0),
+		[Vector2i(0, 0), Vector2i(1, 0)],
+		1,
+		0
+	)
+	var road_after := _make_idle_citizen(20, Vector2i(1, 0))
+	var normal_before := _make_moving_citizen(
+		21,
+		Vector2i(0, 1),
+		[Vector2i(0, 1), Vector2i(1, 1)],
+		1,
+		0
+	)
+	var normal_after := _make_idle_citizen(21, Vector2i(1, 1))
+	WorldData.city_active_mover_id_lookup.clear()
+
+	road_presentation.synchronize_committed_tick([{
+		"citizen_id": 20,
+		"before": road_before,
+		"after": road_after,
+		"traversed_tiles": [Vector2i(0, 0), Vector2i(1, 0)],
+	}])
+	normal_presentation.synchronize_committed_tick([{
+		"citizen_id": 21,
+		"before": normal_before,
+		"after": normal_after,
+		"traversed_tiles": [Vector2i(0, 1), Vector2i(1, 1)],
+	}])
+
+	# At the configured clock rate this provides exactly 5,000 movement-cost
+	# units: one full road tile or half of one ordinary tile.
+	var comparison_delta := (
+		1.0
+		/ (
+			float(SimulationClock.minutes_per_tick)
+			/ SimulationClock.real_seconds_per_tick
+		)
+	)
+	road_presentation.update(comparison_delta)
+	normal_presentation.update(comparison_delta)
+	_expect_vector_close(
+		road_presentation.get_visual_tile_position(road_after),
+		Vector2(1.0, 0.0),
+		"A citizen entering a completed road must visually traverse the tile at double speed."
+	)
+	_expect_vector_close(
+		normal_presentation.get_visual_tile_position(normal_after),
+		Vector2(0.5, 1.0),
+		"The same movement budget must cover only half an ordinary tile."
+	)
 
 
 func _make_moving_citizen(

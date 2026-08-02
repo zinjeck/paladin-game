@@ -150,14 +150,20 @@ func _prepare_dev_city_region() -> void:
 
 	SimulationClock.start_new_game()
 	SimulationCoordinator.reset_performance_statistics()
-	WorldData.lock_world_save({
+	var world_lock_succeeded := WorldData.lock_world_save({
 		"source_world": dev_world,
 		"region_top_left": region_top_left,
 		"region_center": region_center,
 		"region_size": DevCityLauncher.DEV_REGION_SIZE,
 		"world_scene_path": "res://scenes/MainMenu.tscn",
 		"city_scene_path": "res://scenes/CityScreen.tscn",
+		"city_name": "Long Run City",
+		"culture_name": "Long Run Culture",
 	})
+	_expect(
+		world_lock_succeeded,
+		"The long-run world and founding identity must lock."
+	)
 
 
 func _create_mixed_work_fixture(renderer: CityRenderer) -> Dictionary:
