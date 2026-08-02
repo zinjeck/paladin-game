@@ -68,9 +68,7 @@ func _test_background_city_preparation() -> void:
 
 func _test_persistent_world_city_views() -> void:
 	WorldData.reset_runtime_session_state()
-	SimulationClock.suspend_simulation()
-	SimulationClock.set_speed_multiplier(3.0)
-	SimulationClock.set_simulation_paused(false)
+	SimulationClock.reset_clock_state()
 	var world := _make_world(8, 8, 4301)
 	var locked := WorldData.lock_world_save({
 		"source_world": world,
@@ -86,15 +84,30 @@ func _test_persistent_world_city_views() -> void:
 
 	var city_world := _make_world(16, 16, 8123)
 	WorldData.store_city_world_save(city_world, 8123)
+
+	# Reproduce a clock that drifted while the founding world remained visible.
+	# First city entry must discard that pre-settlement time and begin at 06:00.
+	SimulationClock.start_new_game(1, 9, 6)
+	SimulationClock.set_speed_multiplier(3.0)
+	SimulationClock.set_simulation_paused(false)
+
 	var session = GAME_SESSION_SCENE.instantiate()
 	add_child(session)
 	await get_tree().process_frame
 
 	var initial_world_view = session.world_view
 	var initial_world_id: int = initial_world_view.get_instance_id()
+	var world_region_button = session.world_renderer.get(
+		"select_region_button"
+	)
 	_expect(
 		session.simulation_speed_controls == null,
 		"World view must not show speed controls before first city entry."
+	)
+	_expect(
+		world_region_button is CanvasItem
+		and (world_region_button as CanvasItem).visible,
+		"Select Region must remain available before first city entry."
 	)
 
 	session.show_city_view()
@@ -121,6 +134,18 @@ func _test_persistent_world_city_views() -> void:
 	_expect(
 		is_equal_approx(SimulationClock.speed_multiplier, 1.0),
 		"First city entry must select normal speed beneath the paused state."
+	)
+	_expect(
+		SimulationClock.get_world_day() == 1
+		and SimulationClock.get_world_hour() == 6
+		and SimulationClock.get_world_minute() == 0
+		and SimulationClock.tick_index == 0,
+		"First city entry must begin Day 1 at exactly 06:00 with no consumed ticks."
+	)
+	_expect(
+		world_region_button is CanvasItem
+		and not (world_region_button as CanvasItem).visible,
+		"Entering the city must retire the founding-only Select Region button."
 	)
 
 	var speed_controls = session.simulation_speed_controls
@@ -193,6 +218,11 @@ func _test_persistent_world_city_views() -> void:
 		not SimulationClock.simulation_paused
 		and is_equal_approx(SimulationClock.speed_multiplier, 2.0),
 		"World return must preserve the city-selected clock speed."
+	)
+	_expect(
+		world_region_button is CanvasItem
+		and not (world_region_button as CanvasItem).visible,
+		"Select Region must stay hidden after returning to the world."
 	)
 
 	session.show_city_view()
