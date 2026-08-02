@@ -15,6 +15,7 @@ permissions:
 
 jobs:
   apply:
+    # Temporary one-shot applicator for the verified persistent-session patch.
     if: github.head_ref == 'paladin/intensive-debug-performance-cleanup' || github.ref == 'refs/heads/paladin/intensive-debug-performance-cleanup'
     runs-on: ubuntu-latest
     timeout-minutes: 10
