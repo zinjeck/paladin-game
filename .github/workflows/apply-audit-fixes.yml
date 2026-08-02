@@ -40,3 +40,5 @@ jobs:
           git add -A
           git commit -m "Fix construction lifecycle and rebalance test fixtures"
           git push origin HEAD:ci/godot-testing
+
+# This comment intentionally triggers the one-time workflow after creation.
