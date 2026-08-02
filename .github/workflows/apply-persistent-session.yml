@@ -1,0 +1,35 @@
+name: Apply persistent session fix
+
+on:
+  push:
+    branches:
+      - paladin/intensive-debug-performance-cleanup
+    paths:
+      - .github/workflows/apply-persistent-session.yml
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Check out cleanup branch
+        uses: actions/checkout@v4
+        with:
+          ref: paladin/intensive-debug-performance-cleanup
+          fetch-depth: 0
+
+      - name: Apply verified patch
+        run: python3 ci/apply_persistent_session.py
+
+      - name: Commit persistent session architecture
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "paladin-ci-bot"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "Keep world and city views persistent and prepare map modes atomically"
+          git push origin HEAD:paladin/intensive-debug-performance-cleanup
