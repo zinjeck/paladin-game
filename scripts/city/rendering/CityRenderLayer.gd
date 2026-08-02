@@ -2,6 +2,7 @@ extends Node2D
 class_name CityRenderLayer
 
 var _draw_callback: Callable
+var _redraw_requested: bool = false
 
 
 func setup(draw_callback: Callable) -> void:
@@ -9,7 +10,19 @@ func setup(draw_callback: Callable) -> void:
 	texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
 
 
+func request_redraw() -> void:
+	# Rendering invalidations can arrive from several simulation versions during
+	# one frame. Collapse them into one draw request for this layer.
+	if _redraw_requested:
+		return
+
+	_redraw_requested = true
+	queue_redraw()
+
+
 func _draw() -> void:
+	_redraw_requested = false
+
 	if _draw_callback.is_valid():
 		_draw_callback.call(self)
 

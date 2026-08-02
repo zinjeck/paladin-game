@@ -89,45 +89,124 @@ func _run_smoke_test() -> void:
 		for error in validation.get("errors", []):
 			push_error(str(error))
 
+	# Several fixtures deliberately edit authoritative tile data. The complete
+	# atomic cache must already represent that latest version before re-entry.
+	renderer.update_city_map_mode_button_visuals()
+	_expect(
+		renderer.has_valid_saved_city_map_texture_cache(renderer.city_world),
+		"The latest tile-data version must finish with a complete saved map cache."
+	)
+
+	var cached_tree_multimesh_id := (
+		renderer.city_tree_multimesh.get_instance_id()
+		if renderer.city_tree_multimesh != null
+		else 0
+	)
+	var cached_rock_multimesh_id := (
+		renderer.city_rock_multimesh.get_instance_id()
+		if renderer.city_rock_multimesh != null
+		else 0
+	)
 	renderer.queue_free()
+	await get_tree().process_frame
+
+	var reloaded_renderer := CITY_SCENE.instantiate() as CityRenderer
+	add_child(reloaded_renderer)
+	SimulationClock.set_simulation_paused(true)
+	await get_tree().process_frame
+	await get_tree().process_frame
+	_expect(
+		reloaded_renderer.city_natural_feature_cache_reused_on_entry
+		and reloaded_renderer.city_tree_multimesh != null
+		and reloaded_renderer.city_rock_multimesh != null
+		and reloaded_renderer.city_tree_multimesh.get_instance_id()
+		== cached_tree_multimesh_id
+		and reloaded_renderer.city_rock_multimesh.get_instance_id()
+		== cached_rock_multimesh_id,
+		"City re-entry must reuse the natural-feature MultiMeshes instead of rescanning the full map."
+	)
+	_expect(
+		reloaded_renderer.city_map_texture_cache_reused_on_entry
+		and reloaded_renderer.has_valid_saved_city_map_texture_cache(
+			reloaded_renderer.city_world
+		),
+		"City re-entry must reuse the completed map texture cache."
+	)
+	reloaded_renderer.queue_free()
 	await get_tree().process_frame
 	WorldData.reset_runtime_session_state()
 
-	# Let any canceled texture-cache coroutine resume and release its in-flight
-	# WorldData/Image references before this short-lived test process exits.
-	for _frame_index in range(4):
-		await get_tree().process_frame
+	# No deferred map-generation work may remain after the renderer is freed.
+	await get_tree().process_frame
 
 
 func _test_city_map_texture_cache(renderer: CityRenderer) -> void:
 	var view_modes: Array[int] = renderer.get_all_city_view_modes()
 	var original_view_mode := renderer.city_view_mode
 	_expect(
+		renderer.city_texture_cache.is_mode_ready(
+			renderer.city_world,
+			original_view_mode
+		)
+		and renderer.city_terrain_texture != null,
+		"The visible city map mode must be ready as soon as the scene becomes interactive."
+	)
+	_expect(
+		renderer.city_terrain_sprite != null
+		and renderer.city_terrain_sprite.texture
+		== renderer.city_terrain_texture,
+		"The static city terrain must be retained by a Sprite2D."
+	)
+	_expect(
 		renderer.city_texture_cache.mode_textures.size()
-		== view_modes.size()
-		and renderer.has_valid_saved_city_map_texture_cache(
+		== view_modes.size(),
+		"Every city map mode must be ready in the same atomic preparation pass."
+	)
+
+	renderer.update_city_map_mode_button_visuals()
+	_expect(
+		renderer.has_valid_saved_city_map_texture_cache(
 			renderer.city_world
 		),
-		"Every city map mode must be cached before the scene is interactive."
+		"Atomic city map preparation must persist the complete mode set."
 	)
+
+	var shared_atlas: Texture2D
 
 	for mode in view_modes:
 		var raw_texture = renderer.city_texture_cache.mode_textures.get(
 			mode
 		)
 		_expect(
-			raw_texture is ImageTexture,
-			"Every city map mode must have a ready ImageTexture."
+			raw_texture is Texture2D,
+			"Every city map mode must have a ready atlas texture view."
 		)
 
-		if not raw_texture is ImageTexture:
+		if not raw_texture is Texture2D:
 			continue
 
-		var texture: ImageTexture = raw_texture
+		var texture: Texture2D = raw_texture
+		_expect(
+			texture is AtlasTexture,
+			"Every map mode must be a view into the shared atlas."
+		)
+
+		if texture is AtlasTexture:
+			var atlas_view := texture as AtlasTexture
+
+			if shared_atlas == null:
+				shared_atlas = atlas_view.atlas
+			else:
+				_expect(
+					atlas_view.atlas == shared_atlas,
+					"All map modes must share one GPU atlas upload."
+				)
 		renderer.set_city_view_mode(mode)
 		_expect(
-			renderer.city_terrain_texture == texture,
-			"Switching city map modes must be a cache-only texture lookup."
+			renderer.city_terrain_texture == texture
+			and renderer.city_terrain_sprite != null
+			and renderer.city_terrain_sprite.texture == texture,
+			"Switching city map modes must only swap the retained texture."
 		)
 
 		var sample_tile_position := Vector2i(
@@ -434,12 +513,13 @@ func _test_focused_layer_invalidation(
 	var interaction_before := interaction_draw_count
 
 	renderer.queue_city_citizen_layer_redraw()
+	renderer.queue_city_citizen_layer_redraw()
 	await get_tree().process_frame
 	await get_tree().process_frame
 
 	_expect(
-		citizen_draw_count > citizen_before,
-		"Citizen-only invalidation must redraw the citizen layer."
+		citizen_draw_count == citizen_before + 1,
+		"Repeated same-frame invalidation must coalesce into one citizen redraw."
 	)
 	_expect(
 		background_draw_count == background_before,
@@ -448,6 +528,38 @@ func _test_focused_layer_invalidation(
 	_expect(
 		interaction_draw_count == interaction_before,
 		"Citizen-only invalidation must not redraw interaction overlays."
+	)
+
+	background_before = background_draw_count
+	citizen_before = citizen_draw_count
+	interaction_before = interaction_draw_count
+	renderer.queue_city_selection_visual_change(
+		renderer.CITY_SELECTION_KIND_NONE,
+		renderer.CITY_SELECTION_KIND_CITIZEN
+	)
+	await get_tree().process_frame
+	await get_tree().process_frame
+	_expect(
+		background_draw_count == background_before
+		and citizen_draw_count == citizen_before
+		and interaction_draw_count == interaction_before + 1,
+		"Citizen selection must redraw only its interaction highlight."
+	)
+
+	background_before = background_draw_count
+	citizen_before = citizen_draw_count
+	interaction_before = interaction_draw_count
+	renderer.queue_city_selection_visual_change(
+		renderer.CITY_SELECTION_KIND_CITIZEN,
+		renderer.CITY_SELECTION_KIND_OBJECT
+	)
+	await get_tree().process_frame
+	await get_tree().process_frame
+	_expect(
+		background_draw_count == background_before + 1
+		and citizen_draw_count == citizen_before
+		and interaction_draw_count == interaction_before + 1,
+		"Object selection must redraw only its zone and interaction layers."
 	)
 	renderer.set_process(true)
 
@@ -532,6 +644,15 @@ func _test_city_natural_features(
 		and renderer.city_rock_multimesh.instance_count
 		== rock_count,
 		"Rock MultiMesh count must match generated rock tiles."
+	)
+	_expect(
+		renderer.city_tree_multimesh_instance != null
+		and renderer.city_tree_multimesh_instance.multimesh
+		== renderer.city_tree_multimesh
+		and renderer.city_rock_multimesh_instance != null
+		and renderer.city_rock_multimesh_instance.multimesh
+		== renderer.city_rock_multimesh,
+		"Natural features must be retained by MultiMeshInstance2D nodes."
 	)
 
 	if first_tree_tile != Vector2i(-1, -1):
@@ -619,17 +740,19 @@ func _test_city_natural_features(
 	)
 
 	var previous_view_mode := renderer.city_view_mode
-	renderer.city_view_mode = MapVisuals.ViewMode.RESOURCES
+	renderer.set_city_view_mode(MapVisuals.ViewMode.RESOURCES)
 	_expect(
-		not renderer.should_draw_city_trees(),
-		"Trees must be hidden in Resources map mode."
+		not renderer.should_draw_city_trees()
+		and not renderer.city_tree_multimesh_instance.visible,
+		"Trees must be hidden without redrawing citizens in Resources mode."
 	)
-	renderer.city_view_mode = MapVisuals.ViewMode.BIOME
+	renderer.set_city_view_mode(MapVisuals.ViewMode.BIOME)
 	_expect(
-		renderer.should_draw_city_trees(),
-		"Trees must remain visible outside Resources map mode."
+		renderer.should_draw_city_trees()
+		and renderer.city_tree_multimesh_instance.visible,
+		"Trees must remain retained and visible outside Resources mode."
 	)
-	renderer.city_view_mode = previous_view_mode
+	renderer.set_city_view_mode(previous_view_mode)
 
 	_test_city_keep_accepts_tree_covered_access()
 
@@ -1836,36 +1959,6 @@ func _find_clear_road_construction_tiles(
 					return tiles
 
 	return tiles
-
-
-func _find_clear_road_construction_tile(
-	city_world: WorldData
-) -> Vector2i:
-	if city_world == null:
-		return WorldData.INVALID_CITY_TILE_POSITION
-
-	for y in range(city_world.height):
-		for x in range(city_world.width):
-			var tile_position := Vector2i(x, y)
-
-			if (
-				WorldData.can_place_city_road_tile(
-					city_world,
-					tile_position
-				)
-				and WorldData.get_city_surface_feature(
-					city_world.get_tile(x, y)
-				) == WorldData.CITY_SURFACE_FEATURE_NONE
-				and not WorldData.has_city_ground_pile_at_tile(
-					tile_position
-				)
-				and not WorldData.has_living_city_citizen_at_tile(
-					tile_position
-				)
-			):
-				return tile_position
-
-	return WorldData.INVALID_CITY_TILE_POSITION
 
 
 func _find_reachable_construction_rectangle(

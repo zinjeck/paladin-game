@@ -11,7 +11,7 @@ enum ViewMode {
 }
 
 const INVALID_VIEW_MODE: int = -1
-const MAP_VISUAL_CACHE_VERSION: int = 3
+const MAP_VISUAL_CACHE_VERSION: int = 4
 const VIEW_MODE_COLOR_COUNT: int = 6
 
 static func get_all_view_modes() -> Array[int]:
@@ -47,6 +47,83 @@ static func populate_all_tile_colors(
 	output_colors[ViewMode.PRECIPITATION] = get_precipitation_color(tile)
 	output_colors[ViewMode.RESOURCES] = get_resource_overlay_color(tile)
 	output_colors[ViewMode.FERTILITY] = get_fertility_overlay_color(tile)
+
+
+static func build_atomic_mode_atlas_data(
+	source_world: WorldData,
+	biome_resource_blend: float = 0.0
+) -> Dictionary:
+	if source_world == null:
+		return {}
+	if source_world.width <= 0 or source_world.height <= 0:
+		return {}
+
+	var modes := get_all_view_modes()
+	var atlas_width := source_world.width * modes.size()
+	var atlas_data := PackedByteArray()
+	atlas_data.resize(atlas_width * source_world.height * 4)
+	var colors: Array[Color] = []
+	colors.resize(VIEW_MODE_COLOR_COUNT)
+
+	for y in range(source_world.height):
+		var row: Array = source_world.tiles[y]
+
+		for x in range(source_world.width):
+			var tile: Dictionary = row[x]
+			populate_all_tile_colors(
+				tile,
+				colors,
+				biome_resource_blend
+			)
+
+			for mode_index in range(modes.size()):
+				var mode_int := modes[mode_index]
+				var pixel_index := (
+					y * atlas_width
+					+ mode_index * source_world.width
+					+ x
+				) * 4
+				write_color_rgba8(
+					atlas_data,
+					pixel_index,
+					colors[mode_int]
+				)
+
+	return {
+		"rgba8": atlas_data,
+		"width": source_world.width,
+		"height": source_world.height,
+		"modes": modes,
+		"tile_data_version": source_world.tile_data_version,
+		"visual_version": MAP_VISUAL_CACHE_VERSION,
+	}
+
+
+static func write_color_rgba8(
+	output: PackedByteArray,
+	start_index: int,
+	color: Color
+) -> void:
+	output[start_index] = clampi(
+		int(round(color.r * 255.0)),
+		0,
+		255
+	)
+	output[start_index + 1] = clampi(
+		int(round(color.g * 255.0)),
+		0,
+		255
+	)
+	output[start_index + 2] = clampi(
+		int(round(color.b * 255.0)),
+		0,
+		255
+	)
+	output[start_index + 3] = clampi(
+		int(round(color.a * 255.0)),
+		0,
+		255
+	)
 
 
 static func get_view_mode_for_index(index: int) -> int:

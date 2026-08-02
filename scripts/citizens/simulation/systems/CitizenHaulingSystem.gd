@@ -402,7 +402,7 @@ static func make_public_storage_haul_task_request(
 				"city_world": city_world,
 				"start_tile": current_tile,
 				"destination_tiles": source_access_tiles,
-				"max_expanded_nodes": _get_city_wide_path_expansion_limit(city_world),
+				"max_expanded_nodes": CityNavigationSystemScript.get_city_wide_path_expansion_limit(city_world),
 				"citizen_id": citizen_id,
 				"heuristic_weight": EXACT_DESTINATION_HEURISTIC_WEIGHT
 			})
@@ -649,7 +649,7 @@ static func make_directed_haul_task_request(
 			"city_world": city_world,
 			"start_tile": current_tile,
 			"destination_tiles": source_access_tiles,
-			"max_expanded_nodes": _get_city_wide_path_expansion_limit(city_world),
+			"max_expanded_nodes": CityNavigationSystemScript.get_city_wide_path_expansion_limit(city_world),
 			"citizen_id": citizen_id,
 			"heuristic_weight": EXACT_DESTINATION_HEURISTIC_WEIGHT
 		})
@@ -1027,7 +1027,7 @@ static func _advance_pending_source(
 			"city_world": city_world,
 			"start_tile": current_tile,
 			"destination_tiles": source_access_tiles,
-			"max_expanded_nodes": _get_city_wide_path_expansion_limit(city_world),
+			"max_expanded_nodes": CityNavigationSystemScript.get_city_wide_path_expansion_limit(city_world),
 			"citizen_id": citizen_id,
 			"heuristic_weight": CityNavigationSystem.HEURISTIC_WEIGHT
 		})
@@ -1616,7 +1616,7 @@ static func _begin_next_ground_pile_pickup(
 			"city_world": city_world,
 			"start_tile": current_tile,
 			"destination_tiles": candidate_access_tiles,
-			"max_expanded_nodes": _get_city_wide_path_expansion_limit(city_world),
+			"max_expanded_nodes": CityNavigationSystemScript.get_city_wide_path_expansion_limit(city_world),
 			"citizen_id": citizen_id,
 			"heuristic_weight": EXACT_DESTINATION_HEURISTIC_WEIGHT
 		})
@@ -3113,16 +3113,6 @@ static func _prepare_blocked_haul_retry(
 #endregion
 
 #region Endpoint and Path Helpers
-
-static func _get_city_wide_path_expansion_limit(
-	city_world: WorldData
-) -> int:
-	if city_world == null:
-		return 1
-
-	# A full-map upper bound keeps reachability independent of distance. Each
-	# city tile can be closed at most once by the navigation search.
-	return maxi(city_world.width * city_world.height, 1)
 
 
 

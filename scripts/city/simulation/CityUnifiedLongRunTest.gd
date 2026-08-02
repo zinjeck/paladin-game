@@ -890,65 +890,6 @@ func _prepare_deterministic_natural_targets(
 	return results
 
 
-func _find_reachable_natural_command_tiles(
-	command_type: String,
-	start_tile: Vector2i,
-	excluded_tiles: Array,
-	maximum_count: int
-) -> Array[Vector2i]:
-	var results: Array[Vector2i] = []
-	var city_world: WorldData = WorldData.official_city_world
-	var maximum_expanded_nodes := maxi(
-		city_world.width * city_world.height,
-		1
-	)
-
-	for radius in range(maxi(city_world.width, city_world.height) + 1):
-		for offset_y in range(-radius, radius + 1):
-			for offset_x in range(-radius, radius + 1):
-				if (
-					radius > 0
-					and maxi(absi(offset_x), absi(offset_y)) != radius
-				):
-					continue
-
-				var tile_position := start_tile + Vector2i(offset_x, offset_y)
-
-				if (
-					not city_world.is_in_bounds(tile_position.x, tile_position.y)
-					or excluded_tiles.has(tile_position)
-					or not CityWorkSystem.can_designate_city_player_command_at_tile(
-						command_type,
-						tile_position
-					)
-				):
-					continue
-
-				var work_tiles := CityWorkSystem.get_city_player_command_work_tiles({
-					"tile_position": tile_position,
-				}, -1)
-				var path_result := (
-					CityNavigationSystemScript.find_path_to_any_city_tile({
-						"city_world": city_world,
-						"start_tile": start_tile,
-						"destination_tiles": work_tiles,
-						"max_expanded_nodes": maximum_expanded_nodes,
-						"citizen_id": -1,
-						"heuristic_weight": 1,
-					})
-				)
-
-				if not bool(path_result.get("success", false)):
-					continue
-
-				results.append(tile_position)
-
-				if results.size() >= maximum_count:
-					return results
-
-	return results
-
-
 func _find_open_ground_tile_outside_footprint(
 	city_world: WorldData,
 	footprint_tiles: Array,
@@ -1377,19 +1318,6 @@ func _footprint_is_unoccupied(footprint_tiles: Array) -> bool:
 			return false
 
 	return true
-
-
-func _clear_surface_features(
-	city_world: WorldData,
-	tile_positions: Array
-) -> void:
-	for raw_tile in tile_positions:
-		if raw_tile is Vector2i:
-			_set_surface_feature(
-				city_world,
-				raw_tile,
-				WorldData.CITY_SURFACE_FEATURE_NONE
-			)
 
 
 func _set_surface_feature(

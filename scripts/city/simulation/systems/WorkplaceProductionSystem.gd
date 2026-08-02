@@ -1112,7 +1112,7 @@ static func _find_workplace_overflow_tile(
 	if candidate_tiles.is_empty():
 		return WorldData.INVALID_CITY_TILE_POSITION
 
-	candidate_tiles.sort_custom(_sort_tiles_y_then_x)
+	candidate_tiles.sort_custom(WorldData._sort_city_tiles_y_then_x)
 
 	# If buildings or roads consume the immediate ring, select the cheapest
 	# reachable tile inside the configured radius rather than spawning loose
@@ -1156,7 +1156,7 @@ static func _find_workplace_overflow_tile(
 			path_cost < best_path_cost
 			or (
 				path_cost == best_path_cost
-				and _sort_tiles_y_then_x(
+				and WorldData._sort_city_tiles_y_then_x(
 					candidate_tile,
 					best_tile
 				)
@@ -1188,15 +1188,6 @@ static func _tile_is_within_footprint_radius(
 
 	return false
 
-
-static func _sort_tiles_y_then_x(
-	tile_a: Vector2i,
-	tile_b: Vector2i
-) -> bool:
-	if tile_a.y == tile_b.y:
-		return tile_a.x < tile_b.x
-
-	return tile_a.y < tile_b.y
 
 
 static func _calculate_work_units(

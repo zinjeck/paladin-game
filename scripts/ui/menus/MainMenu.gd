@@ -1,6 +1,6 @@
 extends Control
 
-@export_file("*.tscn") var world_scene_path: String = "res://scenes/WorldScene.tscn"
+@export_file("*.tscn") var world_scene_path: String = "res://scenes/GameSession.tscn"
 @export_file("*.tscn") var city_scene_path: String = "res://scenes/CityScreen.tscn"
 
 var background: ColorRect

@@ -9,7 +9,12 @@ class SlimNeedMeter:
 
 	var value: float = 0.0:
 		set(new_value):
-			value = clampf(new_value, 0.0, 100.0)
+			var clamped_value := clampf(new_value, 0.0, 100.0)
+
+			if is_equal_approx(value, clamped_value):
+				return
+
+			value = clamped_value
 			queue_redraw()
 
 	var background_color: Color
@@ -26,6 +31,9 @@ class SlimNeedMeter:
 		fill_color = new_fill_color
 		border_color = new_border_color
 		mouse_filter = Control.MOUSE_FILTER_IGNORE
+		# The meter is custom-drawn from its current Control bounds, so a real
+		# geometry change must invalidate it. Value changes are separately guarded
+		# above and do not redraw when the clamped visual value is unchanged.
 		resized.connect(queue_redraw)
 
 

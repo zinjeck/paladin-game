@@ -70,6 +70,13 @@ var tiles := []
 var tile_data_version: int = 0
 var city_surface_feature_change_version: int = 0
 var pending_city_surface_feature_changes: Array[Dictionary] = []
+# City generation records its initial natural-feature positions while it is
+# already traversing the map. The renderer may consume these immutable lists
+# instead of immediately rescanning every tile. Any later tile-data version
+# invalidates them automatically.
+var prepared_city_tree_tiles: Array[Vector2i] = []
+var prepared_city_rock_tiles: Array[Vector2i] = []
+var prepared_city_feature_tile_data_version: int = -1
 
 static var city_start_world_seed: int = 0
 static var city_start_region_center: Vector2i = Vector2i(-1, -1)
@@ -896,6 +903,7 @@ func setup(new_width: int, new_height: int, new_seed: int):
 	tile_data_version = 0
 	city_surface_feature_change_version = 0
 	pending_city_surface_feature_changes.clear()
+	_invalidate_prepared_city_feature_tiles()
 
 	for y in range(height):
 		var row := []
@@ -938,10 +946,18 @@ func set_tile(x: int, y: int, data: Dictionary) -> void:
 
 	tiles[y][x] = data
 	tile_data_version += 1
+	_invalidate_prepared_city_feature_tiles()
 
 
 func mark_tile_data_changed() -> void:
 	tile_data_version += 1
+	_invalidate_prepared_city_feature_tiles()
+
+
+func _invalidate_prepared_city_feature_tiles() -> void:
+	prepared_city_tree_tiles.clear()
+	prepared_city_rock_tiles.clear()
+	prepared_city_feature_tile_data_version = -1
 
 
 func mark_city_surface_feature_changed(

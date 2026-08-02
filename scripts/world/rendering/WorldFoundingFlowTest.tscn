@@ -2,5 +2,5 @@
 
 [ext_resource type="Script" path="res://scripts/world/rendering/WorldFoundingFlowTest.gd" id="1_test"]
 
-[node name="WorldFoundingFlowTest" type="Node"]
+[node name="WorldFoundingFlowTest" type="Node" groups=["game_session"]]
 script = ExtResource("1_test")

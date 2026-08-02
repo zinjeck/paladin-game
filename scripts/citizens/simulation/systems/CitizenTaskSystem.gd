@@ -537,7 +537,7 @@ static func _advance_acquire_food_task(
 		"city_world": city_world,
 		"start_tile": current_tile,
 		"destination_tiles": [target_tile],
-		"max_expanded_nodes": _get_city_wide_path_expansion_limit(city_world),
+		"max_expanded_nodes": CityNavigationSystemScript.get_city_wide_path_expansion_limit(city_world),
 		"citizen_id": citizen_id,
 		"heuristic_weight": 1,
 	})
@@ -798,7 +798,7 @@ static func _advance_pending_player_command_task(
 		"city_world": city_world,
 		"start_tile": current_tile,
 		"destination_tiles": work_tiles,
-		"max_expanded_nodes": _get_city_wide_path_expansion_limit(city_world),
+		"max_expanded_nodes": CityNavigationSystemScript.get_city_wide_path_expansion_limit(city_world),
 		"citizen_id": citizen_id,
 		"heuristic_weight": 1,
 	})
@@ -1220,7 +1220,7 @@ static func _advance_pending_work_task(context: Dictionary) -> int:
 		"city_world": city_world,
 		"start_tile": current_tile,
 		"destination_tiles": preferred_activity_tiles,
-		"max_expanded_nodes": _get_city_wide_path_expansion_limit(city_world),
+		"max_expanded_nodes": CityNavigationSystemScript.get_city_wide_path_expansion_limit(city_world),
 		"citizen_id": citizen_id,
 		"heuristic_weight": CityNavigationSystem.HEURISTIC_WEIGHT,
 	})
@@ -1431,7 +1431,7 @@ static func _advance_performing_work_task(context: Dictionary) -> int:
 			"city_world": city_world,
 			"start_tile": current_tile,
 			"destination_tiles": [new_target_tile],
-			"max_expanded_nodes": _get_city_wide_path_expansion_limit(city_world),
+			"max_expanded_nodes": CityNavigationSystemScript.get_city_wide_path_expansion_limit(city_world),
 			"citizen_id": citizen_id,
 			"heuristic_weight": CityNavigationSystem.HEURISTIC_WEIGHT
 		})
@@ -1720,7 +1720,7 @@ static func _start_return_home_path(context: Dictionary) -> int:
 		"city_world": city_world,
 		"start_tile": current_tile,
 		"destination_tiles": [assigned_home_tile],
-		"max_expanded_nodes": _get_city_wide_path_expansion_limit(city_world),
+		"max_expanded_nodes": CityNavigationSystemScript.get_city_wide_path_expansion_limit(city_world),
 		"citizen_id": citizen_id,
 		"heuristic_weight": CityNavigationSystem.HEURISTIC_WEIGHT,
 	})
@@ -2236,12 +2236,5 @@ static func _clear_invalid_task(citizen_id: int) -> void:
 	WorldData.cancel_city_citizen_movement(citizen_id)
 
 
-static func _get_city_wide_path_expansion_limit(
-	city_world: WorldData
-) -> int:
-	if city_world == null:
-		return 1
-
-	return maxi(city_world.width * city_world.height, 1)
 
 #endregion

@@ -1217,12 +1217,12 @@ static func _get_best_command_candidate_for_construction_sites(
 		return {}
 
 	var work_tiles: Array = work_tile_lookup.keys()
-	work_tiles.sort_custom(_sort_tiles_y_then_x)
+	work_tiles.sort_custom(WorldData._sort_city_tiles_y_then_x)
 	var path_result := CityNavigationSystemScript.find_path_to_any_city_tile({
 		"city_world": WorldData.official_city_world,
 		"start_tile": citizen_tile,
 		"destination_tiles": work_tiles,
-		"max_expanded_nodes": _get_city_wide_path_expansion_limit(
+		"max_expanded_nodes": CityNavigationSystemScript.get_city_wide_path_expansion_limit(
 			WorldData.official_city_world
 		),
 		"citizen_id": citizen_id,
@@ -1518,7 +1518,7 @@ static func get_cancel_preview_tiles(raw_tiles: Array) -> Array[Vector2i]:
 		if raw_tile is Vector2i:
 			preview_tiles.append(raw_tile)
 
-	preview_tiles.sort_custom(_sort_tiles_y_then_x)
+	preview_tiles.sort_custom(WorldData._sort_city_tiles_y_then_x)
 	return preview_tiles
 
 
@@ -2478,12 +2478,12 @@ static func _get_best_command_candidate(
 		return {}
 
 	var work_tiles: Array = work_tile_lookup.keys()
-	work_tiles.sort_custom(_sort_tiles_y_then_x)
+	work_tiles.sort_custom(WorldData._sort_city_tiles_y_then_x)
 	var path_result := CityNavigationSystemScript.find_path_to_any_city_tile({
 		"city_world": WorldData.official_city_world,
 		"start_tile": citizen_tile,
 		"destination_tiles": work_tiles,
-		"max_expanded_nodes": _get_city_wide_path_expansion_limit(
+		"max_expanded_nodes": CityNavigationSystemScript.get_city_wide_path_expansion_limit(
 			WorldData.official_city_world
 		),
 		"citizen_id": citizen_id,
@@ -3033,19 +3033,7 @@ static func _make_construction_source_key(site_id: int) -> String:
 	return "construction_site:" + str(site_id)
 
 
-static func _get_city_wide_path_expansion_limit(
-	city_world: WorldData
-) -> int:
-	if city_world == null:
-		return 1
-
-	return maxi(city_world.width * city_world.height, 1)
 
 
-static func _sort_tiles_y_then_x(a: Vector2i, b: Vector2i) -> bool:
-	if a.y != b.y:
-		return a.y < b.y
-
-	return a.x < b.x
 
 #endregion

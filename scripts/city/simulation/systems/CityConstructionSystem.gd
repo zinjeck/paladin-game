@@ -825,7 +825,7 @@ static func create_road_sites(
 		tile_lookup[tile_position] = true
 		clean_tiles.append(tile_position)
 
-	clean_tiles.sort_custom(_sort_tiles_y_then_x)
+	clean_tiles.sort_custom(WorldData._sort_city_tiles_y_then_x)
 
 	if clean_tiles.is_empty():
 		return []
@@ -1005,7 +1005,7 @@ static func _build_external_work_positions(
 			position_lookup[candidate_tile] = true
 			positions.append(candidate_tile)
 
-	positions.sort_custom(_sort_tiles_y_then_x)
+	positions.sort_custom(WorldData._sort_city_tiles_y_then_x)
 	return positions
 
 
@@ -1627,7 +1627,7 @@ static func get_best_assignable_batchable_road_work_for_citizen(
 			"city_world": WorldData.official_city_world,
 			"start_tile": raw_current_tile,
 			"destination_tiles": labor_positions,
-			"max_expanded_nodes": _get_city_wide_path_expansion_limit(
+			"max_expanded_nodes": CityNavigationSystemScript.get_city_wide_path_expansion_limit(
 				WorldData.official_city_world
 			),
 			"citizen_id": citizen_id,
@@ -1992,7 +1992,7 @@ static func _find_nearest_ground_relocation_tile(
 
 				candidate_tiles.append(candidate_tile)
 
-		candidate_tiles.sort_custom(_sort_tiles_y_then_x)
+		candidate_tiles.sort_custom(WorldData._sort_city_tiles_y_then_x)
 
 		if candidate_tiles.is_empty():
 			continue
@@ -2005,7 +2005,7 @@ static func _find_nearest_ground_relocation_tile(
 				"city_world": city_world,
 				"start_tile": source_tile,
 				"destination_tiles": candidate_tiles,
-				"max_expanded_nodes": _get_city_wide_path_expansion_limit(city_world),
+				"max_expanded_nodes": CityNavigationSystemScript.get_city_wide_path_expansion_limit(city_world),
 				"citizen_id": citizen_id,
 				"heuristic_weight": EXACT_PATH_HEURISTIC_WEIGHT
 			})
@@ -2189,7 +2189,7 @@ static func _get_labor_candidate(
 			"city_world": WorldData.official_city_world,
 			"start_tile": raw_current_tile,
 			"destination_tiles": candidate_positions,
-			"max_expanded_nodes": _get_city_wide_path_expansion_limit(
+			"max_expanded_nodes": CityNavigationSystemScript.get_city_wide_path_expansion_limit(
 				WorldData.official_city_world
 			),
 			"citizen_id": citizen_id,
@@ -2475,7 +2475,7 @@ static func advance_labor_task(
 					"city_world": city_world,
 					"start_tile": current_tile,
 					"destination_tiles": [target_tile],
-					"max_expanded_nodes": _get_city_wide_path_expansion_limit(city_world),
+					"max_expanded_nodes": CityNavigationSystemScript.get_city_wide_path_expansion_limit(city_world),
 					"citizen_id": citizen_id,
 					"heuristic_weight": EXACT_PATH_HEURISTIC_WEIGHT
 				})
@@ -2590,77 +2590,6 @@ static func _add_labor_progress(
 		>= int(site.get("required_labor_minutes", 1))
 	)
 
-
-static func _relocate_laborer(
-	citizen_id: int,
-	site_id: int,
-	current_target: Vector2i
-) -> bool:
-	var site := WorldData.get_city_construction_site_by_id(site_id)
-	var citizen := WorldData.get_city_citizen_by_id(citizen_id)
-
-	if site.is_empty() or citizen.is_empty():
-		return false
-
-	var claimed_positions := _get_claimed_labor_positions(
-		site_id,
-		citizen_id
-	)
-	var alternatives: Array[Vector2i] = []
-
-	for position in WorldData.get_city_construction_site_work_positions(
-		site
-	):
-		if (
-			position == current_target
-			or claimed_positions.has(position)
-			or not WorldData.is_city_tile_walkable_for_citizen(
-				WorldData.official_city_world,
-				position,
-				citizen_id
-			)
-		):
-			continue
-
-		alternatives.append(position)
-
-	if alternatives.is_empty():
-		return WorldData.set_city_citizen_task_activity_state({
-			"citizen_id": citizen_id,
-			"target_tile": current_target,
-			"next_action_world_minute": (
-				SimulationClock.absolute_world_minutes
-				+ WorldData.CITY_CONSTRUCTION_LABOR_ATOMIC_MINUTES
-			),
-		})
-
-	var sequence := maxi(
-		int(
-			WorldData.get_city_citizen_current_task(
-				citizen_id
-			).get("relocation_count", 0)
-		),
-		0
-	)
-	var next_target := alternatives[
-		posmod(citizen_id + site_id + sequence, alternatives.size())
-	]
-
-	if not WorldData.set_city_citizen_task_activity_state({
-		"citizen_id": citizen_id,
-		"target_tile": next_target,
-		"previous_target_tile": current_target,
-		"next_action_world_minute": (
-			WorldData.INVALID_CITY_CITIZEN_TASK_ACTION_WORLD_MINUTE
-		),
-		"relocation_count": sequence + 1,
-	}):
-		return false
-
-	return WorldData.set_city_citizen_task_phase(
-		citizen_id,
-		WorldData.CITY_CITIZEN_TASK_PHASE_PENDING
-	)
 
 
 static func _release_labor_task(citizen_id: int) -> void:
@@ -3321,7 +3250,7 @@ static func _get_current_construction_path_cost(
 		"city_world": WorldData.official_city_world,
 		"start_tile": raw_current_tile,
 		"destination_tiles": destination_tiles,
-		"max_expanded_nodes": _get_city_wide_path_expansion_limit(
+		"max_expanded_nodes": CityNavigationSystemScript.get_city_wide_path_expansion_limit(
 			WorldData.official_city_world
 		),
 		"citizen_id": citizen_id,
@@ -3764,22 +3693,5 @@ static func interrupt_citizen_construction_for_food(
 	)
 
 
-static func _sort_tiles_y_then_x(
-	tile_a: Vector2i,
-	tile_b: Vector2i
-) -> bool:
-	if tile_a.y == tile_b.y:
-		return tile_a.x < tile_b.x
-
-	return tile_a.y < tile_b.y
-
-
-static func _get_city_wide_path_expansion_limit(
-	city_world: WorldData
-) -> int:
-	if city_world == null:
-		return 1
-
-	return maxi(city_world.width * city_world.height, 1)
 
 #endregion

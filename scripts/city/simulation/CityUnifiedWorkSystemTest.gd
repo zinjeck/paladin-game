@@ -32,6 +32,7 @@ var test_culture_id: int = -1
 
 func _ready() -> void:
 	_test_roads_optimize_travel_time()
+	_test_large_destination_heuristic_is_admissible()
 	_test_independent_road_tiles_batch_scheduling()
 	_test_parent_orders_and_two_level_fairness()
 	_test_new_blueprint_rebalances_uncommitted_construction_travel()
@@ -110,6 +111,68 @@ func _test_roads_optimize_travel_time() -> void:
 			Vector2i(2, 3)
 		) == WorldData.CITY_CITIZEN_ROAD_CARDINAL_MOVEMENT_COST,
 		"Completed roads must halve cardinal movement cost."
+	)
+
+
+func _test_large_destination_heuristic_is_admissible() -> void:
+	var city_world := _reset_fixture()
+	var destination_tiles: Array[Vector2i] = []
+
+	for x in range(8, 28):
+		destination_tiles.append(Vector2i(x, 18))
+
+	var heuristic := (
+		CityNavigationSystemScript._make_destination_heuristic(
+			destination_tiles
+		)
+	)
+	_expect(
+		not bool(heuristic.get("use_exact", true)),
+		"Large destination sets must use the bounded constant-time heuristic."
+	)
+
+	for sample_tile in [
+		Vector2i(2, 2),
+		Vector2i(16, 2),
+		Vector2i(30, 10),
+		Vector2i(16, 18),
+	]:
+		var bounded_cost := (
+			CityNavigationSystemScript._get_destination_heuristic(
+				sample_tile,
+				heuristic
+			)
+		)
+		var exact_cost := (
+			CityNavigationSystemScript._get_minimum_octile_distance(
+				sample_tile,
+				destination_tiles
+			)
+		)
+		_expect(
+			bounded_cost <= exact_cost,
+			"The large-set heuristic must remain admissible for optimal road routing."
+		)
+
+	var result := CityNavigationSystemScript.find_path_to_any_city_tile({
+		"city_world": city_world,
+		"start_tile": Vector2i(2, 2),
+		"destination_tiles": destination_tiles,
+		"max_expanded_nodes": (
+			CityNavigationSystemScript.get_city_wide_path_expansion_limit(
+				city_world
+			)
+		),
+	})
+	_expect(
+		bool(result.get("success", false))
+		and destination_tiles.has(
+			result.get(
+				"destination_tile",
+				WorldData.INVALID_CITY_TILE_POSITION
+			)
+		),
+		"Large destination routing must still return a real requested destination."
 	)
 
 
@@ -1104,7 +1167,7 @@ func _test_food_path_limit_covers_full_city() -> void:
 	large_city_world.width = 101
 	large_city_world.height = 101
 	var expansion_limit := (
-		CityResourceMatcherScript._get_city_wide_path_expansion_limit(
+		CityNavigationSystemScript.get_city_wide_path_expansion_limit(
 			large_city_world
 		)
 	)

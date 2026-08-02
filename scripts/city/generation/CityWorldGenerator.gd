@@ -3,6 +3,11 @@ class_name CityWorldGenerator
 
 var city_world: WorldData
 var city_seed: int = 0
+var source_region_tiles: Array = []
+var source_region_size: int = 0
+var generated_map_atlas_data: Dictionary = {}
+
+const DEFAULT_LOCAL_TILES_PER_WORLD_TILE: int = 64
 
 var detail_noise := FastNoiseLite.new()
 var fertility_noise := FastNoiseLite.new()
@@ -49,21 +54,63 @@ const TUNDRA_ROCK_BASE_CHANCE: float = 0.0032
 const DESERT_ROCK_BASE_CHANCE: float = 0.0026
 
 static func calculate_city_seed() -> int:
-	var center: Vector2i = WorldData.city_start_region_center
+	return calculate_city_seed_for_region(
+		WorldData.city_start_world_seed,
+		WorldData.city_start_region_center,
+		WorldData.city_start_region_size
+	)
 
-	var seed_value: int = int(WorldData.city_start_world_seed)
-	seed_value += int(center.x * 73856093)
-	seed_value += int(center.y * 19349663)
-	seed_value += int(WorldData.city_start_region_size * 83492791)
 
+static func calculate_city_seed_for_region(
+	world_seed: int,
+	region_center: Vector2i,
+	region_size: int
+) -> int:
+	var seed_value: int = world_seed
+	seed_value += int(region_center.x * 73856093)
+	seed_value += int(region_center.y * 19349663)
+	seed_value += int(region_size * 83492791)
 	return seed_value
 
 
 func generate_city_world(
 	local_tiles_per_world_tile: int,
-	requested_city_seed: int
+	requested_city_seed: int,
+	build_map_atlas: bool = false,
+	biome_resource_blend: float = 0.45
 ) -> WorldData:
-	var region_size: int = WorldData.city_start_region_size
+	return generate_city_world_from_region(
+		WorldData.city_start_tiles,
+		WorldData.city_start_region_size,
+		local_tiles_per_world_tile,
+		requested_city_seed,
+		build_map_atlas,
+		biome_resource_blend
+	)
+
+
+func generate_city_world_from_region(
+	region_tiles: Array,
+	region_size: int,
+	local_tiles_per_world_tile: int,
+	requested_city_seed: int,
+	build_map_atlas: bool = false,
+	biome_resource_blend: float = 0.45
+) -> WorldData:
+	if region_size <= 0 or local_tiles_per_world_tile <= 0:
+		push_error("CityWorldGenerator received an invalid city size.")
+		return null
+	if region_tiles.size() != region_size:
+		push_error("CityWorldGenerator region row count does not match region_size.")
+		return null
+
+	for row in region_tiles:
+		if not row is Array or row.size() != region_size:
+			push_error("CityWorldGenerator region columns do not match region_size.")
+			return null
+
+	source_region_tiles = region_tiles
+	source_region_size = region_size
 	var city_width: int = region_size * local_tiles_per_world_tile
 	var city_height: int = region_size * local_tiles_per_world_tile
 
@@ -72,28 +119,94 @@ func generate_city_world(
 
 	city_world = WorldData.new()
 	city_world.setup(city_width, city_height, city_seed)
+	generated_map_atlas_data.clear()
 	var tree_count := 0
 	var rock_count := 0
+	var tree_tiles: Array[Vector2i] = []
+	var rock_tiles: Array[Vector2i] = []
+	var map_modes: Array[int] = []
+	var map_atlas_width := 0
+	var map_atlas_rgba8 := PackedByteArray()
+	var map_colors: Array[Color] = []
+
+	if build_map_atlas:
+		map_modes = MapVisuals.get_all_view_modes()
+		map_atlas_width = city_world.width * map_modes.size()
+		map_atlas_rgba8.resize(
+			map_atlas_width * city_world.height * 4
+		)
+		map_colors.resize(MapVisuals.VIEW_MODE_COLOR_COUNT)
+	# Reuse the interpolation accumulator for every tile. A default 576 x 576
+	# city previously allocated more than 330,000 profile dictionaries plus two
+	# nested weight dictionaries during one scene transition.
+	var reusable_profile := _make_empty_city_source_profile()
 
 	for y in range(city_world.height):
 		var row: Array = city_world.tiles[y]
 
 		for x in range(city_world.width):
 			var tile: Dictionary = row[x]
-			var profile: Dictionary = get_city_source_profile(x, y, region_size)
+			_populate_city_source_profile(
+				reusable_profile,
+				x,
+				y,
+				region_size
+			)
 
-			copy_city_profile_into_tile(tile, profile, x, y)
+			copy_city_profile_into_tile(
+				tile,
+				reusable_profile,
+				x,
+				y
+			)
 
 			match WorldData.get_city_surface_feature(tile):
 				WorldData.CITY_SURFACE_FEATURE_TREE:
 					tree_count += 1
+					tree_tiles.append(Vector2i(x, y))
 
 				WorldData.CITY_SURFACE_FEATURE_ROCK:
 					rock_count += 1
+					rock_tiles.append(Vector2i(x, y))
 
 			row[x] = tile
 
+			if build_map_atlas:
+				MapVisuals.populate_all_tile_colors(
+					tile,
+					map_colors,
+					biome_resource_blend
+				)
+
+				for mode_index in range(map_modes.size()):
+					var mode_int := map_modes[mode_index]
+					var pixel_index := (
+						y * map_atlas_width
+						+ mode_index * city_world.width
+						+ x
+					) * 4
+					MapVisuals.write_color_rgba8(
+						map_atlas_rgba8,
+						pixel_index,
+						map_colors[mode_int]
+					)
+
 	city_world.mark_tile_data_changed()
+	city_world.prepared_city_tree_tiles = tree_tiles
+	city_world.prepared_city_rock_tiles = rock_tiles
+	city_world.prepared_city_feature_tile_data_version = (
+		city_world.tile_data_version
+	)
+
+	if build_map_atlas:
+		generated_map_atlas_data = {
+			"rgba8": map_atlas_rgba8,
+			"width": city_world.width,
+			"height": city_world.height,
+			"modes": map_modes,
+			"tile_data_version": city_world.tile_data_version,
+			"visual_version": MapVisuals.MAP_VISUAL_CACHE_VERSION,
+		}
 	print(
 		"City natural features generated: ",
 		tree_count,
@@ -105,32 +218,18 @@ func generate_city_world(
 	return city_world
 
 
-func get_city_source_profile(city_x: int, city_y: int, region_size: int) -> Dictionary:
-	var source_fx: float = ((float(city_x) + 0.5) / float(city_world.width)) * float(region_size) - 0.5
-	var source_fy: float = ((float(city_y) + 0.5) / float(city_world.height)) * float(region_size) - 0.5
+func get_city_source_profile(
+	city_x: int,
+	city_y: int,
+	region_size: int
+) -> Dictionary:
+	var profile := _make_empty_city_source_profile()
+	_populate_city_source_profile(profile, city_x, city_y, region_size)
+	return profile
 
-	var warp_strength := 0.62
 
-	source_fx += biome_warp_noise.get_noise_2d(city_x, city_y) * warp_strength
-	source_fy += biome_warp_noise.get_noise_2d(city_x + 9173, city_y - 4289) * warp_strength
-
-	source_fx = clamp(source_fx, 0.0, float(region_size - 1))
-	source_fy = clamp(source_fy, 0.0, float(region_size - 1))
-
-	var x0: int = int(floor(source_fx))
-	var y0: int = int(floor(source_fy))
-	var x1: int = min(x0 + 1, region_size - 1)
-	var y1: int = min(y0 + 1, region_size - 1)
-
-	var tx: float = source_fx - float(x0)
-	var ty: float = source_fy - float(y0)
-
-	var w00: float = (1.0 - tx) * (1.0 - ty)
-	var w10: float = tx * (1.0 - ty)
-	var w01: float = (1.0 - tx) * ty
-	var w11: float = tx * ty
-
-	var profile := {
+func _make_empty_city_source_profile() -> Dictionary:
+	return {
 		"elevation": 0.0,
 		"temperature": 0.0,
 		"precipitation": 0.0,
@@ -141,20 +240,99 @@ func get_city_source_profile(city_x: int, city_y: int, region_size: int) -> Dict
 		"river_weight": 0.0,
 		"mountain_weight": 0.0,
 		"biome_weights": {},
-		"resource_weights": {}
+		"resource_weights": {},
 	}
 
-	accumulate_city_source_sample(profile, WorldData.city_start_tiles[y0][x0], w00)
-	accumulate_city_source_sample(profile, WorldData.city_start_tiles[y0][x1], w10)
-	accumulate_city_source_sample(profile, WorldData.city_start_tiles[y1][x0], w01)
-	accumulate_city_source_sample(profile, WorldData.city_start_tiles[y1][x1], w11)
+
+func _reset_city_source_profile(profile: Dictionary) -> void:
+	profile["elevation"] = 0.0
+	profile["temperature"] = 0.0
+	profile["precipitation"] = 0.0
+	profile["fertility"] = 0.0
+	profile["fertility_weight"] = 0.0
+	profile["water_weight"] = 0.0
+	profile["ocean_weight"] = 0.0
+	profile["river_weight"] = 0.0
+	profile["mountain_weight"] = 0.0
+	var biome_weights: Dictionary = profile["biome_weights"]
+	var resource_weights: Dictionary = profile["resource_weights"]
+	biome_weights.clear()
+	resource_weights.clear()
+
+
+func _populate_city_source_profile(
+	profile: Dictionary,
+	city_x: int,
+	city_y: int,
+	region_size: int
+) -> void:
+	_reset_city_source_profile(profile)
+	var source_fx: float = (
+		((float(city_x) + 0.5) / float(city_world.width))
+		* float(region_size)
+		- 0.5
+	)
+	var source_fy: float = (
+		((float(city_y) + 0.5) / float(city_world.height))
+		* float(region_size)
+		- 0.5
+	)
+	var warp_strength := 0.62
+
+	source_fx += (
+		biome_warp_noise.get_noise_2d(city_x, city_y)
+		* warp_strength
+	)
+	source_fy += (
+		biome_warp_noise.get_noise_2d(
+			city_x + 9173,
+			city_y - 4289
+		)
+		* warp_strength
+	)
+
+	source_fx = clamp(source_fx, 0.0, float(region_size - 1))
+	source_fy = clamp(source_fy, 0.0, float(region_size - 1))
+
+	var x0: int = int(floor(source_fx))
+	var y0: int = int(floor(source_fy))
+	var x1: int = mini(x0 + 1, region_size - 1)
+	var y1: int = mini(y0 + 1, region_size - 1)
+	var tx: float = source_fx - float(x0)
+	var ty: float = source_fy - float(y0)
+	var w00: float = (1.0 - tx) * (1.0 - ty)
+	var w10: float = tx * (1.0 - ty)
+	var w01: float = (1.0 - tx) * ty
+	var w11: float = tx * ty
+
+	accumulate_city_source_sample(
+		profile,
+		source_region_tiles[y0][x0],
+		w00
+	)
+	accumulate_city_source_sample(
+		profile,
+		source_region_tiles[y0][x1],
+		w10
+	)
+	accumulate_city_source_sample(
+		profile,
+		source_region_tiles[y1][x0],
+		w01
+	)
+	accumulate_city_source_sample(
+		profile,
+		source_region_tiles[y1][x1],
+		w11
+	)
 
 	if float(profile["fertility_weight"]) > 0.0:
-		profile["fertility"] = float(profile["fertility"]) / float(profile["fertility_weight"])
+		profile["fertility"] = (
+			float(profile["fertility"])
+			/ float(profile["fertility_weight"])
+		)
 	else:
 		profile["fertility"] = -1.0
-
-	return profile
 
 
 func accumulate_city_source_sample(
