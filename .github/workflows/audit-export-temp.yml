@@ -6,12 +6,16 @@ on:
       - paladin/intensive-debug-performance-cleanup
     paths:
       - .github/workflows/audit-export-temp.yml
+  pull_request:
+    branches:
+      - main
 
 permissions:
   contents: read
 
 jobs:
   export:
+    if: github.head_ref == 'paladin/intensive-debug-performance-cleanup' || github.ref == 'refs/heads/paladin/intensive-debug-performance-cleanup'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
