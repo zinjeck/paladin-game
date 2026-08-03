@@ -1,0 +1,1 @@
+Temporary synchronization trigger. Delete during final migration cleanup.
