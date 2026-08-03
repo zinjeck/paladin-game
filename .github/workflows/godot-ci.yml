@@ -25,11 +25,11 @@ jobs:
       - name: Check out Paladin migration branch
         uses: actions/checkout@v4
         with:
-          ref: migration/godot-4.7.1
+          ref: migration/godot-4.7.1-final
           token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Apply Godot 4.7 construction panel test stabilization
-        if: github.event_name == 'pull_request' && github.head_ref == 'migration/godot-4.7.1'
+        if: github.event_name == 'pull_request' && github.head_ref == 'migration/godot-4.7.1-final'
         shell: bash
         run: |
           set -euo pipefail
@@ -102,7 +102,7 @@ jobs:
             git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
             git add scripts/city/rendering/CityRendererRefactorSmokeTest.gd
             git commit -m "Stabilize construction panel zoom test on Godot 4.7"
-            git push origin HEAD:migration/godot-4.7.1
+            git push origin HEAD:migration/godot-4.7.1-final
           fi
 
       - name: Cache Godot
