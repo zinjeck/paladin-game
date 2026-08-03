@@ -1,0 +1,60 @@
+name: Export all GDScript source
+
+on:
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  export:
+    name: Build combined GDScript text file
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Check out exact PR head
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+
+      - name: Combine every GDScript file
+        shell: bash
+        run: |
+          set -euo pipefail
+          output="Paladin_All_GDScript_Source.txt"
+          commit_sha="$(git rev-parse HEAD)"
+          file_count="$(find scripts -type f -name '*.gd' | wc -l | tr -d ' ')"
+
+          {
+            printf 'PALADIN ALL GDSCRIPT SOURCE\n'
+            printf 'Repository: zinjeck/paladin-game\n'
+            printf 'Commit: %s\n' "$commit_sha"
+            printf 'File count: %s\n' "$file_count"
+            printf 'Generated: %s UTC\n' "$(date -u '+%Y-%m-%d %H:%M:%S')"
+            printf '\n'
+          } > "$output"
+
+          while IFS= read -r -d '' file; do
+            {
+              printf '\n'
+              printf '================================================================================\n'
+              printf 'FILE: %s\n' "$file"
+              printf '================================================================================\n\n'
+              cat "$file"
+              printf '\n'
+            } >> "$output"
+          done < <(find scripts -type f -name '*.gd' -print0 | sort -z)
+
+          printf '\nEND OF PALADIN GDSCRIPT SOURCE\n' >> "$output"
+          wc -l -c "$output"
+
+      - name: Upload combined source
+        uses: actions/upload-artifact@v4
+        with:
+          name: paladin-all-gdscript-source
+          path: Paladin_All_GDScript_Source.txt
+          if-no-files-found: error
+          retention-days: 1
