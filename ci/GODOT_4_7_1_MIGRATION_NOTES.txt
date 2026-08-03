@@ -1,0 +1,9 @@
+Godot 4.7.1 migration branch
+
+Branch: migration/godot-4.7.1
+Base: main
+Purpose: Move Paladin from Godot 4.4.x to Godot 4.7.1 without mixing gameplay changes into the migration.
+
+Automated validation includes project import, static audit, all Godot test scenes, and configured main-scene boot.
+
+Local Windows visual validation remains required before merge because GitHub Actions cannot observe the intermittent frame freeze that motivated the migration.
