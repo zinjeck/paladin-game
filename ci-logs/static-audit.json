@@ -1,0 +1,227 @@
+{
+  "script_count": 55,
+  "total_script_lines": 69898,
+  "function_count": 1777,
+  "class_name_count": 38,
+  "error_count": 0,
+  "warning_count": 2,
+  "errors": [],
+  "warnings": [
+    "scripts/city/rendering/CityRendererRefactorSmokeTest.gd:1394 _test_universal_construction_core is 549 lines",
+    "scripts/city/simulation/CityUnifiedLongRunTest.gd:169 _create_mixed_work_fixture is 302 lines"
+  ],
+  "largest_files": [
+    {
+      "path": "scripts/world/simulation/WorldData.gd",
+      "line_count": 11860
+    },
+    {
+      "path": "scripts/city/rendering/CityRenderer.gd",
+      "line_count": 7658
+    },
+    {
+      "path": "scripts/city/simulation/systems/CityConstructionSystem.gd",
+      "line_count": 3696
+    },
+    {
+      "path": "scripts/citizens/simulation/systems/CitizenHaulingSystem.gd",
+      "line_count": 3119
+    },
+    {
+      "path": "scripts/city/simulation/systems/CityWorkSystem.gd",
+      "line_count": 3038
+    },
+    {
+      "path": "scripts/city/simulation/validators/CityCitizenStateValidator.gd",
+      "line_count": 2771
+    },
+    {
+      "path": "scripts/city/simulation/systems/CityResourceMatcher.gd",
+      "line_count": 2553
+    },
+    {
+      "path": "scripts/citizens/simulation/systems/CitizenDecisionSystem.gd",
+      "line_count": 2509
+    },
+    {
+      "path": "scripts/city/simulation/CityUnifiedWorkSystemTest.gd",
+      "line_count": 2398
+    },
+    {
+      "path": "scripts/city/rendering/CityRendererRefactorSmokeTest.gd",
+      "line_count": 2249
+    },
+    {
+      "path": "scripts/city/simulation/validators/CityLogisticsStateValidator.gd",
+      "line_count": 2231
+    },
+    {
+      "path": "scripts/citizens/simulation/systems/CitizenTaskSystem.gd",
+      "line_count": 2179
+    },
+    {
+      "path": "scripts/city/simulation/validators/CityObjectStateValidator.gd",
+      "line_count": 2080
+    },
+    {
+      "path": "scripts/world/rendering/WorldRenderer.gd",
+      "line_count": 1844
+    },
+    {
+      "path": "scripts/city/simulation/systems/WorkplaceProductionSystem.gd",
+      "line_count": 1404
+    }
+  ],
+  "largest_functions": [
+    {
+      "path": "scripts/city/rendering/CityRendererRefactorSmokeTest.gd",
+      "name": "_test_universal_construction_core",
+      "start_line": 1394,
+      "line_count": 549
+    },
+    {
+      "path": "scripts/city/simulation/CityUnifiedLongRunTest.gd",
+      "name": "_create_mixed_work_fixture",
+      "start_line": 169,
+      "line_count": 302
+    },
+    {
+      "path": "scripts/city/simulation/CityUnifiedWorkSystemTest.gd",
+      "name": "_test_new_blueprint_rebalances_uncommitted_construction_travel",
+      "start_line": 465,
+      "line_count": 299
+    },
+    {
+      "path": "scripts/citizens/simulation/systems/CitizenHaulingSystem.gd",
+      "name": "_try_route_cargo_to_best_resource_demand",
+      "start_line": 1747,
+      "line_count": 292
+    },
+    {
+      "path": "scripts/city/rendering/CityRendererRefactorSmokeTest.gd",
+      "name": "_place_and_validate_city_fixture",
+      "start_line": 1105,
+      "line_count": 289
+    },
+    {
+      "path": "scripts/citizens/simulation/systems/CitizenHaulingSystem.gd",
+      "name": "_begin_next_ground_pile_pickup",
+      "start_line": 1466,
+      "line_count": 281
+    },
+    {
+      "path": "scripts/citizens/simulation/systems/CitizenHaulingSystem.gd",
+      "name": "make_public_storage_haul_task_request",
+      "start_line": 237,
+      "line_count": 278
+    },
+    {
+      "path": "scripts/city/simulation/systems/CityNavigationSystem.gd",
+      "name": "find_path_to_any_city_tile",
+      "start_line": 41,
+      "line_count": 277
+    },
+    {
+      "path": "scripts/city/simulation/validators/CityLogisticsStateValidator.gd",
+      "name": "_validate_city_construction_state",
+      "start_line": 10,
+      "line_count": 275
+    },
+    {
+      "path": "scripts/city/data/CityObjectCatalog.gd",
+      "name": "setup_city_object_definitions",
+      "start_line": 156,
+      "line_count": 272
+    },
+    {
+      "path": "scripts/citizens/simulation/systems/CitizenHaulingSystem.gd",
+      "name": "_advance_pending_destination",
+      "start_line": 2039,
+      "line_count": 268
+    },
+    {
+      "path": "scripts/city/simulation/validators/CityLogisticsStateValidator.gd",
+      "name": "_validate_city_haul_reservation_entry",
+      "start_line": 1396,
+      "line_count": 267
+    },
+    {
+      "path": "scripts/world/rendering/WorldFoundingFlowTest.gd",
+      "name": "_run_world_founding_flow_test",
+      "start_line": 48,
+      "line_count": 262
+    },
+    {
+      "path": "scripts/city/simulation/validators/CityObjectStateValidator.gd",
+      "name": "_validate_city_assignments",
+      "start_line": 350,
+      "line_count": 259
+    },
+    {
+      "path": "scripts/city/simulation/validators/CityObjectStateValidator.gd",
+      "name": "_validate_citizen_inventories",
+      "start_line": 863,
+      "line_count": 251
+    },
+    {
+      "path": "scripts/city/simulation/systems/CityConstructionSystem.gd",
+      "name": "rebalance_uncommitted_construction_workers_for_sites",
+      "start_line": 2925,
+      "line_count": 250
+    },
+    {
+      "path": "scripts/city/simulation/validators/CityCitizenStateValidator.gd",
+      "name": "_validate_haul_task_kind_state",
+      "start_line": 1534,
+      "line_count": 245
+    },
+    {
+      "path": "scripts/city/simulation/validators/CityLogisticsStateValidator.gd",
+      "name": "_validate_city_ground_pile_state",
+      "start_line": 285,
+      "line_count": 242
+    },
+    {
+      "path": "scripts/city/simulation/systems/CityResourceMatcher.gd",
+      "name": "_find_best_cargo_construction_demand",
+      "start_line": 472,
+      "line_count": 234
+    },
+    {
+      "path": "scripts/city/simulation/validators/CityCitizenStateValidator.gd",
+      "name": "_validate_city_citizen_spatial_state",
+      "start_line": 12,
+      "line_count": 233
+    },
+    {
+      "path": "scripts/citizens/simulation/systems/CitizenHaulingSystem.gd",
+      "name": "make_directed_haul_task_request",
+      "start_line": 515,
+      "line_count": 218
+    },
+    {
+      "path": "scripts/city/simulation/CityUnifiedWorkSystemTest.gd",
+      "name": "_test_cargo_ready_demand_preempts_soft_claim",
+      "start_line": 1796,
+      "line_count": 215
+    },
+    {
+      "path": "scripts/city/simulation/validators/CityLogisticsStateValidator.gd",
+      "name": "_validate_city_work_order_jobs",
+      "start_line": 1034,
+      "line_count": 213
+    },
+    {
+      "path": "scripts/city/simulation/systems/CityWorkSystem.gd",
+      "name": "_build_jobs_for_order",
+      "start_line": 2000,
+      "line_count": 202
+    },
+    {
+      "path": "scripts/citizens/simulation/systems/CitizenHaulingSystem.gd",
+      "name": "_deposit_to_endpoint",
+      "start_line": 2776,
+      "line_count": 198
+    }
+  ]
+}
