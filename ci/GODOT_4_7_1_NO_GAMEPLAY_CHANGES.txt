@@ -1,0 +1,1 @@
+No gameplay changes are authorized in this migration branch unless they are strictly required to preserve existing behavior under Godot 4.7.1.
