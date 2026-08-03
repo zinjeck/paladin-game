@@ -172,36 +172,32 @@ func _test_city_map_texture_cache(renderer: CityRenderer) -> void:
 		"Atomic city map preparation must persist the complete mode set."
 	)
 
-	var shared_atlas: Texture2D
+	var texture_instance_ids: Dictionary = {}
 
 	for mode in view_modes:
 		var raw_texture = renderer.city_texture_cache.mode_textures.get(
 			mode
 		)
 		_expect(
-			raw_texture is Texture2D,
-			"Every city map mode must have a ready atlas texture view."
+			raw_texture is ImageTexture,
+			"Every city map mode must have a ready independent ImageTexture."
 		)
 
-		if not raw_texture is Texture2D:
+		if not raw_texture is ImageTexture:
 			continue
 
-		var texture: Texture2D = raw_texture
+		var texture := raw_texture as ImageTexture
+		var texture_instance_id := texture.get_instance_id()
 		_expect(
-			texture is AtlasTexture,
-			"Every map mode must be a view into the shared atlas."
+			not texture_instance_ids.has(texture_instance_id),
+			"Each city map mode must own a distinct GPU texture resource."
 		)
-
-		if texture is AtlasTexture:
-			var atlas_view := texture as AtlasTexture
-
-			if shared_atlas == null:
-				shared_atlas = atlas_view.atlas
-			else:
-				_expect(
-					atlas_view.atlas == shared_atlas,
-					"All map modes must share one GPU atlas upload."
-				)
+		texture_instance_ids[texture_instance_id] = true
+		_expect(
+			texture.get_width() == renderer.city_world.width
+			and texture.get_height() == renderer.city_world.height,
+			"Each city map texture must match the source map dimensions."
+		)
 		renderer.set_city_view_mode(mode)
 		_expect(
 			renderer.city_terrain_texture == texture

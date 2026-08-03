@@ -384,37 +384,32 @@ func _test_world_map_cache(
 		"World map preparation must atomically publish and persist every mode."
 	)
 
-	var shared_atlas: Texture2D
+	var texture_instance_ids: Dictionary = {}
 
 	for mode in view_modes:
 		var raw_texture = renderer.world_texture_cache.mode_textures.get(
 			mode
 		)
 		_expect(
-			raw_texture is Texture2D,
-			"Every world map mode must have a ready atlas texture view."
+			raw_texture is ImageTexture,
+			"Every world map mode must have a ready independent ImageTexture."
 		)
 
-		if not raw_texture is Texture2D:
+		if not raw_texture is ImageTexture:
 			continue
 
-		var texture: Texture2D = raw_texture
-		_expect(
-			texture is AtlasTexture,
-			"Every map mode must be a view into the shared atlas."
-		)
-
-		if texture is AtlasTexture:
-			var atlas_view := texture as AtlasTexture
-
-			if shared_atlas == null:
-				shared_atlas = atlas_view.atlas
-			else:
-				_expect(
-					atlas_view.atlas == shared_atlas,
-					"All map modes must share one GPU atlas upload."
-				)
+		var texture := raw_texture as ImageTexture
 		var texture_instance_id := texture.get_instance_id()
+		_expect(
+			not texture_instance_ids.has(texture_instance_id),
+			"Each world map mode must own a distinct GPU texture resource."
+		)
+		texture_instance_ids[texture_instance_id] = true
+		_expect(
+			texture.get_width() == source_world.width
+			and texture.get_height() == source_world.height,
+			"Each world map texture must match the source map dimensions."
+		)
 
 		if expect_saved_texture_reuse:
 			_expect(

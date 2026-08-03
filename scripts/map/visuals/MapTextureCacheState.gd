@@ -2,7 +2,7 @@ extends RefCounted
 class_name MapTextureCacheState
 
 # Owns session-level rendered map texture caches. Every cache is a complete set
-# of AtlasTexture views into one shared atlas, never a partially warmed set.
+# of independent ImageTextures, never a partially prepared or warmed set.
 
 const MapTextureCacheScript = preload(
 	"res://scripts/map/cache/MapTextureCache.gd"
@@ -30,7 +30,7 @@ static func _has_complete_mode_texture_cache(
 		if not texture_cache.has(mode_int):
 			return false
 
-		if not texture_cache[mode_int] is Texture2D:
+		if not texture_cache[mode_int] is ImageTexture:
 			return false
 
 	return true
