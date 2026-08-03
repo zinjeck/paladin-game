@@ -1,0 +1,20 @@
+PALADIN GODOT 4.7.1 LOCAL VALIDATION
+
+Use a separate physical copy of the repository.
+Use the standard Godot 4.7.1 Windows build.
+
+[ ] Project imports without editor-reported errors
+[ ] Main menu opens
+[ ] World generation completes
+[ ] World map modes switch correctly
+[ ] Region selection and founding panel work
+[ ] City entry completes
+[ ] Citizens move and accept work
+[ ] Hunger and food acquisition work
+[ ] Employment fills workplace vacancies
+[ ] Hauling and storage work
+[ ] Construction and roads work
+[ ] World/city switching preserves state
+[ ] Former intermittent freeze is absent during an extended run
+
+Do not merge migration/godot-4.7.1 until these checks are confirmed.
