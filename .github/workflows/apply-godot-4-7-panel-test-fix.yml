@@ -1,23 +1,23 @@
 name: Apply Godot 4.7 panel test stabilization
 
 on:
-  pull_request:
+  push:
     branches:
-      - migration/godot-4.7.1
+      - migration/godot-4.7.1-panel-test-fix
 
 permissions:
   contents: write
 
 jobs:
   apply-fix:
-    if: github.head_ref == 'migration/godot-4.7.1-panel-test-fix'
+    if: github.event.head_commit.message != 'Stabilize construction panel zoom test on Godot 4.7'
     runs-on: ubuntu-latest
 
     steps:
-      - name: Check out migration branch
+      - name: Check out fix branch
         uses: actions/checkout@v4
         with:
-          ref: ${{ github.head_ref }}
+          ref: migration/godot-4.7.1-panel-test-fix
           token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Stabilize construction panel zoom test
@@ -89,4 +89,4 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add scripts/city/rendering/CityRendererRefactorSmokeTest.gd
           git commit -m "Stabilize construction panel zoom test on Godot 4.7"
-          git push origin HEAD:${{ github.head_ref }}
+          git push origin HEAD:migration/godot-4.7.1-panel-test-fix
