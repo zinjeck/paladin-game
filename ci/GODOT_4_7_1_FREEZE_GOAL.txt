@@ -1,0 +1,1 @@
+Migration goal: preserve Paladin behavior while moving to Godot 4.7.1, then verify that the Godot 4.4 intermittent freeze no longer occurs in the full Windows game.
