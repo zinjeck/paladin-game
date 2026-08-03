@@ -22,5 +22,4 @@ config/icon="res://icon.svg"
 [autoload]
 
 SimulationClock="*res://scripts/world/simulation/SimulationClock.gd"
-SimulationProfiler="*res://scripts/dev/SimulationProfiler.gd"
 SimulationCoordinator="*res://scripts/world/simulation/SimulationCoordinator.gd"
