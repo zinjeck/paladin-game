@@ -1,6 +1,6 @@
 [gd_scene load_steps=2 format=3]
 
-[ext_resource type="Script" path="res://scripts/city/rendering/CityRendererRefactorSmokeTest.gd" id="1_test"]
+[ext_resource type="Script" path="res://scripts/city/rendering/CityRendererRefactorSmokeTestGodot47.gd" id="1_test"]
 
 [node name="CityRendererRefactorSmokeTest" type="Node"]
 script = ExtResource("1_test")
