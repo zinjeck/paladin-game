@@ -1,0 +1,3 @@
+Expected result
+
+Paladin should import and pass its automated suite under Godot 4.7.1 with no intentional gameplay changes. After automated validation, the user must run the Windows build long enough to verify that the Godot 4.4 intermittent freeze is absent in the full game.
