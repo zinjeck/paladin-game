@@ -41,38 +41,43 @@ func _ready() -> void:
 
 
 func _process(delta: float) -> void:
-	if not simulation_active:
-		return
-
-	if simulation_paused:
-		return
-
-	if delta <= 0.0:
-		return
-
-	if speed_multiplier <= 0.0:
-		return
-
-	if real_seconds_per_tick <= 0.0:
-		return
-
-	_real_time_accumulator += delta * speed_multiplier
-
+	# TEMPORARY FREEZE DIAGNOSTIC: this wrapper measures the complete clock
+	# process without changing the accumulator, tick order, or simulation rules.
+	var profile_start_usec := Time.get_ticks_usec()
+	var accumulator_before := _real_time_accumulator
 	var ticks_processed_this_frame := 0
 
-	while (
-		_real_time_accumulator >= real_seconds_per_tick
-		and ticks_processed_this_frame < MAX_TICKS_PER_FRAME
-	):
-		_real_time_accumulator -= real_seconds_per_tick
-		advance_one_simulation_tick()
-		ticks_processed_this_frame += 1
-
 	if (
-		ticks_processed_this_frame >= MAX_TICKS_PER_FRAME
-		and _real_time_accumulator >= real_seconds_per_tick
+		simulation_active
+		and not simulation_paused
+		and delta > 0.0
+		and speed_multiplier > 0.0
+		and real_seconds_per_tick > 0.0
 	):
-		backlog_limit_hit_count += 1
+		_real_time_accumulator += delta * speed_multiplier
+
+		while (
+			_real_time_accumulator >= real_seconds_per_tick
+			and ticks_processed_this_frame < MAX_TICKS_PER_FRAME
+		):
+			_real_time_accumulator -= real_seconds_per_tick
+			advance_one_simulation_tick()
+			ticks_processed_this_frame += 1
+
+		if (
+			ticks_processed_this_frame >= MAX_TICKS_PER_FRAME
+			and _real_time_accumulator >= real_seconds_per_tick
+		):
+			backlog_limit_hit_count += 1
+
+	SimulationProfiler.record_clock_process(
+		Time.get_ticks_usec() - profile_start_usec,
+		ticks_processed_this_frame,
+		accumulator_before,
+		_real_time_accumulator,
+		get_accumulated_backlog_ticks(),
+		backlog_limit_hit_count
+	)
 
 
 func start_new_game(
@@ -179,11 +184,34 @@ func set_tick_configuration(
 
 
 func advance_one_simulation_tick() -> void:
+	# TEMPORARY FREEZE DIAGNOSTIC: measure the complete synchronous tick
+	# pipeline, including all simulation_tick and time_changed subscribers.
+	var pipeline_start_usec := Time.get_ticks_usec()
+
 	absolute_world_minutes += minutes_per_tick
 	tick_index += 1
 
+	var simulation_signal_start_usec := Time.get_ticks_usec()
 	simulation_tick.emit(tick_index, minutes_per_tick)
+	var simulation_signal_duration_usec := (
+		Time.get_ticks_usec()
+		- simulation_signal_start_usec
+	)
+
+	var time_changed_signal_start_usec := Time.get_ticks_usec()
 	emit_time_changed()
+	var time_changed_signal_duration_usec := (
+		Time.get_ticks_usec()
+		- time_changed_signal_start_usec
+	)
+
+	SimulationProfiler.record_tick_pipeline(
+		tick_index,
+		minutes_per_tick,
+		Time.get_ticks_usec() - pipeline_start_usec,
+		simulation_signal_duration_usec,
+		time_changed_signal_duration_usec
+	)
 
 
 func advance_debug_ticks(tick_amount: int) -> void:
