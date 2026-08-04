@@ -50,6 +50,21 @@ static func run_tick(
 
 	if not bool(commit_result.get("success", false)):
 		push_error("Citizen movement tick could not be committed.")
+		return
+
+	var rejected_updates: Array = commit_result.get(
+		"rejected_updates",
+		[]
+	)
+
+	if not rejected_updates.is_empty():
+		push_warning(
+			"Quarantined "
+				+ str(rejected_updates.size())
+				+ " invalid citizen movement update(s) without "
+				+ "blocking valid movers: "
+				+ str(rejected_updates)
+		)
 
 
 static func _advance_active_mover(values: Dictionary) -> void:

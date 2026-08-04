@@ -1535,10 +1535,23 @@ func _test_universal_construction_core(
 	var original_camera_zoom := renderer.camera.zoom
 	renderer.camera.zoom = original_camera_zoom * 1.5
 	renderer.update_construction_site_info_panel_screen_position()
-	_expect(
+	var panel_size_after_zoom := (
 		renderer.construction_site_info_panel.size
-		== panel_size_before_zoom,
-		"Construction panel dimensions must remain screen-constant under zoom."
+	)
+	_expect(
+		is_equal_approx(
+			panel_size_after_zoom.x,
+			panel_size_before_zoom.x
+		)
+		and is_equal_approx(
+			panel_size_after_zoom.y,
+			panel_size_before_zoom.y
+		),
+		"Construction panel dimensions must remain screen-constant under zoom. "
+			+ "Before: "
+			+ str(panel_size_before_zoom)
+			+ ", after: "
+			+ str(panel_size_after_zoom)
 	)
 	renderer.camera.zoom = original_camera_zoom
 	renderer.update_construction_site_info_panel_screen_position()
