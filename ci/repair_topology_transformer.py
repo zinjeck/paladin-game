@@ -33,5 +33,29 @@ new = '''    text = regex_replace_once(
 count = text.count(old)
 if count != 1:
     raise RuntimeError(f"Expected one transformer block, found {count}")
-path.write_text(text.replace(old, new, 1), encoding="utf-8")
+text = text.replace(old, new, 1)
+
+old_ci = '''def patch_ci_version() -> None:
+    path = ".github/workflows/godot-ci.yml"
+    text = read(path)
+    if "4.4.1" not in text:
+        raise RuntimeError("Godot CI no longer contains the expected 4.4.1 version")
+    text = text.replace("4.4.1", "4.7.1")
+    write(path, text)
+'''
+new_ci = '''def patch_ci_version() -> None:
+    path = ".github/workflows/godot-ci.yml"
+    text = read(path)
+    if "4.4.1" in text:
+        text = text.replace("4.4.1", "4.7.1")
+    elif "4.7.1" not in text:
+        raise RuntimeError("Godot CI contains neither the old nor current engine version")
+    write(path, text)
+'''
+count = text.count(old_ci)
+if count != 1:
+    raise RuntimeError(f"Expected one CI-version transformer block, found {count}")
+text = text.replace(old_ci, new_ci, 1)
+
+path.write_text(text, encoding="utf-8")
 print("Topology transformer repaired.")
