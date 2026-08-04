@@ -9,7 +9,7 @@ on:
       - main
 
 permissions:
-  contents: write
+  contents: read
 
 concurrency:
   group: godot-ci-${{ github.ref }}
@@ -17,29 +17,13 @@ concurrency:
 
 jobs:
   test:
-    name: Finalize pass and run Godot tests
+    name: Godot 4.7.1 headless tests
     runs-on: ubuntu-latest
     timeout-minutes: 30
 
     steps:
-      - name: Check out Paladin feature branch
+      - name: Check out Paladin
         uses: actions/checkout@v4
-        with:
-          ref: ${{ github.head_ref || github.ref_name }}
-
-      - name: Finalize feature branch
-        if: github.event_name == 'pull_request' && github.actor != 'github-actions[bot]'
-        shell: bash
-        run: |
-          set -euo pipefail
-          python3 ci/finalize_topology_branch.py
-          python3 ci/audit_gdscript.py
-          git diff --check
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add -A
-          git commit -m "Finalize topology safety pass"
-          git push origin HEAD:${{ github.head_ref }}
 
       - name: Cache Godot
         id: cache-godot
