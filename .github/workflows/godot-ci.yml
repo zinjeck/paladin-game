@@ -32,6 +32,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          python3 ci/repair_topology_transformer.py
           python3 ci/apply_topology_safety_pass.py
           python3 ci/audit_gdscript.py
           git diff --check
