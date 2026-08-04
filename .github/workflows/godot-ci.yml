@@ -17,7 +17,7 @@ concurrency:
 
 jobs:
   test:
-    name: Apply pass and run Godot tests
+    name: Finalize pass and run Godot tests
     runs-on: ubuntu-latest
     timeout-minutes: 30
 
@@ -27,25 +27,18 @@ jobs:
         with:
           ref: ${{ github.head_ref || github.ref_name }}
 
-      - name: Apply asserted topology safety transformations
+      - name: Finalize feature branch
         if: github.event_name == 'pull_request' && github.actor != 'github-actions[bot]'
         shell: bash
         run: |
           set -euo pipefail
-          python3 ci/repair_topology_transformer.py
-          python3 ci/apply_topology_safety_pass.py
+          python3 ci/finalize_topology_branch.py
           python3 ci/audit_gdscript.py
           git diff --check
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add \
-            .github/workflows/godot-ci.yml \
-            scripts/world/simulation/WorldData.gd \
-            scripts/city/simulation/systems/CityConstructionSystem.gd \
-            scripts/citizens/simulation/systems/CitizenMovementSystem.gd \
-            scripts/city/simulation/CityTopologySafetyTest.gd \
-            scripts/city/simulation/CityTopologySafetyTest.tscn
-          git commit -m "Make construction finalization topology-safe"
+          git add -A
+          git commit -m "Finalize topology safety pass"
           git push origin HEAD:${{ github.head_ref }}
 
       - name: Cache Godot
