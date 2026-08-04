@@ -325,6 +325,18 @@ const CITY_PLAYER_COMMAND_BLOCKED_RETRY_DELAY_MINUTES: int = 30
 const CITY_CONSTRUCTION_PHASE_CLEARING := "clearing"
 const CITY_CONSTRUCTION_PHASE_GATHERING := "gathering"
 const CITY_CONSTRUCTION_PHASE_LABOR := "labor"
+const CITY_CONSTRUCTION_FINALIZATION_STATE_NONE := "none"
+const CITY_CONSTRUCTION_FINALIZATION_STATE_AWAITING_CLEARANCE := (
+	"awaiting_clearance"
+)
+const CITY_TOPOLOGY_MUTATION_FAILURE_NONE := "none"
+const CITY_TOPOLOGY_MUTATION_FAILURE_INVALID_REQUEST := (
+	"invalid_request"
+)
+const CITY_TOPOLOGY_MUTATION_FAILURE_TILE_BLOCKED := "tile_blocked"
+const CITY_TOPOLOGY_MUTATION_FAILURE_FOOTPRINT_OCCUPIED := (
+	"footprint_occupied"
+)
 const CITY_CONSTRUCTION_TARGET_NEW := "new"
 const CITY_CONSTRUCTION_TARGET_MODIFICATION := "modification"
 const CITY_CONSTRUCTION_TASK_PRIORITY: int = (
@@ -8013,6 +8025,8 @@ static func commit_city_citizen_movement_tick(
 		"success": false,
 		"updated_citizen_count": 0,
 		"moved_citizen_count": 0,
+		"rejected_update_count": 0,
+		"rejected_updates": [],
 	}
 
 	if city_world == null:
@@ -8022,32 +8036,49 @@ static func commit_city_citizen_movement_tick(
 		city_world,
 		raw_citizen_updates
 	)
-
-	if not bool(update_normalization.get("success", false)):
-		return result
-
 	var clean_updates: Array = update_normalization.get("updates", [])
 	var clean_update_by_id: Dictionary = update_normalization.get(
 		"update_by_id",
 		{}
 	)
+	var rejected_updates: Array = update_normalization.get(
+		"rejected_updates",
+		[]
+	)
+	var rejected_id_lookup: Dictionary = {}
+
+	for raw_rejection in rejected_updates:
+		if not raw_rejection is Dictionary:
+			continue
+
+		var rejected_id := int(raw_rejection.get("citizen_id", -1))
+
+		if rejected_id > 0:
+			rejected_id_lookup[rejected_id] = true
+
 	var active_normalization := _normalize_next_active_mover_ids(
 		raw_next_active_mover_ids,
-		clean_update_by_id
+		clean_update_by_id,
+		rejected_id_lookup
 	)
-
-	if not bool(active_normalization.get("success", false)):
-		return result
-
 	var clean_next_active_ids: Array[int] = active_normalization.get(
 		"active_ids",
 		[]
 	)
+	rejected_updates.append_array(
+		active_normalization.get("rejected_updates", [])
+	)
+
 	var application_result := _apply_city_citizen_movement_updates(
 		clean_updates
 	)
 	var moved_citizen_count := int(
 		application_result.get("moved_citizen_count", 0)
+	)
+	var quarantined_count := (
+		_quarantine_rejected_city_citizen_movement_updates(
+			rejected_updates
+		)
 	)
 	var active_registry_changed := (
 		city_active_mover_ids != clean_next_active_ids
@@ -8055,7 +8086,11 @@ static func commit_city_citizen_movement_tick(
 
 	_replace_city_active_mover_registry(clean_next_active_ids)
 
-	if not clean_updates.is_empty() or active_registry_changed:
+	if (
+		not clean_updates.is_empty()
+		or quarantined_count > 0
+		or active_registry_changed
+	):
 		_mark_city_citizen_movement_changed()
 
 	if moved_citizen_count > 0:
@@ -8068,7 +8103,30 @@ static func commit_city_citizen_movement_tick(
 	result["success"] = true
 	result["updated_citizen_count"] = clean_updates.size()
 	result["moved_citizen_count"] = moved_citizen_count
+	result["rejected_update_count"] = rejected_updates.size()
+	result["rejected_updates"] = rejected_updates
 	return result
+
+
+static func _make_city_citizen_movement_rejection(
+	citizen_id: int,
+	reason: String,
+	final_tile = INVALID_CITY_TILE_POSITION,
+	quarantine: bool = true
+) -> Dictionary:
+	var rejection := {
+		"citizen_id": citizen_id,
+		"reason": reason,
+		"quarantine": quarantine,
+	}
+
+	if final_tile is Vector2i:
+		rejection["final_tile"] = final_tile
+		rejection["occupying_object_id"] = int(
+			city_occupied_tiles.get(final_tile, -1)
+		)
+
+	return rejection
 
 
 static func _normalize_city_citizen_movement_updates(
@@ -8077,10 +8135,19 @@ static func _normalize_city_citizen_movement_updates(
 ) -> Dictionary:
 	var clean_updates: Array = []
 	var clean_update_by_id: Dictionary = {}
+	var rejected_updates: Array = []
 
 	for raw_update in raw_citizen_updates:
 		if not raw_update is Dictionary:
-			return {"success": false}
+			rejected_updates.append(
+				_make_city_citizen_movement_rejection(
+					-1,
+					"update_is_not_dictionary",
+					INVALID_CITY_TILE_POSITION,
+					false
+				)
+			)
+			continue
 
 		var update: Dictionary = raw_update
 		var citizen_id := int(update.get("citizen_id", -1))
@@ -8091,36 +8158,108 @@ static func _normalize_city_citizen_movement_updates(
 		)
 		var raw_traversed_tiles = update.get("traversed_tiles", [])
 
-		if citizen_id <= 0 or clean_update_by_id.has(citizen_id):
-			return {"success": false}
+		if citizen_id <= 0:
+			rejected_updates.append(
+				_make_city_citizen_movement_rejection(
+					citizen_id,
+					"invalid_citizen_id",
+					raw_final_tile,
+					false
+				)
+			)
+			continue
+
+		if clean_update_by_id.has(citizen_id):
+			rejected_updates.append(
+				_make_city_citizen_movement_rejection(
+					citizen_id,
+					"duplicate_update",
+					raw_final_tile,
+					false
+				)
+			)
+			continue
 
 		if not raw_updated_citizen is Dictionary:
-			return {"success": false}
+			rejected_updates.append(
+				_make_city_citizen_movement_rejection(
+					citizen_id,
+					"updated_citizen_is_not_dictionary",
+					raw_final_tile
+				)
+			)
+			continue
 
 		if not raw_final_tile is Vector2i:
-			return {"success": false}
+			rejected_updates.append(
+				_make_city_citizen_movement_rejection(
+					citizen_id,
+					"final_tile_is_not_vector"
+				)
+			)
+			continue
+
+		if not raw_traversed_tiles is Array:
+			rejected_updates.append(
+				_make_city_citizen_movement_rejection(
+					citizen_id,
+					"traversed_tiles_is_not_array",
+					raw_final_tile
+				)
+			)
+			continue
 
 		if not is_city_tile_walkable_for_citizen(
 			city_world,
 			raw_final_tile,
 			citizen_id
 		):
-			return {"success": false}
+			rejected_updates.append(
+				_make_city_citizen_movement_rejection(
+					citizen_id,
+					"final_tile_not_walkable",
+					raw_final_tile
+				)
+			)
+			continue
 
 		var citizen_index := get_city_citizen_index_by_id(citizen_id)
 
 		if citizen_index < 0:
-			return {"success": false}
+			rejected_updates.append(
+				_make_city_citizen_movement_rejection(
+					citizen_id,
+					"citizen_not_found",
+					raw_final_tile,
+					false
+				)
+			)
+			continue
 
 		var updated_citizen: Dictionary = raw_updated_citizen
 
 		if int(updated_citizen.get("id", -1)) != citizen_id:
-			return {"success": false}
+			rejected_updates.append(
+				_make_city_citizen_movement_rejection(
+					citizen_id,
+					"updated_citizen_id_mismatch",
+					raw_final_tile
+				)
+			)
+			continue
 
 		var existing_citizen = city_citizens[citizen_index]
 
 		if not existing_citizen is Dictionary:
-			return {"success": false}
+			rejected_updates.append(
+				_make_city_citizen_movement_rejection(
+					citizen_id,
+					"authoritative_citizen_is_not_dictionary",
+					raw_final_tile,
+					false
+				)
+			)
+			continue
 
 		if not (
 			existing_citizen.get(
@@ -8129,7 +8268,14 @@ static func _normalize_city_citizen_movement_updates(
 			)
 			is Vector2i
 		):
-			return {"success": false}
+			rejected_updates.append(
+				_make_city_citizen_movement_rejection(
+					citizen_id,
+					"authoritative_position_invalid",
+					raw_final_tile
+				)
+			)
+			continue
 
 		var clean_update := {
 			"citizen_id": citizen_id,
@@ -8142,22 +8288,35 @@ static func _normalize_city_citizen_movement_updates(
 		clean_update_by_id[citizen_id] = clean_update
 
 	return {
-		"success": true,
 		"updates": clean_updates,
 		"update_by_id": clean_update_by_id,
+		"rejected_updates": rejected_updates,
 	}
 
 
 static func _normalize_next_active_mover_ids(
 	raw_next_active_mover_ids: Array[int],
-	clean_update_by_id: Dictionary
+	clean_update_by_id: Dictionary,
+	rejected_id_lookup: Dictionary
 ) -> Dictionary:
 	var clean_next_active_ids: Array[int] = []
 	var clean_next_active_lookup: Dictionary = {}
+	var rejected_updates: Array = []
 
 	for citizen_id in raw_next_active_mover_ids:
+		if rejected_id_lookup.has(citizen_id):
+			continue
+
 		if citizen_id <= 0 or clean_next_active_lookup.has(citizen_id):
-			return {"success": false}
+			rejected_updates.append(
+				_make_city_citizen_movement_rejection(
+					citizen_id,
+					"invalid_or_duplicate_active_mover",
+					INVALID_CITY_TILE_POSITION,
+					false
+				)
+			)
+			continue
 
 		var proposed_citizen := get_city_citizen_by_id(citizen_id)
 
@@ -8166,25 +8325,90 @@ static func _normalize_next_active_mover_ids(
 			proposed_citizen = proposed_update.get("citizen", {})
 
 		if proposed_citizen.is_empty():
-			return {"success": false}
+			rejected_updates.append(
+				_make_city_citizen_movement_rejection(
+					citizen_id,
+					"active_mover_citizen_missing",
+					INVALID_CITY_TILE_POSITION,
+					false
+				)
+			)
+			continue
 
 		if not bool(proposed_citizen.get("alive", false)):
-			return {"success": false}
+			rejected_updates.append(
+				_make_city_citizen_movement_rejection(
+					citizen_id,
+					"active_mover_not_alive",
+					INVALID_CITY_TILE_POSITION,
+					false
+				)
+			)
+			continue
 
 		if (
 			str(proposed_citizen.get("movement_state", ""))
 			!= CITY_CITIZEN_MOVEMENT_STATE_MOVING
 		):
-			return {"success": false}
+			rejected_updates.append(
+				_make_city_citizen_movement_rejection(
+					citizen_id,
+					"active_registry_entry_not_moving",
+					INVALID_CITY_TILE_POSITION,
+					false
+				)
+			)
+			continue
 
 		clean_next_active_ids.append(citizen_id)
 		clean_next_active_lookup[citizen_id] = true
 
 	clean_next_active_ids.sort()
 	return {
-		"success": true,
 		"active_ids": clean_next_active_ids,
+		"rejected_updates": rejected_updates,
 	}
+
+
+static func _quarantine_rejected_city_citizen_movement_updates(
+	rejected_updates: Array
+) -> int:
+	var quarantined_ids: Dictionary = {}
+
+	for raw_rejection in rejected_updates:
+		if not raw_rejection is Dictionary:
+			continue
+
+		var rejection: Dictionary = raw_rejection
+		var citizen_id := int(rejection.get("citizen_id", -1))
+
+		if (
+			citizen_id <= 0
+			or not bool(rejection.get("quarantine", true))
+			or quarantined_ids.has(citizen_id)
+		):
+			continue
+
+		var citizen_index := get_city_citizen_index_by_id(citizen_id)
+
+		if citizen_index < 0:
+			continue
+
+		var raw_citizen = city_citizens[citizen_index]
+
+		if not raw_citizen is Dictionary:
+			continue
+
+		var citizen: Dictionary = raw_citizen
+		CityCitizensScript.reset_city_citizen_movement_state(citizen, true)
+		citizen["movement_state"] = CITY_CITIZEN_MOVEMENT_STATE_BLOCKED
+		citizen["movement_failure_reason"] = (
+			CITY_CITIZEN_MOVEMENT_FAILURE_INVALID_PATH
+		)
+		city_citizens[citizen_index] = citizen
+		quarantined_ids[citizen_id] = true
+
+	return quarantined_ids.size()
 
 
 static func _apply_city_citizen_movement_updates(
@@ -9190,6 +9414,174 @@ static func reset_city_object_state() -> void:
 
 #region City Object Placement and Traversal
 
+static func city_object_type_preserves_citizen_walkability(
+	object_type: String
+) -> bool:
+	# Roads alter movement cost but remain publicly traversable. Every current
+	# building type replaces open ground with controlled or blocked occupancy.
+	# Keeping this policy centralized makes future bridges, floors, gates, and
+	# similar topology types opt in deliberately instead of acquiring exceptions
+	# throughout construction and movement code.
+	return object_type == CITY_OBJECT_ROAD
+
+
+static func get_living_city_citizen_ids_in_tiles(
+	raw_tiles: Array
+) -> Array[int]:
+	var tile_lookup: Dictionary = {}
+
+	for raw_tile in raw_tiles:
+		if raw_tile is Vector2i:
+			tile_lookup[raw_tile] = true
+
+	var citizen_ids: Array[int] = []
+
+	for raw_citizen in city_citizens:
+		if not raw_citizen is Dictionary:
+			continue
+
+		var citizen: Dictionary = raw_citizen
+
+		if not bool(citizen.get("alive", false)):
+			continue
+
+		var raw_tile = citizen.get(
+			"city_tile_position",
+			INVALID_CITY_TILE_POSITION
+		)
+
+		if not raw_tile is Vector2i or not tile_lookup.has(raw_tile):
+			continue
+
+		var citizen_id := int(citizen.get("id", -1))
+
+		if citizen_id > 0:
+			citizen_ids.append(citizen_id)
+
+	citizen_ids.sort()
+	return citizen_ids
+
+
+static func get_city_object_topology_blocking_citizen_ids(
+	object_type: String,
+	footprint_tiles: Array
+) -> Array[int]:
+	if city_object_type_preserves_citizen_walkability(object_type):
+		return []
+
+	return get_living_city_citizen_ids_in_tiles(footprint_tiles)
+
+
+static func validate_city_object_topology_mutation(
+	values: Dictionary
+) -> Dictionary:
+	var result := {
+		"success": false,
+		"failure_reason": CITY_TOPOLOGY_MUTATION_FAILURE_INVALID_REQUEST,
+		"blocking_citizen_ids": [],
+	}
+	var city_world: WorldData = values.get("city_world")
+	var object_type := str(values.get("object_type", ""))
+	var raw_footprint_tiles = values.get("footprint_tiles", [])
+	var allowed_construction_site_id := int(
+		values.get("allowed_construction_site_id", -1)
+	)
+	var allowed_occupied_object_id := int(
+		values.get("allowed_occupied_object_id", -1)
+	)
+
+	if (
+		city_world == null
+		or get_city_object_definition(object_type).is_empty()
+		or not raw_footprint_tiles is Array
+		or raw_footprint_tiles.is_empty()
+	):
+		return result
+
+	var footprint_tiles: Array[Vector2i] = []
+	var footprint_lookup: Dictionary = {}
+
+	for raw_tile in raw_footprint_tiles:
+		if not raw_tile is Vector2i:
+			return result
+
+		var tile_position: Vector2i = raw_tile
+
+		if footprint_lookup.has(tile_position):
+			continue
+
+		if not city_world.is_in_bounds(tile_position.x, tile_position.y):
+			return result
+
+		var tile: Dictionary = city_world.get_tile(
+			tile_position.x,
+			tile_position.y
+		)
+
+		if (
+			str(tile.get("terrain", TERRAIN_WATER)) in [
+				TERRAIN_WATER,
+				TERRAIN_MOUNTAIN,
+			]
+			or not bool(tile.get("is_land", false))
+		):
+			return result
+
+		var occupied_object_id := int(
+			city_occupied_tiles.get(tile_position, -1)
+		)
+
+		if (
+			occupied_object_id > 0
+			and occupied_object_id != allowed_occupied_object_id
+		):
+			result["failure_reason"] = (
+				CITY_TOPOLOGY_MUTATION_FAILURE_TILE_BLOCKED
+			)
+			return result
+
+		var construction_site_id := int(
+			city_construction_site_id_by_tile.get(tile_position, -1)
+		)
+
+		if (
+			construction_site_id > 0
+			and construction_site_id != allowed_construction_site_id
+		):
+			result["failure_reason"] = (
+				CITY_TOPOLOGY_MUTATION_FAILURE_TILE_BLOCKED
+			)
+			return result
+
+		if has_city_ground_pile_at_tile(tile_position):
+			result["failure_reason"] = (
+				CITY_TOPOLOGY_MUTATION_FAILURE_TILE_BLOCKED
+			)
+			return result
+
+		footprint_lookup[tile_position] = true
+		footprint_tiles.append(tile_position)
+
+	var blocking_citizen_ids := (
+		get_city_object_topology_blocking_citizen_ids(
+			object_type,
+			footprint_tiles
+		)
+	)
+
+	if not blocking_citizen_ids.is_empty():
+		result["failure_reason"] = (
+			CITY_TOPOLOGY_MUTATION_FAILURE_FOOTPRINT_OCCUPIED
+		)
+		result["blocking_citizen_ids"] = blocking_citizen_ids
+		return result
+
+	result["success"] = true
+	result["failure_reason"] = CITY_TOPOLOGY_MUTATION_FAILURE_NONE
+	result["footprint_tiles"] = footprint_tiles
+	return result
+
+
 static func can_place_city_object(
 	city_world: WorldData,
 	top_left: Vector2i,
@@ -9759,12 +10151,7 @@ static func is_city_tile_walkable_for_citizen(
 	):
 		return true
 
-	if (
-		citizen_id <= 0
-		or not city_object_supports_citizen_interior(
-			occupying_object
-		)
-	):
+	if citizen_id <= 0:
 		return false
 
 	var citizen := get_city_citizen_by_id(citizen_id)
@@ -9780,15 +10167,19 @@ static func is_city_tile_walkable_for_citizen(
 		INVALID_CITY_TILE_POSITION
 	)
 
-	# Existing occupants retain interior traversal long enough to reach an
-	# allowed exit. This prevents reassignment or policy changes from trapping
-	# a citizen inside a building.
+	# Recovery invariant: a citizen already caught inside an occupied footprint
+	# may traverse that same footprint long enough to leave it. Normal topology
+	# mutations are prevented from creating this state; this path exists for old
+	# saves and defensive recovery only, and never authorizes re-entry.
 	if (
 		current_position is Vector2i
 		and int(city_occupied_tiles.get(current_position, -1))
 		== object_id
 	):
 		return true
+
+	if not city_object_supports_citizen_interior(occupying_object):
+		return false
 
 	return city_citizen_can_access_object_interior(
 		citizen_id,
@@ -9954,6 +10345,28 @@ static func add_city_object(
 	var definition := get_city_object_definition(object_type)
 	var shape_mode := str(definition.get("shape_mode", CITY_OBJECT_SHAPE_RECTANGLE))
 	var footprint_tiles := make_rectangle_city_object_footprint_tiles(top_left, size_tiles)
+	var topology_validation := validate_city_object_topology_mutation({
+		"city_world": city_world,
+		"object_type": object_type,
+		"footprint_tiles": footprint_tiles,
+		"allowed_construction_site_id": int(
+			values.get("allowed_construction_site_id", -1)
+		),
+		"allowed_occupied_object_id": int(
+			values.get("allowed_occupied_object_id", -1)
+		),
+	})
+
+	if not bool(topology_validation.get("success", false)):
+		push_warning(
+			"Rejected city-object topology mutation for "
+				+ object_type
+				+ ". Reason: "
+				+ str(topology_validation.get("failure_reason", ""))
+				+ ". Blocking citizens: "
+				+ str(topology_validation.get("blocking_citizen_ids", []))
+		)
+		return {}
 
 	city_object["shape_mode"] = shape_mode
 	city_object["footprint_tiles"] = footprint_tiles
@@ -11241,7 +11654,8 @@ static func can_place_city_road_tile(city_world: WorldData, tile_position: Vecto
 static func add_city_road_object(
 	tile_positions: Array,
 	object_owner: String = "player",
-	city_world: WorldData = null
+	city_world: WorldData = null,
+	allowed_construction_site_id: int = -1
 ) -> Dictionary:
 	var clean_tiles: Array = []
 
@@ -11267,6 +11681,16 @@ static func add_city_road_object(
 
 	if feature_world == null:
 		feature_world = official_city_world
+
+	var topology_validation := validate_city_object_topology_mutation({
+		"city_world": feature_world,
+		"object_type": CITY_OBJECT_ROAD,
+		"footprint_tiles": clean_tiles,
+		"allowed_construction_site_id": allowed_construction_site_id,
+	})
+
+	if not bool(topology_validation.get("success", false)):
+		return {}
 
 	clear_city_surface_features_at_tiles(
 		feature_world,

@@ -19,6 +19,12 @@ const CityResourceMatcherScript = preload(
 
 const PLAYER_WORK_KIND_DELIVERY := "construction_delivery"
 const PLAYER_WORK_KIND_LABOR := "construction_labor"
+const FINALIZATION_STATE_NONE := (
+	WorldData.CITY_CONSTRUCTION_FINALIZATION_STATE_NONE
+)
+const FINALIZATION_STATE_AWAITING_CLEARANCE := (
+	WorldData.CITY_CONSTRUCTION_FINALIZATION_STATE_AWAITING_CLEARANCE
+)
 const PROGRESS_REQUIRED_CLEARING_WORK_UNITS_KEY := (
 	"required_clearing_work_units"
 )
@@ -206,6 +212,7 @@ static func create_city_construction_site(
 		"required_clearing_work_units": -1.0,
 		"required_labor_minutes": required_labor_minutes,
 		"completed_labor_minutes": 0,
+		"finalization_state": FINALIZATION_STATE_NONE,
 		"maximum_workers": maxi(
 			int(values.get("maximum_workers", 1)),
 			1
@@ -1033,6 +1040,13 @@ static func refresh_city_construction_site(
 	if site.is_empty():
 		return false
 
+	if (
+		str(site.get("finalization_state", FINALIZATION_STATE_NONE))
+		== FINALIZATION_STATE_AWAITING_CLEARANCE
+	):
+		_advance_city_construction_finalization(site_id)
+		return true
+
 	_reserve_needed_footprint_materials(site_id)
 	_ensure_progress_baseline(site_id)
 	_ensure_clearing_commands(site_id)
@@ -1504,6 +1518,9 @@ static func get_best_assignable_player_work_for_citizen_and_site(
 		or not bool(citizen.get("alive", false))
 		or int(citizen.get("job_object_id", -1)) > 0
 		or site.is_empty()
+		or str(
+			site.get("finalization_state", FINALIZATION_STATE_NONE)
+		) != FINALIZATION_STATE_NONE
 	):
 		return {}
 
@@ -2430,6 +2447,9 @@ static func advance_labor_task(
 
 	if (
 		site.is_empty()
+		or str(
+			site.get("finalization_state", FINALIZATION_STATE_NONE)
+		) != FINALIZATION_STATE_NONE
 		or str(site.get("phase", ""))
 		!= WorldData.CITY_CONSTRUCTION_PHASE_LABOR
 		or int(citizen.get("job_object_id", -1)) > 0
@@ -2607,8 +2627,20 @@ static func _release_labor_task(citizen_id: int) -> void:
 static func complete_city_construction_site(
 	site_id: int
 ) -> Dictionary:
-	refresh_city_construction_site(site_id)
 	var site := WorldData.get_city_construction_site_by_id(site_id)
+
+	if site.is_empty():
+		return {}
+
+	if (
+		str(site.get("finalization_state", FINALIZATION_STATE_NONE))
+		== FINALIZATION_STATE_AWAITING_CLEARANCE
+	):
+		return _advance_city_construction_finalization(site_id)
+
+	refresh_city_construction_site(site_id)
+	site = WorldData.get_city_construction_site_by_id(site_id)
+
 	if (
 		site.is_empty()
 		or str(site.get("target_kind", ""))
@@ -2617,9 +2649,7 @@ static func complete_city_construction_site(
 		!= WorldData.CITY_CONSTRUCTION_PHASE_LABOR
 		or int(site.get("completed_labor_minutes", 0))
 		< int(site.get("required_labor_minutes", 1))
-		or not city_construction_site_has_all_materials(
-			site_id
-		)
+		or not city_construction_site_has_all_materials(site_id)
 	):
 		return {}
 
@@ -2633,12 +2663,60 @@ static func complete_city_construction_site(
 		site.is_empty()
 		or str(site.get("phase", ""))
 		!= WorldData.CITY_CONSTRUCTION_PHASE_LABOR
-		or not city_construction_site_has_all_materials(
-			site_id
-		)
+		or not city_construction_site_has_all_materials(site_id)
 	):
 		return {}
 
+	# Labor completion is not the same operation as changing navigation. First
+	# close the work claims and enter a durable finalization state. The site then
+	# owns clearance and retries until the authoritative footprint is safe.
+	_clear_site_labor_tasks(site_id)
+	site = WorldData.get_city_construction_site_by_id(site_id)
+
+	if site.is_empty():
+		return {}
+
+	site["finalization_state"] = FINALIZATION_STATE_AWAITING_CLEARANCE
+
+	if not update_city_construction_site(site):
+		return {}
+
+	return _advance_city_construction_finalization(site_id)
+
+
+static func _advance_city_construction_finalization(
+	site_id: int
+) -> Dictionary:
+	var site := WorldData.get_city_construction_site_by_id(site_id)
+	var city_world: WorldData = WorldData.official_city_world
+
+	if (
+		site.is_empty()
+		or city_world == null
+		or str(site.get("finalization_state", FINALIZATION_STATE_NONE))
+		!= FINALIZATION_STATE_AWAITING_CLEARANCE
+	):
+		return {}
+
+	var object_type := str(site.get("object_type", ""))
+	var footprint_tiles: Array = site.get("footprint_tiles", [])
+	var blocking_citizen_ids := (
+		WorldData.get_city_object_topology_blocking_citizen_ids(
+			object_type,
+			footprint_tiles
+		)
+	)
+
+	if not blocking_citizen_ids.is_empty():
+		_evacuate_city_construction_footprint(
+			site,
+			blocking_citizen_ids
+		)
+		return {}
+
+	# Resources remain physical and reserved until this exact point. If the
+	# authoritative topology gate rejects the object for any late change, the
+	# materials are restored and the durable site remains available to retry.
 	var consumed_materials := _consume_site_materials(site)
 	var raw_material_recipe = site.get("material_recipe", {})
 
@@ -2649,26 +2727,29 @@ static func complete_city_construction_site(
 	):
 		return {}
 
-	_clear_site_labor_tasks(site_id)
 	var completed_object: Dictionary = {}
-	var object_type := str(site.get("object_type", ""))
 
 	if (
 		str(site.get("shape_mode", ""))
 		== WorldData.CITY_OBJECT_SHAPE_TILE_AREA
 	):
 		completed_object = WorldData.add_city_road_object(
-			site.get("footprint_tiles", []),
+			footprint_tiles,
 			str(site.get("owner", "player")),
-			WorldData.official_city_world
+			city_world,
+			site_id
 		)
 	else:
 		completed_object = WorldData.add_city_object({
 			"object_type": object_type,
-			"top_left": site.get("top_left", WorldData.INVALID_CITY_TILE_POSITION),
+			"top_left": site.get(
+				"top_left",
+				WorldData.INVALID_CITY_TILE_POSITION
+			),
 			"size_tiles": site.get("size", Vector2i.ZERO),
 			"object_owner": str(site.get("owner", "player")),
-			"city_world": WorldData.official_city_world,
+			"city_world": city_world,
+			"allowed_construction_site_id": site_id,
 		})
 
 	if completed_object.is_empty():
@@ -2678,6 +2759,93 @@ static func complete_city_construction_site(
 	_release_site_clearing_commands(site_id)
 	remove_city_construction_site_record(site_id)
 	return completed_object
+
+
+static func _evacuate_city_construction_footprint(
+	site: Dictionary,
+	citizen_ids: Array[int]
+) -> void:
+	var city_world: WorldData = WorldData.official_city_world
+
+	if city_world == null or site.is_empty():
+		return
+
+	var footprint_tiles: Array = site.get("footprint_tiles", [])
+	var destination_tiles := _build_external_work_positions(
+		city_world,
+		footprint_tiles
+	)
+
+	if destination_tiles.is_empty():
+		push_warning(
+			"Construction site "
+				+ str(site.get("id", -1))
+				+ " is ready to finalize but has no reachable exterior "
+				+ "clearance tile."
+		)
+		return
+
+	for citizen_id in citizen_ids:
+		var citizen := WorldData.get_city_citizen_by_id(citizen_id)
+		var raw_current_tile = citizen.get(
+			"city_tile_position",
+			WorldData.INVALID_CITY_TILE_POSITION
+		)
+
+		if (
+			citizen.is_empty()
+			or not bool(citizen.get("alive", false))
+			or not raw_current_tile is Vector2i
+			or not footprint_tiles.has(raw_current_tile)
+		):
+			continue
+
+		var raw_destination = citizen.get(
+			"movement_destination_tile",
+			WorldData.INVALID_CITY_TILE_POSITION
+		)
+
+		if (
+			str(citizen.get("movement_state", ""))
+			== WorldData.CITY_CITIZEN_MOVEMENT_STATE_MOVING
+			and raw_destination is Vector2i
+			and not footprint_tiles.has(raw_destination)
+		):
+			continue
+
+		var path_result := (
+			CityNavigationSystemScript.find_path_to_any_city_tile({
+				"city_world": city_world,
+				"start_tile": raw_current_tile,
+				"destination_tiles": destination_tiles,
+				"max_expanded_nodes": (
+					CityNavigationSystemScript
+					.get_city_wide_path_expansion_limit(city_world)
+				),
+				"citizen_id": citizen_id,
+				"heuristic_weight": EXACT_PATH_HEURISTIC_WEIGHT,
+			})
+		)
+
+		if not bool(path_result.get("success", false)):
+			push_warning(
+				"Could not route citizen "
+					+ str(citizen_id)
+					+ " out of finalizing construction site "
+					+ str(site.get("id", -1))
+			)
+			continue
+
+		WorldData.cancel_city_citizen_movement(citizen_id)
+
+		if not WorldData.assign_city_citizen_movement_order(
+			citizen_id,
+			path_result.get("path", [])
+		):
+			push_warning(
+				"Could not install topology-clearance movement for citizen "
+					+ str(citizen_id)
+			)
 
 
 static func _consume_site_materials(
