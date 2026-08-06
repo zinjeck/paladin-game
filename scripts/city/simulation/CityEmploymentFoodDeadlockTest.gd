@@ -149,6 +149,10 @@ func _test_starving_food_workers_keep_survival_schedule() -> void:
 
 	for citizen_id in citizen_ids:
 		var citizen := WorldData.get_city_citizen_by_id(citizen_id)
+		_expect(
+			int(citizen.get("job_object_id", -1)) == fishery_id,
+			"Every starvation fixture citizen must remain assigned to the Fishery."
+		)
 		var work_request := (
 			CitizenDecisionSystemScript._get_assigned_work_task_request(citizen)
 		)
