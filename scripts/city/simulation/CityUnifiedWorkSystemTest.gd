@@ -1143,6 +1143,7 @@ func _test_survival_food_fallback_and_reservation_accounting() -> void:
 	var first := _add_hungry_citizen("First", Vector2i(8, 9))
 	var second := _add_hungry_citizen("Second", Vector2i(8, 10))
 	var third := _add_hungry_citizen("Third", Vector2i(8, 11))
+	var fourth := _add_hungry_citizen("Fourth", Vector2i(8, 12))
 	var fishery_size := WorldData.get_city_object_size_for_type(
 		WorldData.CITY_OBJECT_FISHING_GROUNDS
 	)
@@ -1212,16 +1213,33 @@ func _test_survival_food_fallback_and_reservation_accounting() -> void:
 		32
 	)
 	_expect(
-		int(third_match.get("source_id", -1)) <= 0,
-		"Fully reserved workplace and ground food must not be promised to a third citizen."
+		str(third_match.get("source_kind", ""))
+		== WorldData.CITY_CITIZEN_HAUL_ENDPOINT_KIND_GROUND_PILE
+		and int(third_match.get("source_id", -1)) == pile_id,
+		"One-item allocation must leave the pile's second fish available to a third hungry citizen."
+	)
+	_expect(
+		_assign_food_match(int(third.get("id", -1)), third_match),
+		"Assigning the third food request must reserve the pile's final fish."
+	)
+
+	var fourth_match := CityResourceMatcherScript.find_best_survival_food_source(
+		fourth,
+		100,
+		10,
+		32
+	)
+	_expect(
+		int(fourth_match.get("source_id", -1)) <= 0,
+		"Three fully reserved fish must not be promised to a fourth citizen."
 	)
 	_expect(
 		WorldData.get_city_food_endpoint_unreserved_amount(
-			int(third.get("id", -1)),
+			int(fourth.get("id", -1)),
 			WorldData.make_city_ground_pile_haul_endpoint(pile_id),
 			WorldData.RESOURCE_FISH
 		) == 0,
-		"Food endpoint availability must subtract competing task reservations."
+		"Food endpoint availability must subtract all competing one-item task reservations."
 	)
 
 
