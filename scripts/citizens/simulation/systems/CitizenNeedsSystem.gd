@@ -70,12 +70,18 @@ static func get_citizen_food_need_nutrition(citizen_id: int) -> int:
 	var personal_food_nutrition := WorldData.get_food_nutrition_in_resource_container(
 		WorldData.get_city_citizen_inventory(citizen_id)
 	)
-	var unmet_nutrition := maxi(
+	return maxi(
 		WorldData.CITIZEN_EAT_TARGET_HUNGER
 		- WorldData.get_city_citizen_hunger(citizen_id)
 		- personal_food_nutrition,
 		0
 	)
+
+
+static func get_citizen_next_food_allocation_nutrition(
+	citizen_id: int
+) -> int:
+	var unmet_nutrition := get_citizen_food_need_nutrition(citizen_id)
 	var allocation_nutrition_cap := (
 		get_single_food_allocation_nutrition_cap()
 	)
@@ -83,9 +89,6 @@ static func get_citizen_food_need_nutrition(citizen_id: int) -> int:
 	if allocation_nutrition_cap <= 0:
 		return 0
 
-	# This value is consumed by the central source matcher. Capping it to one
-	# food allocation means every Acquire Food reservation claims one item, then
-	# the citizen returns to the hunger queue with their projected need updated.
 	return mini(unmet_nutrition, allocation_nutrition_cap)
 
 
@@ -164,7 +167,7 @@ static func _take_personal_food_at_current_legal_source(
 		or WorldData.get_city_citizen_hunger(citizen_id)
 		> WorldData.CITIZEN_FOOD_CARRY_TRIGGER_HUNGER
 		or WorldData.get_city_citizen_inventory_free_space(citizen_id) <= 0
-		or get_citizen_food_need_nutrition(citizen_id) <= 0
+		or get_citizen_next_food_allocation_nutrition(citizen_id) <= 0
 	):
 		return
 
