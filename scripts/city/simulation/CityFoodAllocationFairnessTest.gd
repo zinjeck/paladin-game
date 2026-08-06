@@ -1,5 +1,8 @@
 extends Node
 
+# Protects the scarcity rules that distinguish total nutritional deficit from
+# the next one-item allocation and keep pantry stocking behind immediate meals.
+
 const CitizenDecisionSystemScript = preload(
 	"res://scripts/citizens/simulation/systems/CitizenDecisionSystem.gd"
 )
