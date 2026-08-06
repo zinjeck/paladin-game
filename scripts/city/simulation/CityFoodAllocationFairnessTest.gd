@@ -190,6 +190,7 @@ func _reset_fixture() -> WorldData:
 
 	city_world.mark_tile_data_changed()
 	WorldData.store_city_world_save(city_world, TEST_WORLD_SEED)
+	WorldData.player_city_founded = true
 	var culture := WorldData.create_culture("Food Allocation Test Culture")
 	test_culture_id = int(culture.get("id", -1))
 	return city_world
