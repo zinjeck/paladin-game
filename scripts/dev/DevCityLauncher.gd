@@ -10,11 +10,15 @@ const DEV_CULTURE_NAME := "Dev Culture"
 
 static func launch_dev_city(
 	tree: SceneTree,
-	city_scene_path: String,
-	main_menu_scene_path: String = "res://scenes/MainMenu.tscn"
+	game_session_scene_path: String,
+	city_scene_path: String = "res://scenes/CityScreen.tscn"
 ) -> void:
 	if tree == null:
 		push_error("DevCityLauncher needs a valid SceneTree.")
+		return
+
+	if game_session_scene_path.is_empty():
+		push_error("Dev city GameSession scene path is empty.")
 		return
 
 	if city_scene_path.is_empty():
@@ -32,7 +36,6 @@ static func launch_dev_city(
 		push_error("Could not find a valid dev city region.")
 		return
 
-	SimulationClock.start_new_game()
 	SimulationCoordinator.reset_performance_statistics()
 
 	var region_center := region_top_left + Vector2i(
@@ -45,7 +48,7 @@ static func launch_dev_city(
 		"region_top_left": region_top_left,
 		"region_center": region_center,
 		"region_size": DEV_REGION_SIZE,
-		"world_scene_path": main_menu_scene_path,
+		"world_scene_path": game_session_scene_path,
 		"city_scene_path": city_scene_path,
 		"city_name": DEV_CITY_NAME,
 		"culture_name": DEV_CULTURE_NAME,
@@ -55,19 +58,32 @@ static func launch_dev_city(
 		push_error("Could not lock the dev world and founding identity.")
 		return
 
-	print("Launching dev city.")
+	# Dev City now uses the same persistent session and city-preparation path as
+	# ordinary play. The one-shot request is consumed by the next GameSession.
+	GameSession.request_next_session_city_entry()
+
+	print("Launching dev city through GameSession.")
 	print("Dev world seed: ", dev_world.seed)
 	print("Dev region top-left: ", region_top_left)
 	print("Dev region center: ", region_center)
+	print("Dev city name: ", DEV_CITY_NAME)
+	print("Dev culture name: ", DEV_CULTURE_NAME)
 
-	var error: Error = tree.change_scene_to_file(city_scene_path)
+	var error: Error = tree.change_scene_to_file(game_session_scene_path)
 
 	if error != OK:
-		push_error("Could not load dev city scene: " + city_scene_path)
+		GameSession.cancel_next_session_city_entry()
+		push_error(
+			"Could not load dev GameSession scene: "
+			+ game_session_scene_path
+		)
 
 
 static func reset_dev_city_state() -> void:
+	GameSession.cancel_next_session_city_entry()
 	WorldData.reset_runtime_session_state()
+	SimulationClock.reset_clock_state()
+	SimulationClock.set_simulation_paused(true)
 
 
 static func find_good_dev_region(world: WorldData, region_size: int) -> Vector2i:

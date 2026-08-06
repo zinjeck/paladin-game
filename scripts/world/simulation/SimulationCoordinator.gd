@@ -104,8 +104,7 @@ func run_simulation_systems(
 	minutes_advanced: int,
 	duration_recorder: Callable = Callable()
 ) -> void:
-	# Keep simulation execution and profiling ownership together. System order is
-	# unchanged from the former WorldData forwarding implementation.
+	# Simulation execution and profiling share one ordered system pipeline.
 	var should_record_durations := duration_recorder.is_valid()
 	var system_start_usec := 0
 

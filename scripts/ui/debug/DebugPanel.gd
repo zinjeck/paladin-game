@@ -4,6 +4,11 @@ class_name DebugPanel
 signal panel_moved(new_position: Vector2)
 signal minimized_changed(is_minimized: bool)
 
+# Every DebugPanel instance observes the same enable sequence. When tilde turns
+# debug mode on, active and later-reactivated panels all begin minimized rather
+# than exposing an expensive full diagnostic panel immediately.
+static var _debug_enable_sequence: int = 0
+
 var canvas_layer: CanvasLayer
 var panel: Panel
 var label: Label
@@ -17,6 +22,7 @@ const MINIMUM_GRABBABLE_HEIGHT: float = 24.0
 const MINIMIZE_BUTTON_SIZE: Vector2 = Vector2(26.0, 24.0)
 const HEADER_ACCESSORY_GAP: float = 6.0
 var is_minimized: bool = false
+var _observed_debug_enable_sequence: int = -1
 var _is_dragging: bool = false
 var _drag_offset: Vector2 = Vector2.ZERO
 var _base_position: Vector2 = Vector2.ZERO
@@ -115,13 +121,14 @@ func _has_valid_setup_values(values: Dictionary) -> bool:
 
 
 func set_enabled(is_enabled: bool) -> void:
+	var was_enabled := WorldData.debug_mode_enabled
 	WorldData.debug_mode_enabled = is_enabled
+
+	if is_enabled and not was_enabled:
+		_debug_enable_sequence += 1
 
 	if not is_enabled:
 		_is_dragging = false
-
-	if panel != null:
-		panel.visible = WorldData.debug_mode_enabled
 
 	refresh()
 
@@ -137,6 +144,12 @@ func refresh() -> void:
 
 	if not WorldData.debug_mode_enabled:
 		return
+
+	# A panel may have been inactive when another map view handled the tilde key.
+	# The shared sequence makes it observe that enable event when it next refreshes.
+	if _observed_debug_enable_sequence != _debug_enable_sequence:
+		_observed_debug_enable_sequence = _debug_enable_sequence
+		set_minimized(true)
 
 	if label == null:
 		return

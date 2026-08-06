@@ -9,6 +9,7 @@ all scripts on every pull request.
 from __future__ import annotations
 
 import collections
+import hashlib
 import json
 import re
 import sys
@@ -27,6 +28,30 @@ REGION_RE = re.compile(r"^\s*#region\b", re.MULTILINE)
 ENDREGION_RE = re.compile(r"^\s*#endregion\b", re.MULTILINE)
 FUNC_LINE_RE = re.compile(r"^(?:static\s+)?func\s+([A-Za-z_][A-Za-z0-9_]*)\s*\(")
 QUEUE_REDRAW_RE = re.compile(r"\bqueue_redraw\b")
+COMMENT_LINE_RE = re.compile(r"^\s*#(?!region\b|endregion\b)(.*)$", re.IGNORECASE)
+
+FORBIDDEN_REPOSITORY_ARTIFACT_SUFFIXES = {
+    ".bak",
+    ".backup",
+    ".log",
+    ".old",
+    ".orig",
+    ".tmp",
+    ".zip",
+}
+SUSPICIOUS_TEXT_FILE_PARTS = (
+    "noop",
+    "backup",
+    "copy",
+    "temporary",
+    "temp_",
+    "_temp",
+    "old_",
+    "_old",
+)
+AUDIT_EXCLUDED_DIRECTORIES = {".git", ".godot", "ci-logs"}
+MINIMUM_DUPLICATE_FUNCTION_BODY_LINES = 10
+MINIMUM_DUPLICATE_COMMENT_LENGTH = 28
 
 ALLOWED_QUEUE_REDRAW_CALLS = {
     "scripts/city/rendering/CityRenderLayer.gd": 1,
@@ -44,6 +69,59 @@ class FunctionMetric:
 
 def script_paths() -> list[Path]:
     return sorted(ROOT.glob("scripts/**/*.gd"))
+
+
+def repository_file_paths() -> list[Path]:
+    return sorted(
+        path
+        for path in ROOT.rglob("*")
+        if path.is_file()
+        and not any(part in AUDIT_EXCLUDED_DIRECTORIES for part in path.parts)
+    )
+
+
+def normalized_function_body_groups(text: str) -> dict[str, list[tuple[str, int]]]:
+    lines = text.splitlines()
+    starts: list[tuple[int, str]] = []
+    for index, line in enumerate(lines):
+        match = FUNC_LINE_RE.match(line)
+        if match:
+            starts.append((index, match.group(1)))
+
+    groups: dict[str, list[tuple[str, int]]] = collections.defaultdict(list)
+    for position, (start, name) in enumerate(starts):
+        end = starts[position + 1][0] if position + 1 < len(starts) else len(lines)
+        normalized_lines: list[str] = []
+        for line in lines[start + 1 : end]:
+            stripped = line.strip()
+            if not stripped or stripped.startswith("#"):
+                continue
+            normalized_lines.append(re.sub(r"\s+", " ", stripped))
+
+        if len(normalized_lines) < MINIMUM_DUPLICATE_FUNCTION_BODY_LINES:
+            continue
+
+        digest = hashlib.sha256("\n".join(normalized_lines).encode("utf-8")).hexdigest()
+        groups[digest].append((name, start + 1))
+
+    return groups
+
+
+def duplicate_substantial_comments(text: str) -> list[tuple[str, list[int]]]:
+    occurrences: dict[str, list[int]] = collections.defaultdict(list)
+    for line_number, line in enumerate(text.splitlines(), start=1):
+        match = COMMENT_LINE_RE.match(line)
+        if not match:
+            continue
+        normalized = re.sub(r"\s+", " ", match.group(1).strip())
+        if len(normalized) >= MINIMUM_DUPLICATE_COMMENT_LENGTH:
+            occurrences[normalized].append(line_number)
+
+    return [
+        (comment, line_numbers)
+        for comment, line_numbers in occurrences.items()
+        if len(line_numbers) > 1
+    ]
 
 
 def function_metrics(path: Path, text: str) -> list[FunctionMetric]:
@@ -76,6 +154,33 @@ def main() -> int:
     total_lines = 0
     total_functions = 0
 
+    repository_files = repository_file_paths()
+    content_hash_owners: dict[str, list[str]] = collections.defaultdict(list)
+
+    for path in repository_files:
+        relative = str(path.relative_to(ROOT))
+        suffix = path.suffix.lower()
+        lower_name = path.name.lower()
+
+        if suffix in FORBIDDEN_REPOSITORY_ARTIFACT_SUFFIXES:
+            errors.append(
+                f"{relative}: repository artifact with forbidden suffix {suffix}"
+            )
+        elif suffix == ".txt" and any(
+            marker in lower_name for marker in SUSPICIOUS_TEXT_FILE_PARTS
+        ):
+            errors.append(f"{relative}: suspicious temporary text artifact")
+
+        if path.stat().st_size <= 2_000_000:
+            digest = hashlib.sha256(path.read_bytes()).hexdigest()
+            content_hash_owners[digest].append(relative)
+
+    for owners in content_hash_owners.values():
+        if len(owners) > 1:
+            errors.append(
+                "Duplicate repository file contents: " + ", ".join(sorted(owners))
+            )
+
     scripts = script_paths()
     if not scripts:
         errors.append("No GDScript files were found under scripts/.")
@@ -93,6 +198,22 @@ def main() -> int:
         )
         if duplicates:
             errors.append(f"{relative}: duplicate functions: {', '.join(duplicates)}")
+
+        for body_group in normalized_function_body_groups(text).values():
+            if len(body_group) <= 1:
+                continue
+            locations = ", ".join(
+                f"{name}@{line_number}" for name, line_number in body_group
+            )
+            errors.append(
+                f"{relative}: duplicate substantial function bodies: {locations}"
+            )
+
+        for comment, line_numbers in duplicate_substantial_comments(text):
+            errors.append(
+                f"{relative}: repeated substantial comment at lines "
+                f"{', '.join(str(line) for line in line_numbers)}: {comment}"
+            )
 
         classes = CLASS_RE.findall(text)
         if len(classes) > 1:
