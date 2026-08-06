@@ -4,6 +4,9 @@ const GAME_SESSION_SCENE := preload("res://scenes/GameSession.tscn")
 const PREPARATION_SERVICE := preload(
 	"res://scripts/session/CityPreparationService.gd"
 )
+const DEBUG_PANEL_SCRIPT := preload(
+	"res://scripts/ui/debug/DebugPanel.gd"
+)
 
 var failure_count: int = 0
 
@@ -11,7 +14,10 @@ var failure_count: int = 0
 func _ready() -> void:
 	await _test_background_city_preparation()
 	await _test_persistent_world_city_views()
+	await _test_requested_initial_city_entry()
+	_test_debug_panels_default_to_minimized()
 	WorldData.reset_runtime_session_state()
+	GameSession.cancel_next_session_city_entry()
 
 	if failure_count > 0:
 		push_error("Game session persistence test failed: " + str(failure_count))
@@ -260,6 +266,123 @@ func _test_persistent_world_city_views() -> void:
 	SimulationClock.set_speed_multiplier(1.0)
 	session.queue_free()
 	await get_tree().process_frame
+
+
+func _test_requested_initial_city_entry() -> void:
+	WorldData.reset_runtime_session_state()
+	SimulationClock.reset_clock_state()
+	GameSession.cancel_next_session_city_entry()
+
+	var world := _make_world(8, 8, 7711)
+	var locked := WorldData.lock_world_save({
+		"source_world": world,
+		"region_top_left": Vector2i(2, 2),
+		"region_center": Vector2i(2, 2),
+		"region_size": 1,
+		"world_scene_path": "res://scenes/GameSession.tscn",
+		"city_scene_path": "res://scenes/CityScreen.tscn",
+		"city_name": "Dev City",
+		"culture_name": "Dev Culture",
+	})
+	_expect(locked, "Requested-entry fixture must lock the dev identity.")
+	WorldData.store_city_world_save(_make_world(16, 16, 7722), 7722)
+
+	GameSession.request_next_session_city_entry()
+	_expect(
+		GameSession.has_pending_next_session_city_entry(),
+		"Dev launch must record a one-shot initial-city request."
+	)
+
+	var session = GAME_SESSION_SCENE.instantiate()
+	add_child(session)
+	await get_tree().process_frame
+	await get_tree().process_frame
+
+	_expect(
+		not GameSession.has_pending_next_session_city_entry(),
+		"The new GameSession must consume the one-shot city-entry request."
+	)
+	_expect(
+		session.city_view != null
+		and session.active_view == session.city_view,
+		"A requested session must automatically enter its persistent city view."
+	)
+	_expect(
+		session.simulation_speed_controls != null
+		and SimulationClock.simulation_paused
+		and SimulationClock.get_world_hour() == 6
+		and SimulationClock.get_world_minute() == 0,
+		"Requested Dev City entry must receive the normal controls and paused 06:00 clock."
+	)
+	_expect(
+		WorldData.get_official_city_name() == "Dev City"
+		and WorldData.get_official_founding_culture_name() == "Dev Culture",
+		"Requested Dev City entry must preserve city and culture identity."
+	)
+
+	var world_region_button = session.world_renderer.get(
+		"select_region_button"
+	)
+	_expect(
+		world_region_button is CanvasItem
+		and not (world_region_button as CanvasItem).visible,
+		"Requested Dev City entry must retire Select Region."
+	)
+
+	if session.city_view != null:
+		session.city_view.call("on_back_button_pressed")
+		await get_tree().process_frame
+
+	_expect(
+		session.active_view == session.world_view,
+		"The actual city Back handler must return a requested Dev City to its persistent world."
+	)
+
+	session.queue_free()
+	await get_tree().process_frame
+
+
+func _test_debug_panels_default_to_minimized() -> void:
+	WorldData.debug_mode_enabled = false
+	var host := Node.new()
+	add_child(host)
+	var first_panel = DEBUG_PANEL_SCRIPT.new()
+	var second_panel = DEBUG_PANEL_SCRIPT.new()
+	var setup_values := {
+		"parent": host,
+		"canvas_layer_index": 100,
+		"panel_position": Vector2.ZERO,
+		"padding": Vector2(12.0, 10.0),
+		"minimum_size": Vector2(260.0, 80.0),
+		"initial_text": "Debug Test",
+		"text_provider": Callable(self, "_get_debug_panel_test_text"),
+	}
+	first_panel.setup(setup_values)
+	second_panel.setup(setup_values)
+
+	first_panel.set_enabled(true)
+	second_panel.refresh()
+	_expect(
+		first_panel.is_minimized and second_panel.is_minimized,
+		"Every debug panel must open minimized when tilde enables debug mode."
+	)
+
+	first_panel.set_minimized(false)
+	second_panel.set_minimized(false)
+	first_panel.set_enabled(false)
+	first_panel.set_enabled(true)
+	second_panel.refresh()
+	_expect(
+		first_panel.is_minimized and second_panel.is_minimized,
+		"A later debug enable must re-minimize active and previously inactive panels."
+	)
+
+	first_panel.set_enabled(false)
+	host.queue_free()
+
+
+func _get_debug_panel_test_text() -> String:
+	return "Debug Test"
 
 
 func _make_region_tiles(size: int) -> Array:

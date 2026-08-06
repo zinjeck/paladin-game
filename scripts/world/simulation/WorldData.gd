@@ -920,7 +920,6 @@ func setup(new_width: int, new_height: int, new_seed: int):
 
 	for y in range(height):
 		var row := []
-#THE TILE DICTIONARY \/ \/ \/ \/ \/
 		for x in range(width):
 			row.append(make_default_tile())
 

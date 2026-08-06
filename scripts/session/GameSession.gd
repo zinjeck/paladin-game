@@ -14,6 +14,11 @@ const SimulationSpeedControlsScript := preload(
 	"res://scripts/ui/common/SimulationSpeedControls.gd"
 )
 
+# Scene changes cannot pass constructor arguments. This one-shot request lets
+# launchers choose the initial persistent view without bypassing GameSession.
+# The first GameSession to enter the tree consumes and clears the request.
+static var _next_session_starts_in_city: bool = false
+
 var world_view: Node
 var world_renderer: Node
 var city_view: Node
@@ -25,13 +30,38 @@ var pending_city_switch: bool = false
 var city_view_has_been_entered: bool = false
 
 
+static func request_next_session_city_entry() -> void:
+	_next_session_starts_in_city = true
+
+
+static func cancel_next_session_city_entry() -> void:
+	_next_session_starts_in_city = false
+
+
+static func has_pending_next_session_city_entry() -> bool:
+	return _next_session_starts_in_city
+
+
+static func _consume_next_session_city_entry() -> bool:
+	var should_start_in_city := _next_session_starts_in_city
+	_next_session_starts_in_city = false
+	return should_start_in_city
+
+
 func _ready() -> void:
+	var should_start_in_city := _consume_next_session_city_entry()
+
 	add_to_group("game_session")
 	world_view = WORLD_SCENE.instantiate()
 	add_child(world_view)
 	world_renderer = world_view.get_node_or_null("WorldRenderer")
 	_set_view_active(world_view, true)
 	active_view = world_view
+
+	# Defer until the dynamically instantiated WorldRenderer has completed its
+	# own ready work and can build the ordinary city-preparation request.
+	if should_start_in_city:
+		call_deferred("_enter_requested_initial_city_view")
 
 
 func _process(_delta: float) -> void:
@@ -64,6 +94,13 @@ func _process(_delta: float) -> void:
 
 func _exit_tree() -> void:
 	city_preparation.shutdown()
+
+
+func _enter_requested_initial_city_view() -> void:
+	if not is_inside_tree():
+		return
+
+	show_city_view()
 
 
 func prepare_city_view(request: Dictionary) -> void:

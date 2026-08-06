@@ -96,8 +96,8 @@ func create_buttons() -> void:
 func on_dev_city_pressed() -> void:
 	DevCityLauncher.launch_dev_city(
 		get_tree(),
-		city_scene_path,
-		"res://scenes/MainMenu.tscn"
+		world_scene_path,
+		city_scene_path
 	)
 
 func create_menu_button(button_text: String) -> Button:

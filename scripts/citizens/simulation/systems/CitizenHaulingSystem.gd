@@ -1130,8 +1130,6 @@ static func _advance_traveling_to_source(
 			citizen_id,
 			WorldData.CITY_CITIZEN_TASK_PHASE_PERFORMING
 		)
-		# Loading completes on the next task pass, after the citizen has
-		# visibly reached the source access tile.
 		return path_requests_remaining
 
 	haul["phase"] = WorldData.CITY_CITIZEN_HAUL_PHASE_PENDING_SOURCE
@@ -2445,8 +2443,6 @@ static func _advance_traveling_to_destination(
 			citizen_id,
 			WorldData.CITY_CITIZEN_TASK_PHASE_PERFORMING
 		)
-		# Unloading completes on the next task pass, after the citizen has
-		# visibly reached the destination access tile.
 		return path_requests_remaining
 
 	haul["phase"] = WorldData.CITY_CITIZEN_HAUL_PHASE_RETARGETING
