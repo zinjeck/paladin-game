@@ -4,6 +4,7 @@ const PANEL_ANCHOR_SCRIPT := preload(
 	"res://scripts/ui/city/CityObjectPanelAnchor.gd"
 )
 
+const TEST_VIEWPORT_SIZE := Vector2i(1000, 700)
 const VIEWPORT_MARGIN: float = 8.0
 const DETAILS_GAP: float = 8.0
 
@@ -95,7 +96,7 @@ func _ready() -> void:
 
 func _test_secondary_panel_flips_left_at_right_edge() -> void:
 	var renderer := await _make_renderer()
-	var viewport_size := get_viewport().get_visible_rect().size
+	var viewport_size := renderer.get_viewport().get_visible_rect().size
 	var primary_size := renderer.object_info_panel.size
 	var target_primary_x := (
 		viewport_size.x - VIEWPORT_MARGIN - primary_size.x
@@ -131,13 +132,13 @@ func _test_secondary_panel_flips_left_at_right_edge() -> void:
 		"Both panels must remain fully visible after the right-edge flip."
 	)
 
-	renderer.queue_free()
+	_queue_free_renderer_viewport(renderer)
 	await get_tree().process_frame
 
 
 func _test_panel_group_reclamps_after_anchor_and_size_changes() -> void:
 	var renderer := await _make_renderer()
-	var viewport_size := get_viewport().get_visible_rect().size
+	var viewport_size := renderer.get_viewport().get_visible_rect().size
 	var anchor = renderer.get_node("CityObjectPanelAnchor")
 
 	# Force the requested anchor below and left of the visible screen.
@@ -173,14 +174,19 @@ func _test_panel_group_reclamps_after_anchor_and_size_changes() -> void:
 		"Popup placement must be recalculated when a secondary panel changes size."
 	)
 
-	renderer.queue_free()
+	_queue_free_renderer_viewport(renderer)
 	await get_tree().process_frame
 
 
 func _make_renderer() -> FakeRenderer:
+	var test_viewport := SubViewport.new()
+	test_viewport.name = "PanelTestViewport"
+	test_viewport.size = TEST_VIEWPORT_SIZE
+	add_child(test_viewport)
+
 	var renderer := FakeRenderer.new()
 	renderer.name = "FakeRenderer"
-	add_child(renderer)
+	test_viewport.add_child(renderer)
 	renderer.setup_panels()
 
 	var anchor = PANEL_ANCHOR_SCRIPT.new()
@@ -188,6 +194,13 @@ func _make_renderer() -> FakeRenderer:
 	renderer.add_child(anchor)
 	await get_tree().process_frame
 	return renderer
+
+
+func _queue_free_renderer_viewport(renderer: FakeRenderer) -> void:
+	var test_viewport := renderer.get_parent()
+
+	if test_viewport != null:
+		test_viewport.queue_free()
 
 
 func _panel_fits_viewport(
