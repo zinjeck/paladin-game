@@ -140,8 +140,11 @@ func _attach_panel_to_object(
 
 	var raw_details_panel = renderer.get("workplace_details_panel")
 
-	if raw_details_panel is Control and raw_details_panel.visible:
-		(raw_details_panel as Control).move_to_front()
+	if raw_details_panel is Control:
+		var details_panel := raw_details_panel as Control
+
+		if details_panel.visible:
+			details_panel.move_to_front()
 
 
 func _prepare_workplace_details_panel(
@@ -177,13 +180,19 @@ func _layout_viewport_safe_panel_group(
 ) -> void:
 	var viewport_size := _get_viewport_size()
 
-	if viewport_size.x <= 0.0 or viewport_size.y <= 0.0:
+	if not _viewport_can_contain_panel(
+		viewport_size,
+		object_info_panel.size
+	):
+		# Headless tests and transient zero-sized viewports cannot satisfy an
+		# on-screen constraint. Preserve the historical attachment coordinates
+		# until a real drawable viewport exists.
 		object_info_panel.position = desired_primary_position
 		return
 
 	var raw_details_panel = renderer.get("workplace_details_panel")
 
-	if not raw_details_panel is Control or not raw_details_panel.visible:
+	if not raw_details_panel is Control:
 		object_info_panel.position = _clamp_panel_position(
 			desired_primary_position,
 			object_info_panel.size,
@@ -192,6 +201,19 @@ func _layout_viewport_safe_panel_group(
 		return
 
 	var details_panel := raw_details_panel as Control
+
+	if not details_panel.visible:
+		object_info_panel.position = _clamp_panel_position(
+			desired_primary_position,
+			object_info_panel.size,
+			viewport_size
+		)
+		return
+
+	if not _viewport_can_contain_panel(viewport_size, details_panel.size):
+		object_info_panel.position = desired_primary_position
+		return
+
 	var available_width := maxf(
 		viewport_size.x - VIEWPORT_MARGIN * 2.0,
 		0.0
@@ -356,6 +378,16 @@ func _layout_vertical_panel_group(
 	)
 
 
+func _viewport_can_contain_panel(
+	viewport_size: Vector2,
+	panel_size: Vector2
+) -> bool:
+	return (
+		viewport_size.x >= panel_size.x + VIEWPORT_MARGIN * 2.0
+		and viewport_size.y >= panel_size.y + VIEWPORT_MARGIN * 2.0
+	)
+
+
 func _clamp_panel_position(
 	desired_position: Vector2,
 	panel_size: Vector2,
@@ -386,7 +418,7 @@ func _clamp_axis_position(
 	)
 
 	if maximum_position < minimum_position:
-		return minimum_position
+		return desired_position
 
 	return clampf(
 		desired_position,
