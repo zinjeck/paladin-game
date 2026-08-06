@@ -244,6 +244,10 @@ func _test_starving_residents_keep_return_home_schedule() -> void:
 		"city_world": city_world,
 	})
 	var stockpile_id := int(stockpile.get("id", -1))
+	_expect(
+		stockpile_id > 0,
+		"The return-home fixture must create public storage."
+	)
 	WorldData.add_resource_to_city_object_storage(
 		stockpile_id,
 		WorldData.RESOURCE_FISH,
