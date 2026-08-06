@@ -64,6 +64,18 @@ func _test_current_source_allocates_one_immediate_meal() -> void:
 		"The one-meal fixture pantry must begin with two fish."
 	)
 	WorldData.set_city_citizen_hunger_state(citizen_id, 70, 0)
+	_expect(
+		CitizenNeedsSystemScript.get_citizen_food_need_nutrition(
+			citizen_id
+		) == 30,
+		"Total nutritional deficit must remain distinct from allocation size."
+	)
+	_expect(
+		CitizenNeedsSystemScript.get_citizen_next_food_allocation_nutrition(
+			citizen_id
+		) == 20,
+		"The next allocation must be capped to one ordinary whole food item."
+	)
 
 	CitizenNeedsSystemScript.run_tick(1, 1)
 
