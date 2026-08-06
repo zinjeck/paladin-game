@@ -342,15 +342,15 @@ static func _process_food_needs(critical_only: bool) -> void:
 
 		# A food opportunity is proven before any current activity is released.
 		# Normal hunger waits for the next safe physical boundary; critical
-		# hunger keeps its existing emergency interruption gateway.
+		# hunger releases through the task's real ownership boundary.
 		if current_task_kind != WorldData.CITY_CITIZEN_TASK_KIND_NONE:
 			var prepared_for_food := false
 
 			if critical_only:
 				prepared_for_food = (
-					CitizenTaskSystem
-					.prepare_citizen_for_critical_food_interrupt(
-						citizen_id
+					_prepare_citizen_for_critical_food_interrupt(
+						citizen_id,
+						current_task
 					)
 				)
 			else:
@@ -402,6 +402,56 @@ static func _process_food_needs(critical_only: bool) -> void:
 		WorldData.cancel_city_citizen_movement(citizen_id)
 		_clear_idle_activity_runtime(citizen_id)
 		assigned_count += 1
+
+
+static func _prepare_citizen_for_critical_food_interrupt(
+	citizen_id: int,
+	current_task: Dictionary
+) -> bool:
+	var task_source := str(
+		current_task.get(
+			"source",
+			WorldData.CITY_CITIZEN_TASK_SOURCE_NONE
+		)
+	)
+
+	if task_source != WorldData.CITY_CITIZEN_TASK_SOURCE_SCHEDULE:
+		return (
+			CitizenTaskSystem
+			.prepare_citizen_for_critical_food_interrupt(citizen_id)
+		)
+
+	var task_kind := str(
+		current_task.get(
+			"kind",
+			WorldData.CITY_CITIZEN_TASK_KIND_NONE
+		)
+	)
+	var released := false
+
+	# Schedule-owned hauling may carry physical resources. Use the existing
+	# no-loss interrupt gateway with the schedule source instead of pretending
+	# the task belongs to autonomy.
+	if task_kind == WorldData.CITY_CITIZEN_TASK_KIND_HAUL:
+		released = (
+			CitizenHaulingSystemScript
+			.drop_citizen_haul_cargo_for_priority_interrupt(
+				WorldData.official_city_world,
+				citizen_id,
+				WorldData.CITY_CITIZEN_TASK_SOURCE_SCHEDULE
+			)
+		)
+	else:
+		released = WorldData.clear_city_citizen_task(
+			citizen_id,
+			WorldData.CITY_CITIZEN_TASK_SOURCE_SCHEDULE
+		)
+
+	if released:
+		WorldData.cancel_city_citizen_movement(citizen_id)
+		_clear_idle_activity_runtime(citizen_id)
+
+	return released
 
 
 static func _take_food_scan_start_index(
@@ -934,7 +984,7 @@ static func _get_outstanding_obligation_task_request(
 					"task_priority": (
 						SCHEDULED_OUTPUT_HAUL_TASK_PRIORITY
 					),
-				})
+			})
 			)
 
 			if not task_request.is_empty():
@@ -1052,14 +1102,12 @@ static func _get_scheduled_home_food_delivery_task_request(
 static func _get_assigned_work_task_request(
 	citizen: Dictionary
 ) -> Dictionary:
-	if (
-		not _citizen_needs_scheduled_work_task(citizen)
-		or CitizenNeedsSystem.citizen_should_seek_food(
-			int(citizen.get("id", -1))
-		)
-	):
+	if not _citizen_needs_scheduled_work_task(citizen):
 		return {}
 
+	# Hunger alone cannot suppress the work that may create the settlement's
+	# first meal. The food pass preempts this request only after matching a real,
+	# reachable source for this citizen.
 	return {
 		"kind": WorldData.CITY_CITIZEN_TASK_KIND_WORK,
 		"source": (
@@ -1076,14 +1124,12 @@ static func _get_assigned_work_task_request(
 static func _get_assigned_home_task_request(
 	citizen: Dictionary
 ) -> Dictionary:
-	if (
-		not _citizen_needs_scheduled_return_home_task(citizen)
-		or CitizenNeedsSystem.citizen_should_seek_food(
-			int(citizen.get("id", -1))
-		)
-	):
+	if not _citizen_needs_scheduled_return_home_task(citizen):
 		return {}
 
+	# A hungry citizen with no obtainable food still has a valid home schedule.
+	# A matched meal may interrupt this task through the normal or critical food
+	# boundary, but hunger by itself must not strand the citizen near work.
 	return {
 		"kind": WorldData.CITY_CITIZEN_TASK_KIND_RETURN_HOME,
 		"source": (
