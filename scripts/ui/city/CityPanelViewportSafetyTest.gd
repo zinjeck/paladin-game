@@ -13,6 +13,8 @@ var failure_count: int = 0
 class FakeRenderer:
 	extends Node2D
 
+	const SIDECAR_GAP: float = 8.0
+
 	var selected_city_entity_kind: String = "object"
 	var selected_city_entity_id: int = 1
 	var object_info_panel: Panel
@@ -70,7 +72,7 @@ class FakeRenderer:
 		workplace_details_panel.position = Vector2(
 			object_info_panel.position.x
 			+ object_info_panel.size.x
-			+ DETAILS_GAP,
+			+ SIDECAR_GAP,
 			object_info_panel.position.y
 		)
 
@@ -107,12 +109,17 @@ func _test_secondary_panel_flips_left_at_right_edge() -> void:
 
 	var anchor = renderer.get_node("CityObjectPanelAnchor")
 	anchor.synchronize()
+	var expected_details_x := (
+		renderer.object_info_panel.position.x
+		- DETAILS_GAP
+		- renderer.workplace_details_panel.size.x
+	)
 
 	_expect(
-		renderer.workplace_details_panel.position.x
-		== renderer.object_info_panel.position.x
-		- DETAILS_GAP
-		- renderer.workplace_details_panel.size.x,
+		is_equal_approx(
+			renderer.workplace_details_panel.position.x,
+			expected_details_x
+		),
 		"A visible secondary panel must flip directly left when the preferred right side would leave the viewport."
 	)
 	_expect(
