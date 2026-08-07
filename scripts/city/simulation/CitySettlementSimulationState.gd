@@ -3,9 +3,9 @@ class_name CitySettlementSimulationState
 
 # Instance-owned mutable state for one CITY settlement.
 #
-# WorldData still exposes historical city_* fields while the remaining city
-# systems are migrated. Those fields act as an active compatibility workspace,
-# not the long-term owner of settlement-local simulation state.
+# WorldData still exposes historical compatibility fields while the remaining
+# city systems are migrated, but extracted subsystems are not captured into or
+# restored from that workspace anymore.
 #
 # Do not add world/polity identity here. SettlementData and PolityData own that
 # information. This class is only local city-simulation state.
@@ -32,10 +32,9 @@ var ground_piles: Array = []
 var ground_pile_index_by_id: Dictionary = {}
 var next_ground_pile_id: int = 1
 
-# Player commands and parent work orders are now a coherent local subsystem
-# rather than another flat group of fields on either WorldData or this class.
+# First physically extracted local subsystem. WorldData's old work fields are
+# compatibility accessors onto this object rather than stored data.
 var work_state: CityWorkState = CityWorkState.new()
-var _work_state_adopted_legacy_workspace: bool = false
 
 var haul_reservations: Dictionary = {}
 var haul_reservation_id_by_citizen_id: Dictionary = {}
@@ -93,16 +92,6 @@ func capture_from_world_data() -> void:
 	ground_piles = WorldData.city_ground_piles
 	ground_pile_index_by_id = WorldData.city_ground_pile_index_by_id
 	next_ground_pile_id = WorldData.next_city_ground_pile_id
-
-	# Adopt the old singleton collections only once. Thereafter those collections
-	# live here and WorldData merely points at them while this settlement is the
-	# active compatibility workspace. Legacy scalar IDs/versions are still
-	# sampled until their remaining callers move to CityWorkState.
-	if not _work_state_adopted_legacy_workspace:
-		work_state.capture_legacy_workspace()
-		_work_state_adopted_legacy_workspace = true
-	else:
-		work_state.capture_legacy_scalars()
 
 	haul_reservations = WorldData.city_haul_reservations
 	haul_reservation_id_by_citizen_id = (
@@ -168,8 +157,6 @@ func apply_to_world_data() -> void:
 	WorldData.city_ground_piles = ground_piles
 	WorldData.city_ground_pile_index_by_id = ground_pile_index_by_id
 	WorldData.next_city_ground_pile_id = next_ground_pile_id
-
-	work_state.apply_legacy_workspace()
 
 	WorldData.city_haul_reservations = haul_reservations
 	WorldData.city_haul_reservation_id_by_citizen_id = (
