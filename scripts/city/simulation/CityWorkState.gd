@@ -118,18 +118,23 @@ func get_work_order_snapshot() -> Array:
 
 
 # Temporary compatibility bridge used while remaining city subsystems are
-# migrated away from WorldData. The settlement state remains the durable owner;
-# these methods only keep old callers observing the active city's work state.
+# migrated away from WorldData. A full capture is only appropriate when a city
+# state first adopts the old singleton workspace. After that, the collections
+# above are durable settlement-owned references; only scalar mirrors need to be
+# sampled before a switch because legacy code still increments those scalars.
 func capture_legacy_workspace() -> void:
 	player_commands = WorldData.city_player_commands
 	player_command_index_by_id = WorldData.city_player_command_index_by_id
 	player_command_id_by_tile = WorldData.city_player_command_id_by_tile
+	work_orders = WorldData.city_work_orders
+	work_order_id_by_source_key = WorldData.city_work_order_id_by_source_key
+	capture_legacy_scalars()
+
+
+func capture_legacy_scalars() -> void:
 	next_player_command_id = WorldData.next_city_player_command_id
 	next_player_command_group_id = WorldData.next_city_player_command_group_id
 	player_command_version = WorldData.city_player_command_version
-
-	work_orders = WorldData.city_work_orders
-	work_order_id_by_source_key = WorldData.city_work_order_id_by_source_key
 	next_work_order_id = WorldData.next_city_work_order_id
 	work_order_version = WorldData.city_work_order_version
 
@@ -138,14 +143,9 @@ func apply_legacy_workspace() -> void:
 	WorldData.city_player_commands = player_commands
 	WorldData.city_player_command_index_by_id = player_command_index_by_id
 	WorldData.city_player_command_id_by_tile = player_command_id_by_tile
-	WorldData.next_city_player_command_id = next_player_command_id
-	WorldData.next_city_player_command_group_id = next_player_command_group_id
-	WorldData.city_player_command_version = player_command_version
-
 	WorldData.city_work_orders = work_orders
 	WorldData.city_work_order_id_by_source_key = work_order_id_by_source_key
-	WorldData.next_city_work_order_id = next_work_order_id
-	WorldData.city_work_order_version = work_order_version
+	sync_legacy_scalar_mirrors()
 
 
 func sync_legacy_scalar_mirrors() -> void:
