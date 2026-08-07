@@ -4,6 +4,7 @@ class_name CityWorkState
 # Mutable player-command and parent work-order state for one CITY settlement.
 # Scheduling/validation behavior belongs to CityWorkSystem; this object owns
 # only the data, indexes, counters, and focused change versions for that system.
+# It deliberately has no WorldData dependency.
 
 var player_commands: Array = []
 var player_command_index_by_id: Dictionary = {}
@@ -115,42 +116,3 @@ func get_work_order_snapshot() -> Array:
 			snapshot.append(order)
 
 	return snapshot
-
-
-# Temporary compatibility bridge used while remaining city subsystems are
-# migrated away from WorldData. A full capture is only appropriate when a city
-# state first adopts the old singleton workspace. After that, the collections
-# above are durable settlement-owned references; only scalar mirrors need to be
-# sampled before a switch because legacy code still increments those scalars.
-func capture_legacy_workspace() -> void:
-	player_commands = WorldData.city_player_commands
-	player_command_index_by_id = WorldData.city_player_command_index_by_id
-	player_command_id_by_tile = WorldData.city_player_command_id_by_tile
-	work_orders = WorldData.city_work_orders
-	work_order_id_by_source_key = WorldData.city_work_order_id_by_source_key
-	capture_legacy_scalars()
-
-
-func capture_legacy_scalars() -> void:
-	next_player_command_id = WorldData.next_city_player_command_id
-	next_player_command_group_id = WorldData.next_city_player_command_group_id
-	player_command_version = WorldData.city_player_command_version
-	next_work_order_id = WorldData.next_city_work_order_id
-	work_order_version = WorldData.city_work_order_version
-
-
-func apply_legacy_workspace() -> void:
-	WorldData.city_player_commands = player_commands
-	WorldData.city_player_command_index_by_id = player_command_index_by_id
-	WorldData.city_player_command_id_by_tile = player_command_id_by_tile
-	WorldData.city_work_orders = work_orders
-	WorldData.city_work_order_id_by_source_key = work_order_id_by_source_key
-	sync_legacy_scalar_mirrors()
-
-
-func sync_legacy_scalar_mirrors() -> void:
-	WorldData.next_city_player_command_id = next_player_command_id
-	WorldData.next_city_player_command_group_id = next_player_command_group_id
-	WorldData.city_player_command_version = player_command_version
-	WorldData.next_city_work_order_id = next_work_order_id
-	WorldData.city_work_order_version = work_order_version
