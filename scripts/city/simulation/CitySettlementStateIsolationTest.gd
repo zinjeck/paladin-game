@@ -63,9 +63,13 @@ func _run_state_isolation_test() -> void:
 	if player_state == null:
 		return
 
-	# Give the player city unmistakable local state. These are intentionally
-	# ordinary WorldData writes: the compatibility workspace remains valid while
-	# the ownership boundary is introduced incrementally.
+	_expect(
+		player_state.work_state is CityWorkState,
+		"Every city state must own a dedicated work-state subsystem."
+	)
+
+	# Give the player city unmistakable local state. WorldData remains a
+	# compatibility workspace while individual city subsystems are extracted.
 	var player_city_world := _make_world(5, 5, 91_101)
 	WorldData.official_city_world = player_city_world
 	WorldData.official_city_seed = 91_101
@@ -78,6 +82,18 @@ func _run_state_isolation_test() -> void:
 	WorldData.next_city_object_id = 17
 	WorldData.city_object_version = 4
 	WorldData.city_assignment_version = 9
+	WorldData.city_player_commands = [
+		{"id": 41, "test_owner": "player"},
+	]
+	WorldData.city_player_command_index_by_id = {41: 0}
+	WorldData.next_city_player_command_id = 42
+	WorldData.city_player_command_version = 6
+	WorldData.city_work_orders = {
+		71: {"id": 71, "source_key": "test:player"},
+	}
+	WorldData.city_work_order_id_by_source_key = {"test:player": 71}
+	WorldData.next_city_work_order_id = 72
+	WorldData.city_work_order_version = 8
 
 	var cpu_culture := WorldData.create_culture(CPU_CULTURE_NAME)
 	_expect(
@@ -135,6 +151,11 @@ func _run_state_isolation_test() -> void:
 		cpu_state != player_state,
 		"Two cities must never share the same local state object."
 	)
+	_expect(
+		cpu_state.work_state is CityWorkState
+		and cpu_state.work_state != player_state.work_state,
+		"Two cities must never share the same work-state object."
+	)
 
 	_expect(
 		WorldPoliticalState.set_active_settlement(cpu_city_id),
@@ -155,6 +176,13 @@ func _run_state_isolation_test() -> void:
 		and WorldData.city_object_version == 0
 		and WorldData.city_assignment_version == 0,
 		"A fresh city must begin with independent counters and change versions."
+	)
+	_expect(
+		WorldData.city_player_commands.is_empty()
+		and WorldData.city_work_orders.is_empty()
+		and WorldData.next_city_player_command_id == 1
+		and WorldData.next_city_work_order_id == 1,
+		"A fresh city must begin with an independent work-state subsystem."
 	)
 
 	var cpu_context = WorldPoliticalState.get_active_settlement_context()
@@ -178,6 +206,18 @@ func _run_state_isolation_test() -> void:
 	WorldData.next_city_object_id = 55
 	WorldData.city_object_version = 12
 	WorldData.city_assignment_version = 21
+	WorldData.city_player_commands = [
+		{"id": 11, "test_owner": "cpu"},
+	]
+	WorldData.city_player_command_index_by_id = {11: 0}
+	WorldData.next_city_player_command_id = 12
+	WorldData.city_player_command_version = 14
+	WorldData.city_work_orders = {
+		21: {"id": 21, "source_key": "test:cpu"},
+	}
+	WorldData.city_work_order_id_by_source_key = {"test:cpu": 21}
+	WorldData.next_city_work_order_id = 22
+	WorldData.city_work_order_version = 16
 
 	_expect(
 		WorldPoliticalState.set_active_settlement(player_city_id),
@@ -199,6 +239,15 @@ func _run_state_isolation_test() -> void:
 		and WorldData.city_assignment_version == 9,
 		"Returning to the player city must restore its counters and versions."
 	)
+	_expect(
+		str(WorldData.city_player_commands[0].get("test_owner", "")) == "player"
+		and WorldData.next_city_player_command_id == 42
+		and WorldData.city_player_command_version == 6
+		and WorldData.city_work_orders.has(71)
+		and WorldData.next_city_work_order_id == 72
+		and WorldData.city_work_order_version == 8,
+		"Returning to the player city must restore its independent work state."
+	)
 
 	_expect(
 		WorldPoliticalState.set_active_settlement(cpu_city_id),
@@ -219,6 +268,15 @@ func _run_state_isolation_test() -> void:
 		and WorldData.city_object_version == 12
 		and WorldData.city_assignment_version == 21,
 		"Reactivating the CPU city must restore its own counters and versions."
+	)
+	_expect(
+		str(WorldData.city_player_commands[0].get("test_owner", "")) == "cpu"
+		and WorldData.next_city_player_command_id == 12
+		and WorldData.city_player_command_version == 14
+		and WorldData.city_work_orders.has(21)
+		and WorldData.next_city_work_order_id == 22
+		and WorldData.city_work_order_version == 16,
+		"Reactivating the CPU city must restore its own independent work state."
 	)
 	_expect(
 		WorldPoliticalState.validate_registry_integrity(),
