@@ -7,6 +7,7 @@ class_name PolityData
 
 const INVALID_POLITY_ID: int = -1
 const INVALID_SETTLEMENT_ID: int = -1
+const INVALID_CITIZEN_ID: int = -1
 
 const POLITY_TYPE_CHIEFDOM := "chiefdom"
 const POLITY_TYPE_KINGDOM := "kingdom"
@@ -73,6 +74,9 @@ static func make_polity(values: Dictionary) -> Dictionary:
 	var capital_settlement_id := int(
 		values.get("capital_settlement_id", INVALID_SETTLEMENT_ID)
 	)
+	var ruler_citizen_id := int(
+		values.get("ruler_citizen_id", INVALID_CITIZEN_ID)
+	)
 
 	if polity_id <= 0:
 		push_error("PolityData.make_polity id must be positive.")
@@ -99,6 +103,11 @@ static func make_polity(values: Dictionary) -> Dictionary:
 				"PolityData.make_polity capital must belong to settlement_ids."
 			)
 			return {}
+	if ruler_citizen_id != INVALID_CITIZEN_ID and ruler_citizen_id <= 0:
+		push_error(
+			"PolityData.make_polity ruler_citizen_id must be positive or invalid."
+		)
+		return {}
 
 	return {
 		"id": polity_id,
@@ -108,6 +117,7 @@ static func make_polity(values: Dictionary) -> Dictionary:
 		"accepted_culture_ids": accepted_culture_ids,
 		"capital_settlement_id": capital_settlement_id,
 		"settlement_ids": settlement_ids,
+		"ruler_citizen_id": ruler_citizen_id,
 	}
 
 
@@ -149,6 +159,12 @@ static func is_valid_polity_record(polity: Dictionary) -> bool:
 		INVALID_POLITY_ID
 	)
 	if settlement_ids != polity.get("settlement_ids", []):
+		return false
+
+	var ruler_citizen_id := int(
+		polity.get("ruler_citizen_id", INVALID_CITIZEN_ID)
+	)
+	if ruler_citizen_id != INVALID_CITIZEN_ID and ruler_citizen_id <= 0:
 		return false
 
 	var capital_settlement_id := int(
