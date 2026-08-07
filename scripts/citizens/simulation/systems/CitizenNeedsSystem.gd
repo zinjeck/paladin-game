@@ -4,6 +4,10 @@ class_name CitizenNeedsSystem
 # Needs remain independent of the citizen's current activity. Hunger can fall
 # and food can be eaten while a citizen works, walks, rests, or hauls. Physical
 # food is always removed from personal inventory one whole item at a time.
+#
+# Immediate food allocation is also deliberately one whole item at a time.
+# Citizens reassess after each item instead of filling a private pocket toward
+# 100 while equally or more hungry citizens are still waiting for shared food.
 
 
 static func run_tick(
@@ -36,6 +40,27 @@ static func run_tick(
 		_take_personal_food_at_current_legal_source(citizen_id)
 		_eat_personal_food_if_hungry(citizen_id)
 
+
+static func get_single_food_allocation_nutrition_cap() -> int:
+	var allocation_nutrition_cap := 0
+
+	for resource in WorldData.get_city_food_resource_types():
+		var hunger_restore := WorldData.get_city_food_hunger_restore(resource)
+
+		if hunger_restore <= 0:
+			continue
+
+		if allocation_nutrition_cap <= 0:
+			allocation_nutrition_cap = hunger_restore
+		else:
+			allocation_nutrition_cap = mini(
+				allocation_nutrition_cap,
+				hunger_restore
+			)
+
+	return allocation_nutrition_cap
+
+
 static func get_citizen_food_need_nutrition(citizen_id: int) -> int:
 	var citizen := WorldData.get_city_citizen_by_id(citizen_id)
 
@@ -45,13 +70,26 @@ static func get_citizen_food_need_nutrition(citizen_id: int) -> int:
 	var personal_food_nutrition := WorldData.get_food_nutrition_in_resource_container(
 		WorldData.get_city_citizen_inventory(citizen_id)
 	)
-
 	return maxi(
 		WorldData.CITIZEN_EAT_TARGET_HUNGER
 		- WorldData.get_city_citizen_hunger(citizen_id)
 		- personal_food_nutrition,
 		0
 	)
+
+
+static func get_citizen_next_food_allocation_nutrition(
+	citizen_id: int
+) -> int:
+	var unmet_nutrition := get_citizen_food_need_nutrition(citizen_id)
+	var allocation_nutrition_cap := (
+		get_single_food_allocation_nutrition_cap()
+	)
+
+	if allocation_nutrition_cap <= 0:
+		return 0
+
+	return mini(unmet_nutrition, allocation_nutrition_cap)
 
 
 static func citizen_should_seek_food(citizen_id: int) -> bool:
@@ -129,20 +167,8 @@ static func _take_personal_food_at_current_legal_source(
 		or WorldData.get_city_citizen_hunger(citizen_id)
 		> WorldData.CITIZEN_FOOD_CARRY_TRIGGER_HUNGER
 		or WorldData.get_city_citizen_inventory_free_space(citizen_id) <= 0
+		or get_citizen_next_food_allocation_nutrition(citizen_id) <= 0
 	):
-		return
-
-	var personal_food_nutrition := WorldData.get_food_nutrition_in_resource_container(
-		WorldData.get_city_citizen_inventory(citizen_id)
-	)
-	var desired_nutrition := maxi(
-		WorldData.CITIZEN_EAT_TARGET_HUNGER
-		- WorldData.get_city_citizen_hunger(citizen_id)
-		- personal_food_nutrition,
-		0
-	)
-
-	if desired_nutrition <= 0:
 		return
 
 	var source_endpoints := _get_legal_food_source_endpoints_at_citizen(citizen)
@@ -154,37 +180,22 @@ static func _take_personal_food_at_current_legal_source(
 		var source_endpoint: Dictionary = raw_source_endpoint
 
 		for resource in WorldData.get_city_food_resource_types():
-			var hunger_restore := WorldData.get_city_food_hunger_restore(resource)
-
-			if hunger_restore <= 0:
+			if WorldData.get_city_food_hunger_restore(resource) <= 0:
 				continue
 
-			var requested_units := ceili(
-				float(desired_nutrition) / float(hunger_restore)
-			)
 			var transferred_units := (
 				WorldData.transfer_city_food_endpoint_to_citizen_inventory(
 					citizen_id,
 					source_endpoint,
 					resource,
-					requested_units
+					1
 				)
 			)
 
-			if transferred_units <= 0:
-				continue
-
-			desired_nutrition = maxi(
-				desired_nutrition
-				- transferred_units * hunger_restore,
-				0
-			)
-
-			if (
-				desired_nutrition <= 0
-				or WorldData.get_city_citizen_inventory_free_space(citizen_id)
-				<= 0
-			):
+			# One successful transfer is the complete immediate allocation. The
+			# eating step runs next, then every hungry citizen competes again using
+			# current hunger and the source reservations already owned by others.
+			if transferred_units > 0:
 				return
 
 

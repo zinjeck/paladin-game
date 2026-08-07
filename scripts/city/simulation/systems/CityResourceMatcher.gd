@@ -2205,6 +2205,11 @@ static func _make_survival_endpoint_candidate(
 				ceili(float(desired_nutrition) / float(hunger_restore))
 			)
 		)
+		# Shared survival food is allocated one physical item at a time.
+		# The citizen must re-enter the hunger queue after that item, so
+		# nearby citizens cannot reserve a private multi-meal bundle while
+		# equally or more hungry citizens are still waiting.
+		requested_amount = mini(requested_amount, 1)
 		break
 
 	if requested_amount <= 0:
