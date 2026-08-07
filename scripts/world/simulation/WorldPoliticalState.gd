@@ -1,9 +1,9 @@
 extends Node
 
-# Authoritative runtime registry for polity and settlement identity. This layer
-# intentionally does not own local city arrays yet. The active settlement
-# context adapts the current WorldData-backed city simulation while later
-# passes move that state behind the same boundary.
+# Authoritative runtime registry for polity and settlement identity plus each
+# settlement's local simulation state. WorldData remains the compatibility
+# execution workspace while city systems are migrated, but it is no longer the
+# only place where a city's mutable state can live.
 
 const PolityDataScript = preload(
 	"res://scripts/world/simulation/PolityData.gd"
@@ -14,10 +14,14 @@ const SettlementDataScript = preload(
 const SettlementSimulationContextScript = preload(
 	"res://scripts/world/simulation/SettlementSimulationContext.gd"
 )
+const CitySettlementSimulationStateScript = preload(
+	"res://scripts/city/simulation/CitySettlementSimulationState.gd"
+)
 
 var polities_by_id: Dictionary = {}
 var settlements_by_id: Dictionary = {}
 var settlement_backend_kind_by_id: Dictionary = {}
+var settlement_city_state_by_id: Dictionary = {}
 var next_polity_id: int = 1
 var next_settlement_id: int = 1
 
@@ -31,6 +35,7 @@ func reset_state() -> void:
 	polities_by_id.clear()
 	settlements_by_id.clear()
 	settlement_backend_kind_by_id.clear()
+	settlement_city_state_by_id.clear()
 	next_polity_id = 1
 	next_settlement_id = 1
 	player_polity_id = PolityDataScript.INVALID_POLITY_ID
@@ -73,7 +78,7 @@ func synchronize_foundation_with_world_data() -> bool:
 		"world_region_size": WorldData.official_region_size,
 		"simulation_backend_kind": (
 			SettlementSimulationContextScript
-			.BACKEND_LEGACY_CITY_WORLD_DATA
+			.BACKEND_CITY_SETTLEMENT_STATE
 		),
 	})
 	if capital.is_empty():
@@ -89,6 +94,17 @@ func synchronize_foundation_with_world_data() -> bool:
 
 	player_polity_id = int(player_polity["id"])
 	active_settlement_id = int(capital["id"])
+
+	# Founding begins with the already-live city workspace populated by the
+	# existing generation/session flow. Capture those references rather than
+	# replacing them with a blank state. Future settlement switches can then
+	# restore this exact city independently of every other city settlement.
+	var capital_state = get_city_simulation_state(active_settlement_id)
+	if capital_state == null:
+		reset_state()
+		return false
+	capital_state.capture_from_world_data()
+
 	_foundation_world_fingerprint = fingerprint
 	return validate_registry_integrity()
 
@@ -165,10 +181,29 @@ func create_settlement(values: Dictionary) -> Dictionary:
 			"WorldPoliticalState received an invalid settlement parent-city relationship."
 		)
 		return {}
+	if (
+		backend_kind
+		== SettlementSimulationContextScript.BACKEND_CITY_SETTLEMENT_STATE
+		and str(settlement["settlement_type"])
+		!= SettlementDataScript.SETTLEMENT_TYPE_CITY
+	):
+		push_error(
+			"Only city settlements may own the current city simulation backend."
+		)
+		return {}
 
 	var settlement_id: int = settlement["id"]
 	settlements_by_id[settlement_id] = settlement
 	settlement_backend_kind_by_id[settlement_id] = backend_kind
+
+	if (
+		backend_kind
+		== SettlementSimulationContextScript.BACKEND_CITY_SETTLEMENT_STATE
+	):
+		settlement_city_state_by_id[settlement_id] = (
+			CitySettlementSimulationStateScript.new()
+		)
+
 	next_settlement_id = settlement_id + 1
 
 	var polity: Dictionary = polities_by_id[polity_id]
@@ -209,8 +244,17 @@ func set_polity_capital(polity_id: int, settlement_id: int) -> bool:
 func set_active_settlement(settlement_id: int) -> bool:
 	if not settlements_by_id.has(settlement_id):
 		return false
+	if settlement_id == active_settlement_id:
+		return true
 
+	_capture_active_city_workspace()
 	active_settlement_id = settlement_id
+	_apply_active_city_workspace()
+
+	# CitizenDecisionSystem still carries process-local cursors while its state
+	# is migrated in a later pass. Resetting those cursors on a settlement switch
+	# prevents one city's scheduler history from leaking into another city.
+	CitizenDecisionSystem.reset_runtime_state()
 	return true
 
 
@@ -223,7 +267,33 @@ func set_settlement_simulation_backend(
 	if not _is_valid_backend_kind(backend_kind):
 		return false
 
+	var settlement: Dictionary = settlements_by_id[settlement_id]
+	if (
+		backend_kind
+		== SettlementSimulationContextScript.BACKEND_CITY_SETTLEMENT_STATE
+		and str(settlement.get("settlement_type", ""))
+		!= SettlementDataScript.SETTLEMENT_TYPE_CITY
+	):
+		return false
+
+	if settlement_id == active_settlement_id:
+		_capture_active_city_workspace()
+
 	settlement_backend_kind_by_id[settlement_id] = backend_kind
+
+	if (
+		backend_kind
+		== SettlementSimulationContextScript.BACKEND_CITY_SETTLEMENT_STATE
+		and not settlement_city_state_by_id.has(settlement_id)
+	):
+		var city_state := CitySettlementSimulationStateScript.new()
+		if settlement_id == active_settlement_id:
+			city_state.capture_from_world_data()
+		settlement_city_state_by_id[settlement_id] = city_state
+
+	if settlement_id == active_settlement_id:
+		_apply_active_city_workspace()
+
 	return true
 
 
@@ -247,6 +317,17 @@ func get_player_polity() -> Dictionary:
 
 func get_active_settlement() -> Dictionary:
 	return get_settlement(active_settlement_id)
+
+
+func get_city_simulation_state(settlement_id: int):
+	var raw_state = settlement_city_state_by_id.get(settlement_id)
+	if raw_state is CitySettlementSimulationState:
+		return raw_state
+	return null
+
+
+func get_active_city_simulation_state():
+	return get_city_simulation_state(active_settlement_id)
 
 
 func get_polity_snapshot() -> Array[Dictionary]:
@@ -309,7 +390,12 @@ func get_active_settlement_context():
 			)) == settlement_id
 		),
 		"backend_kind": backend_kind,
+		"local_state": get_city_simulation_state(settlement_id),
 	})
+
+
+func capture_active_settlement_state() -> void:
+	_capture_active_city_workspace()
 
 
 func is_settlement_capital(settlement_id: int) -> bool:
@@ -364,12 +450,56 @@ func validate_registry_integrity() -> bool:
 			return false
 		if not settlement_backend_kind_by_id.has(settlement_id):
 			return false
-		if not _is_valid_backend_kind(
-			str(settlement_backend_kind_by_id[settlement_id])
+
+		var backend_kind := str(
+			settlement_backend_kind_by_id[settlement_id]
+		)
+		if not _is_valid_backend_kind(backend_kind):
+			return false
+		if (
+			backend_kind
+			== SettlementSimulationContextScript.BACKEND_CITY_SETTLEMENT_STATE
+			and (
+				str(settlement["settlement_type"])
+				!= SettlementDataScript.SETTLEMENT_TYPE_CITY
+				or get_city_simulation_state(settlement_id) == null
+			)
 		):
 			return false
 
 	return true
+
+
+func _capture_active_city_workspace() -> void:
+	if active_settlement_id == SettlementDataScript.INVALID_SETTLEMENT_ID:
+		return
+	if not settlement_backend_kind_by_id.has(active_settlement_id):
+		return
+	if (
+		str(settlement_backend_kind_by_id[active_settlement_id])
+		!= SettlementSimulationContextScript.BACKEND_CITY_SETTLEMENT_STATE
+	):
+		return
+
+	var city_state = get_city_simulation_state(active_settlement_id)
+	if city_state != null:
+		city_state.capture_from_world_data()
+
+
+func _apply_active_city_workspace() -> void:
+	if active_settlement_id == SettlementDataScript.INVALID_SETTLEMENT_ID:
+		return
+	if not settlement_backend_kind_by_id.has(active_settlement_id):
+		return
+	if (
+		str(settlement_backend_kind_by_id[active_settlement_id])
+		!= SettlementSimulationContextScript.BACKEND_CITY_SETTLEMENT_STATE
+	):
+		return
+
+	var city_state = get_city_simulation_state(active_settlement_id)
+	if city_state != null:
+		city_state.apply_to_world_data()
 
 
 func _is_settlement_parent_relationship_valid(
@@ -409,6 +539,8 @@ func _is_valid_backend_kind(backend_kind: String) -> bool:
 		backend_kind == SettlementSimulationContextScript.BACKEND_NONE
 		or backend_kind
 		== SettlementSimulationContextScript.BACKEND_LEGACY_CITY_WORLD_DATA
+		or backend_kind
+		== SettlementSimulationContextScript.BACKEND_CITY_SETTLEMENT_STATE
 	)
 
 
