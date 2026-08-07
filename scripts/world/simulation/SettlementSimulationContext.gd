@@ -30,7 +30,6 @@ func is_valid() -> bool:
 		settlement_id > 0
 		and polity_id > 0
 		and SettlementData.is_valid_settlement_type(settlement_type)
-		and backend_kind != BACKEND_NONE
 	)
 
 
