@@ -201,6 +201,15 @@ func _prepare_first_city_entry() -> void:
 	if city_view_has_been_entered:
 		return
 
+	# The capital is now one settlement in a world registry, not an implicit
+	# singleton. Its local state still uses the legacy WorldData backend during
+	# this migration pass, but every simulation tick receives its settlement
+	# identity through SettlementSimulationContext.
+	if not WorldPoliticalState.synchronize_foundation_with_world_data():
+		push_error(
+			"GameSession could not establish the founding settlement context."
+		)
+
 	city_view_has_been_entered = true
 	SimulationClock.start_new_game()
 	SimulationClock.set_simulation_paused(true)
