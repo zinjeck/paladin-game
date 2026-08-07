@@ -276,6 +276,13 @@ func set_settlement_simulation_backend(
 	):
 		return false
 
+	var previous_backend_kind := str(
+		settlement_backend_kind_by_id.get(
+			settlement_id,
+			SettlementSimulationContextScript.BACKEND_NONE
+		)
+	)
+
 	if settlement_id == active_settlement_id:
 		_capture_active_city_workspace()
 
@@ -287,8 +294,18 @@ func set_settlement_simulation_backend(
 		and not settlement_city_state_by_id.has(settlement_id)
 	):
 		var city_state := CitySettlementSimulationStateScript.new()
-		if settlement_id == active_settlement_id:
+
+		# Only the old legacy backend can legitimately mean that the current
+		# WorldData workspace belongs to this same settlement. BACKEND_NONE may
+		# leave another city's compatibility workspace loaded, so copying it here
+		# would silently clone that city's population/resources into this one.
+		if (
+			settlement_id == active_settlement_id
+			and previous_backend_kind
+			== SettlementSimulationContextScript.BACKEND_LEGACY_CITY_WORLD_DATA
+		):
 			city_state.capture_from_world_data()
+
 		settlement_city_state_by_id[settlement_id] = city_state
 
 	if settlement_id == active_settlement_id:
@@ -549,7 +566,10 @@ func _build_foundation_world_fingerprint() -> String:
 	if WorldData.official_world != null:
 		world_instance_id = WorldData.official_world.get_instance_id()
 
-	return "%s:%s:%s:%s:%s:%s:%s:%s" % [
+	# Only immutable founding/world identity belongs in this key. A local city
+	# seed changes when another settlement becomes active and must never make the
+	# political registry think a new world was loaded.
+	return "%s:%s:%s:%s:%s:%s:%s" % [
 		world_instance_id,
 		WorldData.official_world.seed,
 		WorldData.official_selected_region_top_left.x,
@@ -557,5 +577,4 @@ func _build_foundation_world_fingerprint() -> String:
 		WorldData.official_region_size,
 		WorldData.get_official_city_name(),
 		WorldData.get_official_founding_culture_id(),
-		WorldData.official_city_seed,
 	]
