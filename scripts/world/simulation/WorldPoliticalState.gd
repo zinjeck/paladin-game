@@ -17,6 +17,7 @@ const SettlementSimulationContextScript = preload(
 
 var polities_by_id: Dictionary = {}
 var settlements_by_id: Dictionary = {}
+var settlement_backend_kind_by_id: Dictionary = {}
 var next_polity_id: int = 1
 var next_settlement_id: int = 1
 
@@ -29,6 +30,7 @@ var _foundation_world_fingerprint: String = ""
 func reset_state() -> void:
 	polities_by_id.clear()
 	settlements_by_id.clear()
+	settlement_backend_kind_by_id.clear()
 	next_polity_id = 1
 	next_settlement_id = 1
 	player_polity_id = PolityDataScript.INVALID_POLITY_ID
@@ -72,6 +74,10 @@ func synchronize_foundation_with_world_data() -> bool:
 		"world_region_top_left": WorldData.official_selected_region_top_left,
 		"world_region_center": WorldData.official_selected_region_center,
 		"world_region_size": WorldData.official_region_size,
+		"simulation_backend_kind": (
+			SettlementSimulationContextScript
+			.BACKEND_LEGACY_CITY_WORLD_DATA
+		),
 	})
 	if capital.is_empty():
 		reset_state()
@@ -127,6 +133,19 @@ func create_settlement(values: Dictionary) -> Dictionary:
 		)
 		return {}
 
+	var backend_kind := str(
+		settlement_values.get(
+			"simulation_backend_kind",
+			SettlementSimulationContextScript.BACKEND_NONE
+		)
+	)
+	if not _is_valid_backend_kind(backend_kind):
+		push_error(
+			"WorldPoliticalState received an unknown settlement simulation backend."
+		)
+		return {}
+
+	settlement_values.erase("simulation_backend_kind")
 	settlement_values["id"] = next_settlement_id
 	settlement_values["parent_city_id"] = settlement_values.get(
 		"parent_city_id",
@@ -143,6 +162,7 @@ func create_settlement(values: Dictionary) -> Dictionary:
 
 	var settlement_id: int = settlement["id"]
 	settlements_by_id[settlement_id] = settlement
+	settlement_backend_kind_by_id[settlement_id] = backend_kind
 	next_settlement_id = settlement_id + 1
 
 	var polity: Dictionary = polities_by_id[polity_id]
@@ -180,6 +200,19 @@ func set_active_settlement(settlement_id: int) -> bool:
 		return false
 
 	active_settlement_id = settlement_id
+	return true
+
+
+func set_settlement_simulation_backend(
+	settlement_id: int,
+	backend_kind: String
+) -> bool:
+	if not settlements_by_id.has(settlement_id):
+		return false
+	if not _is_valid_backend_kind(backend_kind):
+		return false
+
+	settlement_backend_kind_by_id[settlement_id] = backend_kind
 	return true
 
 
@@ -246,21 +279,25 @@ func get_active_settlement_context():
 	if polity.is_empty():
 		return null
 
+	var settlement_id := int(settlement["id"])
+	var backend_kind := str(
+		settlement_backend_kind_by_id.get(
+			settlement_id,
+			SettlementSimulationContextScript.BACKEND_NONE
+		)
+	)
+
 	return SettlementSimulationContextScript.new({
-		"settlement_id": int(settlement["id"]),
+		"settlement_id": settlement_id,
 		"polity_id": polity_id,
 		"settlement_type": str(settlement["settlement_type"]),
 		"is_capital": (
 			int(polity.get(
 				"capital_settlement_id",
 				PolityDataScript.INVALID_SETTLEMENT_ID
-			))
-			== int(settlement["id"])
+			)) == settlement_id
 		),
-		"backend_kind": (
-			SettlementSimulationContextScript
-			.BACKEND_LEGACY_CITY_WORLD_DATA
-		),
+		"backend_kind": backend_kind,
 	})
 
 
@@ -309,10 +346,25 @@ func validate_registry_integrity() -> bool:
 		var settlement: Dictionary = raw_settlement
 		if not SettlementDataScript.is_valid_settlement_record(settlement):
 			return false
+		var settlement_id := int(settlement["id"])
 		if not polities_by_id.has(int(settlement["polity_id"])):
+			return false
+		if not settlement_backend_kind_by_id.has(settlement_id):
+			return false
+		if not _is_valid_backend_kind(
+			str(settlement_backend_kind_by_id[settlement_id])
+		):
 			return false
 
 	return true
+
+
+func _is_valid_backend_kind(backend_kind: String) -> bool:
+	return (
+		backend_kind == SettlementSimulationContextScript.BACKEND_NONE
+		or backend_kind
+		== SettlementSimulationContextScript.BACKEND_LEGACY_CITY_WORLD_DATA
+	)
 
 
 func _build_foundation_world_fingerprint() -> String:
