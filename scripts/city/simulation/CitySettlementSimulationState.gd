@@ -35,6 +35,7 @@ var next_ground_pile_id: int = 1
 # Player commands and parent work orders are now a coherent local subsystem
 # rather than another flat group of fields on either WorldData or this class.
 var work_state: CityWorkState = CityWorkState.new()
+var _work_state_adopted_legacy_workspace: bool = false
 
 var haul_reservations: Dictionary = {}
 var haul_reservation_id_by_citizen_id: Dictionary = {}
@@ -93,9 +94,15 @@ func capture_from_world_data() -> void:
 	ground_pile_index_by_id = WorldData.city_ground_pile_index_by_id
 	next_ground_pile_id = WorldData.next_city_ground_pile_id
 
-	# This bridge captures the pre-extraction workspace on founding and keeps old
-	# callers coherent until their WorldData aliases can be deleted completely.
-	work_state.capture_legacy_workspace()
+	# Adopt the old singleton collections only once. Thereafter those collections
+	# live here and WorldData merely points at them while this settlement is the
+	# active compatibility workspace. Legacy scalar IDs/versions are still
+	# sampled until their remaining callers move to CityWorkState.
+	if not _work_state_adopted_legacy_workspace:
+		work_state.capture_legacy_workspace()
+		_work_state_adopted_legacy_workspace = true
+	else:
+		work_state.capture_legacy_scalars()
 
 	haul_reservations = WorldData.city_haul_reservations
 	haul_reservation_id_by_citizen_id = (
