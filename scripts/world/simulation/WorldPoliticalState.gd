@@ -108,6 +108,10 @@ func create_polity(values: Dictionary) -> Dictionary:
 		"capital_settlement_id",
 		PolityDataScript.INVALID_SETTLEMENT_ID
 	)
+	polity_values["ruler_citizen_id"] = polity_values.get(
+		"ruler_citizen_id",
+		PolityDataScript.INVALID_CITIZEN_ID
+	)
 
 	var polity := PolityDataScript.make_polity(polity_values)
 	if polity.is_empty():
@@ -156,6 +160,11 @@ func create_settlement(values: Dictionary) -> Dictionary:
 	var settlement := SettlementDataScript.make_settlement(settlement_values)
 	if settlement.is_empty():
 		return {}
+	if not _is_settlement_parent_relationship_valid(settlement):
+		push_error(
+			"WorldPoliticalState received an invalid settlement parent-city relationship."
+		)
+		return {}
 
 	var settlement_id: int = settlement["id"]
 	settlements_by_id[settlement_id] = settlement
@@ -180,6 +189,11 @@ func set_polity_capital(polity_id: int, settlement_id: int) -> bool:
 
 	var settlement: Dictionary = settlements_by_id[settlement_id]
 	if int(settlement.get("polity_id", PolityDataScript.INVALID_POLITY_ID)) != polity_id:
+		return false
+	if (
+		str(settlement.get("settlement_type", ""))
+		!= SettlementDataScript.SETTLEMENT_TYPE_CITY
+	):
 		return false
 
 	var polity: Dictionary = polities_by_id[polity_id]
@@ -346,6 +360,8 @@ func validate_registry_integrity() -> bool:
 		var settlement_id := int(settlement["id"])
 		if not polities_by_id.has(int(settlement["polity_id"])):
 			return false
+		if not _is_settlement_parent_relationship_valid(settlement):
+			return false
 		if not settlement_backend_kind_by_id.has(settlement_id):
 			return false
 		if not _is_valid_backend_kind(
@@ -354,6 +370,31 @@ func validate_registry_integrity() -> bool:
 			return false
 
 	return true
+
+
+func _is_settlement_parent_relationship_valid(
+	settlement: Dictionary
+) -> bool:
+	var settlement_type := str(settlement.get("settlement_type", ""))
+	var parent_city_id := int(
+		settlement.get(
+			"parent_city_id",
+			SettlementDataScript.INVALID_SETTLEMENT_ID
+		)
+	)
+
+	if parent_city_id == SettlementDataScript.INVALID_SETTLEMENT_ID:
+		return settlement_type != SettlementDataScript.SETTLEMENT_TYPE_VILLAGE
+	if not settlements_by_id.has(parent_city_id):
+		return false
+
+	var parent_city: Dictionary = settlements_by_id[parent_city_id]
+	return (
+		str(parent_city.get("settlement_type", ""))
+		== SettlementDataScript.SETTLEMENT_TYPE_CITY
+		and int(parent_city.get("polity_id", PolityDataScript.INVALID_POLITY_ID))
+		== int(settlement.get("polity_id", PolityDataScript.INVALID_POLITY_ID))
+	)
 
 
 func _has_live_foundation_registry() -> bool:
