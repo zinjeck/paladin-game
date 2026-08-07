@@ -4,7 +4,7 @@
 ;
 ; Format:
 ;   [section] ; section goes between []
-;   param=value ; assign values to parameters
+;   param=value ; param=value
 
 config_version=5
 
@@ -26,4 +26,5 @@ config/icon="res://icon.svg"
 [autoload]
 
 SimulationClock="*res://scripts/world/simulation/SimulationClock.gd"
+WorldPoliticalState="*res://scripts/world/simulation/WorldPoliticalState.gd"
 SimulationCoordinator="*res://scripts/world/simulation/SimulationCoordinator.gd"
