@@ -58,6 +58,13 @@ func synchronize_foundation_with_world_data() -> bool:
 	if fingerprint == _foundation_world_fingerprint:
 		return _has_live_foundation_registry()
 
+	# Some low-level simulation/bootstrap paths can create local work before the
+	# political registry exists. Preserve that pre-context state exactly once
+	# when the first City settlement adopts the current city simulation. Never
+	# carry it across an already-live political registry into another world.
+	var should_adopt_unbound_work_state := not _has_live_foundation_registry()
+	var unbound_work_state_to_adopt = _unbound_city_work_state
+
 	reset_state()
 
 	var founding_culture_id := WorldData.get_official_founding_culture_id()
@@ -108,6 +115,8 @@ func synchronize_foundation_with_world_data() -> bool:
 	if capital_state == null:
 		reset_state()
 		return false
+	if should_adopt_unbound_work_state:
+		capital_state.work_state = unbound_work_state_to_adopt
 	capital_state.capture_from_world_data()
 
 	_foundation_world_fingerprint = fingerprint
