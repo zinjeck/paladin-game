@@ -93,6 +93,11 @@ func _run_framework_test() -> void:
 		"The founding polity must not invent accepted cultures."
 	)
 	_expect(
+		int(player_polity["ruler_citizen_id"])
+		== PolityData.INVALID_CITIZEN_ID,
+		"The framework must reserve ruler identity without inventing a ruler yet."
+	)
+	_expect(
 		int(player_polity["capital_settlement_id"]) == capital_id
 		and (player_polity["settlement_ids"] as Array).has(capital_id),
 		"The founding settlement must be linked as the polity capital."
@@ -136,7 +141,50 @@ func _run_framework_test() -> void:
 		"The existing city simulation must run through the founding settlement context."
 	)
 
+	_test_village_hierarchy(player_polity_id, capital_id)
 	_test_generic_second_polity(capital_id)
+
+
+func _test_village_hierarchy(
+	player_polity_id: int,
+	player_capital_id: int
+) -> void:
+	var village := WorldPoliticalState.create_settlement({
+		"name": "Asterfield",
+		"settlement_type": SettlementData.SETTLEMENT_TYPE_VILLAGE,
+		"polity_id": player_polity_id,
+		"world_region_top_left": Vector2i(1, 1),
+		"world_region_center": Vector2i(1, 1),
+		"world_region_size": 1,
+		"parent_city_id": player_capital_id,
+	})
+	_expect(
+		not village.is_empty(),
+		"A village must be creatable beneath a same-polity parent city."
+	)
+	if village.is_empty():
+		return
+
+	var village_id := int(village["id"])
+	_expect(
+		int(village["parent_city_id"]) == player_capital_id,
+		"Village identity must retain its parent-city relationship."
+	)
+	_expect(
+		not WorldPoliticalState.set_polity_capital(
+			player_polity_id,
+			village_id
+		),
+		"A village must not be assignable as a polity capital."
+	)
+	_expect(
+		WorldPoliticalState.is_settlement_capital(player_capital_id),
+		"Rejecting a village capital must preserve the existing city capital."
+	)
+	_expect(
+		WorldPoliticalState.validate_registry_integrity(),
+		"Adding a valid child village must preserve registry integrity."
+	)
 
 
 func _test_generic_second_polity(player_capital_id: int) -> void:
@@ -186,7 +234,7 @@ func _test_generic_second_polity(player_capital_id: int) -> void:
 	)
 	_expect(
 		WorldPoliticalState.get_polity_snapshot().size() == 2
-		and WorldPoliticalState.get_settlement_snapshot().size() == 2,
+		and WorldPoliticalState.get_settlement_snapshot().size() == 3,
 		"Player and CPU political records must coexist in the same registries."
 	)
 	_expect(
