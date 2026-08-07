@@ -104,7 +104,36 @@ func run_simulation_systems(
 	minutes_advanced: int,
 	duration_recorder: Callable = Callable()
 ) -> void:
-	# Simulation execution and profiling share one ordered system pipeline.
+	var settlement_context = (
+		WorldPoliticalState.get_active_settlement_context()
+	)
+	if settlement_context == null:
+		return
+
+	run_settlement_simulation_systems(
+		settlement_context,
+		tick_index,
+		minutes_advanced,
+		duration_recorder
+	)
+
+
+func run_settlement_simulation_systems(
+	settlement_context,
+	tick_index: int,
+	minutes_advanced: int,
+	duration_recorder: Callable = Callable()
+) -> void:
+	if (
+		settlement_context == null
+		or not settlement_context.has_method("supports_city_simulation")
+		or not settlement_context.supports_city_simulation()
+	):
+		return
+
+	# Simulation execution and profiling share one ordered city-settlement
+	# pipeline. The systems still read the legacy WorldData city backend during
+	# this migration pass, but invocation now has an explicit settlement owner.
 	var should_record_durations := duration_recorder.is_valid()
 	var system_start_usec := 0
 
