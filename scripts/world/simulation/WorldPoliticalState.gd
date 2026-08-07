@@ -45,11 +45,8 @@ func synchronize_foundation_with_world_data() -> bool:
 		return false
 
 	var fingerprint := _build_foundation_world_fingerprint()
-	if (
-		fingerprint == _foundation_world_fingerprint
-		and validate_registry_integrity()
-	):
-		return true
+	if fingerprint == _foundation_world_fingerprint:
+		return _has_live_foundation_registry()
 
 	reset_state()
 
@@ -357,6 +354,13 @@ func validate_registry_integrity() -> bool:
 			return false
 
 	return true
+
+
+func _has_live_foundation_registry() -> bool:
+	return (
+		polities_by_id.has(player_polity_id)
+		and settlements_by_id.has(active_settlement_id)
+	)
 
 
 func _is_valid_backend_kind(backend_kind: String) -> bool:
