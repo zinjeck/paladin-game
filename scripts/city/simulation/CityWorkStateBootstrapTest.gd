@@ -44,18 +44,18 @@ func _run_bootstrap_test() -> void:
 
 	# Low-level simulation fixtures can create work before the first simulation
 	# tick asks WorldPoliticalState to establish the founding settlement.
-	WorldData.city_player_commands = [
+	CityWorkSystem.get_current_work_state().player_commands = [
 		{"id": 7, "test_owner": "bootstrap"},
 	]
-	WorldData.city_player_command_index_by_id = {7: 0}
-	WorldData.next_city_player_command_id = 8
-	WorldData.city_player_command_version = 4
-	WorldData.city_work_orders = {
+	CityWorkSystem.get_current_work_state().player_command_index_by_id = {7: 0}
+	CityWorkSystem.get_current_work_state().next_player_command_id = 8
+	CityWorkSystem.get_current_work_state().player_command_version = 4
+	CityWorkSystem.get_current_work_state().work_orders = {
 		11: {"id": 11, "source_key": "test:bootstrap"},
 	}
-	WorldData.city_work_order_id_by_source_key = {"test:bootstrap": 11}
-	WorldData.next_city_work_order_id = 12
-	WorldData.city_work_order_version = 6
+	CityWorkSystem.get_current_work_state().work_order_id_by_source_key = {"test:bootstrap": 11}
+	CityWorkSystem.get_current_work_state().next_work_order_id = 12
+	CityWorkSystem.get_current_work_state().work_order_version = 6
 
 	var bootstrap_state = WorldPoliticalState.get_current_city_work_state()
 	_expect(
@@ -94,9 +94,9 @@ func _run_bootstrap_test() -> void:
 		"Bootstrap parent work-order state must survive context establishment."
 	)
 	_expect(
-		WorldData.city_player_commands
+		CityWorkSystem.get_current_work_state().player_commands
 		== capital_state.work_state.player_commands
-		and WorldData.city_work_orders == capital_state.work_state.work_orders,
+		and CityWorkSystem.get_current_work_state().work_orders == capital_state.work_state.work_orders,
 		"WorldData compatibility fields must resolve to the active City's work state."
 	)
 

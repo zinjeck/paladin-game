@@ -91,6 +91,32 @@ func get_player_command_by_id(command_id: int) -> Dictionary:
 	return (raw_command as Dictionary).duplicate(true)
 
 
+func release_player_command_claim(
+	command_id: int,
+	citizen_id: int,
+	blocked_retry_minute: int = -1
+) -> bool:
+	var command_index := get_player_command_index_by_id(command_id)
+	if command_index < 0:
+		return false
+
+	var command: Dictionary = player_commands[command_index]
+	if int(command.get("claimed_citizen_id", -1)) != citizen_id:
+		return false
+
+	command["claimed_citizen_id"] = -1
+	if blocked_retry_minute >= 0:
+		command["status"] = "blocked"
+		command["next_retry_world_minute"] = blocked_retry_minute
+	else:
+		command["status"] = "pending"
+		command["next_retry_world_minute"] = -1
+
+	player_commands[command_index] = command
+	mark_player_commands_changed()
+	return true
+
+
 func get_player_command_snapshot() -> Array:
 	return player_commands.duplicate(true)
 

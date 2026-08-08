@@ -140,56 +140,6 @@ static var city_ground_piles: Array = []
 static var city_ground_pile_index_by_id: Dictionary = {}
 static var next_city_ground_pile_id: int = 1
 
-# Player designations are authoritative city simulation state. One drag creates
-# a command group, while each target remains independently claimable so many
-# unemployed citizens can work through the designation in parallel.
-static var city_player_commands: Array:
-	get:
-		return WorldPoliticalState.get_current_city_work_state().player_commands
-	set(value):
-		WorldPoliticalState.get_current_city_work_state().player_commands = value
-static var city_player_command_index_by_id: Dictionary:
-	get:
-		return WorldPoliticalState.get_current_city_work_state().player_command_index_by_id
-	set(value):
-		WorldPoliticalState.get_current_city_work_state().player_command_index_by_id = value
-static var city_player_command_id_by_tile: Dictionary:
-	get:
-		return WorldPoliticalState.get_current_city_work_state().player_command_id_by_tile
-	set(value):
-		WorldPoliticalState.get_current_city_work_state().player_command_id_by_tile = value
-static var next_city_player_command_id: int:
-	get:
-		return WorldPoliticalState.get_current_city_work_state().next_player_command_id
-	set(value):
-		WorldPoliticalState.get_current_city_work_state().next_player_command_id = value
-static var next_city_player_command_group_id: int:
-	get:
-		return WorldPoliticalState.get_current_city_work_state().next_player_command_group_id
-	set(value):
-		WorldPoliticalState.get_current_city_work_state().next_player_command_group_id = value
-
-# Player-issued projects are normalized into persistent parent work orders.
-# The existing command, construction, and haul registries remain authoritative
-# for physical execution while this registry owns scheduling identity,
-# priority, progress/fairness history, generated-job diagnostics, and unified
-# cancellation identity.
-static var city_work_orders: Dictionary:
-	get:
-		return WorldPoliticalState.get_current_city_work_state().work_orders
-	set(value):
-		WorldPoliticalState.get_current_city_work_state().work_orders = value
-static var city_work_order_id_by_source_key: Dictionary:
-	get:
-		return WorldPoliticalState.get_current_city_work_state().work_order_id_by_source_key
-	set(value):
-		WorldPoliticalState.get_current_city_work_state().work_order_id_by_source_key = value
-static var next_city_work_order_id: int:
-	get:
-		return WorldPoliticalState.get_current_city_work_state().next_work_order_id
-	set(value):
-		WorldPoliticalState.get_current_city_work_state().next_work_order_id = value
-
 # One atomic reservation binds a citizen to source goods and matching shared
 # capacity at one destination. Aggregate lookups keep availability checks O(1)
 # while the full records remain available for validation and debug inspection.
@@ -228,16 +178,6 @@ static var city_citizen_task_version: int = 0
 static var city_assignment_version: int = 0
 static var city_workplace_version: int = 0
 static var city_ground_pile_version: int = 0
-static var city_player_command_version: int:
-	get:
-		return WorldPoliticalState.get_current_city_work_state().player_command_version
-	set(value):
-		WorldPoliticalState.get_current_city_work_state().player_command_version = value
-static var city_work_order_version: int:
-	get:
-		return WorldPoliticalState.get_current_city_work_state().work_order_version
-	set(value):
-		WorldPoliticalState.get_current_city_work_state().work_order_version = value
 static var city_haul_reservation_version: int = 0
 static var city_construction_version: int = 0
 static var city_citizen_male_name_pool: Array[String] = (
@@ -350,18 +290,6 @@ const INVALID_CITY_CITIZEN_TASK_ACTION_WORLD_MINUTE: int = (
 	CityCitizensScript.INVALID_CITY_CITIZEN_TASK_ACTION_WORLD_MINUTE
 )
 
-const CITY_PLAYER_COMMAND_TYPE_NONE := "none"
-const CITY_PLAYER_COMMAND_TYPE_CHOP_TREE := "chop_tree"
-const CITY_PLAYER_COMMAND_TYPE_COLLECT_ROCK := "collect_rock"
-const CITY_PLAYER_COMMAND_STATUS_PENDING := "pending"
-const CITY_PLAYER_COMMAND_STATUS_CLAIMED := "claimed"
-const CITY_PLAYER_COMMAND_STATUS_BLOCKED := "blocked"
-const CITY_PLAYER_COMMAND_TASK_PRIORITY: int = 1000
-# At the default clock rate, six world minutes is three simulation ticks,
-# or roughly 2.5 real seconds at normal speed.
-const CITY_PLAYER_COMMAND_WORK_DURATION_MINUTES: int = 6
-const CITY_PLAYER_COMMAND_RESOURCE_YIELD: int = 4
-const CITY_PLAYER_COMMAND_BLOCKED_RETRY_DELAY_MINUTES: int = 30
 const CITY_CONSTRUCTION_PHASE_CLEARING := "clearing"
 const CITY_CONSTRUCTION_PHASE_GATHERING := "gathering"
 const CITY_CONSTRUCTION_PHASE_LABOR := "labor"
@@ -379,9 +307,7 @@ const CITY_TOPOLOGY_MUTATION_FAILURE_FOOTPRINT_OCCUPIED := (
 )
 const CITY_CONSTRUCTION_TARGET_NEW := "new"
 const CITY_CONSTRUCTION_TARGET_MODIFICATION := "modification"
-const CITY_CONSTRUCTION_TASK_PRIORITY: int = (
-	CITY_PLAYER_COMMAND_TASK_PRIORITY
-)
+const CITY_CONSTRUCTION_TASK_PRIORITY: int = 1000
 const CITY_CONSTRUCTION_FAIRNESS_BONUS_PER_MINUTE: int = 100
 const CITY_CONSTRUCTION_MAX_FAIRNESS_BONUS: int = 20_000
 # A construction labor task contributes at most this many continuous world
@@ -1642,148 +1568,6 @@ static func clear_city_surface_features_at_tiles(
 		cleared_count += 1
 
 	return cleared_count
-
-#endregion
-
-#region Player Command and Work Order State Primitives
-
-static func get_city_player_command_types() -> Array[String]:
-	return [
-		CITY_PLAYER_COMMAND_TYPE_CHOP_TREE,
-		CITY_PLAYER_COMMAND_TYPE_COLLECT_ROCK,
-	]
-
-static func is_valid_city_player_command_type(
-	command_type: String
-) -> bool:
-	return get_city_player_command_types().has(command_type)
-
-static func get_city_player_command_surface_feature(
-	command_type: String
-) -> String:
-	match command_type:
-		CITY_PLAYER_COMMAND_TYPE_CHOP_TREE:
-			return CITY_SURFACE_FEATURE_TREE
-
-		CITY_PLAYER_COMMAND_TYPE_COLLECT_ROCK:
-			return CITY_SURFACE_FEATURE_ROCK
-
-	return CITY_SURFACE_FEATURE_NONE
-
-static func _mark_city_player_commands_changed() -> void:
-	city_player_command_version += 1
-
-static func mark_city_work_orders_changed() -> void:
-	city_work_order_version += 1
-
-static func reset_city_work_order_state() -> void:
-	city_work_orders.clear()
-	city_work_order_id_by_source_key.clear()
-	next_city_work_order_id = 1
-	mark_city_work_orders_changed()
-
-static func get_city_player_command_index_by_id(
-	command_id: int
-) -> int:
-	if command_id <= 0:
-		return -1
-
-	if not city_player_command_index_by_id.has(command_id):
-		return -1
-
-	var command_index := int(
-		city_player_command_index_by_id[command_id]
-	)
-
-	if command_index < 0 or command_index >= city_player_commands.size():
-		return -1
-
-	var raw_command = city_player_commands[command_index]
-
-	if (
-		not raw_command is Dictionary
-		or int(raw_command.get("id", -1)) != command_id
-	):
-		return -1
-
-	return command_index
-
-static func get_city_player_command_by_id(
-	command_id: int
-) -> Dictionary:
-	var command_index := get_city_player_command_index_by_id(command_id)
-
-	if command_index < 0:
-		return {}
-
-	return city_player_commands[command_index].duplicate(true)
-
-static func is_city_player_command_target_valid(
-	command: Dictionary
-) -> bool:
-	var city_world: WorldData = official_city_world
-	var command_type := str(
-		command.get("type", CITY_PLAYER_COMMAND_TYPE_NONE)
-	)
-	var raw_tile_position = command.get(
-		"tile_position",
-		INVALID_CITY_TILE_POSITION
-	)
-
-	if (
-		city_world == null
-		or not is_valid_city_player_command_type(command_type)
-		or not raw_tile_position is Vector2i
-	):
-		return false
-
-	var tile_position: Vector2i = raw_tile_position
-
-	if not city_world.is_in_bounds(tile_position.x, tile_position.y):
-		return false
-
-	return (
-		get_city_surface_feature(
-			city_world.get_tile(tile_position.x, tile_position.y)
-		)
-		== get_city_player_command_surface_feature(command_type)
-	)
-
-static func release_city_player_command_claim(
-	command_id: int,
-	citizen_id: int,
-	blocked_retry_minute: int = -1
-) -> bool:
-	var command_index := get_city_player_command_index_by_id(command_id)
-
-	if command_index < 0:
-		return false
-
-	var command: Dictionary = city_player_commands[command_index]
-
-	if int(command.get("claimed_citizen_id", -1)) != citizen_id:
-		return false
-
-	command["claimed_citizen_id"] = -1
-
-	if blocked_retry_minute >= 0:
-		command["status"] = CITY_PLAYER_COMMAND_STATUS_BLOCKED
-		command["next_retry_world_minute"] = blocked_retry_minute
-	else:
-		command["status"] = CITY_PLAYER_COMMAND_STATUS_PENDING
-		command["next_retry_world_minute"] = -1
-
-	city_player_commands[command_index] = command
-	_mark_city_player_commands_changed()
-	return true
-
-static func reset_city_player_command_state() -> void:
-	city_player_commands.clear()
-	city_player_command_index_by_id.clear()
-	city_player_command_id_by_tile.clear()
-	next_city_player_command_id = 1
-	next_city_player_command_group_id = 1
-	_mark_city_player_commands_changed()
 
 #endregion
 
@@ -7073,7 +6857,7 @@ static func _prepare_city_player_command_task_assignment(
 	var citizen_id := int(assignment.get("citizen_id", -1))
 	var target_object_id := int(assignment.get("target_object_id", -1))
 	var task_source := str(assignment.get("task_source", ""))
-	var command := get_city_player_command_by_id(target_object_id)
+	var command := WorldPoliticalState.get_current_city_work_state().get_player_command_by_id(target_object_id)
 
 	if (
 		task_source != CITY_CITIZEN_TASK_SOURCE_PLAYER
@@ -7625,7 +7409,7 @@ static func clear_city_citizen_task(
 		)
 
 	if current_task_kind == CITY_CITIZEN_TASK_KIND_PLAYER_COMMAND:
-		WorldData.release_city_player_command_claim(
+		WorldPoliticalState.get_current_city_work_state().release_player_command_claim(
 			int(raw_current_task.get("target_object_id", -1)),
 			citizen_id
 		)
@@ -9405,8 +9189,7 @@ static func reset_player_city_state() -> void:
 	city_resource_amounts.clear()
 	city_owned_resource_amount_cache.clear()
 	city_owned_resource_amount_cache_container_version = -1
-	WorldData.reset_city_work_order_state()
-	WorldData.reset_city_player_command_state()
+	WorldPoliticalState.reset_extracted_city_state()
 	reset_city_object_state()
 	reset_city_citizen_state()
 

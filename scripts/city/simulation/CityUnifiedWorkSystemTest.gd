@@ -279,7 +279,7 @@ func _test_unreachable_order_runtime_diagnostics() -> void:
 	)
 	_expect(
 		CityWorkSystem.add_city_player_command_targets(
-			WorldData.CITY_PLAYER_COMMAND_TYPE_CHOP_TREE,
+			CityWorkSystem.CITY_PLAYER_COMMAND_TYPE_CHOP_TREE,
 			[target_tile]
 		) == 1,
 		"The reachability fixture must create one valid command."
@@ -361,7 +361,7 @@ func _test_parent_orders_and_two_level_fairness() -> void:
 		command_tiles.append(tile_position)
 
 	var designated_count := CityWorkSystem.add_city_player_command_targets(
-		WorldData.CITY_PLAYER_COMMAND_TYPE_CHOP_TREE,
+		CityWorkSystem.CITY_PLAYER_COMMAND_TYPE_CHOP_TREE,
 		command_tiles
 	)
 	_expect(
@@ -436,7 +436,7 @@ func _test_parent_orders_and_two_level_fairness() -> void:
 	SimulationClock.absolute_world_minutes = 240
 	neglected_order["created_world_minute"] = 0
 	neglected_order["last_progress_world_minute"] = 0
-	WorldData.city_work_orders[group_order_id] = neglected_order
+	CityWorkSystem.get_current_work_state().work_orders[group_order_id] = neglected_order
 	CityWorkSystemScript.synchronize_player_work_board()
 	var debug_group_order: Dictionary = {}
 
@@ -864,7 +864,7 @@ func _test_rebalance_preserves_active_construction_clearing() -> void:
 		"The construction clearer must cross the physical performing boundary."
 	)
 	var performing_snapshot := _get_assignment_snapshot(citizen_id)
-	var command_before := WorldData.get_city_player_command_by_id(
+	var command_before := CityWorkSystem.get_city_player_command_by_id(
 		int(performing_task.get("target_object_id", -1))
 	)
 	var urgent_site := _create_ready_labor_site([Vector2i(9, 10)], 1)
@@ -885,7 +885,7 @@ func _test_rebalance_preserves_active_construction_clearing() -> void:
 	_expect(
 		switched_count == 0
 		and _get_assignment_snapshot(citizen_id) == performing_snapshot
-		and WorldData.get_city_player_command_by_id(
+		and CityWorkSystem.get_city_player_command_by_id(
 			int(performing_task.get("target_object_id", -1))
 		) == command_before,
 		"Rebalancing must preserve active construction clearing and its command claim."

@@ -374,6 +374,13 @@ func get_current_city_work_state():
 	return _unbound_city_work_state
 
 
+# WorldData still owns the legacy city-session reset entry point while local
+# subsystems are extracted. Keep that entry point generic: it asks the local
+# ownership registry to reset extracted state without knowing its internals.
+func reset_extracted_city_state() -> void:
+	get_current_city_work_state().reset_all()
+
+
 func get_polity_snapshot() -> Array[Dictionary]:
 	var polity_snapshot: Array[Dictionary] = []
 	var polity_ids := polities_by_id.keys()

@@ -86,7 +86,7 @@ func _test_normal_order_preempts_before_pickup() -> void:
 
 	var command_id := _add_natural_command(
 		city_world,
-		WorldData.CITY_PLAYER_COMMAND_TYPE_CHOP_TREE,
+		CityWorkSystem.CITY_PLAYER_COMMAND_TYPE_CHOP_TREE,
 		Vector2i(4, 5)
 	)
 	CitizenDecisionSystemScript.run_tick(1, 2)
@@ -120,11 +120,11 @@ func _test_normal_order_preempts_before_pickup() -> void:
 		"The commanded tree must enter its real performing phase."
 	)
 	SimulationClock.absolute_world_minutes += (
-		WorldData.CITY_PLAYER_COMMAND_WORK_DURATION_MINUTES
+		CityWorkSystem.CITY_PLAYER_COMMAND_WORK_DURATION_MINUTES
 	)
 	CitizenTaskSystemScript.run_tick(3, 2)
 	_expect(
-		WorldData.get_city_player_command_by_id(command_id).is_empty()
+		CityWorkSystem.get_city_player_command_by_id(command_id).is_empty()
 		and WorldData.get_total_physical_city_resource_amount(
 			WorldData.RESOURCE_LUMBER
 		) == 6,
@@ -174,7 +174,7 @@ func _test_normal_order_waits_for_picked_up_cargo_delivery() -> void:
 
 	var command_id := _add_natural_command(
 		city_world,
-		WorldData.CITY_PLAYER_COMMAND_TYPE_COLLECT_ROCK,
+		CityWorkSystem.CITY_PLAYER_COMMAND_TYPE_COLLECT_ROCK,
 		Vector2i(4, 5)
 	)
 	var physical_before_order := (
@@ -395,7 +395,7 @@ func _test_construction_labor_releases_at_atomic_boundary() -> void:
 	var citizen_id := int(citizen.get("id", -1))
 	_add_natural_command(
 		city_world,
-		WorldData.CITY_PLAYER_COMMAND_TYPE_CHOP_TREE,
+		CityWorkSystem.CITY_PLAYER_COMMAND_TYPE_CHOP_TREE,
 		Vector2i(25, 18)
 	)
 	CitizenDecisionSystemScript.run_tick(1, 2)
@@ -812,7 +812,7 @@ func _add_natural_command(
 ) -> int:
 	city_world.get_tile(tile_position.x, tile_position.y)[
 		"surface_feature"
-	] = WorldData.get_city_player_command_surface_feature(command_type)
+	] = CityWorkSystem.get_city_player_command_surface_feature(command_type)
 	var added_count := CityWorkSystem.add_city_player_command_targets(
 		command_type,
 		[tile_position]

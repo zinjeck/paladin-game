@@ -29,7 +29,7 @@ const PROGRESS_REQUIRED_CLEARING_WORK_UNITS_KEY := (
 	"required_clearing_work_units"
 )
 const PROGRESS_BASE_WORK_MINUTES := (
-	WorldData.CITY_PLAYER_COMMAND_WORK_DURATION_MINUTES
+	CityWorkSystem.CITY_PLAYER_COMMAND_WORK_DURATION_MINUTES
 )
 const EXACT_PATH_HEURISTIC_WEIGHT: int = 1
 const REBALANCE_MINIMUM_PATH_SAVINGS_TILES: int = 3
@@ -1246,7 +1246,7 @@ static func _get_remaining_clearing_work_units(
 			continue
 
 		remaining_work_units += (
-			float(WorldData.CITY_PLAYER_COMMAND_WORK_DURATION_MINUTES)
+			float(CityWorkSystem.CITY_PLAYER_COMMAND_WORK_DURATION_MINUTES)
 			/ safe_base_minutes
 		)
 
@@ -1261,7 +1261,7 @@ static func _get_remaining_clearing_work_units(
 
 		pending_yield_by_resource[resource] = (
 			int(pending_yield_by_resource.get(resource, 0))
-			+ WorldData.CITY_PLAYER_COMMAND_RESOURCE_YIELD
+			+ CityWorkSystem.CITY_PLAYER_COMMAND_RESOURCE_YIELD
 		)
 
 	for raw_ground_pile in WorldData.get_city_ground_pile_snapshot():
@@ -1391,21 +1391,21 @@ static func _ensure_clearing_commands(site_id: int) -> void:
 		)
 		var surface_feature := WorldData.get_city_surface_feature(tile)
 		var command_type: String = (
-			WorldData.CITY_PLAYER_COMMAND_TYPE_NONE
+			CityWorkSystem.CITY_PLAYER_COMMAND_TYPE_NONE
 		)
 
 		match surface_feature:
 			WorldData.CITY_SURFACE_FEATURE_TREE:
 				command_type = (
-					WorldData.CITY_PLAYER_COMMAND_TYPE_CHOP_TREE
+					CityWorkSystem.CITY_PLAYER_COMMAND_TYPE_CHOP_TREE
 				)
 
 			WorldData.CITY_SURFACE_FEATURE_ROCK:
 				command_type = (
-					WorldData.CITY_PLAYER_COMMAND_TYPE_COLLECT_ROCK
+					CityWorkSystem.CITY_PLAYER_COMMAND_TYPE_COLLECT_ROCK
 				)
 
-		if command_type == WorldData.CITY_PLAYER_COMMAND_TYPE_NONE:
+		if command_type == CityWorkSystem.CITY_PLAYER_COMMAND_TYPE_NONE:
 			continue
 
 		CityWorkSystem.ensure_city_construction_clearing_command(
@@ -3118,7 +3118,7 @@ static func rebalance_uncommitted_construction_workers_for_sites(
 	var triggering_order_id_lookup: Dictionary = {}
 	var existing_order_by_site_id: Dictionary = {}
 
-	for raw_order_id in WorldData.city_work_orders.keys():
+	for raw_order_id in CityWorkSystem.get_current_work_state().work_orders.keys():
 		var existing_order := CityWorkSystem.get_city_work_order_by_id(
 			int(raw_order_id)
 		)
@@ -3397,7 +3397,7 @@ static func _get_current_construction_path_cost(
 				destination_tiles = work_positions
 
 		WorldData.CITY_CITIZEN_TASK_KIND_PLAYER_COMMAND:
-			var command := WorldData.get_city_player_command_by_id(
+			var command := CityWorkSystem.get_city_player_command_by_id(
 				int(current_task.get("target_object_id", -1))
 			)
 			var work_tiles := CityWorkSystem.get_city_player_command_work_tiles(
@@ -3770,7 +3770,7 @@ static func _make_construction_rebalance_restore_candidate(
 			}
 
 		WorldData.CITY_CITIZEN_TASK_KIND_PLAYER_COMMAND:
-			var command := WorldData.get_city_player_command_by_id(
+			var command := CityWorkSystem.get_city_player_command_by_id(
 				int(current_task.get("target_object_id", -1))
 			)
 
@@ -3800,7 +3800,7 @@ static func citizen_task_is_interruptible_construction(
 
 		WorldData.CITY_CITIZEN_TASK_KIND_PLAYER_COMMAND:
 			return CityWorkSystem.city_player_command_is_for_construction(
-				WorldData.get_city_player_command_by_id(
+				CityWorkSystem.get_city_player_command_by_id(
 					int(current_task.get("target_object_id", -1))
 				)
 			)

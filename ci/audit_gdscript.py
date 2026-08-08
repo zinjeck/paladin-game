@@ -58,6 +58,40 @@ ALLOWED_QUEUE_REDRAW_CALLS = {
     "scripts/ui/city/CityInformationPanel.gd": 2,
 }
 
+WORLD_DATA_FORBIDDEN_CITY_WORK_SYMBOLS = (
+    "city_player_commands",
+    "city_player_command_index_by_id",
+    "city_player_command_id_by_tile",
+    "next_city_player_command_id",
+    "next_city_player_command_group_id",
+    "city_player_command_version",
+    "city_work_orders",
+    "city_work_order_id_by_source_key",
+    "next_city_work_order_id",
+    "city_work_order_version",
+    "CITY_PLAYER_COMMAND_TYPE_NONE",
+    "CITY_PLAYER_COMMAND_TYPE_CHOP_TREE",
+    "CITY_PLAYER_COMMAND_TYPE_COLLECT_ROCK",
+    "CITY_PLAYER_COMMAND_STATUS_PENDING",
+    "CITY_PLAYER_COMMAND_STATUS_CLAIMED",
+    "CITY_PLAYER_COMMAND_STATUS_BLOCKED",
+    "CITY_PLAYER_COMMAND_TASK_PRIORITY",
+    "CITY_PLAYER_COMMAND_WORK_DURATION_MINUTES",
+    "CITY_PLAYER_COMMAND_RESOURCE_YIELD",
+    "CITY_PLAYER_COMMAND_BLOCKED_RETRY_DELAY_MINUTES",
+    "get_city_player_command_types",
+    "is_valid_city_player_command_type",
+    "get_city_player_command_surface_feature",
+    "mark_city_player_commands_changed",
+    "mark_city_work_orders_changed",
+    "reset_city_work_order_state",
+    "get_city_player_command_index_by_id",
+    "get_city_player_command_by_id",
+    "is_city_player_command_target_valid",
+    "release_city_player_command_claim",
+    "reset_city_player_command_state",
+)
+
 
 @dataclass(frozen=True)
 class FunctionMetric:
@@ -283,6 +317,30 @@ def main() -> int:
                 errors.append(
                     "scripts/map/cache/MapTextureCache.gd: retired staggered "
                     f"map loading term remains: {term}"
+                )
+
+
+    world_data_path = ROOT / "scripts/world/simulation/WorldData.gd"
+    if world_data_path.exists():
+        world_data_text = world_data_path.read_text(encoding="utf-8")
+        for symbol in WORLD_DATA_FORBIDDEN_CITY_WORK_SYMBOLS:
+            if symbol in world_data_text:
+                errors.append(
+                    "scripts/world/simulation/WorldData.gd: extracted city-work "
+                    f"symbol must not return to WorldData: {symbol}"
+                )
+
+    for path in scripts:
+        if path == world_data_path:
+            continue
+        relative = str(path.relative_to(ROOT))
+        text = path.read_text(encoding="utf-8")
+        for symbol in WORLD_DATA_FORBIDDEN_CITY_WORK_SYMBOLS:
+            legacy_reference = f"WorldData.{symbol}"
+            if legacy_reference in text:
+                errors.append(
+                    f"{relative}: legacy WorldData city-work reference remains: "
+                    f"{legacy_reference}"
                 )
 
     city_renderer_path = ROOT / "scripts/city/rendering/CityRenderer.gd"
