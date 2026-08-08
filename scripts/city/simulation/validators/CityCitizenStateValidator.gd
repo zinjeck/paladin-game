@@ -1801,7 +1801,7 @@ static func _validate_construction_task_kind_state(values: Dictionary) -> void:
 		""
 	)
 	var construction_site := (
-		WorldData.get_city_construction_site_by_id(
+		CityConstructionSystem.get_city_construction_site_by_id(
 			target_object_id
 		)
 	)
@@ -1829,7 +1829,7 @@ static func _validate_construction_task_kind_state(values: Dictionary) -> void:
 
 	if (
 		str(construction_site.get("phase", ""))
-		!= WorldData.CITY_CONSTRUCTION_PHASE_LABOR
+		!= CityConstructionSystem.CITY_CONSTRUCTION_PHASE_LABOR
 	):
 		errors.append(
 			"Citizen "

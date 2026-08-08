@@ -485,7 +485,7 @@ static func get_task_text(citizen: Dictionary) -> String:
 		and target_object_id > 0
 	):
 		var construction_site := (
-			WorldData.get_city_construction_site_by_id(
+			CityConstructionSystem.get_city_construction_site_by_id(
 				target_object_id
 			)
 		)
@@ -605,7 +605,7 @@ static func format_haul_endpoint(raw_endpoint) -> String:
 		endpoint_kind
 		== WorldData.CITY_CITIZEN_HAUL_ENDPOINT_KIND_CONSTRUCTION_SITE
 	):
-		var site := WorldData.get_city_construction_site_by_id(
+		var site := CityConstructionSystem.get_city_construction_site_by_id(
 			endpoint_id
 		)
 

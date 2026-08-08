@@ -149,7 +149,7 @@ static func validate(
 		"haul_reservation_version": (
 			CityLogisticsSystem.get_current_state().haul_reservation_version
 		),
-		"construction_version": WorldData.city_construction_version,
+		"construction_version": CityConstructionSystem.get_current_state().construction_version,
 	}
 
 	_cached_result = result
@@ -318,7 +318,7 @@ static func _validation_cache_matches_current_state() -> bool:
 
 	if (
 		int(_cached_result.get("construction_version", -1))
-		!= WorldData.city_construction_version
+		!= CityConstructionSystem.get_current_state().construction_version
 	):
 		return false
 

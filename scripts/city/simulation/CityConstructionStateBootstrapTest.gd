@@ -42,16 +42,16 @@ func _run_bootstrap_test() -> void:
 	if not locked:
 		return
 
-	WorldData.city_construction_sites = [
+	CityConstructionSystem.get_current_state().construction_sites = [
 		{
 			"id": 17,
 			"test_owner": "bootstrap",
 		},
 	]
-	WorldData.city_construction_site_index_by_id = {17: 0}
-	WorldData.city_construction_site_id_by_tile = {Vector2i(3, 3): 17}
-	WorldData.next_city_construction_site_id = 18
-	WorldData.city_construction_version = 5
+	CityConstructionSystem.get_current_state().construction_site_index_by_id = {17: 0}
+	CityConstructionSystem.get_current_state().construction_site_id_by_tile = {Vector2i(3, 3): 17}
+	CityConstructionSystem.get_current_state().next_construction_site_id = 18
+	CityConstructionSystem.get_current_state().construction_version = 5
 
 	var bootstrap_state = WorldPoliticalState.get_current_city_construction_state()
 	_expect(
@@ -84,9 +84,9 @@ func _run_bootstrap_test() -> void:
 		"Bootstrap construction state must survive context establishment."
 	)
 	_expect(
-		WorldData.city_construction_sites == capital_state.construction_state.construction_sites
-		and WorldData.next_city_construction_site_id == 18
-		and WorldData.city_construction_version == 5,
+		CityConstructionSystem.get_current_state().construction_sites == capital_state.construction_state.construction_sites
+		and CityConstructionSystem.get_current_state().next_construction_site_id == 18
+		and CityConstructionSystem.get_current_state().construction_version == 5,
 		"WorldData compatibility properties must resolve to the active City's construction state."
 	)
 

@@ -118,7 +118,7 @@ func _test_construction_waits_for_footprint_clearance() -> void:
 		"The finalization fixture must contain the complete physical recipe."
 	)
 	CityConstructionSystemScript.refresh_city_construction_site(site_id)
-	site = WorldData.get_city_construction_site_by_id(site_id)
+	site = CityConstructionSystem.get_city_construction_site_by_id(site_id)
 	site["completed_labor_minutes"] = int(
 		site.get("required_labor_minutes", 1)
 	)
@@ -150,7 +150,7 @@ func _test_construction_waits_for_footprint_clearance() -> void:
 	var immediate_completion := (
 		CityConstructionSystemScript.complete_city_construction_site(site_id)
 	)
-	var pending_site := WorldData.get_city_construction_site_by_id(site_id)
+	var pending_site := CityConstructionSystem.get_city_construction_site_by_id(site_id)
 	var trapped_after_request := WorldData.get_city_citizen_by_id(trapped_id)
 
 	_expect(
@@ -159,9 +159,9 @@ func _test_construction_waits_for_footprint_clearance() -> void:
 		and str(
 			pending_site.get(
 				"finalization_state",
-				WorldData.CITY_CONSTRUCTION_FINALIZATION_STATE_NONE
+				CityConstructionSystem.CITY_CONSTRUCTION_FINALIZATION_STATE_NONE
 			)
-		) == WorldData.CITY_CONSTRUCTION_FINALIZATION_STATE_AWAITING_CLEARANCE,
+		) == CityConstructionSystem.CITY_CONSTRUCTION_FINALIZATION_STATE_AWAITING_CLEARANCE,
 		"Completed labor must enter durable clearance instead of creating a building over a citizen."
 	)
 	_expect(
@@ -171,13 +171,11 @@ func _test_construction_waits_for_footprint_clearance() -> void:
 		"Clearance must give the citizen a real route without teleporting them."
 	)
 	_expect(
-		WorldData
-		.get_city_construction_site_reserved_resource_amount(
+		CityConstructionSystem.get_city_construction_site_reserved_resource_amount(
 			site_id,
 			WorldData.RESOURCE_LUMBER
 		) == 10
-		and WorldData
-		.get_city_construction_site_reserved_resource_amount(
+		and CityConstructionSystem.get_city_construction_site_reserved_resource_amount(
 			site_id,
 			WorldData.RESOURCE_STONE
 		) == 4,
@@ -188,7 +186,7 @@ func _test_construction_waits_for_footprint_clearance() -> void:
 		CitizenMovementSystemScript.run_tick(tick_index, 2)
 		CityConstructionSystemScript.refresh_all_city_construction_sites()
 
-		if WorldData.get_city_construction_site_by_id(site_id).is_empty():
+		if CityConstructionSystem.get_city_construction_site_by_id(site_id).is_empty():
 			break
 
 	var completed_fishery := WorldData.get_city_object_at_tile(top_left)
@@ -202,7 +200,7 @@ func _test_construction_waits_for_footprint_clearance() -> void:
 	)
 
 	_expect(
-		WorldData.get_city_construction_site_by_id(site_id).is_empty()
+		CityConstructionSystem.get_city_construction_site_by_id(site_id).is_empty()
 		and str(completed_fishery.get("type", ""))
 		== WorldData.CITY_OBJECT_FISHING_GROUNDS,
 		"The Fishing Grounds must finalize once its footprint is physically clear."

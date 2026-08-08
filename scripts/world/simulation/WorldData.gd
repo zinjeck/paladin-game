@@ -122,27 +122,6 @@ static var next_city_object_id: int = 1
 # Construction registry ownership is settlement-local. These compatibility
 # properties preserve the historical WorldData API during the ownership-only
 # pass while resolving to the active City's CityConstructionState.
-static var city_construction_sites: Array:
-	get:
-		return WorldPoliticalState.get_current_city_construction_state().construction_sites
-	set(value):
-		WorldPoliticalState.get_current_city_construction_state().construction_sites = value
-static var city_construction_site_index_by_id: Dictionary:
-	get:
-		return WorldPoliticalState.get_current_city_construction_state().construction_site_index_by_id
-	set(value):
-		WorldPoliticalState.get_current_city_construction_state().construction_site_index_by_id = value
-static var city_construction_site_id_by_tile: Dictionary:
-	get:
-		return WorldPoliticalState.get_current_city_construction_state().construction_site_id_by_tile
-	set(value):
-		WorldPoliticalState.get_current_city_construction_state().construction_site_id_by_tile = value
-static var next_city_construction_site_id: int:
-	get:
-		return WorldPoliticalState.get_current_city_construction_state().next_construction_site_id
-	set(value):
-		WorldPoliticalState.get_current_city_construction_state().next_construction_site_id = value
-
 # Physical ground-pile and haul-reservation ownership lives in
 # CityLogisticsState/CityLogisticsSystem for the active settlement.
 static var city_citizens: Array = []
@@ -173,11 +152,6 @@ static var city_citizen_movement_version: int = 0
 static var city_citizen_task_version: int = 0
 static var city_assignment_version: int = 0
 static var city_workplace_version: int = 0
-static var city_construction_version: int:
-	get:
-		return WorldPoliticalState.get_current_city_construction_state().construction_version
-	set(value):
-		WorldPoliticalState.get_current_city_construction_state().construction_version = value
 static var city_citizen_male_name_pool: Array[String] = (
 	CityCitizensScript.city_citizen_male_name_pool
 )
@@ -288,13 +262,6 @@ const INVALID_CITY_CITIZEN_TASK_ACTION_WORLD_MINUTE: int = (
 	CityCitizensScript.INVALID_CITY_CITIZEN_TASK_ACTION_WORLD_MINUTE
 )
 
-const CITY_CONSTRUCTION_PHASE_CLEARING := "clearing"
-const CITY_CONSTRUCTION_PHASE_GATHERING := "gathering"
-const CITY_CONSTRUCTION_PHASE_LABOR := "labor"
-const CITY_CONSTRUCTION_FINALIZATION_STATE_NONE := "none"
-const CITY_CONSTRUCTION_FINALIZATION_STATE_AWAITING_CLEARANCE := (
-	"awaiting_clearance"
-)
 const CITY_TOPOLOGY_MUTATION_FAILURE_NONE := "none"
 const CITY_TOPOLOGY_MUTATION_FAILURE_INVALID_REQUEST := (
 	"invalid_request"
@@ -303,15 +270,6 @@ const CITY_TOPOLOGY_MUTATION_FAILURE_TILE_BLOCKED := "tile_blocked"
 const CITY_TOPOLOGY_MUTATION_FAILURE_FOOTPRINT_OCCUPIED := (
 	"footprint_occupied"
 )
-const CITY_CONSTRUCTION_TARGET_NEW := "new"
-const CITY_CONSTRUCTION_TARGET_MODIFICATION := "modification"
-const CITY_CONSTRUCTION_TASK_PRIORITY: int = 1000
-const CITY_CONSTRUCTION_FAIRNESS_BONUS_PER_MINUTE: int = 100
-const CITY_CONSTRUCTION_MAX_FAIRNESS_BONUS: int = 20_000
-# A construction labor task contributes at most this many continuous world
-# minutes before releasing its concrete claim and returning to the parent-order
-# scheduler. This is the shared safe boundary for fairness and hunger policy.
-const CITY_CONSTRUCTION_LABOR_ATOMIC_MINUTES: int = 30
 const CITY_CITIZEN_HAUL_ENDPOINT_KIND_NONE: String = (
 	CityCitizensScript.CITY_CITIZEN_HAUL_ENDPOINT_KIND_NONE
 )
@@ -590,24 +548,6 @@ static func get_city_object_production_recipe(
 	return _get_city_object_definition_dictionary(
 		city_object,
 		"production_recipe"
-	)
-
-
-static func get_city_object_construction_materials(
-	object_type: String
-) -> Dictionary:
-	return (
-		CityObjectCatalogScript
-		.get_city_object_construction_materials(object_type)
-	)
-
-
-static func city_object_type_uses_construction(
-	object_type: String
-) -> bool:
-	return (
-		CityObjectCatalogScript
-		.city_object_type_uses_construction(object_type)
 	)
 
 
@@ -1862,10 +1802,6 @@ static func _mark_city_workplaces_changed() -> void:
 	city_workplace_version += 1
 
 
-static func mark_city_construction_changed() -> void:
-	city_construction_version += 1
-
-
 static func rebuild_city_object_index() -> void:
 	city_object_index_by_id.clear()
 
@@ -2388,261 +2324,6 @@ static func get_city_object_by_id(object_id: int) -> Dictionary:
 
 #endregion
 
-#region Construction State Primitives
-
-static func get_city_construction_site_index_by_id(
-	site_id: int
-) -> int:
-	if site_id <= 0:
-		return -1
-
-	if not city_construction_site_index_by_id.has(site_id):
-		return -1
-
-	var site_index := int(
-		city_construction_site_index_by_id[site_id]
-	)
-
-	if site_index < 0 or site_index >= city_construction_sites.size():
-		return -1
-
-	var raw_site = city_construction_sites[site_index]
-
-	if (
-		not raw_site is Dictionary
-		or int(raw_site.get("id", -1)) != site_id
-	):
-		return -1
-
-	return site_index
-
-static func get_city_construction_site_by_id(
-	site_id: int
-) -> Dictionary:
-	var site_index := get_city_construction_site_index_by_id(site_id)
-
-	if site_index < 0:
-		return {}
-
-	return city_construction_sites[site_index].duplicate(true)
-
-static func can_place_city_construction_footprint(
-	city_world: WorldData,
-	raw_footprint_tiles: Array,
-	require_external_access: bool = false,
-	allowed_occupied_object_id: int = -1
-) -> bool:
-	if city_world == null or raw_footprint_tiles.is_empty():
-		return false
-
-	var clean_tiles: Array[Vector2i] = []
-	var tile_lookup: Dictionary = {}
-
-	for raw_tile in raw_footprint_tiles:
-		if not raw_tile is Vector2i:
-			return false
-
-		var tile_position: Vector2i = raw_tile
-
-		if tile_lookup.has(tile_position):
-			continue
-
-		if not city_world.is_in_bounds(tile_position.x, tile_position.y):
-			return false
-
-		if city_construction_site_id_by_tile.has(tile_position):
-			return false
-
-		if (
-			city_occupied_tiles.has(tile_position)
-			and int(
-				city_occupied_tiles.get(tile_position, -1)
-			) != allowed_occupied_object_id
-		):
-			return false
-
-		var tile := city_world.get_tile(
-			tile_position.x,
-			tile_position.y
-		)
-		var terrain := str(tile.get("terrain", TERRAIN_WATER))
-
-		if (
-			terrain == TERRAIN_WATER
-			or terrain == TERRAIN_MOUNTAIN
-			or not bool(tile.get("is_land", false))
-		):
-			return false
-
-		tile_lookup[tile_position] = true
-		clean_tiles.append(tile_position)
-
-	if not require_external_access:
-		return true
-
-	for footprint_tile in clean_tiles:
-		for offset in CITY_CARDINAL_TILE_OFFSETS:
-			var candidate_tile: Vector2i = (
-				footprint_tile + Vector2i(offset)
-			)
-
-			if tile_lookup.has(candidate_tile):
-				continue
-
-			if is_city_tile_walkable_for_citizen(
-				city_world,
-				candidate_tile
-			):
-				return true
-
-	return false
-
-static func reset_city_construction_state() -> void:
-	city_construction_sites.clear()
-	city_construction_site_index_by_id.clear()
-	city_construction_site_id_by_tile.clear()
-	next_city_construction_site_id = 1
-	mark_city_construction_changed()
-
-static func get_city_construction_site_work_positions(
-	site: Dictionary
-) -> Array[Vector2i]:
-	var positions: Array[Vector2i] = []
-	var raw_positions = site.get("work_positions", [])
-
-	if not raw_positions is Array:
-		return positions
-
-	for raw_position in raw_positions:
-		if raw_position is Vector2i:
-			positions.append(raw_position)
-
-	return positions
-
-static func get_city_construction_site_reserved_resource_amount(
-	site_id: int,
-	resource: String
-) -> int:
-	var total_amount := 0
-
-	for raw_ground_pile in CityLogisticsSystem.get_current_state().ground_piles:
-		if not raw_ground_pile is Dictionary:
-			continue
-
-		var ground_pile: Dictionary = raw_ground_pile
-
-		if (
-			CityLogisticsSystem.get_city_ground_pile_construction_site_id(ground_pile)
-			!= site_id
-		):
-			continue
-
-		total_amount += CityLogisticsSystem.get_city_ground_pile_resource_amount(
-			ground_pile,
-			resource
-		)
-
-	return total_amount
-
-static func get_city_construction_site_remaining_resource_amount(
-	site_id: int,
-	resource: String
-) -> int:
-	var site := get_city_construction_site_by_id(site_id)
-
-	if site.is_empty():
-		return 0
-
-	var raw_recipe = site.get("material_recipe", {})
-
-	if not raw_recipe is Dictionary:
-		return 0
-
-	return maxi(
-		int(raw_recipe.get(resource, 0))
-		- get_city_construction_site_reserved_resource_amount(
-			site_id,
-			resource
-		),
-		0
-	)
-
-static func get_city_construction_site_destination_reserved_resource_amount(
-	site_id: int,
-	resource: String,
-	excluding_reservation_id: int = (
-		INVALID_CITY_CITIZEN_HAUL_RESERVATION_ID
-	)
-) -> int:
-	var site_endpoint := CityLogisticsSystem.make_city_construction_site_haul_endpoint(
-		site_id
-	)
-	var reserved_amount := 0
-
-	for raw_reservation_id in CityLogisticsSystem.get_current_state().haul_reservations.keys():
-		var reservation_id := int(raw_reservation_id)
-
-		if reservation_id == excluding_reservation_id:
-			continue
-
-		var reservation := CityLogisticsSystem.get_city_haul_reservation(reservation_id)
-
-		if (
-			reservation.is_empty()
-			or not CityLogisticsSystem.city_citizen_haul_endpoints_match(
-				reservation.get("destination", {}),
-				site_endpoint
-			)
-		):
-			continue
-
-		reserved_amount += (
-			CityLogisticsSystem.get_city_haul_reservation_destination_resource_amount(
-				reservation_id,
-				resource
-			)
-		)
-
-	return reserved_amount
-
-static func get_city_construction_site_unreserved_resource_space(
-	site_id: int,
-	resource: String,
-	excluding_reservation_id: int = (
-		INVALID_CITY_CITIZEN_HAUL_RESERVATION_ID
-	)
-) -> int:
-	return maxi(
-		get_city_construction_site_remaining_resource_amount(
-			site_id,
-			resource
-		)
-		- get_city_construction_site_destination_reserved_resource_amount(
-			site_id,
-			resource,
-			excluding_reservation_id
-		),
-		0
-	)
-
-static func get_city_construction_site_unreserved_total_space(
-	site_id: int,
-	excluding_reservation_id: int = (
-		INVALID_CITY_CITIZEN_HAUL_RESERVATION_ID
-	)
-) -> int:
-	var total_space := 0
-
-	for resource in get_city_resource_types():
-		total_space += get_city_construction_site_unreserved_resource_space(
-			site_id,
-			resource,
-			excluding_reservation_id
-		)
-
-	return total_space
-
-#endregion
 
 #region Citizen and Haul Endpoint Factories
 
@@ -4476,7 +4157,7 @@ static func _prepare_city_citizen_task_assignment(
 			return _prepare_city_player_command_task_assignment(assignment)
 
 		CITY_CITIZEN_TASK_KIND_CONSTRUCTION:
-			return _prepare_city_construction_task_assignment(assignment)
+			return CityConstructionSystem.prepare_city_construction_task_assignment(assignment)
 
 		CITY_CITIZEN_TASK_KIND_HAUL:
 			return _prepare_city_haul_task_assignment(assignment)
@@ -4623,35 +4304,6 @@ static func _prepare_city_player_command_task_assignment(
 		return false
 
 	assignment["assigned_target_tile"] = raw_command_tile
-	return true
-
-
-static func _prepare_city_construction_task_assignment(
-	assignment: Dictionary
-) -> bool:
-	var target_object_id := int(assignment.get("target_object_id", -1))
-	var task_source := str(assignment.get("task_source", ""))
-	var task_values: Dictionary = assignment.get("task_values", {})
-	var construction_site := get_city_construction_site_by_id(target_object_id)
-	var raw_target_tile = task_values.get(
-		"target_tile",
-		INVALID_CITY_TILE_POSITION
-	)
-
-	if (
-		task_source != CITY_CITIZEN_TASK_SOURCE_PLAYER
-		or bool(assignment.get("player_locked", false))
-		or construction_site.is_empty()
-		or str(construction_site.get("phase", ""))
-		!= CITY_CONSTRUCTION_PHASE_LABOR
-		or not raw_target_tile is Vector2i
-		or not get_city_construction_site_work_positions(
-			construction_site
-		).has(raw_target_tile)
-	):
-		return false
-
-	assignment["assigned_target_tile"] = raw_target_tile
 	return true
 
 
@@ -6944,7 +6596,7 @@ static func reset_player_city_state() -> void:
 static func reset_city_object_state() -> void:
 	CityLogisticsSystem.reset_city_haul_reservation_state()
 	CityLogisticsSystem.reset_city_ground_pile_state()
-	WorldData.reset_city_construction_state()
+	CityConstructionSystem.reset_city_construction_state()
 	city_object_access_tile_cache.clear()
 	city_objects.clear()
 	city_object_index_by_id.clear()
@@ -7094,7 +6746,7 @@ static func validate_city_object_topology_mutation(
 			return result
 
 		var construction_site_id := int(
-			city_construction_site_id_by_tile.get(tile_position, -1)
+			CityConstructionSystem.get_current_state().construction_site_id_by_tile.get(tile_position, -1)
 		)
 
 		if (
@@ -7163,7 +6815,7 @@ static func can_place_city_object(
 			if city_occupied_tiles.has(tile_position):
 				return false
 
-			if city_construction_site_id_by_tile.has(tile_position):
+			if CityConstructionSystem.get_current_state().construction_site_id_by_tile.has(tile_position):
 				return false
 
 			# Ground piles stay outside the blocking-object registry so citizens
@@ -7196,29 +6848,6 @@ static func can_place_city_object(
 		return false
 
 	return true
-
-
-static func can_place_city_object_construction(
-	city_world: WorldData,
-	top_left: Vector2i,
-	size_tiles: Vector2i,
-	object_type: String
-) -> bool:
-	if (
-		not city_object_type_uses_construction(object_type)
-		or size_tiles.x <= 0
-		or size_tiles.y <= 0
-	):
-		return false
-
-	return WorldData.can_place_city_construction_footprint(
-		city_world,
-		make_rectangle_city_object_footprint_tiles(
-			top_left,
-			size_tiles
-		),
-		true
-	)
 
 
 static func city_object_placement_has_walkable_access_tile(
@@ -9197,8 +8826,8 @@ static func has_city_object_type(object_type: String) -> bool:
 
 static func can_place_city_road_tile(city_world: WorldData, tile_position: Vector2i) -> bool:
 	return (
-		city_object_type_uses_construction(CITY_OBJECT_ROAD)
-		and WorldData.can_place_city_construction_footprint(
+		CityConstructionSystem.city_object_type_uses_construction(CITY_OBJECT_ROAD)
+		and CityConstructionSystem.can_place_city_construction_footprint(
 			city_world,
 			[tile_position]
 		)

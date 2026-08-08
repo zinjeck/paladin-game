@@ -587,7 +587,7 @@ func _check_nonnegative_state(elapsed_minutes: int) -> void:
 
 func _assert_long_run_outcomes(fixture: Dictionary) -> void:
 	var site_id := int(fixture.get("house_site_id", -1))
-	var site_completed := WorldData.get_city_construction_site_by_id(
+	var site_completed := CityConstructionSystem.get_city_construction_site_by_id(
 		site_id
 	).is_empty()
 	_expect(
@@ -1054,7 +1054,7 @@ func _find_and_prepare_reachable_rectangle(
 				)
 
 				if for_construction:
-					can_place = WorldData.can_place_city_object_construction(
+					can_place = CityConstructionSystem.can_place_city_object_construction(
 						city_world,
 						top_left,
 						size_tiles,

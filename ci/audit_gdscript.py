@@ -139,12 +139,39 @@ WORLD_DATA_FORBIDDEN_CITY_LOGISTICS_SYMBOLS = (
     "reset_city_haul_reservation_state",
 )
 
-WORLD_DATA_CONSTRUCTION_COMPATIBILITY_FIELDS = (
-    ("city_construction_sites", "construction_sites"),
-    ("city_construction_site_index_by_id", "construction_site_index_by_id"),
-    ("city_construction_site_id_by_tile", "construction_site_id_by_tile"),
-    ("next_city_construction_site_id", "next_construction_site_id"),
-    ("city_construction_version", "construction_version"),
+WORLD_DATA_FORBIDDEN_CITY_CONSTRUCTION_SYMBOLS = (
+    "city_construction_sites",
+    "city_construction_site_index_by_id",
+    "city_construction_site_id_by_tile",
+    "next_city_construction_site_id",
+    "city_construction_version",
+    "CITY_CONSTRUCTION_PHASE_CLEARING",
+    "CITY_CONSTRUCTION_PHASE_GATHERING",
+    "CITY_CONSTRUCTION_PHASE_LABOR",
+    "CITY_CONSTRUCTION_FINALIZATION_STATE_NONE",
+    "CITY_CONSTRUCTION_FINALIZATION_STATE_AWAITING_CLEARANCE",
+    "CITY_CONSTRUCTION_TARGET_NEW",
+    "CITY_CONSTRUCTION_TARGET_MODIFICATION",
+    "CITY_CONSTRUCTION_TASK_PRIORITY",
+    "CITY_CONSTRUCTION_FAIRNESS_BONUS_PER_MINUTE",
+    "CITY_CONSTRUCTION_MAX_FAIRNESS_BONUS",
+    "CITY_CONSTRUCTION_LABOR_ATOMIC_MINUTES",
+    "get_city_object_construction_materials",
+    "city_object_type_uses_construction",
+    "mark_city_construction_changed",
+    "get_city_construction_site_index_by_id",
+    "get_city_construction_site_by_id",
+    "can_place_city_construction_footprint",
+    "reset_city_construction_state",
+    "get_city_construction_site_work_positions",
+    "get_city_construction_site_reserved_resource_amount",
+    "get_city_construction_site_remaining_resource_amount",
+    "get_city_construction_site_destination_reserved_resource_amount",
+    "get_city_construction_site_unreserved_resource_space",
+    "get_city_construction_site_unreserved_total_space",
+    "_prepare_city_construction_task_assignment",
+    "can_place_city_object_construction",
+    "prepare_city_construction_task_assignment",
 )
 
 WORLD_DATA_FORBIDDEN_CITY_WORK_SYMBOLS = (
@@ -506,37 +533,54 @@ def main() -> int:
 
     construction_state_path = ROOT / "scripts/city/simulation/CityConstructionState.gd"
     city_root_state_path = ROOT / "scripts/city/simulation/CitySettlementSimulationState.gd"
-    if world_data_path.exists() and construction_state_path.exists() and city_root_state_path.exists():
+    construction_system_path = ROOT / "scripts/city/simulation/systems/CityConstructionSystem.gd"
+    if world_data_path.exists() and construction_state_path.exists() and city_root_state_path.exists() and construction_system_path.exists():
         world_data_text = world_data_path.read_text(encoding="utf-8")
         construction_state_text = construction_state_path.read_text(encoding="utf-8")
         city_root_state_text = city_root_state_path.read_text(encoding="utf-8")
-        for legacy_name, state_name in WORLD_DATA_CONSTRUCTION_COMPATIBILITY_FIELDS:
-            direct_storage_pattern = rf"^\s*static\s+var\s+{re.escape(legacy_name)}[^\n]*="
-            if re.search(direct_storage_pattern, world_data_text, re.MULTILINE):
-                errors.append(
-                    f"scripts/world/simulation/WorldData.gd: construction field {legacy_name} "
-                    "must forward to CityConstructionState instead of owning storage"
-                )
-            expected_getter = (
-                f"WorldPoliticalState.get_current_city_construction_state().{state_name}"
+        construction_system_text = construction_system_path.read_text(encoding="utf-8")
+
+        for symbol in WORLD_DATA_FORBIDDEN_CITY_CONSTRUCTION_SYMBOLS:
+            declaration_patterns = (
+                rf"^\s*static\s+var\s+{re.escape(symbol)}\b",
+                rf"^\s*const\s+{re.escape(symbol)}\b",
+                rf"^\s*(?:static\s+)?func\s+{re.escape(symbol)}\s*\(",
             )
-            if expected_getter not in world_data_text:
+            if any(re.search(pattern, world_data_text, re.MULTILINE) for pattern in declaration_patterns):
                 errors.append(
-                    f"scripts/world/simulation/WorldData.gd: construction compatibility field "
-                    f"{legacy_name} does not forward to {state_name}"
+                    "scripts/world/simulation/WorldData.gd: extracted city-construction "
+                    f"ownership declaration must not return to WorldData: {symbol}"
                 )
+
+        for path in scripts:
+            text = path.read_text(encoding="utf-8")
+            relative = str(path.relative_to(ROOT))
+            for symbol in WORLD_DATA_FORBIDDEN_CITY_CONSTRUCTION_SYMBOLS:
+                legacy_pattern = rf"WorldData\s*\.\s*{re.escape(symbol)}\b"
+                if re.search(legacy_pattern, text):
+                    errors.append(
+                        f"{relative}: legacy WorldData city-construction reference remains: "
+                        f"WorldData.{symbol}"
+                    )
+
+        for state_name in ("construction_sites", "construction_site_index_by_id", "construction_site_id_by_tile", "next_construction_site_id", "construction_version"):
             if not re.search(rf"^var\s+{re.escape(state_name)}\b", construction_state_text, re.MULTILINE):
                 errors.append(
                     f"scripts/city/simulation/CityConstructionState.gd: missing {state_name}"
                 )
             if re.search(rf"^var\s+{re.escape(state_name)}\b", city_root_state_text, re.MULTILINE):
                 errors.append(
-                    f"scripts/city/simulation/CitySettlementSimulationState.gd: construction storage "
+                    "scripts/city/simulation/CitySettlementSimulationState.gd: construction storage "
                     f"{state_name} must live in CityConstructionState"
                 )
+
         if "var construction_state: CityConstructionState" not in city_root_state_text:
             errors.append(
                 "scripts/city/simulation/CitySettlementSimulationState.gd: missing construction_state owner"
+            )
+        if "static func get_current_state() -> CityConstructionState:" not in construction_system_text:
+            errors.append(
+                "scripts/city/simulation/systems/CityConstructionSystem.gd: missing typed construction-state accessor"
             )
 
     report = {

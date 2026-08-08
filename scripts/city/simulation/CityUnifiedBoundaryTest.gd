@@ -373,15 +373,15 @@ func _test_construction_labor_releases_at_atomic_boundary() -> void:
 		"The House site must receive its complete physical material recipe."
 	)
 	CityConstructionSystemScript.refresh_city_construction_site(site_id)
-	house_site = WorldData.get_city_construction_site_by_id(site_id)
+	house_site = CityConstructionSystem.get_city_construction_site_by_id(site_id)
 	_expect(
 		str(house_site.get("phase", ""))
-		== WorldData.CITY_CONSTRUCTION_PHASE_LABOR,
+		== CityConstructionSystem.CITY_CONSTRUCTION_PHASE_LABOR,
 		"A fully supplied clear House must enter labor."
 	)
 
 	var work_positions := (
-		WorldData.get_city_construction_site_work_positions(house_site)
+		CityConstructionSystem.get_city_construction_site_work_positions(house_site)
 	)
 	_expect(
 		not work_positions.is_empty(),
@@ -420,7 +420,7 @@ func _test_construction_labor_releases_at_atomic_boundary() -> void:
 		== WorldData.CITY_CITIZEN_TASK_PHASE_PERFORMING
 		and boundary_minute
 		== SimulationClock.absolute_world_minutes
-		+ WorldData.CITY_CONSTRUCTION_LABOR_ATOMIC_MINUTES,
+		+ CityConstructionSystem.CITY_CONSTRUCTION_LABOR_ATOMIC_MINUTES,
 		"Construction labor must publish its exact 30-minute atomic boundary."
 	)
 
@@ -433,7 +433,7 @@ func _test_construction_labor_releases_at_atomic_boundary() -> void:
 		str(before_boundary_task.get("kind", ""))
 		== WorldData.CITY_CITIZEN_TASK_KIND_CONSTRUCTION
 		and int(
-			WorldData.get_city_construction_site_by_id(site_id).get(
+			CityConstructionSystem.get_city_construction_site_by_id(site_id).get(
 				"completed_labor_minutes",
 				-1
 			)
@@ -449,7 +449,7 @@ func _test_construction_labor_releases_at_atomic_boundary() -> void:
 		str(released_task.get("kind", ""))
 		== WorldData.CITY_CITIZEN_TASK_KIND_NONE
 		and int(
-			WorldData.get_city_construction_site_by_id(site_id).get(
+			CityConstructionSystem.get_city_construction_site_by_id(site_id).get(
 				"completed_labor_minutes",
 				-1
 			)

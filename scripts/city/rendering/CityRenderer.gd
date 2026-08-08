@@ -654,10 +654,10 @@ func _collect_world_data_change_flags(
 
 	if (
 		observed_city_construction_version
-		!= WorldData.city_construction_version
+		!= CityConstructionSystem.get_current_state().construction_version
 	):
 		observed_city_construction_version = (
-			WorldData.city_construction_version
+			CityConstructionSystem.get_current_state().construction_version
 		)
 		change_flags["city_construction_changed"] = true
 
@@ -2643,7 +2643,7 @@ func update_construction_site_info_panel_screen_position() -> void:
 	):
 		return
 
-	var site := WorldData.get_city_construction_site_by_id(
+	var site := CityConstructionSystem.get_city_construction_site_by_id(
 		selected_city_construction_site_id
 	)
 
@@ -3254,7 +3254,7 @@ func update_selected_city_construction_site_panel() -> void:
 	hide_object_info_storage_display()
 	hide_workplace_details_ui()
 
-	var site := WorldData.get_city_construction_site_by_id(
+	var site := CityConstructionSystem.get_city_construction_site_by_id(
 		selected_city_construction_site_id
 	)
 
@@ -3307,7 +3307,7 @@ func update_selected_city_construction_site_panel() -> void:
 				continue
 
 			var delivered_amount := mini(
-				WorldData.get_city_construction_site_reserved_resource_amount(
+				CityConstructionSystem.get_city_construction_site_reserved_resource_amount(
 					selected_city_construction_site_id,
 					resource
 				),
@@ -4326,7 +4326,7 @@ func confirm_active_city_object_placement() -> void:
 	var object_owner: String = str(preview_object.get("owner", "player"))
 	var repeat_after_place: bool = bool(active_city_object_placement.get("repeat_after_place", false))
 	var uses_construction := (
-		WorldData.city_object_type_uses_construction(object_type)
+		CityConstructionSystem.city_object_type_uses_construction(object_type)
 	)
 
 	var can_place := WorldData.can_place_city_object(
@@ -4337,7 +4337,7 @@ func confirm_active_city_object_placement() -> void:
 	)
 
 	if uses_construction:
-		can_place = WorldData.can_place_city_object_construction(
+		can_place = CityConstructionSystem.can_place_city_object_construction(
 			city_world,
 			top_left,
 			size_tiles,
@@ -4754,7 +4754,7 @@ func set_selected_city_entity(
 		== CITY_SELECTION_KIND_CONSTRUCTION_SITE
 	):
 		var construction_site := (
-			WorldData.get_city_construction_site_by_id(
+			CityConstructionSystem.get_city_construction_site_by_id(
 				entity_id
 			)
 		)
@@ -6674,13 +6674,13 @@ func draw_city_construction_sites(draw_target: CanvasItem) -> void:
 
 func _get_city_construction_phase_color(phase: String) -> Color:
 	match phase:
-		WorldData.CITY_CONSTRUCTION_PHASE_CLEARING:
+		CityConstructionSystem.CITY_CONSTRUCTION_PHASE_CLEARING:
 			return CITY_CONSTRUCTION_CLEARING_COLOR
 
-		WorldData.CITY_CONSTRUCTION_PHASE_GATHERING:
+		CityConstructionSystem.CITY_CONSTRUCTION_PHASE_GATHERING:
 			return CITY_CONSTRUCTION_GATHERING_COLOR
 
-		WorldData.CITY_CONSTRUCTION_PHASE_LABOR:
+		CityConstructionSystem.CITY_CONSTRUCTION_PHASE_LABOR:
 			return CITY_CONSTRUCTION_LABOR_COLOR
 
 	return CURSOR_LOOK_BORDER_COLOR
@@ -6840,8 +6840,8 @@ func draw_active_city_object_placement_preview(
 		object_type
 	)
 
-	if WorldData.city_object_type_uses_construction(object_type):
-		can_place = WorldData.can_place_city_object_construction(
+	if CityConstructionSystem.city_object_type_uses_construction(object_type):
+		can_place = CityConstructionSystem.can_place_city_object_construction(
 			city_world,
 			top_left,
 			size_tiles,
@@ -6988,7 +6988,7 @@ func draw_selected_city_construction_site_highlight(
 	if selected_city_construction_site_id <= 0:
 		return
 
-	var site := WorldData.get_city_construction_site_by_id(
+	var site := CityConstructionSystem.get_city_construction_site_by_id(
 		selected_city_construction_site_id
 	)
 

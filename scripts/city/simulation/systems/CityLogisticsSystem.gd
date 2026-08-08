@@ -388,7 +388,7 @@ static func add_resource_to_city_ground_piles_with_result(
 
 	if (
 		construction_site_id > 0
-		and WorldData.get_city_construction_site_by_id(
+		and CityConstructionSystem.get_city_construction_site_by_id(
 			construction_site_id
 		).is_empty()
 	):
@@ -639,7 +639,7 @@ static func reserve_city_ground_pile_for_construction(
 	site_id: int,
 	requested_amount: int
 ) -> int:
-	var site := WorldData.get_city_construction_site_by_id(site_id)
+	var site := CityConstructionSystem.get_city_construction_site_by_id(site_id)
 	var pile_index := get_city_ground_pile_index_by_id(ground_pile_id)
 
 	if site.is_empty() or pile_index < 0 or requested_amount <= 0:
@@ -1278,7 +1278,7 @@ static func get_city_haul_endpoint_unreserved_destination_space(
 	var endpoint_id := int(endpoint.get("id", -1))
 
 	if endpoint_kind == WorldData.CITY_CITIZEN_HAUL_ENDPOINT_KIND_CONSTRUCTION_SITE:
-		return WorldData.get_city_construction_site_unreserved_total_space(
+		return CityConstructionSystem.get_city_construction_site_unreserved_total_space(
 			endpoint_id,
 			excluding_reservation_id
 		)
@@ -1343,7 +1343,7 @@ static func get_city_haul_endpoint_unreserved_destination_resource_space(
 		)
 		== WorldData.CITY_CITIZEN_HAUL_ENDPOINT_KIND_CONSTRUCTION_SITE
 	):
-		return WorldData.get_city_construction_site_unreserved_resource_space(
+		return CityConstructionSystem.get_city_construction_site_unreserved_resource_space(
 			int(endpoint.get("id", -1)),
 			resource,
 			excluding_reservation_id
@@ -1475,19 +1475,19 @@ static func city_haul_endpoint_can_accept_resource(
 		)
 
 	if endpoint_kind == WorldData.CITY_CITIZEN_HAUL_ENDPOINT_KIND_CONSTRUCTION_SITE:
-		var site := WorldData.get_city_construction_site_by_id(endpoint_id)
+		var site := CityConstructionSystem.get_city_construction_site_by_id(endpoint_id)
 
 		if (
 			site.is_empty()
 			or deposit_purpose != WorldData.CONTAINER_HAUL_PURPOSE_CONSTRUCTION
 			or str(site.get("phase", ""))
-			!= WorldData.CITY_CONSTRUCTION_PHASE_GATHERING
+			!= CityConstructionSystem.CITY_CONSTRUCTION_PHASE_GATHERING
 		):
 			return false
 
 		return (
 			not require_unreserved_space
-			or WorldData.get_city_construction_site_unreserved_resource_space(
+			or CityConstructionSystem.get_city_construction_site_unreserved_resource_space(
 				endpoint_id,
 				resource,
 				excluding_reservation_id
