@@ -143,20 +143,52 @@ static var next_city_ground_pile_id: int = 1
 # Player designations are authoritative city simulation state. One drag creates
 # a command group, while each target remains independently claimable so many
 # unemployed citizens can work through the designation in parallel.
-static var city_player_commands: Array = []
-static var city_player_command_index_by_id: Dictionary = {}
-static var city_player_command_id_by_tile: Dictionary = {}
-static var next_city_player_command_id: int = 1
-static var next_city_player_command_group_id: int = 1
+static var city_player_commands: Array:
+	get:
+		return WorldPoliticalState.get_current_city_work_state().player_commands
+	set(value):
+		WorldPoliticalState.get_current_city_work_state().player_commands = value
+static var city_player_command_index_by_id: Dictionary:
+	get:
+		return WorldPoliticalState.get_current_city_work_state().player_command_index_by_id
+	set(value):
+		WorldPoliticalState.get_current_city_work_state().player_command_index_by_id = value
+static var city_player_command_id_by_tile: Dictionary:
+	get:
+		return WorldPoliticalState.get_current_city_work_state().player_command_id_by_tile
+	set(value):
+		WorldPoliticalState.get_current_city_work_state().player_command_id_by_tile = value
+static var next_city_player_command_id: int:
+	get:
+		return WorldPoliticalState.get_current_city_work_state().next_player_command_id
+	set(value):
+		WorldPoliticalState.get_current_city_work_state().next_player_command_id = value
+static var next_city_player_command_group_id: int:
+	get:
+		return WorldPoliticalState.get_current_city_work_state().next_player_command_group_id
+	set(value):
+		WorldPoliticalState.get_current_city_work_state().next_player_command_group_id = value
 
 # Player-issued projects are normalized into persistent parent work orders.
 # The existing command, construction, and haul registries remain authoritative
 # for physical execution while this registry owns scheduling identity,
 # priority, progress/fairness history, generated-job diagnostics, and unified
 # cancellation identity.
-static var city_work_orders: Dictionary = {}
-static var city_work_order_id_by_source_key: Dictionary = {}
-static var next_city_work_order_id: int = 1
+static var city_work_orders: Dictionary:
+	get:
+		return WorldPoliticalState.get_current_city_work_state().work_orders
+	set(value):
+		WorldPoliticalState.get_current_city_work_state().work_orders = value
+static var city_work_order_id_by_source_key: Dictionary:
+	get:
+		return WorldPoliticalState.get_current_city_work_state().work_order_id_by_source_key
+	set(value):
+		WorldPoliticalState.get_current_city_work_state().work_order_id_by_source_key = value
+static var next_city_work_order_id: int:
+	get:
+		return WorldPoliticalState.get_current_city_work_state().next_work_order_id
+	set(value):
+		WorldPoliticalState.get_current_city_work_state().next_work_order_id = value
 
 # One atomic reservation binds a citizen to source goods and matching shared
 # capacity at one destination. Aggregate lookups keep availability checks O(1)
@@ -196,8 +228,16 @@ static var city_citizen_task_version: int = 0
 static var city_assignment_version: int = 0
 static var city_workplace_version: int = 0
 static var city_ground_pile_version: int = 0
-static var city_player_command_version: int = 0
-static var city_work_order_version: int = 0
+static var city_player_command_version: int:
+	get:
+		return WorldPoliticalState.get_current_city_work_state().player_command_version
+	set(value):
+		WorldPoliticalState.get_current_city_work_state().player_command_version = value
+static var city_work_order_version: int:
+	get:
+		return WorldPoliticalState.get_current_city_work_state().work_order_version
+	set(value):
+		WorldPoliticalState.get_current_city_work_state().work_order_version = value
 static var city_haul_reservation_version: int = 0
 static var city_construction_version: int = 0
 static var city_citizen_male_name_pool: Array[String] = (

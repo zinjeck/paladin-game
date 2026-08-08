@@ -55,3 +55,13 @@ func has_instance_owned_city_state() -> bool:
 		backend_kind == BACKEND_CITY_SETTLEMENT_STATE
 		and local_state is CitySettlementSimulationState
 	)
+
+
+func get_city_work_state():
+	if not has_instance_owned_city_state():
+		return null
+
+	var raw_work_state = local_state.work_state
+	if raw_work_state is CityWorkState:
+		return raw_work_state
+	return null

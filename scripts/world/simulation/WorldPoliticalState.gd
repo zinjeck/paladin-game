@@ -17,6 +17,9 @@ const SettlementSimulationContextScript = preload(
 const CitySettlementSimulationStateScript = preload(
 	"res://scripts/city/simulation/CitySettlementSimulationState.gd"
 )
+const CityWorkStateScript = preload(
+	"res://scripts/city/simulation/CityWorkState.gd"
+)
 
 var polities_by_id: Dictionary = {}
 var settlements_by_id: Dictionary = {}
@@ -29,6 +32,7 @@ var player_polity_id: int = PolityDataScript.INVALID_POLITY_ID
 var active_settlement_id: int = SettlementDataScript.INVALID_SETTLEMENT_ID
 
 var _foundation_world_fingerprint: String = ""
+var _unbound_city_work_state = CityWorkStateScript.new()
 
 
 func reset_state() -> void:
@@ -41,6 +45,7 @@ func reset_state() -> void:
 	player_polity_id = PolityDataScript.INVALID_POLITY_ID
 	active_settlement_id = SettlementDataScript.INVALID_SETTLEMENT_ID
 	_foundation_world_fingerprint = ""
+	_unbound_city_work_state = CityWorkStateScript.new()
 
 
 func synchronize_foundation_with_world_data() -> bool:
@@ -52,6 +57,13 @@ func synchronize_foundation_with_world_data() -> bool:
 	var fingerprint := _build_foundation_world_fingerprint()
 	if fingerprint == _foundation_world_fingerprint:
 		return _has_live_foundation_registry()
+
+	# Some low-level simulation/bootstrap paths can create local work before the
+	# political registry exists. Preserve that pre-context state exactly once
+	# when the first City settlement adopts the current city simulation. Never
+	# carry it across an already-live political registry into another world.
+	var should_adopt_unbound_work_state := not _has_live_foundation_registry()
+	var unbound_work_state_to_adopt = _unbound_city_work_state
 
 	reset_state()
 
@@ -103,6 +115,8 @@ func synchronize_foundation_with_world_data() -> bool:
 	if capital_state == null:
 		reset_state()
 		return false
+	if should_adopt_unbound_work_state:
+		capital_state.work_state = unbound_work_state_to_adopt
 	capital_state.capture_from_world_data()
 
 	_foundation_world_fingerprint = fingerprint
@@ -345,6 +359,19 @@ func get_city_simulation_state(settlement_id: int):
 
 func get_active_city_simulation_state():
 	return get_city_simulation_state(active_settlement_id)
+
+
+# Compatibility owner for code paths that run before a settlement context is
+# established (primarily low-level tests and reset/setup code). Runtime city
+# work always resolves to the active settlement state once one exists.
+func get_current_city_work_state():
+	var active_city_state = get_active_city_simulation_state()
+	if (
+		active_city_state != null
+		and active_city_state.work_state is CityWorkState
+	):
+		return active_city_state.work_state
+	return _unbound_city_work_state
 
 
 func get_polity_snapshot() -> Array[Dictionary]:

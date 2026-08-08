@@ -3,12 +3,9 @@ class_name CitySettlementSimulationState
 
 # Instance-owned mutable state for one CITY settlement.
 #
-# WorldData still exposes the historical city_* fields while the city systems
-# are migrated. Those fields now act as the active execution workspace: this
-# object can capture that workspace by reference and later restore it. Because
-# each settlement owns a different instance, switching settlements no longer
-# requires all cities to share one set of arrays, dictionaries, counters, and
-# change versions.
+# WorldData still exposes historical compatibility fields while the remaining
+# city systems are migrated, but extracted subsystems are not captured into or
+# restored from that workspace anymore.
 #
 # Do not add world/polity identity here. SettlementData and PolityData own that
 # information. This class is only local city-simulation state.
@@ -35,15 +32,9 @@ var ground_piles: Array = []
 var ground_pile_index_by_id: Dictionary = {}
 var next_ground_pile_id: int = 1
 
-var player_commands: Array = []
-var player_command_index_by_id: Dictionary = {}
-var player_command_id_by_tile: Dictionary = {}
-var next_player_command_id: int = 1
-var next_player_command_group_id: int = 1
-
-var work_orders: Dictionary = {}
-var work_order_id_by_source_key: Dictionary = {}
-var next_work_order_id: int = 1
+# First physically extracted local subsystem. WorldData's old work fields are
+# compatibility accessors onto this object rather than stored data.
+var work_state: CityWorkState = CityWorkState.new()
 
 var haul_reservations: Dictionary = {}
 var haul_reservation_id_by_citizen_id: Dictionary = {}
@@ -73,8 +64,6 @@ var citizen_task_version: int = 0
 var assignment_version: int = 0
 var workplace_version: int = 0
 var ground_pile_version: int = 0
-var player_command_version: int = 0
-var work_order_version: int = 0
 var haul_reservation_version: int = 0
 var construction_version: int = 0
 
@@ -103,16 +92,6 @@ func capture_from_world_data() -> void:
 	ground_piles = WorldData.city_ground_piles
 	ground_pile_index_by_id = WorldData.city_ground_pile_index_by_id
 	next_ground_pile_id = WorldData.next_city_ground_pile_id
-
-	player_commands = WorldData.city_player_commands
-	player_command_index_by_id = WorldData.city_player_command_index_by_id
-	player_command_id_by_tile = WorldData.city_player_command_id_by_tile
-	next_player_command_id = WorldData.next_city_player_command_id
-	next_player_command_group_id = WorldData.next_city_player_command_group_id
-
-	work_orders = WorldData.city_work_orders
-	work_order_id_by_source_key = WorldData.city_work_order_id_by_source_key
-	next_work_order_id = WorldData.next_city_work_order_id
 
 	haul_reservations = WorldData.city_haul_reservations
 	haul_reservation_id_by_citizen_id = (
@@ -150,8 +129,6 @@ func capture_from_world_data() -> void:
 	assignment_version = WorldData.city_assignment_version
 	workplace_version = WorldData.city_workplace_version
 	ground_pile_version = WorldData.city_ground_pile_version
-	player_command_version = WorldData.city_player_command_version
-	work_order_version = WorldData.city_work_order_version
 	haul_reservation_version = WorldData.city_haul_reservation_version
 	construction_version = WorldData.city_construction_version
 
@@ -180,16 +157,6 @@ func apply_to_world_data() -> void:
 	WorldData.city_ground_piles = ground_piles
 	WorldData.city_ground_pile_index_by_id = ground_pile_index_by_id
 	WorldData.next_city_ground_pile_id = next_ground_pile_id
-
-	WorldData.city_player_commands = player_commands
-	WorldData.city_player_command_index_by_id = player_command_index_by_id
-	WorldData.city_player_command_id_by_tile = player_command_id_by_tile
-	WorldData.next_city_player_command_id = next_player_command_id
-	WorldData.next_city_player_command_group_id = next_player_command_group_id
-
-	WorldData.city_work_orders = work_orders
-	WorldData.city_work_order_id_by_source_key = work_order_id_by_source_key
-	WorldData.next_city_work_order_id = next_work_order_id
 
 	WorldData.city_haul_reservations = haul_reservations
 	WorldData.city_haul_reservation_id_by_citizen_id = (
@@ -227,8 +194,6 @@ func apply_to_world_data() -> void:
 	WorldData.city_assignment_version = assignment_version
 	WorldData.city_workplace_version = workplace_version
 	WorldData.city_ground_pile_version = ground_pile_version
-	WorldData.city_player_command_version = player_command_version
-	WorldData.city_work_order_version = work_order_version
 	WorldData.city_haul_reservation_version = haul_reservation_version
 	WorldData.city_construction_version = construction_version
 
@@ -239,6 +204,7 @@ func is_bound_to_world_data_workspace() -> bool:
 		and WorldData.city_citizens == citizens
 		and WorldData.city_ground_piles == ground_piles
 		and WorldData.city_construction_sites == construction_sites
-		and WorldData.city_work_orders == work_orders
+		and WorldData.city_work_orders == work_state.work_orders
+		and WorldData.city_player_commands == work_state.player_commands
 		and WorldData.city_haul_reservations == haul_reservations
 	)
