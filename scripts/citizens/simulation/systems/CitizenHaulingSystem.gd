@@ -1917,8 +1917,7 @@ static func _try_route_cargo_to_best_resource_demand(
 			continue
 
 		var preemption_result := (
-			WorldData
-			.preempt_soft_city_haul_reservations_for_destination_resource(
+			CityLogisticsSystem.preempt_soft_city_haul_reservations_for_destination_resource(
 				demand_endpoint,
 				resource,
 				required_amount,

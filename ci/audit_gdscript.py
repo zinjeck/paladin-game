@@ -474,11 +474,11 @@ def main() -> int:
                 )
 
         for symbol in WORLD_DATA_FORBIDDEN_CITY_LOGISTICS_SYMBOLS:
-            legacy_reference = f"WorldData.{symbol}"
-            if legacy_reference in text:
+            legacy_pattern = rf"WorldData\s*\.\s*{re.escape(symbol)}\b"
+            if re.search(legacy_pattern, text):
                 errors.append(
                     f"{relative}: legacy WorldData city-logistics reference remains: "
-                    f"{legacy_reference}"
+                    f"WorldData.{symbol}"
                 )
 
     city_renderer_path = ROOT / "scripts/city/rendering/CityRenderer.gd"
