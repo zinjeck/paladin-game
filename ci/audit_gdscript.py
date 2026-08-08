@@ -58,6 +58,19 @@ ALLOWED_QUEUE_REDRAW_CALLS = {
     "scripts/ui/city/CityInformationPanel.gd": 2,
 }
 
+WORLD_DATA_CITY_LOGISTICS_COMPATIBILITY_FIELDS = {
+    "city_ground_piles": "ground_piles",
+    "city_ground_pile_index_by_id": "ground_pile_index_by_id",
+    "next_city_ground_pile_id": "next_ground_pile_id",
+    "city_ground_pile_version": "ground_pile_version",
+    "city_haul_reservations": "haul_reservations",
+    "city_haul_reservation_id_by_citizen_id": "haul_reservation_id_by_citizen_id",
+    "city_haul_source_reserved_amount_by_key": "haul_source_reserved_amount_by_key",
+    "city_haul_destination_reserved_amount_by_key": "haul_destination_reserved_amount_by_key",
+    "next_city_haul_reservation_id": "next_haul_reservation_id",
+    "city_haul_reservation_version": "haul_reservation_version",
+}
+
 WORLD_DATA_FORBIDDEN_CITY_WORK_SYMBOLS = (
     "city_player_commands",
     "city_player_command_index_by_id",
@@ -323,6 +336,51 @@ def main() -> int:
     world_data_path = ROOT / "scripts/world/simulation/WorldData.gd"
     if world_data_path.exists():
         world_data_text = world_data_path.read_text(encoding="utf-8")
+        for symbol, state_field in WORLD_DATA_CITY_LOGISTICS_COMPATIBILITY_FIELDS.items():
+            if re.search(
+                rf"^\s*static\s+var\s+{re.escape(symbol)}\b[^\n]*=",
+                world_data_text,
+                re.MULTILINE,
+            ):
+                errors.append(
+                    "scripts/world/simulation/WorldData.gd: city logistics storage "
+                    f"must not return to WorldData: {symbol}"
+                )
+            resolver = (
+                "WorldPoliticalState.get_current_city_logistics_state()."
+                + state_field
+            )
+            if world_data_text.count(resolver) < 2:
+                errors.append(
+                    "scripts/world/simulation/WorldData.gd: logistics compatibility "
+                    f"field must forward getter/setter to settlement state: {symbol}"
+                )
+
+        settlement_state_path = (
+            ROOT / "scripts/city/simulation/CitySettlementSimulationState.gd"
+        )
+        if settlement_state_path.exists():
+            settlement_state_text = settlement_state_path.read_text(encoding="utf-8")
+            legacy_storage_declarations = (
+                "var ground_piles:",
+                "var ground_pile_index_by_id:",
+                "var next_ground_pile_id:",
+                "var ground_pile_version:",
+                "var haul_reservations:",
+                "var haul_reservation_id_by_citizen_id:",
+                "var haul_source_reserved_amount_by_key:",
+                "var haul_destination_reserved_amount_by_key:",
+                "var next_haul_reservation_id:",
+                "var haul_reservation_version:",
+            )
+            for declaration in legacy_storage_declarations:
+                if declaration in settlement_state_text:
+                    errors.append(
+                        "scripts/city/simulation/CitySettlementSimulationState.gd: "
+                        "logistics storage must live in CityLogisticsState, not "
+                        f"the settlement root: {declaration}"
+                    )
+
         for symbol in WORLD_DATA_FORBIDDEN_CITY_WORK_SYMBOLS:
             declaration_patterns = (
                 rf"^\s*static\s+var\s+{re.escape(symbol)}\b",
