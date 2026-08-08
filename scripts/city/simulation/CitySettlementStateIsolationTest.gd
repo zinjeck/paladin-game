@@ -67,6 +67,10 @@ func _run_state_isolation_test() -> void:
 		player_state.work_state is CityWorkState,
 		"Every city state must own a dedicated work-state subsystem."
 	)
+	_expect(
+		player_state.logistics_state is CityLogisticsState,
+		"Every city state must own a dedicated logistics-state subsystem."
+	)
 
 	# Give the player city unmistakable local state. WorldData remains a
 	# compatibility workspace while individual city subsystems are extracted.
@@ -94,6 +98,20 @@ func _run_state_isolation_test() -> void:
 	CityWorkSystem.get_current_work_state().work_order_id_by_source_key = {"test:player": 71}
 	CityWorkSystem.get_current_work_state().next_work_order_id = 72
 	CityWorkSystem.get_current_work_state().work_order_version = 8
+	WorldData.city_ground_piles = [
+		{"id": 81, "test_owner": "player"},
+	]
+	WorldData.city_ground_pile_index_by_id = {81: 0}
+	WorldData.next_city_ground_pile_id = 82
+	WorldData.city_ground_pile_version = 10
+	WorldData.city_haul_reservations = {
+		91: {"id": 91, "citizen_id": 1, "test_owner": "player"},
+	}
+	WorldData.city_haul_reservation_id_by_citizen_id = {1: 91}
+	WorldData.city_haul_source_reserved_amount_by_key = {"player:source": 3}
+	WorldData.city_haul_destination_reserved_amount_by_key = {"player:destination": 3}
+	WorldData.next_city_haul_reservation_id = 92
+	WorldData.city_haul_reservation_version = 11
 
 	var cpu_culture := WorldData.create_culture(CPU_CULTURE_NAME)
 	_expect(
@@ -156,6 +174,11 @@ func _run_state_isolation_test() -> void:
 		and cpu_state.work_state != player_state.work_state,
 		"Two cities must never share the same work-state object."
 	)
+	_expect(
+		cpu_state.logistics_state is CityLogisticsState
+		and cpu_state.logistics_state != player_state.logistics_state,
+		"Two cities must never share the same logistics-state object."
+	)
 
 	_expect(
 		WorldPoliticalState.set_active_settlement(cpu_city_id),
@@ -183,6 +206,15 @@ func _run_state_isolation_test() -> void:
 		and CityWorkSystem.get_current_work_state().next_player_command_id == 1
 		and CityWorkSystem.get_current_work_state().next_work_order_id == 1,
 		"A fresh city must begin with an independent work-state subsystem."
+	)
+	_expect(
+		WorldData.city_ground_piles.is_empty()
+		and WorldData.city_haul_reservations.is_empty()
+		and WorldData.next_city_ground_pile_id == 1
+		and WorldData.next_city_haul_reservation_id == 1
+		and WorldData.city_ground_pile_version == 0
+		and WorldData.city_haul_reservation_version == 0,
+		"A fresh city must begin with an independent logistics-state subsystem."
 	)
 
 	var cpu_context = WorldPoliticalState.get_active_settlement_context()
@@ -218,6 +250,20 @@ func _run_state_isolation_test() -> void:
 	CityWorkSystem.get_current_work_state().work_order_id_by_source_key = {"test:cpu": 21}
 	CityWorkSystem.get_current_work_state().next_work_order_id = 22
 	CityWorkSystem.get_current_work_state().work_order_version = 16
+	WorldData.city_ground_piles = [
+		{"id": 31, "test_owner": "cpu"},
+	]
+	WorldData.city_ground_pile_index_by_id = {31: 0}
+	WorldData.next_city_ground_pile_id = 32
+	WorldData.city_ground_pile_version = 18
+	WorldData.city_haul_reservations = {
+		41: {"id": 41, "citizen_id": 2, "test_owner": "cpu"},
+	}
+	WorldData.city_haul_reservation_id_by_citizen_id = {2: 41}
+	WorldData.city_haul_source_reserved_amount_by_key = {"cpu:source": 5}
+	WorldData.city_haul_destination_reserved_amount_by_key = {"cpu:destination": 5}
+	WorldData.next_city_haul_reservation_id = 42
+	WorldData.city_haul_reservation_version = 19
 
 	_expect(
 		WorldPoliticalState.set_active_settlement(player_city_id),
@@ -248,6 +294,15 @@ func _run_state_isolation_test() -> void:
 		and CityWorkSystem.get_current_work_state().work_order_version == 8,
 		"Returning to the player city must restore its independent work state."
 	)
+	_expect(
+		str(WorldData.city_ground_piles[0].get("test_owner", "")) == "player"
+		and WorldData.next_city_ground_pile_id == 82
+		and WorldData.city_ground_pile_version == 10
+		and WorldData.city_haul_reservations.has(91)
+		and WorldData.next_city_haul_reservation_id == 92
+		and WorldData.city_haul_reservation_version == 11,
+		"Returning to the player city must restore its independent logistics state."
+	)
 
 	_expect(
 		WorldPoliticalState.set_active_settlement(cpu_city_id),
@@ -277,6 +332,15 @@ func _run_state_isolation_test() -> void:
 		and CityWorkSystem.get_current_work_state().next_work_order_id == 22
 		and CityWorkSystem.get_current_work_state().work_order_version == 16,
 		"Reactivating the CPU city must restore its own independent work state."
+	)
+	_expect(
+		str(WorldData.city_ground_piles[0].get("test_owner", "")) == "cpu"
+		and WorldData.next_city_ground_pile_id == 32
+		and WorldData.city_ground_pile_version == 18
+		and WorldData.city_haul_reservations.has(41)
+		and WorldData.next_city_haul_reservation_id == 42
+		and WorldData.city_haul_reservation_version == 19,
+		"Reactivating the CPU city must restore its own independent logistics state."
 	)
 	_expect(
 		WorldPoliticalState.validate_registry_integrity(),

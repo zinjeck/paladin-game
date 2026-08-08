@@ -136,18 +136,54 @@ static var next_city_construction_site_id: int = 1
 const CITY_GROUND_PILE_CAPACITY: int = 20
 const CITY_GROUND_PILE_MERGE_RADIUS_TILES: int = 2
 const CITY_GROUND_DROP_RESERVATION_CAPACITY: int = 1_000_000
-static var city_ground_piles: Array = []
-static var city_ground_pile_index_by_id: Dictionary = {}
-static var next_city_ground_pile_id: int = 1
+# Physical logistics storage is settlement-owned. These temporary accessors
+# preserve the historical WorldData API while callers are migrated in the next
+# pass; switching the active settlement changes which CityLogisticsState they
+# resolve to instead of copying logistics registries through WorldData.
+static var city_ground_piles: Array:
+	get:
+		return WorldPoliticalState.get_current_city_logistics_state().ground_piles
+	set(value):
+		WorldPoliticalState.get_current_city_logistics_state().ground_piles = value
+static var city_ground_pile_index_by_id: Dictionary:
+	get:
+		return WorldPoliticalState.get_current_city_logistics_state().ground_pile_index_by_id
+	set(value):
+		WorldPoliticalState.get_current_city_logistics_state().ground_pile_index_by_id = value
+static var next_city_ground_pile_id: int:
+	get:
+		return WorldPoliticalState.get_current_city_logistics_state().next_ground_pile_id
+	set(value):
+		WorldPoliticalState.get_current_city_logistics_state().next_ground_pile_id = value
 
 # One atomic reservation binds a citizen to source goods and matching shared
 # capacity at one destination. Aggregate lookups keep availability checks O(1)
 # while the full records remain available for validation and debug inspection.
-static var city_haul_reservations: Dictionary = {}
-static var city_haul_reservation_id_by_citizen_id: Dictionary = {}
-static var city_haul_source_reserved_amount_by_key: Dictionary = {}
-static var city_haul_destination_reserved_amount_by_key: Dictionary = {}
-static var next_city_haul_reservation_id: int = 1
+static var city_haul_reservations: Dictionary:
+	get:
+		return WorldPoliticalState.get_current_city_logistics_state().haul_reservations
+	set(value):
+		WorldPoliticalState.get_current_city_logistics_state().haul_reservations = value
+static var city_haul_reservation_id_by_citizen_id: Dictionary:
+	get:
+		return WorldPoliticalState.get_current_city_logistics_state().haul_reservation_id_by_citizen_id
+	set(value):
+		WorldPoliticalState.get_current_city_logistics_state().haul_reservation_id_by_citizen_id = value
+static var city_haul_source_reserved_amount_by_key: Dictionary:
+	get:
+		return WorldPoliticalState.get_current_city_logistics_state().haul_source_reserved_amount_by_key
+	set(value):
+		WorldPoliticalState.get_current_city_logistics_state().haul_source_reserved_amount_by_key = value
+static var city_haul_destination_reserved_amount_by_key: Dictionary:
+	get:
+		return WorldPoliticalState.get_current_city_logistics_state().haul_destination_reserved_amount_by_key
+	set(value):
+		WorldPoliticalState.get_current_city_logistics_state().haul_destination_reserved_amount_by_key = value
+static var next_city_haul_reservation_id: int:
+	get:
+		return WorldPoliticalState.get_current_city_logistics_state().next_haul_reservation_id
+	set(value):
+		WorldPoliticalState.get_current_city_logistics_state().next_haul_reservation_id = value
 
 static var city_citizens: Array = []
 static var city_citizen_index_by_id: Dictionary = {}
@@ -177,8 +213,16 @@ static var city_citizen_movement_version: int = 0
 static var city_citizen_task_version: int = 0
 static var city_assignment_version: int = 0
 static var city_workplace_version: int = 0
-static var city_ground_pile_version: int = 0
-static var city_haul_reservation_version: int = 0
+static var city_ground_pile_version: int:
+	get:
+		return WorldPoliticalState.get_current_city_logistics_state().ground_pile_version
+	set(value):
+		WorldPoliticalState.get_current_city_logistics_state().ground_pile_version = value
+static var city_haul_reservation_version: int:
+	get:
+		return WorldPoliticalState.get_current_city_logistics_state().haul_reservation_version
+	set(value):
+		WorldPoliticalState.get_current_city_logistics_state().haul_reservation_version = value
 static var city_construction_version: int = 0
 static var city_citizen_male_name_pool: Array[String] = (
 	CityCitizensScript.city_citizen_male_name_pool

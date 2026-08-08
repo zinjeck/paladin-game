@@ -20,6 +20,9 @@ const CitySettlementSimulationStateScript = preload(
 const CityWorkStateScript = preload(
 	"res://scripts/city/simulation/CityWorkState.gd"
 )
+const CityLogisticsStateScript = preload(
+	"res://scripts/city/simulation/CityLogisticsState.gd"
+)
 
 var polities_by_id: Dictionary = {}
 var settlements_by_id: Dictionary = {}
@@ -33,6 +36,7 @@ var active_settlement_id: int = SettlementDataScript.INVALID_SETTLEMENT_ID
 
 var _foundation_world_fingerprint: String = ""
 var _unbound_city_work_state = CityWorkStateScript.new()
+var _unbound_city_logistics_state = CityLogisticsStateScript.new()
 
 
 func reset_state() -> void:
@@ -46,6 +50,7 @@ func reset_state() -> void:
 	active_settlement_id = SettlementDataScript.INVALID_SETTLEMENT_ID
 	_foundation_world_fingerprint = ""
 	_unbound_city_work_state = CityWorkStateScript.new()
+	_unbound_city_logistics_state = CityLogisticsStateScript.new()
 
 
 func synchronize_foundation_with_world_data() -> bool:
@@ -64,6 +69,7 @@ func synchronize_foundation_with_world_data() -> bool:
 	# carry it across an already-live political registry into another world.
 	var should_adopt_unbound_work_state := not _has_live_foundation_registry()
 	var unbound_work_state_to_adopt = _unbound_city_work_state
+	var unbound_logistics_state_to_adopt = _unbound_city_logistics_state
 
 	reset_state()
 
@@ -117,6 +123,7 @@ func synchronize_foundation_with_world_data() -> bool:
 		return false
 	if should_adopt_unbound_work_state:
 		capital_state.work_state = unbound_work_state_to_adopt
+		capital_state.logistics_state = unbound_logistics_state_to_adopt
 	capital_state.capture_from_world_data()
 
 	_foundation_world_fingerprint = fingerprint
@@ -372,6 +379,16 @@ func get_current_city_work_state() -> CityWorkState:
 	):
 		return active_city_state.work_state
 	return _unbound_city_work_state
+
+
+func get_current_city_logistics_state() -> CityLogisticsState:
+	var active_city_state = get_active_city_simulation_state()
+	if (
+		active_city_state != null
+		and active_city_state.logistics_state is CityLogisticsState
+	):
+		return active_city_state.logistics_state
+	return _unbound_city_logistics_state
 
 
 # WorldData still owns the legacy city-session reset entry point while local
