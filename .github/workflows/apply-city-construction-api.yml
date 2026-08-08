@@ -1,0 +1,23 @@
+name: Apply City Construction API Extraction
+on:
+  push:
+    branches:
+      - agent/extract-city-construction-api
+permissions:
+  contents: write
+jobs:
+  apply:
+    if: "!contains(github.event.head_commit.message, '[construction-api-applied]')"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Apply guarded construction API extraction
+        run: python3 ci/refactor_city_construction_api.py
+      - name: Commit transformed source
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add ci/audit_gdscript.py scripts
+          git diff --cached --exit-code && exit 1 || true
+          git commit -m "Extract city construction API from WorldData [construction-api-applied]"
+          git push
