@@ -1,0 +1,13 @@
+name: Inventory City Construction API
+on:
+  push:
+    branches:
+      - agent/extract-city-construction-api
+jobs:
+  inventory:
+    if: "!contains(github.event.head_commit.message, '[inventory-skip]')"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Inventory construction ownership
+        run: python3 ci/inventory_city_construction_api.py
