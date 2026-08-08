@@ -162,6 +162,7 @@ def qualify_moved_function(block: str, old_name: str) -> str:
         "CITY_CITIZEN_TASK_SOURCE_PLAYER",
         "INVALID_CITY_TILE_POSITION",
         "make_rectangle_city_object_footprint_tiles",
+        "city_occupied_tiles",
     }
     for symbol in sorted(qualify, key=len, reverse=True):
         block = re.sub(

@@ -138,9 +138,9 @@ static func can_place_city_construction_footprint(
 			return false
 
 		if (
-			city_occupied_tiles.has(tile_position)
+			WorldData.city_occupied_tiles.has(tile_position)
 			and int(
-				city_occupied_tiles.get(tile_position, -1)
+				WorldData.city_occupied_tiles.get(tile_position, -1)
 			) != allowed_occupied_object_id
 		):
 			return false
