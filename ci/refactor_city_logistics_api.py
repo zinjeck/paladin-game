@@ -98,9 +98,6 @@ MOVED_CONSTANTS = {
     "CITY_GROUND_DROP_RESERVATION_CAPACITY": "1_000_000",
 }
 
-FUNC_START_RE = re.compile(
-    r"(?m)^(?:static\s+)?func\s+([A-Za-z_][A-Za-z0-9_]*)\s*\("
-)
 CONST_RE = re.compile(r"(?m)^const\s+([A-Za-z_][A-Za-z0-9_]*)\b")
 STATIC_VAR_RE = re.compile(r"(?m)^static\s+var\s+([A-Za-z_][A-Za-z0-9_]*)\b")
 
@@ -155,8 +152,6 @@ def top_level_function_spans(text: str) -> dict[str, tuple[int, int, str]]:
 
 
 def replace_code_token(text: str, token: str, replacement: str) -> str:
-    # Avoid replacing already-qualified identifiers (foo.token) while still
-    # catching ordinary bare references in moved WorldData function bodies.
     return re.sub(rf"(?<![A-Za-z0-9_.]){re.escape(token)}\b", replacement, text)
 
 
@@ -188,15 +183,9 @@ def transform_extracted_function(
             transformed,
         )
 
-    excluded_globals = (
-        set(STATE_FIELDS)
-        | set(MOVED_CONSTANTS)
-        | {"CityCitizensScript"}
-    )
+    excluded_globals = set(STATE_FIELDS) | set(MOVED_CONSTANTS) | {"CityCitizensScript"}
     for symbol in sorted(world_global_symbols - excluded_globals, key=len, reverse=True):
-        transformed = replace_code_token(
-            transformed, symbol, f"WorldData.{symbol}"
-        )
+        transformed = replace_code_token(transformed, symbol, f"WorldData.{symbol}")
 
     return transformed.rstrip() + "\n\n"
 
@@ -249,13 +238,13 @@ def update_world_data(original: str) -> tuple[str, str]:
         )
 
     for constant in MOVED_CONSTANTS:
-        world = replace_code_token(
-            world,
-            constant,
-            f"CityLogisticsSystem.{constant}",
-        )
+        world = replace_code_token(world, constant, f"CityLogisticsSystem.{constant}")
 
     for name in EXTRACTED_FUNCTIONS:
+        world = world.replace(
+            f"WorldData.{name}(",
+            f"CityLogisticsSystem.{name}(",
+        )
         world = re.sub(
             rf"(?<![A-Za-z0-9_.]){re.escape(name)}\s*\(",
             f"CityLogisticsSystem.{name}(",
@@ -319,10 +308,7 @@ def migrate_script_callers() -> None:
         original = text
 
         for name in EXTRACTED_FUNCTIONS:
-            text = text.replace(
-                f"WorldData.{name}",
-                f"CityLogisticsSystem.{name}",
-            )
+            text = text.replace(f"WorldData.{name}", f"CityLogisticsSystem.{name}")
 
         for legacy_field, state_field in STATE_FIELDS.items():
             text = text.replace(
@@ -331,10 +317,7 @@ def migrate_script_callers() -> None:
             )
 
         for constant in MOVED_CONSTANTS:
-            text = text.replace(
-                f"WorldData.{constant}",
-                f"CityLogisticsSystem.{constant}",
-            )
+            text = text.replace(f"WorldData.{constant}", f"CityLogisticsSystem.{constant}")
 
         text = text.replace(
             "WorldData compatibility fields must resolve to the active City's logistics state.",
