@@ -23,6 +23,9 @@ const CityWorkStateScript = preload(
 const CityLogisticsStateScript = preload(
 	"res://scripts/city/simulation/CityLogisticsState.gd"
 )
+const CityConstructionStateScript = preload(
+	"res://scripts/city/simulation/CityConstructionState.gd"
+)
 
 var polities_by_id: Dictionary = {}
 var settlements_by_id: Dictionary = {}
@@ -37,6 +40,7 @@ var active_settlement_id: int = SettlementDataScript.INVALID_SETTLEMENT_ID
 var _foundation_world_fingerprint: String = ""
 var _unbound_city_work_state = CityWorkStateScript.new()
 var _unbound_city_logistics_state = CityLogisticsStateScript.new()
+var _unbound_city_construction_state = CityConstructionStateScript.new()
 
 
 func reset_state() -> void:
@@ -51,6 +55,7 @@ func reset_state() -> void:
 	_foundation_world_fingerprint = ""
 	_unbound_city_work_state = CityWorkStateScript.new()
 	_unbound_city_logistics_state = CityLogisticsStateScript.new()
+	_unbound_city_construction_state = CityConstructionStateScript.new()
 
 
 func synchronize_foundation_with_world_data() -> bool:
@@ -70,6 +75,7 @@ func synchronize_foundation_with_world_data() -> bool:
 	var should_adopt_unbound_work_state := not _has_live_foundation_registry()
 	var unbound_work_state_to_adopt = _unbound_city_work_state
 	var unbound_logistics_state_to_adopt = _unbound_city_logistics_state
+	var unbound_construction_state_to_adopt = _unbound_city_construction_state
 
 	reset_state()
 
@@ -124,6 +130,7 @@ func synchronize_foundation_with_world_data() -> bool:
 	if should_adopt_unbound_work_state:
 		capital_state.work_state = unbound_work_state_to_adopt
 		capital_state.logistics_state = unbound_logistics_state_to_adopt
+		capital_state.construction_state = unbound_construction_state_to_adopt
 	capital_state.capture_from_world_data()
 
 	_foundation_world_fingerprint = fingerprint
@@ -389,6 +396,16 @@ func get_current_city_logistics_state() -> CityLogisticsState:
 	):
 		return active_city_state.logistics_state
 	return _unbound_city_logistics_state
+
+
+func get_current_city_construction_state() -> CityConstructionState:
+	var active_city_state = get_active_city_simulation_state()
+	if (
+		active_city_state != null
+		and active_city_state.construction_state is CityConstructionState
+	):
+		return active_city_state.construction_state
+	return _unbound_city_construction_state
 
 
 # WorldData still owns the legacy city-session reset entry point while local

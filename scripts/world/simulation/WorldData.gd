@@ -119,12 +119,29 @@ static var city_object_index_by_id: Dictionary = {}
 static var city_occupied_tiles: Dictionary = {}
 static var next_city_object_id: int = 1
 
-# Construction sites reserve placement footprints without becoming operational
-# city objects. Their physical materials remain authoritative ground piles.
-static var city_construction_sites: Array = []
-static var city_construction_site_index_by_id: Dictionary = {}
-static var city_construction_site_id_by_tile: Dictionary = {}
-static var next_city_construction_site_id: int = 1
+# Construction registry ownership is settlement-local. These compatibility
+# properties preserve the historical WorldData API during the ownership-only
+# pass while resolving to the active City's CityConstructionState.
+static var city_construction_sites: Array:
+	get:
+		return WorldPoliticalState.get_current_city_construction_state().construction_sites
+	set(value):
+		WorldPoliticalState.get_current_city_construction_state().construction_sites = value
+static var city_construction_site_index_by_id: Dictionary:
+	get:
+		return WorldPoliticalState.get_current_city_construction_state().construction_site_index_by_id
+	set(value):
+		WorldPoliticalState.get_current_city_construction_state().construction_site_index_by_id = value
+static var city_construction_site_id_by_tile: Dictionary:
+	get:
+		return WorldPoliticalState.get_current_city_construction_state().construction_site_id_by_tile
+	set(value):
+		WorldPoliticalState.get_current_city_construction_state().construction_site_id_by_tile = value
+static var next_city_construction_site_id: int:
+	get:
+		return WorldPoliticalState.get_current_city_construction_state().next_construction_site_id
+	set(value):
+		WorldPoliticalState.get_current_city_construction_state().next_construction_site_id = value
 
 # Physical ground-pile and haul-reservation ownership lives in
 # CityLogisticsState/CityLogisticsSystem for the active settlement.
@@ -156,7 +173,11 @@ static var city_citizen_movement_version: int = 0
 static var city_citizen_task_version: int = 0
 static var city_assignment_version: int = 0
 static var city_workplace_version: int = 0
-static var city_construction_version: int = 0
+static var city_construction_version: int:
+	get:
+		return WorldPoliticalState.get_current_city_construction_state().construction_version
+	set(value):
+		WorldPoliticalState.get_current_city_construction_state().construction_version = value
 static var city_citizen_male_name_pool: Array[String] = (
 	CityCitizensScript.city_citizen_male_name_pool
 )

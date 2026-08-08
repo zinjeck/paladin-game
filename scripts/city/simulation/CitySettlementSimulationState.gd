@@ -23,15 +23,11 @@ var object_index_by_id: Dictionary = {}
 var occupied_tiles: Dictionary = {}
 var next_object_id: int = 1
 
-var construction_sites: Array = []
-var construction_site_index_by_id: Dictionary = {}
-var construction_site_id_by_tile: Dictionary = {}
-var next_construction_site_id: int = 1
-
 # Physically extracted settlement-local subsystems. Their state is selected by
 # settlement identity rather than copied through the legacy WorldData workspace.
 var work_state: CityWorkState = CityWorkState.new()
 var logistics_state: CityLogisticsState = CityLogisticsState.new()
+var construction_state: CityConstructionState = CityConstructionState.new()
 
 var citizens: Array = []
 var citizen_index_by_id: Dictionary = {}
@@ -54,7 +50,6 @@ var citizen_movement_version: int = 0
 var citizen_task_version: int = 0
 var assignment_version: int = 0
 var workplace_version: int = 0
-var construction_version: int = 0
 
 
 func capture_from_world_data() -> void:
@@ -72,11 +67,6 @@ func capture_from_world_data() -> void:
 	object_index_by_id = WorldData.city_object_index_by_id
 	occupied_tiles = WorldData.city_occupied_tiles
 	next_object_id = WorldData.next_city_object_id
-
-	construction_sites = WorldData.city_construction_sites
-	construction_site_index_by_id = WorldData.city_construction_site_index_by_id
-	construction_site_id_by_tile = WorldData.city_construction_site_id_by_tile
-	next_construction_site_id = WorldData.next_city_construction_site_id
 
 	citizens = WorldData.city_citizens
 	citizen_index_by_id = WorldData.city_citizen_index_by_id
@@ -101,7 +91,6 @@ func capture_from_world_data() -> void:
 	citizen_task_version = WorldData.city_citizen_task_version
 	assignment_version = WorldData.city_assignment_version
 	workplace_version = WorldData.city_workplace_version
-	construction_version = WorldData.city_construction_version
 
 
 func apply_to_world_data() -> void:
@@ -119,11 +108,6 @@ func apply_to_world_data() -> void:
 	WorldData.city_object_index_by_id = object_index_by_id
 	WorldData.city_occupied_tiles = occupied_tiles
 	WorldData.next_city_object_id = next_object_id
-
-	WorldData.city_construction_sites = construction_sites
-	WorldData.city_construction_site_index_by_id = construction_site_index_by_id
-	WorldData.city_construction_site_id_by_tile = construction_site_id_by_tile
-	WorldData.next_city_construction_site_id = next_construction_site_id
 
 	WorldData.city_citizens = citizens
 	WorldData.city_citizen_index_by_id = citizen_index_by_id
@@ -148,12 +132,10 @@ func apply_to_world_data() -> void:
 	WorldData.city_citizen_task_version = citizen_task_version
 	WorldData.city_assignment_version = assignment_version
 	WorldData.city_workplace_version = workplace_version
-	WorldData.city_construction_version = construction_version
 
 
 func is_bound_to_world_data_workspace() -> bool:
 	return (
 		WorldData.city_objects == objects
 		and WorldData.city_citizens == citizens
-		and WorldData.city_construction_sites == construction_sites
 	)
