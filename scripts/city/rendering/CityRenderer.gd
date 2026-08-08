@@ -627,10 +627,10 @@ func _collect_world_data_change_flags(
 
 	if (
 		observed_city_ground_pile_version
-		!= WorldData.city_ground_pile_version
+		!= CityLogisticsSystem.get_current_state().ground_pile_version
 	):
 		observed_city_ground_pile_version = (
-			WorldData.city_ground_pile_version
+			CityLogisticsSystem.get_current_state().ground_pile_version
 		)
 		change_flags["city_ground_piles_changed"] = true
 
@@ -645,10 +645,10 @@ func _collect_world_data_change_flags(
 
 	if (
 		observed_city_haul_reservation_version
-		!= WorldData.city_haul_reservation_version
+		!= CityLogisticsSystem.get_current_state().haul_reservation_version
 	):
 		observed_city_haul_reservation_version = (
-			WorldData.city_haul_reservation_version
+			CityLogisticsSystem.get_current_state().haul_reservation_version
 		)
 		change_flags["city_haul_reservations_changed"] = true
 
@@ -3009,13 +3009,13 @@ func get_citizen_haul_status_lines(
 	)
 
 	if reservation_id > 0:
-		var reservation := WorldData.get_city_haul_reservation(
+		var reservation := CityLogisticsSystem.get_city_haul_reservation(
 			reservation_id
 		)
 
 		if not reservation.is_empty():
 			var reserved_resources := (
-				WorldData.get_city_haul_reservation_destination_resources(
+				CityLogisticsSystem.get_city_haul_reservation_destination_resources(
 					reservation_id
 				)
 			)
@@ -6199,7 +6199,7 @@ func draw_city_ground_piles(draw_target: CanvasItem) -> void:
 	if city_world == null:
 		return
 
-	var ground_piles := WorldData.get_city_ground_pile_snapshot()
+	var ground_piles := CityLogisticsSystem.get_city_ground_pile_snapshot()
 	var pile_count_by_tile: Dictionary = {}
 
 	for raw_ground_pile in ground_piles:

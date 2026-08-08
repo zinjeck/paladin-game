@@ -351,7 +351,7 @@ func _create_mixed_work_fixture(renderer: CityRenderer) -> Dictionary:
 		return {}
 
 	var cleanup_result := (
-		WorldData.add_resource_to_city_ground_piles_with_result({
+		CityLogisticsSystem.add_resource_to_city_ground_piles_with_result({
 			"tile_position": cleanup_tile,
 			"resource": WorldData.RESOURCE_COAL,
 			"amount_delta": 1,
@@ -384,7 +384,7 @@ func _create_mixed_work_fixture(renderer: CityRenderer) -> Dictionary:
 		"A reachable source tile must exist for construction lumber."
 	)
 
-	var lumber_result := WorldData.add_resource_to_city_ground_piles_with_result({
+	var lumber_result := CityLogisticsSystem.add_resource_to_city_ground_piles_with_result({
 		"tile_position": lumber_source_tile,
 		"resource": WorldData.RESOURCE_LUMBER,
 		"amount_delta": 4,
@@ -714,7 +714,7 @@ func _ordinary_resource_exists_inside_footprint(
 	raw_footprint_tiles: Array,
 	resource: String
 ) -> bool:
-	for raw_pile in WorldData.get_city_ground_pile_snapshot():
+	for raw_pile in CityLogisticsSystem.get_city_ground_pile_snapshot():
 		if not raw_pile is Dictionary:
 			continue
 
@@ -850,7 +850,7 @@ func _prepare_deterministic_natural_targets(
 					or not CityConstructionSystem.get_city_construction_site_at_tile(
 						tile_position
 					).is_empty()
-					or WorldData.has_city_ground_pile_at_tile(tile_position)
+					or CityLogisticsSystem.has_city_ground_pile_at_tile(tile_position)
 					or WorldData.has_living_city_citizen_at_tile(tile_position)
 				):
 					continue
@@ -906,7 +906,7 @@ func _find_open_ground_tile_outside_footprint(
 
 				if (
 					footprint_tiles.has(tile_position)
-					or not WorldData.can_city_ground_pile_exist_at_tile(
+					or not CityLogisticsSystem.can_city_ground_pile_exist_at_tile(
 						city_world,
 						tile_position
 					)
@@ -1099,7 +1099,7 @@ func _select_external_access_target(
 				or not CityConstructionSystem.get_city_construction_site_at_tile(
 					candidate
 				).is_empty()
-				or WorldData.has_city_ground_pile_at_tile(candidate)
+				or CityLogisticsSystem.has_city_ground_pile_at_tile(candidate)
 			):
 				continue
 
@@ -1257,7 +1257,7 @@ func _fixture_path_is_clear(path_tiles: Array[Vector2i]) -> bool:
 			or not CityConstructionSystem.get_city_construction_site_at_tile(
 				tile_position
 			).is_empty()
-			or WorldData.has_city_ground_pile_at_tile(tile_position)
+			or CityLogisticsSystem.has_city_ground_pile_at_tile(tile_position)
 		):
 			return false
 
@@ -1312,7 +1312,7 @@ func _footprint_is_unoccupied(footprint_tiles: Array) -> bool:
 			or not CityConstructionSystem.get_city_construction_site_at_tile(
 				raw_tile
 			).is_empty()
-			or WorldData.has_city_ground_pile_at_tile(raw_tile)
+			or CityLogisticsSystem.has_city_ground_pile_at_tile(raw_tile)
 			or WorldData.has_living_city_citizen_at_tile(raw_tile)
 		):
 			return false

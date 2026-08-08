@@ -679,7 +679,7 @@ func _test_city_natural_features(
 			"Citizens must be able to walk beneath tree canopies."
 		)
 		_expect(
-			not WorldData.can_city_ground_pile_exist_at_tile(
+			not CityLogisticsSystem.can_city_ground_pile_exist_at_tile(
 				renderer.city_world,
 				first_tree_tile
 			),
@@ -972,14 +972,14 @@ func _test_ground_pile_coalescing(
 
 	var anchor_tile: Vector2i = test_tiles[0]
 	var overflow_tile: Vector2i = test_tiles[1]
-	var first_amount := WorldData.CITY_GROUND_PILE_CAPACITY - 2
+	var first_amount := CityLogisticsSystem.CITY_GROUND_PILE_CAPACITY - 2
 
 	_expect(
-		WorldData.CITY_GROUND_PILE_MERGE_RADIUS_TILES == 2,
+		CityLogisticsSystem.CITY_GROUND_PILE_MERGE_RADIUS_TILES == 2,
 		"Ground-pile coalescing radius must remain exactly two tiles."
 	)
 	_expect(
-		WorldData.add_resource_to_city_ground_pile(
+		CityLogisticsSystem.add_resource_to_city_ground_pile(
 			anchor_tile,
 			WorldData.RESOURCE_LUMBER,
 			first_amount
@@ -987,7 +987,7 @@ func _test_ground_pile_coalescing(
 		"The anchor ground pile must accept its initial lumber."
 	)
 	_expect(
-		WorldData.add_resource_to_city_ground_pile(
+		CityLogisticsSystem.add_resource_to_city_ground_pile(
 			overflow_tile,
 			WorldData.RESOURCE_LUMBER,
 			4
@@ -997,7 +997,7 @@ func _test_ground_pile_coalescing(
 
 	var lumber_piles: Array = []
 
-	for raw_ground_pile in WorldData.get_city_ground_pile_snapshot():
+	for raw_ground_pile in CityLogisticsSystem.get_city_ground_pile_snapshot():
 		if not raw_ground_pile is Dictionary:
 			continue
 
@@ -1029,7 +1029,7 @@ func _test_ground_pile_coalescing(
 
 		if (
 			pile_tile == anchor_tile
-			and pile_amount == WorldData.CITY_GROUND_PILE_CAPACITY
+			and pile_amount == CityLogisticsSystem.CITY_GROUND_PILE_CAPACITY
 		):
 			found_full_anchor = true
 		elif pile_tile == overflow_tile and pile_amount == 2:
@@ -1049,7 +1049,7 @@ func _test_ground_pile_coalescing(
 		var amount := int(ground_pile.get("amount", 0))
 
 		_expect(
-			WorldData.remove_resource_from_city_ground_pile(
+			CityLogisticsSystem.remove_resource_from_city_ground_pile(
 				int(ground_pile.get("id", -1)),
 				WorldData.RESOURCE_LUMBER,
 				amount
@@ -1068,7 +1068,7 @@ func _find_ground_pile_test_pair(
 		for x in range(city_world.width):
 			var anchor_tile := Vector2i(x, y)
 
-			if not WorldData.can_city_ground_pile_exist_at_tile(
+			if not CityLogisticsSystem.can_city_ground_pile_exist_at_tile(
 				city_world,
 				anchor_tile
 			):
@@ -1085,7 +1085,7 @@ func _find_ground_pile_test_pair(
 					)
 
 					if (
-						WorldData.get_city_ground_pile_tile_distance_squared(
+						CityLogisticsSystem.get_city_ground_pile_tile_distance_squared(
 							anchor_tile,
 							candidate_tile
 						)
@@ -1093,7 +1093,7 @@ func _find_ground_pile_test_pair(
 					):
 						continue
 
-					if WorldData.can_city_ground_pile_exist_at_tile(
+					if CityLogisticsSystem.can_city_ground_pile_exist_at_tile(
 						city_world,
 						candidate_tile
 					):
@@ -1599,7 +1599,7 @@ func _test_universal_construction_core(
 	)
 
 	var cleanup_add_result := (
-		WorldData.add_resource_to_city_ground_piles_with_result({
+		CityLogisticsSystem.add_resource_to_city_ground_piles_with_result({
 			"tile_position": cleanup_tile,
 			"resource": WorldData.RESOURCE_COAL,
 			"amount_delta": 1,
@@ -1630,7 +1630,7 @@ func _test_universal_construction_core(
 		if not raw_placement is Dictionary:
 			continue
 
-		WorldData.remove_resource_from_city_ground_pile(
+		CityLogisticsSystem.remove_resource_from_city_ground_pile(
 			int(raw_placement.get("ground_pile_id", -1)),
 			WorldData.RESOURCE_COAL,
 			int(raw_placement.get("amount", 0))
@@ -1723,20 +1723,20 @@ func _test_universal_construction_core(
 		"The open construction panel must live-update delivered materials."
 	)
 
-	for raw_ground_pile in WorldData.get_city_ground_pile_snapshot():
+	for raw_ground_pile in CityLogisticsSystem.get_city_ground_pile_snapshot():
 		if (
 			not raw_ground_pile is Dictionary
-			or WorldData.get_city_ground_pile_construction_site_id(
+			or CityLogisticsSystem.get_city_ground_pile_construction_site_id(
 				raw_ground_pile
 			) != house_site_id
 		):
 			continue
 
-		var pile_endpoint := WorldData.make_city_ground_pile_haul_endpoint(
+		var pile_endpoint := CityLogisticsSystem.make_city_ground_pile_haul_endpoint(
 			int(raw_ground_pile.get("id", -1))
 		)
 		_expect(
-			not WorldData.city_haul_endpoint_can_provide_resource({
+			not CityLogisticsSystem.city_haul_endpoint_can_provide_resource({
 				"endpoint": pile_endpoint,
 				"resource": str(raw_ground_pile.get("resource_type", "")),
 				"withdrawal_purpose": WorldData.CONTAINER_HAUL_PURPOSE_GROUND_PILE_CLEANUP,
@@ -1974,7 +1974,7 @@ func _find_clear_road_construction_tiles(
 				and WorldData.get_city_surface_feature(
 					city_world.get_tile(x, y)
 				) == WorldData.CITY_SURFACE_FEATURE_NONE
-				and not WorldData.has_city_ground_pile_at_tile(
+				and not CityLogisticsSystem.has_city_ground_pile_at_tile(
 					tile_position
 				)
 				and not WorldData.has_living_city_citizen_at_tile(
@@ -2070,7 +2070,7 @@ func _find_reachable_construction_rectangle(
 								raw_tile
 							).is_empty()
 							or
-							WorldData.has_city_ground_pile_at_tile(raw_tile)
+							CityLogisticsSystem.has_city_ground_pile_at_tile(raw_tile)
 							or WorldData.has_living_city_citizen_at_tile(
 								raw_tile
 							)
@@ -2206,7 +2206,7 @@ func _fixture_path_is_clear(path_tiles: Array[Vector2i]) -> bool:
 			or not CityConstructionSystem.get_city_construction_site_at_tile(
 				tile_position
 			).is_empty()
-			or WorldData.has_city_ground_pile_at_tile(tile_position)
+			or CityLogisticsSystem.has_city_ground_pile_at_tile(tile_position)
 		):
 			return false
 

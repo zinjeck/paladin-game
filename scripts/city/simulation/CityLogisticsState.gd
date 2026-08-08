@@ -4,12 +4,10 @@ class_name CityLogisticsState
 # Settlement-owned mutable logistics state for one CITY.
 #
 # This object owns only the physical ground-pile registry and atomic hauling
-# reservation registries/counters. WorldData temporarily exposes compatibility
-# accessors while the existing logistics APIs are migrated in a later pass.
+# reservation registries/counters. CityLogisticsSystem owns the behavior and
+# resolves this state through the active settlement context.
 #
-# Ground-pile and reservation behavior remains in the existing systems for now;
-# this class is deliberately a small state container rather than a second
-# simulation brain.
+# Keep this class a small state container rather than a second simulation brain.
 
 var ground_piles: Array = []
 var ground_pile_index_by_id: Dictionary = {}

@@ -98,20 +98,20 @@ func _run_state_isolation_test() -> void:
 	CityWorkSystem.get_current_work_state().work_order_id_by_source_key = {"test:player": 71}
 	CityWorkSystem.get_current_work_state().next_work_order_id = 72
 	CityWorkSystem.get_current_work_state().work_order_version = 8
-	WorldData.city_ground_piles = [
+	CityLogisticsSystem.get_current_state().ground_piles = [
 		{"id": 81, "test_owner": "player"},
 	]
-	WorldData.city_ground_pile_index_by_id = {81: 0}
-	WorldData.next_city_ground_pile_id = 82
-	WorldData.city_ground_pile_version = 10
-	WorldData.city_haul_reservations = {
+	CityLogisticsSystem.get_current_state().ground_pile_index_by_id = {81: 0}
+	CityLogisticsSystem.get_current_state().next_ground_pile_id = 82
+	CityLogisticsSystem.get_current_state().ground_pile_version = 10
+	CityLogisticsSystem.get_current_state().haul_reservations = {
 		91: {"id": 91, "citizen_id": 1, "test_owner": "player"},
 	}
-	WorldData.city_haul_reservation_id_by_citizen_id = {1: 91}
-	WorldData.city_haul_source_reserved_amount_by_key = {"player:source": 3}
-	WorldData.city_haul_destination_reserved_amount_by_key = {"player:destination": 3}
-	WorldData.next_city_haul_reservation_id = 92
-	WorldData.city_haul_reservation_version = 11
+	CityLogisticsSystem.get_current_state().haul_reservation_id_by_citizen_id = {1: 91}
+	CityLogisticsSystem.get_current_state().haul_source_reserved_amount_by_key = {"player:source": 3}
+	CityLogisticsSystem.get_current_state().haul_destination_reserved_amount_by_key = {"player:destination": 3}
+	CityLogisticsSystem.get_current_state().next_haul_reservation_id = 92
+	CityLogisticsSystem.get_current_state().haul_reservation_version = 11
 
 	var cpu_culture := WorldData.create_culture(CPU_CULTURE_NAME)
 	_expect(
@@ -208,12 +208,12 @@ func _run_state_isolation_test() -> void:
 		"A fresh city must begin with an independent work-state subsystem."
 	)
 	_expect(
-		WorldData.city_ground_piles.is_empty()
-		and WorldData.city_haul_reservations.is_empty()
-		and WorldData.next_city_ground_pile_id == 1
-		and WorldData.next_city_haul_reservation_id == 1
-		and WorldData.city_ground_pile_version == 0
-		and WorldData.city_haul_reservation_version == 0,
+		CityLogisticsSystem.get_current_state().ground_piles.is_empty()
+		and CityLogisticsSystem.get_current_state().haul_reservations.is_empty()
+		and CityLogisticsSystem.get_current_state().next_ground_pile_id == 1
+		and CityLogisticsSystem.get_current_state().next_haul_reservation_id == 1
+		and CityLogisticsSystem.get_current_state().ground_pile_version == 0
+		and CityLogisticsSystem.get_current_state().haul_reservation_version == 0,
 		"A fresh city must begin with an independent logistics-state subsystem."
 	)
 
@@ -250,20 +250,20 @@ func _run_state_isolation_test() -> void:
 	CityWorkSystem.get_current_work_state().work_order_id_by_source_key = {"test:cpu": 21}
 	CityWorkSystem.get_current_work_state().next_work_order_id = 22
 	CityWorkSystem.get_current_work_state().work_order_version = 16
-	WorldData.city_ground_piles = [
+	CityLogisticsSystem.get_current_state().ground_piles = [
 		{"id": 31, "test_owner": "cpu"},
 	]
-	WorldData.city_ground_pile_index_by_id = {31: 0}
-	WorldData.next_city_ground_pile_id = 32
-	WorldData.city_ground_pile_version = 18
-	WorldData.city_haul_reservations = {
+	CityLogisticsSystem.get_current_state().ground_pile_index_by_id = {31: 0}
+	CityLogisticsSystem.get_current_state().next_ground_pile_id = 32
+	CityLogisticsSystem.get_current_state().ground_pile_version = 18
+	CityLogisticsSystem.get_current_state().haul_reservations = {
 		41: {"id": 41, "citizen_id": 2, "test_owner": "cpu"},
 	}
-	WorldData.city_haul_reservation_id_by_citizen_id = {2: 41}
-	WorldData.city_haul_source_reserved_amount_by_key = {"cpu:source": 5}
-	WorldData.city_haul_destination_reserved_amount_by_key = {"cpu:destination": 5}
-	WorldData.next_city_haul_reservation_id = 42
-	WorldData.city_haul_reservation_version = 19
+	CityLogisticsSystem.get_current_state().haul_reservation_id_by_citizen_id = {2: 41}
+	CityLogisticsSystem.get_current_state().haul_source_reserved_amount_by_key = {"cpu:source": 5}
+	CityLogisticsSystem.get_current_state().haul_destination_reserved_amount_by_key = {"cpu:destination": 5}
+	CityLogisticsSystem.get_current_state().next_haul_reservation_id = 42
+	CityLogisticsSystem.get_current_state().haul_reservation_version = 19
 
 	_expect(
 		WorldPoliticalState.set_active_settlement(player_city_id),
@@ -295,12 +295,12 @@ func _run_state_isolation_test() -> void:
 		"Returning to the player city must restore its independent work state."
 	)
 	_expect(
-		str(WorldData.city_ground_piles[0].get("test_owner", "")) == "player"
-		and WorldData.next_city_ground_pile_id == 82
-		and WorldData.city_ground_pile_version == 10
-		and WorldData.city_haul_reservations.has(91)
-		and WorldData.next_city_haul_reservation_id == 92
-		and WorldData.city_haul_reservation_version == 11,
+		str(CityLogisticsSystem.get_current_state().ground_piles[0].get("test_owner", "")) == "player"
+		and CityLogisticsSystem.get_current_state().next_ground_pile_id == 82
+		and CityLogisticsSystem.get_current_state().ground_pile_version == 10
+		and CityLogisticsSystem.get_current_state().haul_reservations.has(91)
+		and CityLogisticsSystem.get_current_state().next_haul_reservation_id == 92
+		and CityLogisticsSystem.get_current_state().haul_reservation_version == 11,
 		"Returning to the player city must restore its independent logistics state."
 	)
 
@@ -334,12 +334,12 @@ func _run_state_isolation_test() -> void:
 		"Reactivating the CPU city must restore its own independent work state."
 	)
 	_expect(
-		str(WorldData.city_ground_piles[0].get("test_owner", "")) == "cpu"
-		and WorldData.next_city_ground_pile_id == 32
-		and WorldData.city_ground_pile_version == 18
-		and WorldData.city_haul_reservations.has(41)
-		and WorldData.next_city_haul_reservation_id == 42
-		and WorldData.city_haul_reservation_version == 19,
+		str(CityLogisticsSystem.get_current_state().ground_piles[0].get("test_owner", "")) == "cpu"
+		and CityLogisticsSystem.get_current_state().next_ground_pile_id == 32
+		and CityLogisticsSystem.get_current_state().ground_pile_version == 18
+		and CityLogisticsSystem.get_current_state().haul_reservations.has(41)
+		and CityLogisticsSystem.get_current_state().next_haul_reservation_id == 42
+		and CityLogisticsSystem.get_current_state().haul_reservation_version == 19,
 		"Reactivating the CPU city must restore its own independent logistics state."
 	)
 	_expect(

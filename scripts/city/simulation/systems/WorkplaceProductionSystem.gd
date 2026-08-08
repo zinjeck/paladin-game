@@ -1069,7 +1069,7 @@ static func _find_workplace_overflow_tile(
 		):
 			continue
 
-		if WorldData.can_city_ground_pile_exist_at_tile(
+		if CityLogisticsSystem.can_city_ground_pile_exist_at_tile(
 			active_world,
 			access_tile
 		):
@@ -1099,7 +1099,7 @@ static func _find_workplace_overflow_tile(
 				if candidate_lookup.has(candidate_tile):
 					continue
 
-				if not WorldData.can_city_ground_pile_exist_at_tile(
+				if not CityLogisticsSystem.can_city_ground_pile_exist_at_tile(
 					active_world,
 					candidate_tile
 				):
@@ -1327,7 +1327,7 @@ static func _store_recipe_outputs_in_ground_pile(
 			* batch_count
 		)
 		var add_result := (
-			WorldData.add_resource_to_city_ground_piles_with_result({
+			CityLogisticsSystem.add_resource_to_city_ground_piles_with_result({
 				"tile_position": tile_position,
 				"resource": resource,
 				"amount_delta": requested_amount,
@@ -1386,7 +1386,7 @@ static func _rollback_ground_pile_resources(
 			[]
 		)
 
-		if not WorldData.rollback_city_ground_pile_additions(
+		if not CityLogisticsSystem.rollback_city_ground_pile_additions(
 			resource,
 			placements
 		):

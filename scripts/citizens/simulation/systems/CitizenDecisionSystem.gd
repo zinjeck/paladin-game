@@ -116,7 +116,7 @@ static func run_tick(
 
 	# Newly produced output first expands the oldest compatible pre-pickup load.
 	# Only the remainder is visible to autonomous task matching below.
-	WorldData.expand_pending_city_haul_reservations()
+	CityLogisticsSystem.expand_pending_city_haul_reservations()
 
 	# Player designations outrank every scheduled or autonomous activity for
 	# unemployed citizens. Invalid targets are pruned before workers claim them.
@@ -937,7 +937,7 @@ static func _get_outstanding_obligation_task_request(
 		and not workplace.is_empty()
 		and WorldData.city_object_is_workplace(workplace)
 	):
-		var source := WorldData.make_city_citizen_haul_endpoint(
+		var source := CityLogisticsSystem.make_city_citizen_haul_endpoint(
 			workplace_id
 		)
 
@@ -1021,7 +1021,7 @@ static func _get_scheduled_home_food_delivery_task_request(
 	if remaining_carry_capacity <= 0:
 		return {}
 
-	var destination := WorldData.make_city_citizen_haul_endpoint(
+	var destination := CityLogisticsSystem.make_city_citizen_haul_endpoint(
 		home_id
 	)
 	var current_tile: Vector2i = raw_current_tile
@@ -1437,7 +1437,7 @@ static func _get_ground_pile_haul_opportunities() -> Array:
 	var deliverable_resource_lookup: Dictionary = {}
 	var total_unreserved_ground_amount := 0
 
-	for raw_ground_pile in WorldData.get_city_ground_pile_snapshot():
+	for raw_ground_pile in CityLogisticsSystem.get_city_ground_pile_snapshot():
 		if not raw_ground_pile is Dictionary:
 			continue
 
@@ -1446,7 +1446,7 @@ static func _get_ground_pile_haul_opportunities() -> Array:
 		var resource := str(
 			ground_pile.get("resource_type", WorldData.RESOURCE_NONE)
 		)
-		var source := WorldData.make_city_ground_pile_haul_endpoint(
+		var source := CityLogisticsSystem.make_city_ground_pile_haul_endpoint(
 			ground_pile_id
 		)
 
@@ -1459,7 +1459,7 @@ static func _get_ground_pile_haul_opportunities() -> Array:
 
 		if (
 			not bool(deliverable_resource_lookup[resource])
-			or not WorldData.city_haul_endpoint_can_provide_resource({
+			or not CityLogisticsSystem.city_haul_endpoint_can_provide_resource({
 				"endpoint": source,
 				"resource": resource,
 				"withdrawal_purpose": WorldData.CONTAINER_HAUL_PURPOSE_GROUND_PILE_CLEANUP,
@@ -1469,7 +1469,7 @@ static func _get_ground_pile_haul_opportunities() -> Array:
 			continue
 
 		var unreserved_amount := (
-			WorldData.get_city_haul_endpoint_unreserved_resource_amount(
+			CityLogisticsSystem.get_city_haul_endpoint_unreserved_resource_amount(
 				source,
 				resource
 			)
@@ -1558,7 +1558,7 @@ static func _get_active_ground_pile_chain_capacity() -> int:
 				WorldData.INVALID_CITY_CITIZEN_HAUL_RESERVATION_ID
 			)
 		)
-		var reservation := WorldData.get_city_haul_reservation(
+		var reservation := CityLogisticsSystem.get_city_haul_reservation(
 			reservation_id
 		)
 
@@ -1598,11 +1598,11 @@ static func _get_total_unreserved_public_storage_space() -> int:
 		):
 			continue
 
-		var destination := WorldData.make_city_citizen_haul_endpoint(
+		var destination := CityLogisticsSystem.make_city_citizen_haul_endpoint(
 			int(city_object.get("id", -1))
 		)
 		total_space += (
-			WorldData.get_city_haul_endpoint_unreserved_destination_space(
+			CityLogisticsSystem.get_city_haul_endpoint_unreserved_destination_space(
 				destination
 			)
 		)
@@ -1624,7 +1624,7 @@ static func _get_workplace_output_haul_opportunities() -> Array:
 			continue
 
 		var workplace_id := int(workplace.get("id", -1))
-		var source := WorldData.make_city_citizen_haul_endpoint(
+		var source := CityLogisticsSystem.make_city_citizen_haul_endpoint(
 			workplace_id
 		)
 
@@ -1640,7 +1640,7 @@ static func _get_workplace_output_haul_opportunities() -> Array:
 
 			if (
 				not bool(deliverable_resource_lookup[resource])
-				or not WorldData.city_haul_endpoint_can_provide_resource({
+				or not CityLogisticsSystem.city_haul_endpoint_can_provide_resource({
 					"endpoint": source,
 					"resource": resource,
 					"withdrawal_purpose": WorldData.CONTAINER_HAUL_PURPOSE_WORKPLACE_OUTPUT,
@@ -1684,11 +1684,11 @@ static func _resource_has_unreserved_public_storage_destination(
 			):
 				continue
 
-			var destination := WorldData.make_city_citizen_haul_endpoint(
+			var destination := CityLogisticsSystem.make_city_citizen_haul_endpoint(
 				int(city_object.get("id", -1))
 			)
 
-			if WorldData.city_haul_endpoint_can_accept_resource({
+			if CityLogisticsSystem.city_haul_endpoint_can_accept_resource({
 				"endpoint": destination,
 				"resource": resource,
 				"deposit_purpose": WorldData.CONTAINER_HAUL_PURPOSE_PUBLIC_STORAGE,
@@ -1935,7 +1935,7 @@ static func _try_assign_autonomous_haul_match(
 	if (
 		citizen.is_empty()
 		or int(citizen.get("job_object_id", -1)) > 0
-		or not WorldData.city_haul_endpoint_can_provide_resource({
+		or not CityLogisticsSystem.city_haul_endpoint_can_provide_resource({
 			"endpoint": source,
 			"resource": resource,
 			"withdrawal_purpose": source_access_purpose,
@@ -1946,7 +1946,7 @@ static func _try_assign_autonomous_haul_match(
 
 	if (
 		has_fixed_destination
-		and not WorldData.city_haul_endpoint_can_accept_resource({
+		and not CityLogisticsSystem.city_haul_endpoint_can_accept_resource({
 			"endpoint": destination,
 			"resource": resource,
 			"deposit_purpose": destination_access_purpose,
@@ -1957,7 +1957,7 @@ static func _try_assign_autonomous_haul_match(
 
 	var requested_amount := mini(
 		WorldData.get_city_citizen_available_haul_capacity(citizen_id),
-		WorldData.get_city_haul_endpoint_unreserved_resource_amount(
+		CityLogisticsSystem.get_city_haul_endpoint_unreserved_resource_amount(
 			source,
 			resource
 		)
@@ -1970,7 +1970,7 @@ static func _try_assign_autonomous_haul_match(
 	if has_fixed_destination:
 		requested_amount = mini(
 			requested_amount,
-			WorldData.get_city_haul_endpoint_unreserved_destination_space(
+			CityLogisticsSystem.get_city_haul_endpoint_unreserved_destination_space(
 				destination
 			)
 		)

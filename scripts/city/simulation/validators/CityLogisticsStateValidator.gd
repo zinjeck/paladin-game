@@ -290,8 +290,8 @@ static func _validate_city_ground_pile_state(
 	var nonfull_pile_id_by_resource_tile: Dictionary = {}
 	var maximum_ground_pile_id := 0
 
-	for pile_index in range(WorldData.city_ground_piles.size()):
-		var raw_ground_pile = WorldData.city_ground_piles[pile_index]
+	for pile_index in range(CityLogisticsSystem.get_current_state().ground_piles.size()):
+		var raw_ground_pile = CityLogisticsSystem.get_current_state().ground_piles[pile_index]
 
 		if not raw_ground_pile is Dictionary:
 			errors.append(
@@ -312,7 +312,7 @@ static func _validate_city_ground_pile_state(
 		)
 		var raw_amount = ground_pile.get("amount")
 		var construction_site_id := (
-			WorldData.get_city_ground_pile_construction_site_id(
+			CityLogisticsSystem.get_city_ground_pile_construction_site_id(
 				ground_pile
 			)
 		)
@@ -352,7 +352,7 @@ static func _validate_city_ground_pile_state(
 
 			if (
 				WorldData.official_city_world != null
-				and not WorldData.can_city_ground_pile_exist_at_tile(
+				and not CityLogisticsSystem.can_city_ground_pile_exist_at_tile(
 					WorldData.official_city_world,
 					tile_position
 				)
@@ -413,23 +413,23 @@ static func _validate_city_ground_pile_state(
 				+ str(raw_amount)
 				+ "."
 			)
-		elif int(raw_amount) > WorldData.CITY_GROUND_PILE_CAPACITY:
+		elif int(raw_amount) > CityLogisticsSystem.CITY_GROUND_PILE_CAPACITY:
 			errors.append(
 				"Ground pile "
 				+ str(ground_pile_id)
 				+ " exceeds capacity "
-				+ str(WorldData.CITY_GROUND_PILE_CAPACITY)
+				+ str(CityLogisticsSystem.CITY_GROUND_PILE_CAPACITY)
 				+ "."
 			)
 		elif (
 			raw_tile_position is Vector2i
 			and WorldData.is_city_resource_type(resource)
-			and int(raw_amount) < WorldData.CITY_GROUND_PILE_CAPACITY
+			and int(raw_amount) < CityLogisticsSystem.CITY_GROUND_PILE_CAPACITY
 		):
 			var tile_position: Vector2i = raw_tile_position
 			var nearby_nonfull_pile_id := -1
 			var merge_radius := (
-				WorldData.CITY_GROUND_PILE_MERGE_RADIUS_TILES
+				CityLogisticsSystem.CITY_GROUND_PILE_MERGE_RADIUS_TILES
 			)
 			var merge_radius_squared := merge_radius * merge_radius
 
@@ -492,7 +492,7 @@ static func _validate_city_ground_pile_state(
 
 
 		if int(
-			WorldData.city_ground_pile_index_by_id.get(
+			CityLogisticsSystem.get_current_state().ground_pile_index_by_id.get(
 				ground_pile_id,
 				-1
 			)
@@ -504,14 +504,14 @@ static func _validate_city_ground_pile_state(
 			)
 
 	if (
-		WorldData.city_ground_pile_index_by_id.size()
+		CityLogisticsSystem.get_current_state().ground_pile_index_by_id.size()
 		!= ground_pile_lookup.size()
 	):
 		errors.append(
 			"Ground pile registry array and ID lookup have different sizes."
 		)
 
-	if WorldData.next_city_ground_pile_id <= maximum_ground_pile_id:
+	if CityLogisticsSystem.get_current_state().next_ground_pile_id <= maximum_ground_pile_id:
 		errors.append(
 			"next_city_ground_pile_id must be greater than every existing pile ID."
 		)
@@ -1257,7 +1257,7 @@ static func _validate_city_haul_reservations(
 	var destination_endpoint_by_key: Dictionary = {}
 	var maximum_reservation_id := 0
 
-	for raw_reservation_id in WorldData.city_haul_reservations.keys():
+	for raw_reservation_id in CityLogisticsSystem.get_current_state().haul_reservations.keys():
 		maximum_reservation_id = _validate_city_haul_reservation_entry({
 			"errors": errors,
 			"citizen_lookup": citizen_lookup,
@@ -1283,7 +1283,7 @@ static func _validate_city_haul_reservations(
 
 		if (
 			reserved_amount
-			> WorldData.get_city_haul_endpoint_resource_amount(
+			> CityLogisticsSystem.get_city_haul_endpoint_resource_amount(
 				source,
 				resource
 			)
@@ -1341,7 +1341,7 @@ static func _validate_city_haul_reservations(
 			destination_kind
 			== WorldData.CITY_CITIZEN_HAUL_ENDPOINT_KIND_GROUND_TILE
 			and reserved_amount
-			> WorldData.CITY_GROUND_DROP_RESERVATION_CAPACITY
+			> CityLogisticsSystem.CITY_GROUND_DROP_RESERVATION_CAPACITY
 		):
 			errors.append(
 				"Destination reservations exceed ground-drop capacity at "
@@ -1360,7 +1360,7 @@ static func _validate_city_haul_reservations(
 			)
 
 	if (
-		WorldData.city_haul_reservation_id_by_citizen_id
+		CityLogisticsSystem.get_current_state().haul_reservation_id_by_citizen_id
 		!= expected_citizen_lookup
 	):
 		errors.append(
@@ -1368,7 +1368,7 @@ static func _validate_city_haul_reservations(
 		)
 
 	if (
-		WorldData.city_haul_source_reserved_amount_by_key
+		CityLogisticsSystem.get_current_state().haul_source_reserved_amount_by_key
 		!= expected_source_amount_by_key
 	):
 		errors.append(
@@ -1376,19 +1376,19 @@ static func _validate_city_haul_reservations(
 		)
 
 	if (
-		WorldData.city_haul_destination_reserved_amount_by_key
+		CityLogisticsSystem.get_current_state().haul_destination_reserved_amount_by_key
 		!= expected_destination_amount_by_key
 	):
 		errors.append(
 			"Haul destination reservation aggregate does not match the ledger."
 		)
 
-	if WorldData.next_city_haul_reservation_id <= maximum_reservation_id:
+	if CityLogisticsSystem.get_current_state().next_haul_reservation_id <= maximum_reservation_id:
 		errors.append(
 			"next_city_haul_reservation_id must exceed every reservation ID."
 		)
 
-	return WorldData.city_haul_reservations.size()
+	return CityLogisticsSystem.get_current_state().haul_reservations.size()
 
 
 
@@ -1434,7 +1434,7 @@ static func _validate_city_haul_reservation_entry(
 		return maximum_reservation_id
 
 	var reservation_id: int = raw_reservation_id
-	var raw_reservation = WorldData.city_haul_reservations[
+	var raw_reservation = CityLogisticsSystem.get_current_state().haul_reservations[
 		reservation_id
 	]
 
@@ -1917,7 +1917,7 @@ static func _validate_city_haul_reservation_source(
 				+ " reserves a missing source endpoint."
 			)
 
-		if not WorldData.city_haul_endpoint_can_provide_resource({
+		if not CityLogisticsSystem.city_haul_endpoint_can_provide_resource({
 			"endpoint": source,
 			"resource": resource,
 			"withdrawal_purpose": str(
@@ -2020,7 +2020,7 @@ static func _validate_city_haul_reservation_destination(
 		var destination_policy_is_valid := true
 
 		for reserved_resource in destination_reserved_resources.keys():
-			if not WorldData.city_haul_endpoint_can_accept_resource({
+			if not CityLogisticsSystem.city_haul_endpoint_can_accept_resource({
 				"endpoint": destination,
 				"resource": str(reserved_resource),
 				"deposit_purpose": destination_access_purpose,
@@ -2106,7 +2106,7 @@ static func _city_haul_endpoint_exists(
 			return (
 				raw_tile is Vector2i
 				and WorldData.official_city_world != null
-				and WorldData.can_city_ground_pile_exist_at_tile(
+				and CityLogisticsSystem.can_city_ground_pile_exist_at_tile(
 					WorldData.official_city_world,
 					raw_tile
 				)

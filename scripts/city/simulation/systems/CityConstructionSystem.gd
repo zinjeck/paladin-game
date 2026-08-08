@@ -378,10 +378,10 @@ static func _can_update_city_construction_site_footprint(
 		):
 			return false
 
-	for raw_ground_pile in WorldData.city_ground_piles:
+	for raw_ground_pile in CityLogisticsSystem.get_current_state().ground_piles:
 		if (
 			raw_ground_pile is Dictionary
-			and WorldData.get_city_ground_pile_construction_site_id(
+			and CityLogisticsSystem.get_city_ground_pile_construction_site_id(
 				raw_ground_pile
 			) == site_id
 			and not updated_footprint.has(
@@ -486,7 +486,7 @@ static func _get_city_construction_material_deposit_tile(
 	for raw_tile in site.get("footprint_tiles", []):
 		if (
 			raw_tile is Vector2i
-			and WorldData.can_city_ground_pile_exist_at_tile(
+			and CityLogisticsSystem.can_city_ground_pile_exist_at_tile(
 				WorldData.official_city_world,
 				raw_tile
 			)
@@ -524,7 +524,7 @@ static func add_resource_to_city_construction_site(
 	if accepted_amount <= 0 or deposit_tile == WorldData.INVALID_CITY_TILE_POSITION:
 		return 0
 
-	var add_result := WorldData.add_resource_to_city_ground_piles_with_result({
+	var add_result := CityLogisticsSystem.add_resource_to_city_ground_piles_with_result({
 		"tile_position": deposit_tile,
 		"resource": resource,
 		"amount_delta": accepted_amount,
@@ -543,16 +543,16 @@ static func remove_resource_from_city_construction_site(
 	var remaining_amount := requested_amount
 	var pile_ids: Array[int] = []
 
-	for raw_ground_pile in WorldData.city_ground_piles:
+	for raw_ground_pile in CityLogisticsSystem.get_current_state().ground_piles:
 		if not raw_ground_pile is Dictionary:
 			continue
 
 		var ground_pile: Dictionary = raw_ground_pile
 
 		if (
-			WorldData.get_city_ground_pile_construction_site_id(ground_pile)
+			CityLogisticsSystem.get_city_ground_pile_construction_site_id(ground_pile)
 			!= site_id
-			or WorldData.get_city_ground_pile_resource_amount(
+			or CityLogisticsSystem.get_city_ground_pile_resource_amount(
 				ground_pile,
 				resource
 			) <= 0
@@ -567,13 +567,13 @@ static func remove_resource_from_city_construction_site(
 		if remaining_amount <= 0:
 			break
 
-		var ground_pile := WorldData.get_city_ground_pile_by_id(pile_id)
-		var removed_amount := WorldData.remove_resource_from_city_ground_pile(
+		var ground_pile := CityLogisticsSystem.get_city_ground_pile_by_id(pile_id)
+		var removed_amount := CityLogisticsSystem.remove_resource_from_city_ground_pile(
 			pile_id,
 			resource,
 			mini(
 				remaining_amount,
-				WorldData.get_city_ground_pile_resource_amount(
+				CityLogisticsSystem.get_city_ground_pile_resource_amount(
 					ground_pile,
 					resource
 				)
@@ -589,8 +589,8 @@ static func release_city_construction_site_materials(
 	var released_amount := 0
 	var changed := false
 
-	for pile_index in range(WorldData.city_ground_piles.size()):
-		var raw_ground_pile = WorldData.city_ground_piles[pile_index]
+	for pile_index in range(CityLogisticsSystem.get_current_state().ground_piles.size()):
+		var raw_ground_pile = CityLogisticsSystem.get_current_state().ground_piles[pile_index]
 
 		if not raw_ground_pile is Dictionary:
 			continue
@@ -598,7 +598,7 @@ static func release_city_construction_site_materials(
 		var ground_pile: Dictionary = raw_ground_pile
 
 		if (
-			WorldData.get_city_ground_pile_construction_site_id(ground_pile)
+			CityLogisticsSystem.get_city_ground_pile_construction_site_id(ground_pile)
 			!= site_id
 		):
 			continue
@@ -608,19 +608,19 @@ static func release_city_construction_site_materials(
 			0
 		)
 		ground_pile.erase("construction_site_id")
-		WorldData.city_ground_piles[pile_index] = ground_pile
+		CityLogisticsSystem.get_current_state().ground_piles[pile_index] = ground_pile
 		changed = true
 
 	if changed:
 		_coalesce_ordinary_city_ground_piles()
-		WorldData._mark_city_ground_piles_changed()
+		CityLogisticsSystem._mark_city_ground_piles_changed()
 
 	return released_amount
 
 static func _coalesce_ordinary_city_ground_piles() -> void:
 	var merge_radius_squared := (
-		WorldData.CITY_GROUND_PILE_MERGE_RADIUS_TILES
-		* WorldData.CITY_GROUND_PILE_MERGE_RADIUS_TILES
+		CityLogisticsSystem.CITY_GROUND_PILE_MERGE_RADIUS_TILES
+		* CityLogisticsSystem.CITY_GROUND_PILE_MERGE_RADIUS_TILES
 	)
 	var merged_any := true
 
@@ -628,10 +628,10 @@ static func _coalesce_ordinary_city_ground_piles() -> void:
 		merged_any = false
 		var pile_ids: Array[int] = []
 
-		for raw_ground_pile in WorldData.city_ground_piles:
+		for raw_ground_pile in CityLogisticsSystem.get_current_state().ground_piles:
 			if (
 				raw_ground_pile is Dictionary
-				and not WorldData.city_ground_pile_is_construction_reserved(
+				and not CityLogisticsSystem.city_ground_pile_is_construction_reserved(
 					raw_ground_pile
 				)
 			):
@@ -641,14 +641,14 @@ static func _coalesce_ordinary_city_ground_piles() -> void:
 
 		for source_order_index in range(1, pile_ids.size()):
 			var source_id := pile_ids[source_order_index]
-			var source_index := WorldData.get_city_ground_pile_index_by_id(
+			var source_index := CityLogisticsSystem.get_city_ground_pile_index_by_id(
 				source_id
 			)
 
 			if source_index < 0:
 				continue
 
-			var source: Dictionary = WorldData.city_ground_piles[source_index]
+			var source: Dictionary = CityLogisticsSystem.get_current_state().ground_piles[source_index]
 			var source_resource := str(
 				source.get("resource_type", WorldData.RESOURCE_NONE)
 			)
@@ -662,14 +662,14 @@ static func _coalesce_ordinary_city_ground_piles() -> void:
 
 			for target_order_index in range(source_order_index):
 				var target_id := pile_ids[target_order_index]
-				var target_index := WorldData.get_city_ground_pile_index_by_id(
+				var target_index := CityLogisticsSystem.get_city_ground_pile_index_by_id(
 					target_id
 				)
 
 				if target_index < 0:
 					continue
 
-				var target: Dictionary = WorldData.city_ground_piles[target_index]
+				var target: Dictionary = CityLogisticsSystem.get_current_state().ground_piles[target_index]
 				var raw_target_tile = target.get(
 					"tile_position",
 					WorldData.INVALID_CITY_TILE_POSITION
@@ -680,10 +680,10 @@ static func _coalesce_ordinary_city_ground_piles() -> void:
 					or str(
 						target.get("resource_type", WorldData.RESOURCE_NONE)
 					) != source_resource
-					or WorldData.city_ground_pile_is_construction_reserved(
+					or CityLogisticsSystem.city_ground_pile_is_construction_reserved(
 						target
 					)
-					or WorldData.get_city_ground_pile_tile_distance_squared(
+					or CityLogisticsSystem.get_city_ground_pile_tile_distance_squared(
 						raw_source_tile,
 						raw_target_tile
 					) > merge_radius_squared
@@ -692,7 +692,7 @@ static func _coalesce_ordinary_city_ground_piles() -> void:
 
 				var moved_amount := mini(
 					maxi(int(source.get("amount", 0)), 0),
-					WorldData.get_city_ground_pile_free_space(target)
+					CityLogisticsSystem.get_city_ground_pile_free_space(target)
 				)
 
 				if moved_amount <= 0:
@@ -706,13 +706,13 @@ static func _coalesce_ordinary_city_ground_piles() -> void:
 					maxi(int(source.get("amount", 0)), 0)
 					- moved_amount
 				)
-				WorldData.city_ground_piles[target_index] = target
+				CityLogisticsSystem.get_current_state().ground_piles[target_index] = target
 
 				if int(source.get("amount", 0)) > 0:
-					WorldData.city_ground_piles[source_index] = source
+					CityLogisticsSystem.get_current_state().ground_piles[source_index] = source
 				else:
-					WorldData.city_ground_piles.remove_at(source_index)
-					WorldData.rebuild_city_ground_pile_index()
+					CityLogisticsSystem.get_current_state().ground_piles.remove_at(source_index)
+					CityLogisticsSystem.rebuild_city_ground_pile_index()
 
 				merged_any = true
 				break
@@ -1264,7 +1264,7 @@ static func _get_remaining_clearing_work_units(
 			+ CityWorkSystem.CITY_PLAYER_COMMAND_RESOURCE_YIELD
 		)
 
-	for raw_ground_pile in WorldData.get_city_ground_pile_snapshot():
+	for raw_ground_pile in CityLogisticsSystem.get_city_ground_pile_snapshot():
 		if not raw_ground_pile is Dictionary:
 			continue
 
@@ -1279,7 +1279,7 @@ static func _get_remaining_clearing_work_units(
 			continue
 
 		if (
-			WorldData.get_city_ground_pile_construction_site_id(
+			CityLogisticsSystem.get_city_ground_pile_construction_site_id(
 				ground_pile
 			) == site_id
 		):
@@ -1324,7 +1324,7 @@ static func _reserve_needed_footprint_materials(
 		return
 
 	var footprint_tiles: Array = site.get("footprint_tiles", [])
-	var ground_piles := WorldData.get_city_ground_pile_snapshot()
+	var ground_piles := CityLogisticsSystem.get_city_ground_pile_snapshot()
 
 	ground_piles.sort_custom(
 		func(a: Dictionary, b: Dictionary) -> bool:
@@ -1344,7 +1344,7 @@ static func _reserve_needed_footprint_materials(
 		if (
 			not raw_tile_position is Vector2i
 			or not footprint_tiles.has(raw_tile_position)
-			or WorldData.city_ground_pile_is_construction_reserved(
+			or CityLogisticsSystem.city_ground_pile_is_construction_reserved(
 				ground_pile
 			)
 		):
@@ -1366,7 +1366,7 @@ static func _reserve_needed_footprint_materials(
 		if needed_amount <= 0:
 			continue
 
-		WorldData.reserve_city_ground_pile_for_construction(
+		CityLogisticsSystem.reserve_city_ground_pile_for_construction(
 			int(ground_pile.get("id", -1)),
 			site_id,
 			needed_amount
@@ -1447,7 +1447,7 @@ static func _site_has_ordinary_ground_pile(
 	var site_id := int(site.get("id", -1))
 	var footprint_tiles: Array = site.get("footprint_tiles", [])
 
-	for raw_ground_pile in WorldData.city_ground_piles:
+	for raw_ground_pile in CityLogisticsSystem.get_current_state().ground_piles:
 		if not raw_ground_pile is Dictionary:
 			continue
 
@@ -1462,7 +1462,7 @@ static func _site_has_ordinary_ground_pile(
 			continue
 
 		if (
-			WorldData.get_city_ground_pile_construction_site_id(
+			CityLogisticsSystem.get_city_ground_pile_construction_site_id(
 				ground_pile
 			) != site_id
 		):
@@ -1713,7 +1713,7 @@ static func _get_best_clearing_cleanup_candidate(
 	var site_id := int(site.get("id", -1))
 	var footprint_tiles: Array = site.get("footprint_tiles", [])
 	var site_endpoint := (
-		WorldData.make_city_construction_site_haul_endpoint(site_id)
+		CityLogisticsSystem.make_city_construction_site_haul_endpoint(site_id)
 	)
 	var raw_citizen_tile = citizen.get(
 		"city_tile_position",
@@ -1724,7 +1724,7 @@ static func _get_best_clearing_cleanup_candidate(
 	if site_id <= 0 or not raw_citizen_tile is Vector2i:
 		return best_candidate
 
-	for raw_ground_pile in WorldData.get_city_ground_pile_snapshot():
+	for raw_ground_pile in CityLogisticsSystem.get_city_ground_pile_snapshot():
 		if not raw_ground_pile is Dictionary:
 			continue
 
@@ -1737,7 +1737,7 @@ static func _get_best_clearing_cleanup_candidate(
 		if (
 			not raw_pile_tile is Vector2i
 			or not footprint_tiles.has(raw_pile_tile)
-			or WorldData.city_ground_pile_is_construction_reserved(
+			or CityLogisticsSystem.city_ground_pile_is_construction_reserved(
 				ground_pile
 			)
 		):
@@ -1750,11 +1750,11 @@ static func _get_best_clearing_cleanup_candidate(
 				WorldData.RESOURCE_NONE
 			)
 		)
-		var source := WorldData.make_city_ground_pile_haul_endpoint(
+		var source := CityLogisticsSystem.make_city_ground_pile_haul_endpoint(
 			ground_pile_id
 		)
 		var requested_amount := (
-			WorldData.get_city_haul_endpoint_unreserved_resource_amount(
+			CityLogisticsSystem.get_city_haul_endpoint_unreserved_resource_amount(
 				source,
 				resource
 			)
@@ -1872,7 +1872,7 @@ static func can_relocate_ground_pile_outside_site(
 	ground_pile_id: int
 ) -> bool:
 	var site := WorldData.get_city_construction_site_by_id(site_id)
-	var pile := WorldData.get_city_ground_pile_by_id(ground_pile_id)
+	var pile := CityLogisticsSystem.get_city_ground_pile_by_id(ground_pile_id)
 	var raw_source_tile = pile.get(
 		"tile_position",
 		WorldData.INVALID_CITY_TILE_POSITION
@@ -1882,7 +1882,7 @@ static func can_relocate_ground_pile_outside_site(
 		site.is_empty()
 		or not raw_source_tile is Vector2i
 		or not site.get("footprint_tiles", []).has(raw_source_tile)
-		or WorldData.city_ground_pile_is_construction_reserved(pile)
+		or CityLogisticsSystem.city_ground_pile_is_construction_reserved(pile)
 	):
 		return false
 
@@ -1924,7 +1924,7 @@ static func _make_ground_relocation_task_request(
 	var excluded_pile_ids: Array[int] = []
 	var footprint_tiles: Array = site.get("footprint_tiles", [])
 
-	for raw_pile in WorldData.get_city_ground_pile_snapshot():
+	for raw_pile in CityLogisticsSystem.get_city_ground_pile_snapshot():
 		if (
 			raw_pile is Dictionary
 			and footprint_tiles.has(
@@ -1933,18 +1933,18 @@ static func _make_ground_relocation_task_request(
 					WorldData.INVALID_CITY_TILE_POSITION
 				)
 			)
-			and not WorldData.city_ground_pile_is_construction_reserved(
+			and not CityLogisticsSystem.city_ground_pile_is_construction_reserved(
 				raw_pile
 			)
 		):
 			excluded_pile_ids.append(int(raw_pile.get("id", -1)))
 
 	excluded_pile_ids.sort()
-	var destination := WorldData.make_city_ground_tile_haul_endpoint(
+	var destination := CityLogisticsSystem.make_city_ground_tile_haul_endpoint(
 		destination_tile,
 		excluded_pile_ids
 	)
-	var site_endpoint := WorldData.make_city_construction_site_haul_endpoint(
+	var site_endpoint := CityLogisticsSystem.make_city_construction_site_haul_endpoint(
 		int(site.get("id", -1))
 	)
 
@@ -2000,7 +2000,7 @@ static func _find_nearest_ground_relocation_tile(
 					or not get_city_construction_site_at_tile(
 						candidate_tile
 					).is_empty()
-					or not WorldData.can_city_ground_pile_exist_at_tile(
+					or not CityLogisticsSystem.can_city_ground_pile_exist_at_tile(
 						city_world,
 						candidate_tile
 					)
@@ -2063,7 +2063,7 @@ static func _get_best_delivery_candidate(
 ) -> Dictionary:
 	var site_id := int(site.get("id", -1))
 	var destination := (
-		WorldData.make_city_construction_site_haul_endpoint(site_id)
+		CityLogisticsSystem.make_city_construction_site_haul_endpoint(site_id)
 	)
 	var best_candidate: Dictionary = {}
 
@@ -2913,7 +2913,7 @@ static func _restore_site_materials(
 		if amount <= 0:
 			continue
 
-		WorldData.add_resource_to_city_ground_pile(
+		CityLogisticsSystem.add_resource_to_city_ground_pile(
 			deposit_tile,
 			str(resource),
 			amount,
@@ -2990,15 +2990,15 @@ static func _release_site_delivery_tasks(site_id: int) -> bool:
 			return false
 
 	var site_endpoint := (
-		WorldData.make_city_construction_site_haul_endpoint(site_id)
+		CityLogisticsSystem.make_city_construction_site_haul_endpoint(site_id)
 	)
 
-	for reservation in WorldData.get_city_haul_reservation_snapshot():
-		if WorldData.city_citizen_haul_endpoints_match(
+	for reservation in CityLogisticsSystem.get_city_haul_reservation_snapshot():
+		if CityLogisticsSystem.city_citizen_haul_endpoints_match(
 			reservation.get("destination", {}),
 			site_endpoint
 		):
-			WorldData.release_city_haul_reservation(
+			CityLogisticsSystem.release_city_haul_reservation(
 				int(reservation.get("id", -1))
 			)
 
@@ -3052,7 +3052,7 @@ static func _haul_references_site(
 ) -> bool:
 	var haul := WorldData.get_city_citizen_current_haul(citizen_id)
 	var site_endpoint := (
-		WorldData.make_city_construction_site_haul_endpoint(site_id)
+		CityLogisticsSystem.make_city_construction_site_haul_endpoint(site_id)
 	)
 
 	for endpoint_field in ["source", "destination", "requester"]:
@@ -3060,7 +3060,7 @@ static func _haul_references_site(
 
 		if (
 			raw_endpoint is Dictionary
-			and WorldData.city_citizen_haul_endpoints_match(
+			and CityLogisticsSystem.city_citizen_haul_endpoints_match(
 				raw_endpoint,
 				site_endpoint
 			)

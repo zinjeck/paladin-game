@@ -551,7 +551,7 @@ func _test_new_blueprint_rebalances_uncommitted_construction_travel() -> void:
 		"A material-blocked blueprint must not stop or restart existing trips."
 	)
 
-	var stone_result := WorldData.add_resource_to_city_ground_piles_with_result({
+	var stone_result := CityLogisticsSystem.add_resource_to_city_ground_piles_with_result({
 		"tile_position": Vector2i(4, 7),
 		"resource": WorldData.RESOURCE_STONE,
 		"amount_delta": 1,
@@ -723,7 +723,7 @@ func _test_new_blueprint_rebalances_uncommitted_construction_travel() -> void:
 	var protected_reservation_id := int(
 		protected_haul.get("reservation_id", -1)
 	)
-	var protected_reservation := WorldData.get_city_haul_reservation(
+	var protected_reservation := CityLogisticsSystem.get_city_haul_reservation(
 		protected_reservation_id
 	)
 	var urgent_site := _create_ready_labor_site([Vector2i(22, 7)], 1)
@@ -754,7 +754,7 @@ func _test_new_blueprint_rebalances_uncommitted_construction_travel() -> void:
 	_expect(
 		_get_assignment_snapshot(left_builder_id) == protected_delivery
 		and protected_reservation_id > 0
-		and WorldData.get_city_haul_reservation(
+		and CityLogisticsSystem.get_city_haul_reservation(
 			protected_reservation_id
 		) == protected_reservation,
 		"Rebalancing must preserve an empty-handed construction delivery and its reservation."
@@ -1164,7 +1164,7 @@ func _test_survival_food_fallback_and_reservation_accounting() -> void:
 		"The fishery fixture must expose one unit of workplace output."
 	)
 
-	var pile_result := WorldData.add_resource_to_city_ground_piles_with_result({
+	var pile_result := CityLogisticsSystem.add_resource_to_city_ground_piles_with_result({
 		"tile_position": Vector2i(7, 12),
 		"resource": WorldData.RESOURCE_FISH,
 		"amount_delta": 2,
@@ -1236,7 +1236,7 @@ func _test_survival_food_fallback_and_reservation_accounting() -> void:
 	_expect(
 		WorldData.get_city_food_endpoint_unreserved_amount(
 			int(fourth.get("id", -1)),
-			WorldData.make_city_ground_pile_haul_endpoint(pile_id),
+			CityLogisticsSystem.make_city_ground_pile_haul_endpoint(pile_id),
 			WorldData.RESOURCE_FISH
 		) == 0,
 		"Food endpoint availability must subtract all competing one-item task reservations."
@@ -1297,7 +1297,7 @@ func _test_unreachable_food_tier_does_not_hide_fallbacks() -> void:
 		"The reachable fallback workplace must contain fish."
 	)
 
-	var pile_result := WorldData.add_resource_to_city_ground_piles_with_result({
+	var pile_result := CityLogisticsSystem.add_resource_to_city_ground_piles_with_result({
 		"tile_position": Vector2i(20, 13),
 		"resource": WorldData.RESOURCE_FISH,
 		"amount_delta": 1,
@@ -1461,7 +1461,7 @@ func _test_unified_food_search_avoids_budget_starvation() -> void:
 			"Every isolated container source must contain one physical fish."
 		)
 
-	var pile_result := WorldData.add_resource_to_city_ground_piles_with_result({
+	var pile_result := CityLogisticsSystem.add_resource_to_city_ground_piles_with_result({
 		"tile_position": Vector2i(27, 15),
 		"resource": WorldData.RESOURCE_FISH,
 		"amount_delta": 2,
@@ -1582,7 +1582,7 @@ func _test_full_storage_construction_relocation_and_cancel_preview() -> void:
 		return
 
 	var footprint_tiles: Array = house_site.get("footprint_tiles", [])
-	var pile_result := WorldData.add_resource_to_city_ground_piles_with_result({
+	var pile_result := CityLogisticsSystem.add_resource_to_city_ground_piles_with_result({
 		"tile_position": footprint_tiles[0],
 		"resource": WorldData.RESOURCE_COAL,
 		"amount_delta": 1,
@@ -1726,14 +1726,14 @@ func _test_safe_boundary_and_cancellation_preserve_physical_cargo() -> void:
 	if site_id <= 0:
 		return
 
-	var source_result := WorldData.add_resource_to_city_ground_piles_with_result({
+	var source_result := CityLogisticsSystem.add_resource_to_city_ground_piles_with_result({
 		"tile_position": Vector2i(7, 7),
 		"resource": WorldData.RESOURCE_STONE,
 		"amount_delta": 2,
 	})
 	var source_id := _first_ground_pile_id(source_result)
-	var source := WorldData.make_city_ground_pile_haul_endpoint(source_id)
-	var site_endpoint := WorldData.make_city_construction_site_haul_endpoint(
+	var source := CityLogisticsSystem.make_city_ground_pile_haul_endpoint(source_id)
+	var site_endpoint := CityLogisticsSystem.make_city_construction_site_haul_endpoint(
 		site_id
 	)
 	_expect(
@@ -1848,7 +1848,7 @@ func _test_cargo_ready_demand_preempts_soft_claim() -> void:
 		"city_world": city_world,
 	})
 	var keep_id := int(keep.get("id", -1))
-	var keep_endpoint := WorldData.make_city_citizen_haul_endpoint(
+	var keep_endpoint := CityLogisticsSystem.make_city_citizen_haul_endpoint(
 		keep_id
 	)
 	var house_site := CityConstructionSystemScript.create_rectangular_site({
@@ -1860,7 +1860,7 @@ func _test_cargo_ready_demand_preempts_soft_claim() -> void:
 	})
 	var site_id := int(house_site.get("id", -1))
 	var site_endpoint := (
-		WorldData.make_city_construction_site_haul_endpoint(site_id)
+		CityLogisticsSystem.make_city_construction_site_haul_endpoint(site_id)
 	)
 
 	_expect(
@@ -1874,13 +1874,13 @@ func _test_cargo_ready_demand_preempts_soft_claim() -> void:
 	if keep_id <= 0 or site_id <= 0:
 		return
 
-	var source_result := WorldData.add_resource_to_city_ground_piles_with_result({
+	var source_result := CityLogisticsSystem.add_resource_to_city_ground_piles_with_result({
 		"tile_position": Vector2i(24, 10),
 		"resource": WorldData.RESOURCE_STONE,
 		"amount_delta": 4,
 	})
 	var source_id := _first_ground_pile_id(source_result)
-	var source_endpoint := WorldData.make_city_ground_pile_haul_endpoint(
+	var source_endpoint := CityLogisticsSystem.make_city_ground_pile_haul_endpoint(
 		source_id
 	)
 	var soft_task_assigned := WorldData.assign_city_citizen_task(
@@ -1912,13 +1912,13 @@ func _test_cargo_ready_demand_preempts_soft_claim() -> void:
 		}
 	)
 	var soft_reservation_id := (
-		WorldData.get_city_haul_reservation_id_for_citizen(
+		CityLogisticsSystem.get_city_haul_reservation_id_for_citizen(
 			claimant_id
 		)
 	)
 	_expect(
 		soft_task_assigned
-		and WorldData.city_haul_reservation_is_soft(
+		and CityLogisticsSystem.city_haul_reservation_is_soft(
 			soft_reservation_id
 		),
 		"An unpicked construction assignment must remain a transferable soft reservation."
@@ -1987,14 +1987,14 @@ func _test_cargo_ready_demand_preempts_soft_claim() -> void:
 			"path_requests_remaining": 8,
 		}
 	)
-	var final_reservation := WorldData.get_city_haul_reservation(
-		WorldData.get_city_haul_reservation_id_for_citizen(
+	var final_reservation := CityLogisticsSystem.get_city_haul_reservation(
+		CityLogisticsSystem.get_city_haul_reservation_id_for_citizen(
 			carrier_id
 		)
 	)
 
 	_expect(
-		WorldData.city_citizen_haul_endpoints_match(
+		CityLogisticsSystem.city_citizen_haul_endpoints_match(
 			final_reservation.get("destination", {}),
 			site_endpoint
 		)
@@ -2007,7 +2007,7 @@ func _test_cargo_ready_demand_preempts_soft_claim() -> void:
 		"Cargo already in hand must reroute from passive storage to the compatible player-command demand."
 	)
 	_expect(
-		WorldData.get_city_haul_reservation(
+		CityLogisticsSystem.get_city_haul_reservation(
 			soft_reservation_id
 		).is_empty()
 		and str(

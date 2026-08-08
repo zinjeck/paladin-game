@@ -331,7 +331,7 @@ static func get_object_text(city_object: Dictionary) -> String:
 
 
 static func get_ground_pile_text(tile_position: Vector2i) -> String:
-	var ground_piles := WorldData.get_city_ground_piles_at_tile(
+	var ground_piles := CityLogisticsSystem.get_city_ground_piles_at_tile(
 		tile_position
 	)
 
@@ -353,11 +353,11 @@ static func get_ground_pile_text(tile_position: Vector2i) -> String:
 			)
 		)
 		var amount := maxi(int(ground_pile.get("amount", 0)), 0)
-		var source := WorldData.make_city_ground_pile_haul_endpoint(
+		var source := CityLogisticsSystem.make_city_ground_pile_haul_endpoint(
 			ground_pile_id
 		)
 		var reserved_amount := (
-			WorldData.get_city_haul_endpoint_source_reserved_amount(
+			CityLogisticsSystem.get_city_haul_endpoint_source_reserved_amount(
 				source,
 				resource
 			)
@@ -388,7 +388,7 @@ static func get_resource_conservation_text() -> String:
 			+ str(WorldData.get_total_owned_city_resource_amount(resource))
 			+ "/"
 			+ str(
-				WorldData.get_total_city_ground_pile_resource_amount(
+				CityLogisticsSystem.get_total_city_ground_pile_resource_amount(
 					resource
 				)
 			)
