@@ -139,6 +139,14 @@ WORLD_DATA_FORBIDDEN_CITY_LOGISTICS_SYMBOLS = (
     "reset_city_haul_reservation_state",
 )
 
+WORLD_DATA_CONSTRUCTION_COMPATIBILITY_FIELDS = (
+    ("city_construction_sites", "construction_sites"),
+    ("city_construction_site_index_by_id", "construction_site_index_by_id"),
+    ("city_construction_site_id_by_tile", "construction_site_id_by_tile"),
+    ("next_city_construction_site_id", "next_construction_site_id"),
+    ("city_construction_version", "construction_version"),
+)
+
 WORLD_DATA_FORBIDDEN_CITY_WORK_SYMBOLS = (
     "city_player_commands",
     "city_player_command_index_by_id",
@@ -495,6 +503,41 @@ def main() -> int:
         count = len(path.read_text(encoding="utf-8").splitlines())
         largest_files.append((count, str(path.relative_to(ROOT))))
     largest_files.sort(reverse=True)
+
+    construction_state_path = ROOT / "scripts/city/simulation/CityConstructionState.gd"
+    city_root_state_path = ROOT / "scripts/city/simulation/CitySettlementSimulationState.gd"
+    if world_data_path.exists() and construction_state_path.exists() and city_root_state_path.exists():
+        world_data_text = world_data_path.read_text(encoding="utf-8")
+        construction_state_text = construction_state_path.read_text(encoding="utf-8")
+        city_root_state_text = city_root_state_path.read_text(encoding="utf-8")
+        for legacy_name, state_name in WORLD_DATA_CONSTRUCTION_COMPATIBILITY_FIELDS:
+            direct_storage_pattern = rf"^\s*static\s+var\s+{re.escape(legacy_name)}[^\n]*="
+            if re.search(direct_storage_pattern, world_data_text, re.MULTILINE):
+                errors.append(
+                    f"scripts/world/simulation/WorldData.gd: construction field {legacy_name} "
+                    "must forward to CityConstructionState instead of owning storage"
+                )
+            expected_getter = (
+                f"WorldPoliticalState.get_current_city_construction_state().{state_name}"
+            )
+            if expected_getter not in world_data_text:
+                errors.append(
+                    f"scripts/world/simulation/WorldData.gd: construction compatibility field "
+                    f"{legacy_name} does not forward to {state_name}"
+                )
+            if not re.search(rf"^var\s+{re.escape(state_name)}\b", construction_state_text, re.MULTILINE):
+                errors.append(
+                    f"scripts/city/simulation/CityConstructionState.gd: missing {state_name}"
+                )
+            if re.search(rf"^var\s+{re.escape(state_name)}\b", city_root_state_text, re.MULTILINE):
+                errors.append(
+                    f"scripts/city/simulation/CitySettlementSimulationState.gd: construction storage "
+                    f"{state_name} must live in CityConstructionState"
+                )
+        if "var construction_state: CityConstructionState" not in city_root_state_text:
+            errors.append(
+                "scripts/city/simulation/CitySettlementSimulationState.gd: missing construction_state owner"
+            )
 
     report = {
         "script_count": len(scripts),
