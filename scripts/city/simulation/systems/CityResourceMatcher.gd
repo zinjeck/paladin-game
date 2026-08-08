@@ -523,7 +523,7 @@ static func _find_best_cargo_construction_demand(
 		if (
 			site_id <= 0
 			or str(site.get("phase", ""))
-			!= WorldData.CITY_CONSTRUCTION_PHASE_GATHERING
+			!= CityConstructionSystem.CITY_CONSTRUCTION_PHASE_GATHERING
 		):
 			continue
 
@@ -548,7 +548,7 @@ static func _find_best_cargo_construction_demand(
 				continue
 
 			var unreserved_space := (
-				WorldData.get_city_construction_site_unreserved_resource_space(
+				CityConstructionSystem.get_city_construction_site_unreserved_resource_space(
 					site_id,
 					resource
 				)
@@ -2457,7 +2457,7 @@ static func get_haul_endpoint_access_tiles(
 	):
 		return CityConstructionSystem.get_city_construction_site_access_tiles(
 			city_world,
-			WorldData.get_city_construction_site_by_id(endpoint_id)
+			CityConstructionSystem.get_city_construction_site_by_id(endpoint_id)
 		)
 
 	var city_object := _get_container_object_for_endpoint(endpoint)

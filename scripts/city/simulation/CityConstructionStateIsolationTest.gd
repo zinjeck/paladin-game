@@ -54,11 +54,11 @@ func _run_isolation_test() -> void:
 	if player_state == null:
 		return
 
-	WorldData.city_construction_sites = [{"id": 41, "test_owner": "player"}]
-	WorldData.city_construction_site_index_by_id = {41: 0}
-	WorldData.city_construction_site_id_by_tile = {Vector2i(2, 2): 41}
-	WorldData.next_city_construction_site_id = 42
-	WorldData.city_construction_version = 6
+	CityConstructionSystem.get_current_state().construction_sites = [{"id": 41, "test_owner": "player"}]
+	CityConstructionSystem.get_current_state().construction_site_index_by_id = {41: 0}
+	CityConstructionSystem.get_current_state().construction_site_id_by_tile = {Vector2i(2, 2): 41}
+	CityConstructionSystem.get_current_state().next_construction_site_id = 42
+	CityConstructionSystem.get_current_state().construction_version = 6
 
 	var cpu_culture := WorldData.create_culture("Construction CPU Culture")
 	var cpu_polity := WorldPoliticalState.create_polity({
@@ -93,30 +93,30 @@ func _run_isolation_test() -> void:
 		"CPU City must become active."
 	)
 	_expect(
-		WorldData.city_construction_sites.is_empty()
-		and WorldData.city_construction_site_index_by_id.is_empty()
-		and WorldData.city_construction_site_id_by_tile.is_empty()
-		and WorldData.next_city_construction_site_id == 1
-		and WorldData.city_construction_version == 0,
+		CityConstructionSystem.get_current_state().construction_sites.is_empty()
+		and CityConstructionSystem.get_current_state().construction_site_index_by_id.is_empty()
+		and CityConstructionSystem.get_current_state().construction_site_id_by_tile.is_empty()
+		and CityConstructionSystem.get_current_state().next_construction_site_id == 1
+		and CityConstructionSystem.get_current_state().construction_version == 0,
 		"Fresh CPU City must start with independent construction state."
 	)
 
-	WorldData.city_construction_sites = [{"id": 71, "test_owner": "cpu"}]
-	WorldData.city_construction_site_index_by_id = {71: 0}
-	WorldData.city_construction_site_id_by_tile = {Vector2i(6, 6): 71}
-	WorldData.next_city_construction_site_id = 72
-	WorldData.city_construction_version = 9
+	CityConstructionSystem.get_current_state().construction_sites = [{"id": 71, "test_owner": "cpu"}]
+	CityConstructionSystem.get_current_state().construction_site_index_by_id = {71: 0}
+	CityConstructionSystem.get_current_state().construction_site_id_by_tile = {Vector2i(6, 6): 71}
+	CityConstructionSystem.get_current_state().next_construction_site_id = 72
+	CityConstructionSystem.get_current_state().construction_version = 9
 
 	_expect(
 		WorldPoliticalState.set_active_settlement(player_city_id),
 		"Player City must become active again."
 	)
 	_expect(
-		str(WorldData.city_construction_sites[0].get("test_owner", "")) == "player"
-		and WorldData.city_construction_site_index_by_id.has(41)
-		and int(WorldData.city_construction_site_id_by_tile.get(Vector2i(2, 2), -1)) == 41
-		and WorldData.next_city_construction_site_id == 42
-		and WorldData.city_construction_version == 6,
+		str(CityConstructionSystem.get_current_state().construction_sites[0].get("test_owner", "")) == "player"
+		and CityConstructionSystem.get_current_state().construction_site_index_by_id.has(41)
+		and int(CityConstructionSystem.get_current_state().construction_site_id_by_tile.get(Vector2i(2, 2), -1)) == 41
+		and CityConstructionSystem.get_current_state().next_construction_site_id == 42
+		and CityConstructionSystem.get_current_state().construction_version == 6,
 		"Player construction state must survive a settlement switch."
 	)
 
@@ -125,11 +125,11 @@ func _run_isolation_test() -> void:
 		"CPU City must become active again."
 	)
 	_expect(
-		str(WorldData.city_construction_sites[0].get("test_owner", "")) == "cpu"
-		and WorldData.city_construction_site_index_by_id.has(71)
-		and int(WorldData.city_construction_site_id_by_tile.get(Vector2i(6, 6), -1)) == 71
-		and WorldData.next_city_construction_site_id == 72
-		and WorldData.city_construction_version == 9,
+		str(CityConstructionSystem.get_current_state().construction_sites[0].get("test_owner", "")) == "cpu"
+		and CityConstructionSystem.get_current_state().construction_site_index_by_id.has(71)
+		and int(CityConstructionSystem.get_current_state().construction_site_id_by_tile.get(Vector2i(6, 6), -1)) == 71
+		and CityConstructionSystem.get_current_state().next_construction_site_id == 72
+		and CityConstructionSystem.get_current_state().construction_version == 9,
 		"CPU construction state must survive a settlement switch."
 	)
 

@@ -15,17 +15,17 @@ static func _validate_city_construction_state(
 	var expected_tile_lookup: Dictionary = {}
 	var maximum_site_id := 0
 	var valid_phases := [
-		WorldData.CITY_CONSTRUCTION_PHASE_CLEARING,
-		WorldData.CITY_CONSTRUCTION_PHASE_GATHERING,
-		WorldData.CITY_CONSTRUCTION_PHASE_LABOR,
+		CityConstructionSystem.CITY_CONSTRUCTION_PHASE_CLEARING,
+		CityConstructionSystem.CITY_CONSTRUCTION_PHASE_GATHERING,
+		CityConstructionSystem.CITY_CONSTRUCTION_PHASE_LABOR,
 	]
 	var valid_target_kinds := [
-		WorldData.CITY_CONSTRUCTION_TARGET_NEW,
-		WorldData.CITY_CONSTRUCTION_TARGET_MODIFICATION,
+		CityConstructionSystem.CITY_CONSTRUCTION_TARGET_NEW,
+		CityConstructionSystem.CITY_CONSTRUCTION_TARGET_MODIFICATION,
 	]
 
-	for site_index in range(WorldData.city_construction_sites.size()):
-		var raw_site = WorldData.city_construction_sites[site_index]
+	for site_index in range(CityConstructionSystem.get_current_state().construction_sites.size()):
+		var raw_site = CityConstructionSystem.get_current_state().construction_sites[site_index]
 
 		if not raw_site is Dictionary:
 			errors.append(
@@ -62,7 +62,7 @@ static func _validate_city_construction_state(
 
 		if (
 			int(
-				WorldData.city_construction_site_index_by_id.get(
+				CityConstructionSystem.get_current_state().construction_site_index_by_id.get(
 					site_id,
 					-1
 				)
@@ -75,7 +75,7 @@ static func _validate_city_construction_state(
 				+ "."
 			)
 
-		if not WorldData.city_object_type_uses_construction(object_type):
+		if not CityConstructionSystem.city_object_type_uses_construction(object_type):
 			errors.append(
 				"Construction site "
 				+ str(site_id)
@@ -92,7 +92,7 @@ static func _validate_city_construction_state(
 				+ target_kind
 				+ "'."
 			)
-		elif target_kind == WorldData.CITY_CONSTRUCTION_TARGET_NEW:
+		elif target_kind == CityConstructionSystem.CITY_CONSTRUCTION_TARGET_NEW:
 			if target_object_id != -1:
 				errors.append(
 					"New construction site "
@@ -198,8 +198,7 @@ static func _validate_city_construction_state(
 						object_lookup.has(completed_object_id)
 						and not (
 							target_kind
-							== WorldData
-							.CITY_CONSTRUCTION_TARGET_MODIFICATION
+							== CityConstructionSystem.CITY_CONSTRUCTION_TARGET_MODIFICATION
 							and completed_object_id
 							== target_object_id
 						)
@@ -260,19 +259,19 @@ static func _validate_city_construction_state(
 			)
 
 	if (
-		WorldData.city_construction_site_index_by_id.size()
+		CityConstructionSystem.get_current_state().construction_site_index_by_id.size()
 		!= site_lookup.size()
 	):
 		errors.append(
 			"Construction site registry and ID lookup have different sizes."
 		)
 
-	if WorldData.city_construction_site_id_by_tile != expected_tile_lookup:
+	if CityConstructionSystem.get_current_state().construction_site_id_by_tile != expected_tile_lookup:
 		errors.append(
 			"Construction site footprint lookup does not match site state."
 		)
 
-	if WorldData.next_city_construction_site_id <= maximum_site_id:
+	if CityConstructionSystem.get_current_state().next_construction_site_id <= maximum_site_id:
 		errors.append(
 			"next_city_construction_site_id must exceed every site ID."
 		)
@@ -376,7 +375,7 @@ static func _validate_city_ground_pile_state(
 
 		if construction_site_id > 0:
 			var construction_site := (
-				WorldData.get_city_construction_site_by_id(
+				CityConstructionSystem.get_city_construction_site_by_id(
 					construction_site_id
 				)
 			)
@@ -882,7 +881,7 @@ static func _validate_city_work_order_source_state(
 			+ "'."
 		)
 	elif order_type == CityWorkSystemScript.ORDER_TYPE_CONSTRUCTION_SITE:
-		var source_site := WorldData.get_city_construction_site_by_id(
+		var source_site := CityConstructionSystem.get_city_construction_site_by_id(
 			source_id
 		)
 
@@ -1323,8 +1322,7 @@ static func _validate_city_haul_reservations(
 
 			for resource in WorldData.get_city_resource_types():
 				remaining_capacity += (
-					WorldData
-					.get_city_construction_site_remaining_resource_amount(
+					CityConstructionSystem.get_city_construction_site_remaining_resource_amount(
 						site_id,
 						resource
 					)
@@ -2113,7 +2111,7 @@ static func _city_haul_endpoint_exists(
 			)
 
 		WorldData.CITY_CITIZEN_HAUL_ENDPOINT_KIND_CONSTRUCTION_SITE:
-			return not WorldData.get_city_construction_site_by_id(
+			return not CityConstructionSystem.get_city_construction_site_by_id(
 				int(endpoint.get("id", -1))
 			).is_empty()
 

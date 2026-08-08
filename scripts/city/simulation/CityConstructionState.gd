@@ -4,8 +4,8 @@ class_name CityConstructionState
 # Settlement-owned mutable construction registry state for one CITY.
 #
 # This object owns only construction-site collections, indexes, counters, and
-# the focused construction change version. Construction rules and behavior stay
-# in the existing construction APIs for this ownership-only pass.
+# the focused construction change version. CityConstructionSystem owns the
+# construction rules, queries, mutations, lifecycle, and scheduling behavior.
 #
 # Keep this class a small state container rather than a second simulation brain.
 

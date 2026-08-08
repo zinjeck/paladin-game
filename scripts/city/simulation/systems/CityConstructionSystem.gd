@@ -1,9 +1,12 @@
 extends RefCounted
 class_name CityConstructionSystem
 
-# File responsibility: Construction-site operations, lifecycle, work selection, material delivery, labor, and completion. Authoritative site collections remain in WorldData.
+# File responsibility: Authoritative construction behavior/API for one active city settlement. Mutable construction registries live in CityConstructionState.
 # Navigation regions are organizational only; they do not define runtime ownership.
 
+const CityObjectCatalogScript = preload(
+	"res://scripts/city/data/CityObjectCatalog.gd"
+)
 const CityNavigationSystemScript = preload(
 	"res://scripts/city/simulation/systems/CityNavigationSystem.gd"
 )
@@ -19,11 +22,7 @@ const CityResourceMatcherScript = preload(
 
 const PLAYER_WORK_KIND_DELIVERY := "construction_delivery"
 const PLAYER_WORK_KIND_LABOR := "construction_labor"
-const FINALIZATION_STATE_NONE := (
-	WorldData.CITY_CONSTRUCTION_FINALIZATION_STATE_NONE
 )
-const FINALIZATION_STATE_AWAITING_CLEARANCE := (
-	WorldData.CITY_CONSTRUCTION_FINALIZATION_STATE_AWAITING_CLEARANCE
 )
 const PROGRESS_REQUIRED_CLEARING_WORK_UNITS_KEY := (
 	"required_clearing_work_units"
@@ -36,14 +35,104 @@ const REBALANCE_MINIMUM_PATH_SAVINGS_TILES: int = 3
 const REBALANCE_MINIMUM_RELATIVE_SAVINGS_PERCENT: int = 25
 
 
+const CITY_CONSTRUCTION_PHASE_CLEARING := "clearing"
+const CITY_CONSTRUCTION_PHASE_GATHERING := "gathering"
+const CITY_CONSTRUCTION_PHASE_LABOR := "labor"
+const CITY_CONSTRUCTION_FINALIZATION_STATE_NONE := "none"
+const CITY_CONSTRUCTION_FINALIZATION_STATE_AWAITING_CLEARANCE := (
+	"awaiting_clearance"
+)
+const CITY_CONSTRUCTION_TARGET_NEW := "new"
+const CITY_CONSTRUCTION_TARGET_MODIFICATION := "modification"
+const CITY_CONSTRUCTION_TASK_PRIORITY: int = 1000
+const CITY_CONSTRUCTION_FAIRNESS_BONUS_PER_MINUTE: int = 100
+const CITY_CONSTRUCTION_MAX_FAIRNESS_BONUS: int = 20_000
+# A construction labor task contributes at most this many continuous world
+# minutes before releasing its concrete claim and returning to the parent-order
+# scheduler. This is the shared safe boundary for fairness and hunger policy.
+const CITY_CONSTRUCTION_LABOR_ATOMIC_MINUTES: int = 30
+
+
+static func get_current_state() -> CityConstructionState:
+	return WorldPoliticalState.get_current_city_construction_state()
+
+
+static func get_city_object_construction_materials(
+	object_type: String
+
+static func city_object_type_uses_construction(
+	object_type: String
+
+static func mark_city_construction_changed() -> void:
+	get_current_state().construction_version += 1
+
+static func get_city_construction_site_index_by_id(
+	site_id: int
+
+static func get_city_construction_site_by_id(
+	site_id: int
+
+static func can_place_city_construction_footprint(
+	city_world: WorldData,
+	raw_footprint_tiles: Array,
+	require_external_access: bool = false,
+	allowed_occupied_object_id: int = -1
+
+static func reset_city_construction_state() -> void:
+	get_current_state().construction_sites.clear()
+	get_current_state().construction_site_index_by_id.clear()
+	get_current_state().construction_site_id_by_tile.clear()
+	get_current_state().next_construction_site_id = 1
+	mark_city_construction_changed()
+
+static func get_city_construction_site_work_positions(
+	site: Dictionary
+
+static func get_city_construction_site_reserved_resource_amount(
+	site_id: int,
+	resource: String
+
+static func get_city_construction_site_remaining_resource_amount(
+	site_id: int,
+	resource: String
+
+static func get_city_construction_site_destination_reserved_resource_amount(
+	site_id: int,
+	resource: String,
+	excluding_reservation_id: int = (
+		WorldData.INVALID_CITY_CITIZEN_HAUL_RESERVATION_ID
+	)
+
+static func get_city_construction_site_unreserved_resource_space(
+	site_id: int,
+	resource: String,
+	excluding_reservation_id: int = (
+		WorldData.INVALID_CITY_CITIZEN_HAUL_RESERVATION_ID
+	)
+
+static func get_city_construction_site_unreserved_total_space(
+	site_id: int,
+	excluding_reservation_id: int = (
+		WorldData.INVALID_CITY_CITIZEN_HAUL_RESERVATION_ID
+	)
+
+static func prepare_city_construction_task_assignment(
+	assignment: Dictionary
+
+static func can_place_city_object_construction(
+	city_world: WorldData,
+	top_left: Vector2i,
+	size_tiles: Vector2i,
+	object_type: String
+
 #region Construction Site Registry Operations
 
 static func rebuild_city_construction_site_index() -> void:
-	WorldData.city_construction_site_index_by_id.clear()
-	WorldData.city_construction_site_id_by_tile.clear()
+	get_current_state().construction_site_index_by_id.clear()
+	get_current_state().construction_site_id_by_tile.clear()
 
-	for site_index in range(WorldData.city_construction_sites.size()):
-		var raw_site = WorldData.city_construction_sites[site_index]
+	for site_index in range(get_current_state().construction_sites.size()):
+		var raw_site = get_current_state().construction_sites[site_index]
 
 		if not raw_site is Dictionary:
 			continue
@@ -54,25 +143,25 @@ static func rebuild_city_construction_site_index() -> void:
 		if site_id <= 0:
 			continue
 
-		WorldData.city_construction_site_index_by_id[site_id] = site_index
+		get_current_state().construction_site_index_by_id[site_id] = site_index
 
 		for raw_tile in site.get("footprint_tiles", []):
 			if raw_tile is Vector2i:
-				WorldData.city_construction_site_id_by_tile[raw_tile] = site_id
+				get_current_state().construction_site_id_by_tile[raw_tile] = site_id
 
 
 
 static func get_city_construction_site_snapshot() -> Array:
-	return WorldData.city_construction_sites.duplicate(true)
+	return get_current_state().construction_sites.duplicate(true)
 
 static func get_city_construction_site_at_tile(
 	tile_position: Vector2i
 ) -> Dictionary:
-	if not WorldData.city_construction_site_id_by_tile.has(tile_position):
+	if not get_current_state().construction_site_id_by_tile.has(tile_position):
 		return {}
 
-	return WorldData.get_city_construction_site_by_id(
-		int(WorldData.city_construction_site_id_by_tile[tile_position])
+	return get_city_construction_site_by_id(
+		int(get_current_state().construction_site_id_by_tile[tile_position])
 	)
 
 
@@ -104,7 +193,7 @@ static func create_city_construction_site(
 	var target_kind := str(
 		values.get(
 			"target_kind",
-			WorldData.CITY_CONSTRUCTION_TARGET_NEW
+			CITY_CONSTRUCTION_TARGET_NEW
 		)
 	)
 	var target_object_id := int(
@@ -112,7 +201,7 @@ static func create_city_construction_site(
 	)
 	var allowed_occupied_object_id := -1
 
-	if target_kind == WorldData.CITY_CONSTRUCTION_TARGET_MODIFICATION:
+	if target_kind == CITY_CONSTRUCTION_TARGET_MODIFICATION:
 		var target_object := WorldData.get_city_object_by_id(
 			target_object_id
 		)
@@ -121,10 +210,10 @@ static func create_city_construction_site(
 			return {}
 
 		allowed_occupied_object_id = target_object_id
-	elif target_kind != WorldData.CITY_CONSTRUCTION_TARGET_NEW:
+	elif target_kind != CITY_CONSTRUCTION_TARGET_NEW:
 		return {}
 
-	if not WorldData.can_place_city_construction_footprint(
+	if not can_place_city_construction_footprint(
 		WorldData.official_city_world,
 		footprint_tiles,
 		bool(values.get("require_external_access", false)),
@@ -134,11 +223,11 @@ static func create_city_construction_site(
 
 	var object_type := str(values.get("object_type", ""))
 
-	if not WorldData.city_object_type_uses_construction(object_type):
+	if not city_object_type_uses_construction(object_type):
 		return {}
 
 	if (
-		target_kind == WorldData.CITY_CONSTRUCTION_TARGET_MODIFICATION
+		target_kind == CITY_CONSTRUCTION_TARGET_MODIFICATION
 		and str(
 			WorldData.get_city_object_by_id(target_object_id).get(
 				"type",
@@ -187,7 +276,7 @@ static func create_city_construction_site(
 	if work_positions.is_empty():
 		return {}
 
-	var site_id := WorldData.next_city_construction_site_id
+	var site_id := get_current_state().next_construction_site_id
 	var site := {
 		"id": site_id,
 		"target_kind": target_kind,
@@ -207,12 +296,12 @@ static func create_city_construction_site(
 		"tiles": footprint_tiles.duplicate(),
 		"footprint_tiles": footprint_tiles.duplicate(),
 		"owner": str(values.get("owner", "player")),
-		"phase": WorldData.CITY_CONSTRUCTION_PHASE_CLEARING,
+		"phase": CITY_CONSTRUCTION_PHASE_CLEARING,
 		"material_recipe": material_recipe,
 		"required_clearing_work_units": -1.0,
 		"required_labor_minutes": required_labor_minutes,
 		"completed_labor_minutes": 0,
-		"finalization_state": FINALIZATION_STATE_NONE,
+		"finalization_state": CITY_CONSTRUCTION_FINALIZATION_STATE_NONE,
 		"maximum_workers": maxi(
 			int(values.get("maximum_workers", 1)),
 			1
@@ -223,28 +312,28 @@ static func create_city_construction_site(
 		),
 	}
 
-	WorldData.next_city_construction_site_id += 1
-	WorldData.city_construction_sites.append(site)
-	WorldData.city_construction_site_index_by_id[site_id] = (
-		WorldData.city_construction_sites.size() - 1
+	get_current_state().next_construction_site_id += 1
+	get_current_state().construction_sites.append(site)
+	get_current_state().construction_site_index_by_id[site_id] = (
+		get_current_state().construction_sites.size() - 1
 	)
 
 	for tile_position in footprint_tiles:
-		WorldData.city_construction_site_id_by_tile[tile_position] = site_id
+		get_current_state().construction_site_id_by_tile[tile_position] = site_id
 
-	WorldData.mark_city_construction_changed()
+	mark_city_construction_changed()
 	return site.duplicate(true)
 
 static func update_city_construction_site(
 	site: Dictionary
 ) -> bool:
 	var site_id := int(site.get("id", -1))
-	var site_index := WorldData.get_city_construction_site_index_by_id(site_id)
+	var site_index := get_city_construction_site_index_by_id(site_id)
 
 	if site_index < 0:
 		return false
 
-	var current_site: Dictionary = WorldData.city_construction_sites[site_index]
+	var current_site: Dictionary = get_current_state().construction_sites[site_index]
 	var raw_updated_footprint = site.get("footprint_tiles", [])
 
 	if not raw_updated_footprint is Array:
@@ -297,19 +386,19 @@ static func update_city_construction_site(
 			if (
 				raw_tile is Vector2i
 				and int(
-					WorldData.city_construction_site_id_by_tile.get(
+					get_current_state().construction_site_id_by_tile.get(
 						raw_tile,
 						-1
 					)
 				) == site_id
 			):
-				WorldData.city_construction_site_id_by_tile.erase(raw_tile)
+				get_current_state().construction_site_id_by_tile.erase(raw_tile)
 
 		for tile_position in updated_footprint:
-			WorldData.city_construction_site_id_by_tile[tile_position] = site_id
+			get_current_state().construction_site_id_by_tile[tile_position] = site_id
 
-	WorldData.city_construction_sites[site_index] = site.duplicate(true)
-	WorldData.mark_city_construction_changed()
+	get_current_state().construction_sites[site_index] = site.duplicate(true)
+	mark_city_construction_changed()
 	return true
 
 static func _can_update_city_construction_site_footprint(
@@ -323,7 +412,7 @@ static func _can_update_city_construction_site_footprint(
 	var target_kind := str(
 		site.get(
 			"target_kind",
-			WorldData.CITY_CONSTRUCTION_TARGET_NEW
+			CITY_CONSTRUCTION_TARGET_NEW
 		)
 	)
 	var target_object_id := int(
@@ -331,8 +420,8 @@ static func _can_update_city_construction_site_footprint(
 	)
 
 	if target_kind not in [
-		WorldData.CITY_CONSTRUCTION_TARGET_NEW,
-		WorldData.CITY_CONSTRUCTION_TARGET_MODIFICATION,
+		CITY_CONSTRUCTION_TARGET_NEW,
+		CITY_CONSTRUCTION_TARGET_MODIFICATION,
 	]:
 		return false
 
@@ -344,7 +433,7 @@ static func _can_update_city_construction_site_footprint(
 			return false
 
 		var other_site_id := int(
-			WorldData.city_construction_site_id_by_tile.get(
+			get_current_state().construction_site_id_by_tile.get(
 				tile_position,
 				-1
 			)
@@ -359,7 +448,7 @@ static func _can_update_city_construction_site_footprint(
 			)
 
 			if (
-				target_kind != WorldData.CITY_CONSTRUCTION_TARGET_MODIFICATION
+				target_kind != CITY_CONSTRUCTION_TARGET_MODIFICATION
 				or target_object_id <= 0
 				or occupied_object_id != target_object_id
 			):
@@ -398,12 +487,12 @@ static func _can_update_city_construction_site_footprint(
 static func remove_city_construction_site_record(
 	site_id: int
 ) -> bool:
-	var site_index := WorldData.get_city_construction_site_index_by_id(site_id)
+	var site_index := get_city_construction_site_index_by_id(site_id)
 
 	if site_index < 0:
 		return false
 
-	var site: Dictionary = WorldData.city_construction_sites[site_index]
+	var site: Dictionary = get_current_state().construction_sites[site_index]
 
 	# The site and its parent order are one logical record. Remove the order
 	# in the same operation so completion and direct cancellation leave a
@@ -414,17 +503,17 @@ static func remove_city_construction_site_record(
 		if (
 			raw_tile is Vector2i
 			and int(
-				WorldData.city_construction_site_id_by_tile.get(
+				get_current_state().construction_site_id_by_tile.get(
 					raw_tile,
 					-1
 				)
 			) == site_id
 		):
-			WorldData.city_construction_site_id_by_tile.erase(raw_tile)
+			get_current_state().construction_site_id_by_tile.erase(raw_tile)
 
-	WorldData.city_construction_sites.remove_at(site_index)
+	get_current_state().construction_sites.remove_at(site_index)
 	rebuild_city_construction_site_index()
-	WorldData.mark_city_construction_changed()
+	mark_city_construction_changed()
 	return true
 
 
@@ -464,14 +553,14 @@ static func get_city_construction_site_access_tiles(
 static func city_construction_site_has_all_materials(
 	site_id: int
 ) -> bool:
-	var site := WorldData.get_city_construction_site_by_id(site_id)
+	var site := get_city_construction_site_by_id(site_id)
 
 	if site.is_empty():
 		return false
 
 	for resource in WorldData.get_city_resource_types():
 		if (
-			WorldData.get_city_construction_site_remaining_resource_amount(
+			get_city_construction_site_remaining_resource_amount(
 				site_id,
 				resource
 			) > 0
@@ -500,19 +589,19 @@ static func add_resource_to_city_construction_site(
 	resource: String,
 	requested_amount: int
 ) -> int:
-	var site := WorldData.get_city_construction_site_by_id(site_id)
+	var site := get_city_construction_site_by_id(site_id)
 
 	if (
 		site.is_empty()
 		or requested_amount <= 0
 		or str(site.get("phase", ""))
-		!= WorldData.CITY_CONSTRUCTION_PHASE_GATHERING
+		!= CITY_CONSTRUCTION_PHASE_GATHERING
 	):
 		return 0
 
 	var accepted_amount := mini(
 		requested_amount,
-		WorldData.get_city_construction_site_remaining_resource_amount(
+		get_city_construction_site_remaining_resource_amount(
 			site_id,
 			resource
 		)
@@ -738,7 +827,7 @@ static func create_rectangular_site(values: Dictionary) -> Dictionary:
 	if resolved_world == null:
 		resolved_world = WorldData.official_city_world
 
-	if not WorldData.can_place_city_object_construction(
+	if not can_place_city_object_construction(
 		resolved_world,
 		top_left,
 		size_tiles,
@@ -762,7 +851,7 @@ static func create_rectangular_site(values: Dictionary) -> Dictionary:
 		return {}
 
 	var site := create_city_construction_site({
-		"target_kind": WorldData.CITY_CONSTRUCTION_TARGET_NEW,
+		"target_kind": CITY_CONSTRUCTION_TARGET_NEW,
 		"object_type": object_type,
 		"shape_mode": WorldData.CITY_OBJECT_SHAPE_RECTANGLE,
 		"top_left": top_left,
@@ -788,7 +877,7 @@ static func create_rectangular_site(values: Dictionary) -> Dictionary:
 		refresh_city_construction_site(
 			int(site.get("id", -1))
 		)
-		site = WorldData.get_city_construction_site_by_id(
+		site = get_city_construction_site_by_id(
 			int(site.get("id", -1))
 		)
 		rebalance_uncommitted_construction_workers(
@@ -848,7 +937,7 @@ static func create_road_sites(
 	# progress, cancellation state, and eventual completed road object.
 	for tile_position in clean_tiles:
 		var site := create_city_construction_site({
-			"target_kind": WorldData.CITY_CONSTRUCTION_TARGET_NEW,
+			"target_kind": CITY_CONSTRUCTION_TARGET_NEW,
 			"object_type": WorldData.CITY_OBJECT_ROAD,
 			"shape_mode": WorldData.CITY_OBJECT_SHAPE_TILE_AREA,
 			"top_left": tile_position,
@@ -874,7 +963,7 @@ static func create_road_sites(
 
 		var site_id := int(site.get("id", -1))
 		refresh_city_construction_site(site_id)
-		site = WorldData.get_city_construction_site_by_id(site_id)
+		site = get_city_construction_site_by_id(site_id)
 
 		if site.is_empty():
 			continue
@@ -895,7 +984,7 @@ static func create_road_sites(
 
 	for site_id in created_site_ids:
 		var refreshed_site := (
-			WorldData.get_city_construction_site_by_id(site_id)
+			get_city_construction_site_by_id(site_id)
 		)
 
 		if not refreshed_site.is_empty():
@@ -1036,13 +1125,13 @@ static func refresh_all_city_construction_sites() -> void:
 static func refresh_city_construction_site(
 	site_id: int
 ) -> bool:
-	var site := WorldData.get_city_construction_site_by_id(site_id)
+	var site := get_city_construction_site_by_id(site_id)
 	if site.is_empty():
 		return false
 
 	if (
-		str(site.get("finalization_state", FINALIZATION_STATE_NONE))
-		== FINALIZATION_STATE_AWAITING_CLEARANCE
+		str(site.get("finalization_state", CITY_CONSTRUCTION_FINALIZATION_STATE_NONE))
+		== CITY_CONSTRUCTION_FINALIZATION_STATE_AWAITING_CLEARANCE
 	):
 		_advance_city_construction_finalization(site_id)
 		return true
@@ -1050,13 +1139,13 @@ static func refresh_city_construction_site(
 	_reserve_needed_footprint_materials(site_id)
 	_ensure_progress_baseline(site_id)
 	_ensure_clearing_commands(site_id)
-	site = WorldData.get_city_construction_site_by_id(site_id)
+	site = get_city_construction_site_by_id(site_id)
 
 	if site.is_empty():
 		return false
 
 	var next_phase: String = (
-		WorldData.CITY_CONSTRUCTION_PHASE_CLEARING
+		CITY_CONSTRUCTION_PHASE_CLEARING
 	)
 
 	if (
@@ -1064,9 +1153,9 @@ static func refresh_city_construction_site(
 		and not _site_has_ordinary_ground_pile(site)
 	):
 		if city_construction_site_has_all_materials(site_id):
-			next_phase = WorldData.CITY_CONSTRUCTION_PHASE_LABOR
+			next_phase = CITY_CONSTRUCTION_PHASE_LABOR
 		else:
-			next_phase = WorldData.CITY_CONSTRUCTION_PHASE_GATHERING
+			next_phase = CITY_CONSTRUCTION_PHASE_GATHERING
 
 	if str(site.get("phase", "")) != next_phase:
 		site["phase"] = next_phase
@@ -1078,7 +1167,7 @@ static func refresh_city_construction_site(
 static func get_city_construction_site_progress_summary(
 	site_id: int
 ) -> Dictionary:
-	var site := WorldData.get_city_construction_site_by_id(site_id)
+	var site := get_city_construction_site_by_id(site_id)
 	if site.is_empty():
 		return {}
 
@@ -1121,7 +1210,7 @@ static func get_city_construction_site_progress_summary(
 			required_material_work_units += float(required_amount)
 			completed_material_work_units += float(
 				mini(
-					WorldData.get_city_construction_site_reserved_resource_amount(
+					get_city_construction_site_reserved_resource_amount(
 						site_id,
 						resource
 					),
@@ -1194,7 +1283,7 @@ static func get_city_construction_site_progress_summary(
 
 
 static func _ensure_progress_baseline(site_id: int) -> void:
-	var site := WorldData.get_city_construction_site_by_id(site_id)
+	var site := get_city_construction_site_by_id(site_id)
 	if site.is_empty():
 		return
 
@@ -1296,7 +1385,7 @@ static func _get_remaining_clearing_work_units(
 			0
 		)
 		var remaining_required_amount := (
-			WorldData.get_city_construction_site_remaining_resource_amount(
+			get_city_construction_site_remaining_resource_amount(
 				site_id,
 				resource
 			)
@@ -1319,7 +1408,7 @@ static func _get_remaining_clearing_work_units(
 static func _reserve_needed_footprint_materials(
 	site_id: int
 ) -> void:
-	var site := WorldData.get_city_construction_site_by_id(site_id)
+	var site := get_city_construction_site_by_id(site_id)
 	if site.is_empty():
 		return
 
@@ -1357,7 +1446,7 @@ static func _reserve_needed_footprint_materials(
 			)
 		)
 		var needed_amount := (
-			WorldData.get_city_construction_site_unreserved_resource_space(
+			get_city_construction_site_unreserved_resource_space(
 				site_id,
 				resource
 			)
@@ -1374,7 +1463,7 @@ static func _reserve_needed_footprint_materials(
 
 
 static func _ensure_clearing_commands(site_id: int) -> void:
-	var site := WorldData.get_city_construction_site_by_id(site_id)
+	var site := get_city_construction_site_by_id(site_id)
 	var city_world: WorldData = WorldData.official_city_world
 
 	if site.is_empty() or city_world == null:
@@ -1512,26 +1601,26 @@ static func get_best_assignable_player_work_for_citizen_and_site(
 	site_id: int
 ) -> Dictionary:
 	var citizen := WorldData.get_city_citizen_by_id(citizen_id)
-	var site := WorldData.get_city_construction_site_by_id(site_id)
+	var site := get_city_construction_site_by_id(site_id)
 	if (
 		citizen.is_empty()
 		or not bool(citizen.get("alive", false))
 		or int(citizen.get("job_object_id", -1)) > 0
 		or site.is_empty()
 		or str(
-			site.get("finalization_state", FINALIZATION_STATE_NONE)
-		) != FINALIZATION_STATE_NONE
+			site.get("finalization_state", CITY_CONSTRUCTION_FINALIZATION_STATE_NONE)
+		) != CITY_CONSTRUCTION_FINALIZATION_STATE_NONE
 	):
 		return {}
 
 	match str(site.get("phase", "")):
-		WorldData.CITY_CONSTRUCTION_PHASE_CLEARING:
+		CITY_CONSTRUCTION_PHASE_CLEARING:
 			return _get_best_clearing_cleanup_candidate(citizen, site)
 
-		WorldData.CITY_CONSTRUCTION_PHASE_GATHERING:
+		CITY_CONSTRUCTION_PHASE_GATHERING:
 			return _get_best_delivery_candidate(citizen, site)
 
-		WorldData.CITY_CONSTRUCTION_PHASE_LABOR:
+		CITY_CONSTRUCTION_PHASE_LABOR:
 			return _get_labor_candidate(citizen, site)
 
 	return {}
@@ -1578,7 +1667,7 @@ static func get_best_assignable_batchable_road_work_for_citizen(
 
 	for raw_site_id in site_ids:
 		var site_id := int(raw_site_id)
-		var site := WorldData.get_city_construction_site_by_id(site_id)
+		var site := get_city_construction_site_by_id(site_id)
 		var raw_recipe = site.get("material_recipe", {})
 
 		if (
@@ -1591,7 +1680,7 @@ static func get_best_assignable_batchable_road_work_for_citizen(
 			continue
 
 		match str(site.get("phase", "")):
-			WorldData.CITY_CONSTRUCTION_PHASE_CLEARING:
+			CITY_CONSTRUCTION_PHASE_CLEARING:
 				var cleanup_candidate := (
 					_get_best_clearing_cleanup_candidate(
 						citizen,
@@ -1605,7 +1694,7 @@ static func get_best_assignable_batchable_road_work_for_citizen(
 				):
 					best_candidate = cleanup_candidate
 
-			WorldData.CITY_CONSTRUCTION_PHASE_LABOR:
+			CITY_CONSTRUCTION_PHASE_LABOR:
 				if _get_active_laborer_count(site_id) >= maxi(
 					int(site.get("maximum_workers", 1)),
 					1
@@ -1617,7 +1706,7 @@ static func get_best_assignable_batchable_road_work_for_citizen(
 				)
 
 				for position in (
-					WorldData.get_city_construction_site_work_positions(
+					get_city_construction_site_work_positions(
 						site
 					)
 				):
@@ -1670,7 +1759,7 @@ static func get_best_assignable_batchable_road_work_for_citizen(
 	var selected_site_id := int(
 		labor_site_id_by_position.get(target_tile, -1)
 	)
-	var selected_site := WorldData.get_city_construction_site_by_id(
+	var selected_site := get_city_construction_site_by_id(
 		selected_site_id
 	)
 	var path_cost := maxi(int(path_result.get("path_cost", 0)), 0)
@@ -1786,7 +1875,7 @@ static func _get_best_clearing_cleanup_candidate(
 					WorldData.CITY_CITIZEN_TASK_SOURCE_PLAYER
 				),
 				"task_priority": (
-					WorldData.CITY_CONSTRUCTION_TASK_PRIORITY
+					CITY_CONSTRUCTION_TASK_PRIORITY
 				),
 			})
 		)
@@ -1871,7 +1960,7 @@ static func can_relocate_ground_pile_outside_site(
 	site_id: int,
 	ground_pile_id: int
 ) -> bool:
-	var site := WorldData.get_city_construction_site_by_id(site_id)
+	var site := get_city_construction_site_by_id(site_id)
 	var pile := CityLogisticsSystem.get_city_ground_pile_by_id(ground_pile_id)
 	var raw_source_tile = pile.get(
 		"tile_position",
@@ -1966,7 +2055,7 @@ static func _make_ground_relocation_task_request(
 			WorldData.CONTAINER_HAUL_PURPOSE_GROUND_PILE_CLEANUP
 		),
 		"task_source": WorldData.CITY_CITIZEN_TASK_SOURCE_PLAYER,
-		"task_priority": WorldData.CITY_CONSTRUCTION_TASK_PRIORITY,
+		"task_priority": CITY_CONSTRUCTION_TASK_PRIORITY,
 	})
 
 
@@ -2069,7 +2158,7 @@ static func _get_best_delivery_candidate(
 
 	for resource in WorldData.get_city_resource_types():
 		var requested_amount := (
-			WorldData.get_city_construction_site_unreserved_resource_space(
+			get_city_construction_site_unreserved_resource_space(
 				site_id,
 				resource
 			)
@@ -2118,7 +2207,7 @@ static func _get_best_delivery_candidate(
 						WorldData.CITY_CITIZEN_TASK_SOURCE_PLAYER
 					),
 					"task_priority": (
-						WorldData.CITY_CONSTRUCTION_TASK_PRIORITY
+						CITY_CONSTRUCTION_TASK_PRIORITY
 					),
 				})
 			)
@@ -2183,7 +2272,7 @@ static func _get_labor_candidate(
 	var claimed_positions := _get_claimed_labor_positions(site_id)
 	var candidate_positions: Array[Vector2i] = []
 
-	for position in WorldData.get_city_construction_site_work_positions(
+	for position in get_city_construction_site_work_positions(
 		site
 	):
 		if (
@@ -2307,8 +2396,8 @@ static func _get_fairness_bonus(site: Dictionary) -> int:
 	)
 	return mini(
 		age_minutes
-		* WorldData.CITY_CONSTRUCTION_FAIRNESS_BONUS_PER_MINUTE,
-		WorldData.CITY_CONSTRUCTION_MAX_FAIRNESS_BONUS
+		* CITY_CONSTRUCTION_FAIRNESS_BONUS_PER_MINUTE,
+		CITY_CONSTRUCTION_MAX_FAIRNESS_BONUS
 	)
 
 
@@ -2395,7 +2484,7 @@ static func assign_player_work_candidate(
 						WorldData.CITY_CITIZEN_TASK_SOURCE_PLAYER
 					),
 					"priority": (
-						WorldData.CITY_CONSTRUCTION_TASK_PRIORITY
+						CITY_CONSTRUCTION_TASK_PRIORITY
 					),
 					"target_object_id": int(
 						candidate.get(
@@ -2435,7 +2524,7 @@ static func advance_labor_task(
 		0
 	)
 	var site_id := int(current_task.get("target_object_id", -1))
-	var site := WorldData.get_city_construction_site_by_id(site_id)
+	var site := get_city_construction_site_by_id(site_id)
 	var raw_target_tile = current_task.get(
 		"target_tile",
 		WorldData.INVALID_CITY_TILE_POSITION
@@ -2448,14 +2537,14 @@ static func advance_labor_task(
 	if (
 		site.is_empty()
 		or str(
-			site.get("finalization_state", FINALIZATION_STATE_NONE)
-		) != FINALIZATION_STATE_NONE
+			site.get("finalization_state", CITY_CONSTRUCTION_FINALIZATION_STATE_NONE)
+		) != CITY_CONSTRUCTION_FINALIZATION_STATE_NONE
 		or str(site.get("phase", ""))
-		!= WorldData.CITY_CONSTRUCTION_PHASE_LABOR
+		!= CITY_CONSTRUCTION_PHASE_LABOR
 		or int(citizen.get("job_object_id", -1)) > 0
 		or not raw_target_tile is Vector2i
 		or not raw_current_tile is Vector2i
-		or not WorldData.get_city_construction_site_work_positions(
+		or not get_city_construction_site_work_positions(
 			site
 		).has(raw_target_tile)
 	):
@@ -2573,7 +2662,7 @@ static func _begin_labor(
 		"target_tile": target_tile,
 		"next_action_world_minute": (
 			SimulationClock.absolute_world_minutes
-			+ WorldData.CITY_CONSTRUCTION_LABOR_ATOMIC_MINUTES
+			+ CITY_CONSTRUCTION_LABOR_ATOMIC_MINUTES
 		),
 	}):
 		return false
@@ -2588,11 +2677,11 @@ static func _add_labor_progress(
 	site_id: int,
 	minutes_advanced: int
 ) -> bool:
-	var site := WorldData.get_city_construction_site_by_id(site_id)
+	var site := get_city_construction_site_by_id(site_id)
 	if (
 		site.is_empty()
 		or str(site.get("phase", ""))
-		!= WorldData.CITY_CONSTRUCTION_PHASE_LABOR
+		!= CITY_CONSTRUCTION_PHASE_LABOR
 	):
 		return false
 
@@ -2627,26 +2716,26 @@ static func _release_labor_task(citizen_id: int) -> void:
 static func complete_city_construction_site(
 	site_id: int
 ) -> Dictionary:
-	var site := WorldData.get_city_construction_site_by_id(site_id)
+	var site := get_city_construction_site_by_id(site_id)
 
 	if site.is_empty():
 		return {}
 
 	if (
-		str(site.get("finalization_state", FINALIZATION_STATE_NONE))
-		== FINALIZATION_STATE_AWAITING_CLEARANCE
+		str(site.get("finalization_state", CITY_CONSTRUCTION_FINALIZATION_STATE_NONE))
+		== CITY_CONSTRUCTION_FINALIZATION_STATE_AWAITING_CLEARANCE
 	):
 		return _advance_city_construction_finalization(site_id)
 
 	refresh_city_construction_site(site_id)
-	site = WorldData.get_city_construction_site_by_id(site_id)
+	site = get_city_construction_site_by_id(site_id)
 
 	if (
 		site.is_empty()
 		or str(site.get("target_kind", ""))
-		!= WorldData.CITY_CONSTRUCTION_TARGET_NEW
+		!= CITY_CONSTRUCTION_TARGET_NEW
 		or str(site.get("phase", ""))
-		!= WorldData.CITY_CONSTRUCTION_PHASE_LABOR
+		!= CITY_CONSTRUCTION_PHASE_LABOR
 		or int(site.get("completed_labor_minutes", 0))
 		< int(site.get("required_labor_minutes", 1))
 		or not city_construction_site_has_all_materials(site_id)
@@ -2657,12 +2746,12 @@ static func complete_city_construction_site(
 		return {}
 
 	refresh_city_construction_site(site_id)
-	site = WorldData.get_city_construction_site_by_id(site_id)
+	site = get_city_construction_site_by_id(site_id)
 
 	if (
 		site.is_empty()
 		or str(site.get("phase", ""))
-		!= WorldData.CITY_CONSTRUCTION_PHASE_LABOR
+		!= CITY_CONSTRUCTION_PHASE_LABOR
 		or not city_construction_site_has_all_materials(site_id)
 	):
 		return {}
@@ -2671,12 +2760,12 @@ static func complete_city_construction_site(
 	# close the work claims and enter a durable finalization state. The site then
 	# owns clearance and retries until the authoritative footprint is safe.
 	_clear_site_labor_tasks(site_id)
-	site = WorldData.get_city_construction_site_by_id(site_id)
+	site = get_city_construction_site_by_id(site_id)
 
 	if site.is_empty():
 		return {}
 
-	site["finalization_state"] = FINALIZATION_STATE_AWAITING_CLEARANCE
+	site["finalization_state"] = CITY_CONSTRUCTION_FINALIZATION_STATE_AWAITING_CLEARANCE
 
 	if not update_city_construction_site(site):
 		return {}
@@ -2687,14 +2776,14 @@ static func complete_city_construction_site(
 static func _advance_city_construction_finalization(
 	site_id: int
 ) -> Dictionary:
-	var site := WorldData.get_city_construction_site_by_id(site_id)
+	var site := get_city_construction_site_by_id(site_id)
 	var city_world: WorldData = WorldData.official_city_world
 
 	if (
 		site.is_empty()
 		or city_world == null
-		or str(site.get("finalization_state", FINALIZATION_STATE_NONE))
-		!= FINALIZATION_STATE_AWAITING_CLEARANCE
+		or str(site.get("finalization_state", CITY_CONSTRUCTION_FINALIZATION_STATE_NONE))
+		!= CITY_CONSTRUCTION_FINALIZATION_STATE_AWAITING_CLEARANCE
 	):
 		return {}
 
@@ -2922,7 +3011,7 @@ static func _restore_site_materials(
 
 
 static func cancel_city_construction_site(site_id: int) -> bool:
-	var site := WorldData.get_city_construction_site_by_id(site_id)
+	var site := get_city_construction_site_by_id(site_id)
 	if site.is_empty():
 		return false
 
@@ -3100,7 +3189,7 @@ static func rebalance_uncommitted_construction_workers_for_sites(
 
 		if (
 			site_id > 0
-			and not WorldData.get_city_construction_site_by_id(
+			and not get_city_construction_site_by_id(
 				site_id
 			).is_empty()
 		):
@@ -3108,7 +3197,7 @@ static func rebalance_uncommitted_construction_workers_for_sites(
 
 	if (
 		triggering_site_id_lookup.is_empty()
-		or WorldData.city_construction_sites.size() <= 1
+		or get_current_state().construction_sites.size() <= 1
 	):
 		return 0
 
@@ -3382,11 +3471,11 @@ static func _get_current_construction_path_cost(
 
 	match str(current_task.get("kind", "")):
 		WorldData.CITY_CITIZEN_TASK_KIND_CONSTRUCTION:
-			var site := WorldData.get_city_construction_site_by_id(
+			var site := get_city_construction_site_by_id(
 				int(current_task.get("target_object_id", -1))
 			)
 			var work_positions := (
-				WorldData.get_city_construction_site_work_positions(site)
+				get_city_construction_site_work_positions(site)
 			)
 
 			if raw_target_tile is Vector2i and work_positions.has(

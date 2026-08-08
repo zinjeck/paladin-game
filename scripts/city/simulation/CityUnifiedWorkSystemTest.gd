@@ -1707,7 +1707,7 @@ func _test_construction_labor_balance() -> void:
 		int(road_definition.get("construction_labor_minutes", -1)) == 8
 		and road_definition.get("construction_materials", {}).is_empty()
 		and int(road_definition.get("construction_max_workers", -1)) == 1
-		and WorldData.CITY_CONSTRUCTION_LABOR_ATOMIC_MINUTES == 30,
+		and CityConstructionSystem.CITY_CONSTRUCTION_LABOR_ATOMIC_MINUTES == 30,
 		"Roads must remain fast, labor-only, single-tile construction jobs without changing the scheduler boundary."
 	)
 
@@ -1749,7 +1749,7 @@ func _test_safe_boundary_and_cancellation_preserve_physical_cargo() -> void:
 		{
 			"kind": WorldData.CITY_CITIZEN_TASK_KIND_HAUL,
 			"source": WorldData.CITY_CITIZEN_TASK_SOURCE_PLAYER,
-			"priority": WorldData.CITY_CONSTRUCTION_TASK_PRIORITY,
+			"priority": CityConstructionSystem.CITY_CONSTRUCTION_TASK_PRIORITY,
 			"target_object_id": source_id,
 			"haul": {
 				"source": source,
@@ -1867,7 +1867,7 @@ func _test_cargo_ready_demand_preempts_soft_claim() -> void:
 		keep_id > 0
 		and site_id > 0
 		and str(house_site.get("phase", ""))
-		== WorldData.CITY_CONSTRUCTION_PHASE_GATHERING,
+		== CityConstructionSystem.CITY_CONSTRUCTION_PHASE_GATHERING,
 		"The cargo-routing fixture must create reachable storage and a gathering site."
 	)
 
@@ -1888,7 +1888,7 @@ func _test_cargo_ready_demand_preempts_soft_claim() -> void:
 		{
 			"kind": WorldData.CITY_CITIZEN_TASK_KIND_HAUL,
 			"source": WorldData.CITY_CITIZEN_TASK_SOURCE_PLAYER,
-			"priority": WorldData.CITY_CONSTRUCTION_TASK_PRIORITY,
+			"priority": CityConstructionSystem.CITY_CONSTRUCTION_TASK_PRIORITY,
 			"target_object_id": source_id,
 			"haul": {
 				"source": source_endpoint,
@@ -2311,7 +2311,7 @@ func _create_material_blocked_site(
 	stone_amount: int
 ) -> Dictionary:
 	var site := CityConstructionSystemScript.create_city_construction_site({
-		"target_kind": WorldData.CITY_CONSTRUCTION_TARGET_NEW,
+		"target_kind": CityConstructionSystem.CITY_CONSTRUCTION_TARGET_NEW,
 		"object_type": WorldData.CITY_OBJECT_ROAD,
 		"shape_mode": WorldData.CITY_OBJECT_SHAPE_TILE_AREA,
 		"top_left": tile_position,
@@ -2331,7 +2331,7 @@ func _create_material_blocked_site(
 		return {}
 
 	CityConstructionSystemScript.refresh_city_construction_site(site_id)
-	return WorldData.get_city_construction_site_by_id(site_id)
+	return CityConstructionSystem.get_city_construction_site_by_id(site_id)
 
 
 func _create_ready_labor_site(
@@ -2351,7 +2351,7 @@ func _create_ready_labor_site(
 		bottom_right.y = maxi(bottom_right.y, tile_position.y)
 
 	var site := CityConstructionSystemScript.create_city_construction_site({
-		"target_kind": WorldData.CITY_CONSTRUCTION_TARGET_NEW,
+		"target_kind": CityConstructionSystem.CITY_CONSTRUCTION_TARGET_NEW,
 		"object_type": WorldData.CITY_OBJECT_ROAD,
 		"shape_mode": WorldData.CITY_OBJECT_SHAPE_TILE_AREA,
 		"top_left": top_left,
@@ -2369,7 +2369,7 @@ func _create_ready_labor_site(
 		return {}
 
 	CityConstructionSystemScript.refresh_city_construction_site(site_id)
-	return WorldData.get_city_construction_site_by_id(site_id)
+	return CityConstructionSystem.get_city_construction_site_by_id(site_id)
 
 
 func _get_assignment_snapshot(citizen_id: int) -> Dictionary:

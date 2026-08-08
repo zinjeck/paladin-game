@@ -345,7 +345,7 @@ static func ensure_city_construction_clearing_command(
 	command_type: String,
 	tile_position: Vector2i
 ) -> int:
-	var site := WorldData.get_city_construction_site_by_id(site_id)
+	var site := CityConstructionSystem.get_city_construction_site_by_id(site_id)
 
 	if (
 		site.is_empty()
@@ -728,8 +728,8 @@ static func get_best_assignable_city_player_command_for_citizen(
 		)
 		var fairness_bonus := mini(
 			command_age_minutes
-			* WorldData.CITY_CONSTRUCTION_FAIRNESS_BONUS_PER_MINUTE,
-			WorldData.CITY_CONSTRUCTION_MAX_FAIRNESS_BONUS
+			* CityConstructionSystem.CITY_CONSTRUCTION_FAIRNESS_BONUS_PER_MINUTE,
+			CityConstructionSystem.CITY_CONSTRUCTION_MAX_FAIRNESS_BONUS
 		)
 		var selection_score := estimated_cost - fairness_bonus
 		var command_id := int(command.get("id", -1))
@@ -829,13 +829,13 @@ static func complete_city_player_command(
 
 	if (
 		construction_site_id > 0
-		and not WorldData.get_city_construction_site_by_id(
+		and not CityConstructionSystem.get_city_construction_site_by_id(
 			construction_site_id
 		).is_empty()
 	):
 		reserved_amount = mini(
 			resource_yield,
-			WorldData.get_city_construction_site_unreserved_resource_space(
+			CityConstructionSystem.get_city_construction_site_unreserved_resource_space(
 				construction_site_id,
 				resource
 			)
@@ -993,7 +993,7 @@ static func synchronize_player_work_board() -> void:
 
 
 static func synchronize_construction_work_order(site_id: int) -> Dictionary:
-	var site := WorldData.get_city_construction_site_by_id(site_id)
+	var site := CityConstructionSystem.get_city_construction_site_by_id(site_id)
 
 	if site.is_empty():
 		return {}
@@ -1162,7 +1162,7 @@ static func _construction_order_uses_batchable_road_site(
 	):
 		return false
 
-	var site := WorldData.get_city_construction_site_by_id(
+	var site := CityConstructionSystem.get_city_construction_site_by_id(
 		int(order.get("source_id", -1))
 	)
 	var raw_recipe = site.get("material_recipe", {})
@@ -2074,7 +2074,7 @@ static func _get_order_phase(order: Dictionary) -> String:
 
 	if str(order.get("order_type", "")) == ORDER_TYPE_CONSTRUCTION_SITE:
 		return str(
-			WorldData.get_city_construction_site_by_id(
+			CityConstructionSystem.get_city_construction_site_by_id(
 				int(order.get("source_id", -1))
 			).get("phase", "")
 		)
@@ -2103,14 +2103,14 @@ static func _build_jobs_for_order(
 	if order_type != ORDER_TYPE_CONSTRUCTION_SITE:
 		return jobs
 
-	var site := WorldData.get_city_construction_site_by_id(source_id)
+	var site := CityConstructionSystem.get_city_construction_site_by_id(source_id)
 
 	if site.is_empty():
 		return jobs
 
 	var phase := str(site.get("phase", ""))
 
-	if phase == WorldData.CITY_CONSTRUCTION_PHASE_CLEARING:
+	if phase == CityConstructionSystem.CITY_CONSTRUCTION_PHASE_CLEARING:
 		_append_command_jobs({
 			"jobs": jobs,
 			"group_id": -1,
@@ -2194,10 +2194,10 @@ static func _build_jobs_for_order(
 				"blocked_reason": blocked_reason,
 				"claimed_citizen_id": -1,
 			})
-	elif phase == WorldData.CITY_CONSTRUCTION_PHASE_GATHERING:
+	elif phase == CityConstructionSystem.CITY_CONSTRUCTION_PHASE_GATHERING:
 		for resource in WorldData.get_city_resource_types():
 			var remaining_amount := (
-				WorldData.get_city_construction_site_remaining_resource_amount(
+				CityConstructionSystem.get_city_construction_site_remaining_resource_amount(
 					source_id,
 					resource
 				)
@@ -2207,13 +2207,13 @@ static func _build_jobs_for_order(
 				continue
 
 			var destination_reserved_amount := (
-				WorldData.get_city_construction_site_destination_reserved_resource_amount(
+				CityConstructionSystem.get_city_construction_site_destination_reserved_resource_amount(
 					source_id,
 					resource
 				)
 			)
 			var requested_amount := (
-				WorldData.get_city_construction_site_unreserved_resource_space(
+				CityConstructionSystem.get_city_construction_site_unreserved_resource_space(
 					source_id,
 					resource
 				)
@@ -2254,7 +2254,7 @@ static func _build_jobs_for_order(
 				"blocked_reason": blocked_reason,
 				"claimed_citizen_id": -1,
 			})
-	elif phase == WorldData.CITY_CONSTRUCTION_PHASE_LABOR:
+	elif phase == CityConstructionSystem.CITY_CONSTRUCTION_PHASE_LABOR:
 		var maximum_workers := maxi(int(site.get("maximum_workers", 1)), 1)
 		var active_workers := _count_construction_workers(source_id)
 		var remaining_labor := maxi(
@@ -2367,7 +2367,7 @@ static func _build_progress_signature(
 	if order_type != ORDER_TYPE_CONSTRUCTION_SITE:
 		return "invalid"
 
-	var site := WorldData.get_city_construction_site_by_id(source_id)
+	var site := CityConstructionSystem.get_city_construction_site_by_id(source_id)
 
 	if site.is_empty():
 		return "missing"
@@ -2382,7 +2382,7 @@ static func _build_progress_signature(
 			resource
 			+ "="
 			+ str(
-				WorldData.get_city_construction_site_reserved_resource_amount(
+				CityConstructionSystem.get_city_construction_site_reserved_resource_amount(
 					source_id,
 					resource
 				)
@@ -2740,7 +2740,7 @@ static func _candidate_unlocks_progress(
 		str(candidate.get("player_work_kind", ""))
 		== CityConstructionSystemScript.PLAYER_WORK_KIND_LABOR
 	):
-		var site := WorldData.get_city_construction_site_by_id(
+		var site := CityConstructionSystem.get_city_construction_site_by_id(
 			int(order.get("source_id", -1))
 		)
 		return (
@@ -2870,7 +2870,7 @@ static func _get_useful_parallel_capacity(
 			actionable_job_count += 1
 
 	if str(order.get("order_type", "")) == ORDER_TYPE_CONSTRUCTION_SITE:
-		var site := WorldData.get_city_construction_site_by_id(
+		var site := CityConstructionSystem.get_city_construction_site_by_id(
 			int(order.get("source_id", -1))
 		)
 
@@ -2911,10 +2911,10 @@ static func _get_order_blocked_reason(
 
 	if jobs.is_empty():
 		match _get_order_phase(order):
-			WorldData.CITY_CONSTRUCTION_PHASE_CLEARING:
+			CityConstructionSystem.CITY_CONSTRUCTION_PHASE_CLEARING:
 				return BLOCKED_REASON_WAITING_FOR_CLEARING
 
-			WorldData.CITY_CONSTRUCTION_PHASE_GATHERING:
+			CityConstructionSystem.CITY_CONSTRUCTION_PHASE_GATHERING:
 				return BLOCKED_REASON_WAITING_FOR_MATERIALS
 
 	return BLOCKED_REASON_INVALIDATED

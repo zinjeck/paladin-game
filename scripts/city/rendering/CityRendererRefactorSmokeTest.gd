@@ -1594,7 +1594,7 @@ func _test_universal_construction_core(
 	)
 	_expect(
 		str(house_site.get("phase", ""))
-		== WorldData.CITY_CONSTRUCTION_PHASE_CLEARING,
+		== CityConstructionSystem.CITY_CONSTRUCTION_PHASE_CLEARING,
 		"An obstructed House blueprint must begin in clearing."
 	)
 
@@ -1681,21 +1681,21 @@ func _test_universal_construction_core(
 	CityConstructionSystemScript.refresh_city_construction_site(
 		house_site_id
 	)
-	house_site = WorldData.get_city_construction_site_by_id(
+	house_site = CityConstructionSystem.get_city_construction_site_by_id(
 		house_site_id
 	)
 
 	_expect(
 		str(house_site.get("phase", ""))
-		== WorldData.CITY_CONSTRUCTION_PHASE_GATHERING,
+		== CityConstructionSystem.CITY_CONSTRUCTION_PHASE_GATHERING,
 		"A cleared but under-supplied House must enter gathering."
 	)
 	_expect(
-		WorldData.get_city_construction_site_reserved_resource_amount(
+		CityConstructionSystem.get_city_construction_site_reserved_resource_amount(
 			house_site_id,
 			WorldData.RESOURCE_LUMBER
 		) == 4
-		and WorldData.get_city_construction_site_reserved_resource_amount(
+		and CityConstructionSystem.get_city_construction_site_reserved_resource_amount(
 			house_site_id,
 			WorldData.RESOURCE_STONE
 		) == 4,
@@ -1756,13 +1756,13 @@ func _test_universal_construction_core(
 	CityConstructionSystemScript.refresh_city_construction_site(
 		house_site_id
 	)
-	house_site = WorldData.get_city_construction_site_by_id(
+	house_site = CityConstructionSystem.get_city_construction_site_by_id(
 		house_site_id
 	)
 
 	_expect(
 		str(house_site.get("phase", ""))
-		== WorldData.CITY_CONSTRUCTION_PHASE_LABOR,
+		== CityConstructionSystem.CITY_CONSTRUCTION_PHASE_LABOR,
 		"A fully supplied House must enter labor."
 	)
 
@@ -1796,13 +1796,13 @@ func _test_universal_construction_core(
 		)
 
 	_expect(
-		WorldData.get_city_construction_site_by_id(
+		CityConstructionSystem.get_city_construction_site_by_id(
 			house_site_id
 		).is_empty(),
 		"Completed construction must release its blueprint."
 	)
 	_expect(
-		WorldData.get_city_construction_site_reserved_resource_amount(
+		CityConstructionSystem.get_city_construction_site_reserved_resource_amount(
 			house_site_id,
 			WorldData.RESOURCE_LUMBER
 		) == 0,
@@ -1902,20 +1902,20 @@ func _test_universal_construction_core(
 		"Canceling one road tile must succeed independently."
 	)
 	_expect(
-		WorldData.get_city_construction_site_by_id(
+		CityConstructionSystem.get_city_construction_site_by_id(
 			selected_road_site_id
 		).is_empty()
-		and not WorldData.get_city_construction_site_by_id(
+		and not CityConstructionSystem.get_city_construction_site_by_id(
 			int(road_sites[0].get("id", -1))
 		).is_empty()
-		and not WorldData.get_city_construction_site_by_id(
+		and not CityConstructionSystem.get_city_construction_site_by_id(
 			int(road_sites[2].get("id", -1))
 		).is_empty(),
 		"Canceling one road tile must leave the neighboring painted tiles intact."
 	)
 
 	var completed_site_id := int(road_sites[0].get("id", -1))
-	var completed_site := WorldData.get_city_construction_site_by_id(
+	var completed_site := CityConstructionSystem.get_city_construction_site_by_id(
 		completed_site_id
 	)
 	completed_site["completed_labor_minutes"] = int(
@@ -2122,7 +2122,7 @@ func _find_reachable_construction_rectangle(
 
 				city_world.mark_tile_data_changed()
 
-				if not WorldData.can_place_city_object_construction(
+				if not CityConstructionSystem.can_place_city_object_construction(
 					city_world,
 					top_left,
 					size_tiles,
