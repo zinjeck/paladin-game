@@ -18,44 +18,7 @@ jobs:
           ref: agent/extract-city-logistics-api
           fetch-depth: 0
       - name: Apply guarded refactor
-        shell: bash
-        run: |
-          set -o pipefail
-          set +e
-          python3 ci/refactor_city_logistics_api.py 2>&1 | tee /tmp/logistics-refactor.log
-          status=${PIPESTATUS[0]}
-          set -e
-          if [ "$status" -ne 0 ]; then
-            grep -Fq "scripts/world/simulation/WorldData.gd: WorldData.city_ground_pile_is_construction_reserved" /tmp/logistics-refactor.log || exit "$status"
-          fi
-
-          python3 - <<'PY'
-          from pathlib import Path
-          import sys
-          sys.path.insert(0, str(Path('ci').resolve()))
-          from refactor_city_logistics_api import EXTRACTED_FUNCTIONS, STATE_FIELDS, MOVED_CONSTANTS
-
-          world_path = Path('scripts/world/simulation/WorldData.gd')
-          text = world_path.read_text(encoding='utf-8')
-          old = 'WorldData.city_ground_pile_is_construction_reserved('
-          new = 'CityLogisticsSystem.city_ground_pile_is_construction_reserved('
-          if text.count(old) != 1:
-              raise RuntimeError(f'expected exactly one qualified logistics self-call, found {text.count(old)}')
-          text = text.replace(old, new, 1)
-          world_path.write_text(text, encoding='utf-8')
-
-          forbidden = list(STATE_FIELDS) + list(MOVED_CONSTANTS) + EXTRACTED_FUNCTIONS
-          errors = []
-          for path in sorted(Path('scripts').rglob('*.gd')):
-              ptext = path.read_text(encoding='utf-8')
-              for symbol in forbidden:
-                  needle = f'WorldData.{symbol}'
-                  if needle in ptext:
-                      errors.append(f'{path}: {needle}')
-          if errors:
-              raise RuntimeError('legacy WorldData logistics references remain:\n' + '\n'.join(errors))
-          print('Qualified self-call patched; no legacy WorldData logistics references remain.')
-          PY
+        run: python3 ci/refactor_city_logistics_api.py
       - name: Commit transformed source
         shell: bash
         run: |
