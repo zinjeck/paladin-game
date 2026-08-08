@@ -124,7 +124,7 @@ var city_command_cancel_cursor_icon: Label
 var city_command_menu_open: bool = false
 var is_city_player_command_cancel_mode_active: bool = false
 var active_city_player_command_type: String = (
-	WorldData.CITY_PLAYER_COMMAND_TYPE_NONE
+	CityWorkSystem.CITY_PLAYER_COMMAND_TYPE_NONE
 )
 var is_city_player_command_dragging: bool = false
 var city_player_command_drag_removing: bool = false
@@ -636,10 +636,10 @@ func _collect_world_data_change_flags(
 
 	if (
 		observed_city_player_command_version
-		!= WorldData.city_player_command_version
+		!= CityWorkSystem.get_current_work_state().player_command_version
 	):
 		observed_city_player_command_version = (
-			WorldData.city_player_command_version
+			CityWorkSystem.get_current_work_state().player_command_version
 		)
 		change_flags["city_player_commands_changed"] = true
 
@@ -1483,7 +1483,7 @@ func create_city_player_command_menu() -> void:
 	ui_root.add_child(city_command_chop_trees_button)
 	city_command_chop_trees_button.pressed.connect(
 		on_city_player_command_option_pressed.bind(
-			WorldData.CITY_PLAYER_COMMAND_TYPE_CHOP_TREE
+			CityWorkSystem.CITY_PLAYER_COMMAND_TYPE_CHOP_TREE
 		)
 	)
 
@@ -1498,7 +1498,7 @@ func create_city_player_command_menu() -> void:
 	ui_root.add_child(city_command_collect_rocks_button)
 	city_command_collect_rocks_button.pressed.connect(
 		on_city_player_command_option_pressed.bind(
-			WorldData.CITY_PLAYER_COMMAND_TYPE_COLLECT_ROCK
+			CityWorkSystem.CITY_PLAYER_COMMAND_TYPE_COLLECT_ROCK
 		)
 	)
 
@@ -1532,7 +1532,7 @@ func on_city_player_command_menu_button_pressed() -> void:
 
 
 func on_city_player_command_option_pressed(command_type: String) -> void:
-	if not WorldData.is_valid_city_player_command_type(command_type):
+	if not CityWorkSystem.is_valid_city_player_command_type(command_type):
 		return
 
 	is_city_player_command_cancel_mode_active = false
@@ -1541,7 +1541,7 @@ func on_city_player_command_option_pressed(command_type: String) -> void:
 		city_command_cancel_cursor_icon.visible = false
 
 	if active_city_player_command_type == command_type:
-		active_city_player_command_type = WorldData.CITY_PLAYER_COMMAND_TYPE_NONE
+		active_city_player_command_type = CityWorkSystem.CITY_PLAYER_COMMAND_TYPE_NONE
 	else:
 		active_city_player_command_type = command_type
 
@@ -1552,7 +1552,7 @@ func on_city_player_command_option_pressed(command_type: String) -> void:
 
 
 func on_city_player_command_cancel_task_pressed() -> void:
-	active_city_player_command_type = WorldData.CITY_PLAYER_COMMAND_TYPE_NONE
+	active_city_player_command_type = CityWorkSystem.CITY_PLAYER_COMMAND_TYPE_NONE
 	is_city_player_command_cancel_mode_active = (
 		not is_city_player_command_cancel_mode_active
 	)
@@ -1572,7 +1572,7 @@ func on_city_player_command_cancel_task_pressed() -> void:
 
 
 func deactivate_city_player_command_tool() -> void:
-	active_city_player_command_type = WorldData.CITY_PLAYER_COMMAND_TYPE_NONE
+	active_city_player_command_type = CityWorkSystem.CITY_PLAYER_COMMAND_TYPE_NONE
 	is_city_player_command_cancel_mode_active = false
 	cancel_city_player_command_drag()
 
@@ -1597,7 +1597,7 @@ func close_city_player_command_menu() -> void:
 		city_command_collect_rocks_button.visible = false
 
 func is_city_player_command_mode_active() -> bool:
-	return WorldData.is_valid_city_player_command_type(
+	return CityWorkSystem.is_valid_city_player_command_type(
 		active_city_player_command_type
 	)
 
@@ -1618,13 +1618,13 @@ func update_city_player_command_button_visuals() -> void:
 	if city_command_chop_trees_button != null:
 		city_command_chop_trees_button.set_pressed_no_signal(
 			active_city_player_command_type
-			== WorldData.CITY_PLAYER_COMMAND_TYPE_CHOP_TREE
+			== CityWorkSystem.CITY_PLAYER_COMMAND_TYPE_CHOP_TREE
 		)
 
 	if city_command_collect_rocks_button != null:
 		city_command_collect_rocks_button.set_pressed_no_signal(
 			active_city_player_command_type
-			== WorldData.CITY_PLAYER_COMMAND_TYPE_COLLECT_ROCK
+			== CityWorkSystem.CITY_PLAYER_COMMAND_TYPE_COLLECT_ROCK
 		)
 
 
@@ -5955,7 +5955,7 @@ func draw_active_city_player_command_features(
 
 	if (
 		active_city_player_command_type
-		== WorldData.CITY_PLAYER_COMMAND_TYPE_CHOP_TREE
+		== CityWorkSystem.CITY_PLAYER_COMMAND_TYPE_CHOP_TREE
 	):
 		if (
 			city_tree_multimesh != null
@@ -5967,7 +5967,7 @@ func draw_active_city_player_command_features(
 			)
 	elif (
 		active_city_player_command_type
-		== WorldData.CITY_PLAYER_COMMAND_TYPE_COLLECT_ROCK
+		== CityWorkSystem.CITY_PLAYER_COMMAND_TYPE_COLLECT_ROCK
 	):
 		if (
 			city_rock_multimesh != null

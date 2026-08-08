@@ -1,8 +1,8 @@
 extends RefCounted
 class_name CityWorkSystem
 
-# File responsibility: Player-command and work-order operations, scheduling, job generation, assignment, and diagnostics. Authoritative collections remain in WorldData.
-# Navigation regions are organizational only; they do not define runtime ownership.
+# File responsibility: Player-command and work-order state access, mutation, scheduling, job generation, assignment, and diagnostics for the active CITY settlement.
+# CityWorkState owns the data; this system owns the behavior. WorldData is not a work-state owner or API surface.
 
 const CityConstructionSystemScript = preload(
 	"res://scripts/city/simulation/systems/CityConstructionSystem.gd"
@@ -13,6 +13,19 @@ const CityResourceMatcherScript = preload(
 const CityNavigationSystemScript = preload(
 	"res://scripts/city/simulation/systems/CityNavigationSystem.gd"
 )
+
+const CITY_PLAYER_COMMAND_TYPE_NONE := "none"
+const CITY_PLAYER_COMMAND_TYPE_CHOP_TREE := "chop_tree"
+const CITY_PLAYER_COMMAND_TYPE_COLLECT_ROCK := "collect_rock"
+const CITY_PLAYER_COMMAND_STATUS_PENDING := "pending"
+const CITY_PLAYER_COMMAND_STATUS_CLAIMED := "claimed"
+const CITY_PLAYER_COMMAND_STATUS_BLOCKED := "blocked"
+const CITY_PLAYER_COMMAND_TASK_PRIORITY: int = 1000
+# At the default clock rate, six world minutes is three simulation ticks,
+# or roughly 2.5 real seconds at normal speed.
+const CITY_PLAYER_COMMAND_WORK_DURATION_MINUTES: int = 6
+const CITY_PLAYER_COMMAND_RESOURCE_YIELD: int = 4
+const CITY_PLAYER_COMMAND_BLOCKED_RETRY_DELAY_MINUTES: int = 30
 
 # Parent work orders are selected before their individual jobs. This keeps a
 # large drag designation from receiving more scheduler weight merely because
@@ -77,6 +90,78 @@ const PROGRESS_UNLOCK_SCORE: int = 35_000
 const EXACT_COMMAND_PATH_HEURISTIC_WEIGHT: int = 1
 
 
+static func get_current_work_state() -> CityWorkState:
+	return WorldPoliticalState.get_current_city_work_state()
+
+
+static func _work_state() -> CityWorkState:
+	return get_current_work_state()
+
+
+static func get_city_player_command_types() -> Array[String]:
+	return [
+		CITY_PLAYER_COMMAND_TYPE_CHOP_TREE,
+		CITY_PLAYER_COMMAND_TYPE_COLLECT_ROCK,
+	]
+
+
+static func is_valid_city_player_command_type(command_type: String) -> bool:
+	return get_city_player_command_types().has(command_type)
+
+
+static func get_city_player_command_surface_feature(command_type: String) -> String:
+	match command_type:
+		CITY_PLAYER_COMMAND_TYPE_CHOP_TREE:
+			return WorldData.CITY_SURFACE_FEATURE_TREE
+		CITY_PLAYER_COMMAND_TYPE_COLLECT_ROCK:
+			return WorldData.CITY_SURFACE_FEATURE_ROCK
+	return WorldData.CITY_SURFACE_FEATURE_NONE
+
+
+static func mark_city_player_commands_changed() -> void:
+	_work_state().mark_player_commands_changed()
+
+
+static func mark_city_work_orders_changed() -> void:
+	_work_state().mark_work_orders_changed()
+
+
+static func reset_city_work_order_state() -> void:
+	_work_state().reset_work_orders()
+
+
+static func reset_city_player_command_state() -> void:
+	_work_state().reset_player_commands()
+
+
+static func get_city_player_command_index_by_id(command_id: int) -> int:
+	return _work_state().get_player_command_index_by_id(command_id)
+
+
+static func get_city_player_command_by_id(command_id: int) -> Dictionary:
+	return _work_state().get_player_command_by_id(command_id)
+
+
+static func is_city_player_command_target_valid(command: Dictionary) -> bool:
+	return _work_state().is_player_command_target_valid(
+		command,
+		WorldData.official_city_world,
+		WorldData.INVALID_CITY_TILE_POSITION
+	)
+
+
+static func release_city_player_command_claim(
+	command_id: int,
+	citizen_id: int,
+	blocked_retry_minute: int = -1
+) -> bool:
+	return _work_state().release_player_command_claim(
+		command_id,
+		citizen_id,
+		blocked_retry_minute
+	)
+
+
 #region Player Command and Work Order Operations
 
 
@@ -85,10 +170,10 @@ static func get_city_player_command_display_name(
 	command_type: String
 ) -> String:
 	match command_type:
-		WorldData.CITY_PLAYER_COMMAND_TYPE_CHOP_TREE:
+		CITY_PLAYER_COMMAND_TYPE_CHOP_TREE:
 			return "Chop Tree"
 
-		WorldData.CITY_PLAYER_COMMAND_TYPE_COLLECT_ROCK:
+		CITY_PLAYER_COMMAND_TYPE_COLLECT_ROCK:
 			return "Collect Rock"
 
 	return "Player Command"
@@ -98,16 +183,16 @@ static func get_city_player_command_resource_type(
 	command_type: String
 ) -> String:
 	return WorldData.get_city_surface_feature_resource_type(
-		WorldData.get_city_player_command_surface_feature(command_type)
+		get_city_player_command_surface_feature(command_type)
 	)
 
 
 
 static func get_city_work_order_by_id(order_id: int) -> Dictionary:
-	if order_id <= 0 or not WorldData.city_work_orders.has(order_id):
+	if order_id <= 0 or not _work_state().work_orders.has(order_id):
 		return {}
 
-	var raw_order = WorldData.city_work_orders.get(order_id, {})
+	var raw_order = _work_state().work_orders.get(order_id, {})
 
 	if not raw_order is Dictionary:
 		return {}
@@ -116,7 +201,7 @@ static func get_city_work_order_by_id(order_id: int) -> Dictionary:
 
 static func get_city_work_order_snapshot() -> Array:
 	var snapshot: Array = []
-	var order_ids: Array = WorldData.city_work_orders.keys()
+	var order_ids: Array = _work_state().work_orders.keys()
 	order_ids.sort()
 
 	for raw_order_id in order_ids:
@@ -129,11 +214,11 @@ static func get_city_work_order_snapshot() -> Array:
 
 
 static func rebuild_city_player_command_index() -> void:
-	WorldData.city_player_command_index_by_id.clear()
-	WorldData.city_player_command_id_by_tile.clear()
+	_work_state().player_command_index_by_id.clear()
+	_work_state().player_command_id_by_tile.clear()
 
-	for command_index in range(WorldData.city_player_commands.size()):
-		var raw_command = WorldData.city_player_commands[command_index]
+	for command_index in range(_work_state().player_commands.size()):
+		var raw_command = _work_state().player_commands[command_index]
 
 		if not raw_command is Dictionary:
 			continue
@@ -148,22 +233,22 @@ static func rebuild_city_player_command_index() -> void:
 		if command_id <= 0 or not raw_tile_position is Vector2i:
 			continue
 
-		WorldData.city_player_command_index_by_id[command_id] = command_index
-		WorldData.city_player_command_id_by_tile[raw_tile_position] = command_id
+		_work_state().player_command_index_by_id[command_id] = command_index
+		_work_state().player_command_id_by_tile[raw_tile_position] = command_id
 
 
 
 static func get_city_player_command_snapshot() -> Array:
-	return WorldData.city_player_commands.duplicate(true)
+	return _work_state().player_commands.duplicate(true)
 
 static func get_city_player_command_at_tile(
 	tile_position: Vector2i
 ) -> Dictionary:
-	if not WorldData.city_player_command_id_by_tile.has(tile_position):
+	if not _work_state().player_command_id_by_tile.has(tile_position):
 		return {}
 
-	return WorldData.get_city_player_command_by_id(
-		int(WorldData.city_player_command_id_by_tile[tile_position])
+	return get_city_player_command_by_id(
+		int(_work_state().player_command_id_by_tile[tile_position])
 	)
 
 static func can_designate_city_player_command_at_tile(
@@ -174,9 +259,9 @@ static func can_designate_city_player_command_at_tile(
 
 	if (
 		city_world == null
-		or not WorldData.is_valid_city_player_command_type(command_type)
+		or not is_valid_city_player_command_type(command_type)
 		or not city_world.is_in_bounds(tile_position.x, tile_position.y)
-		or WorldData.city_player_command_id_by_tile.has(tile_position)
+		or _work_state().player_command_id_by_tile.has(tile_position)
 	):
 		return false
 
@@ -184,7 +269,7 @@ static func can_designate_city_player_command_at_tile(
 
 	return (
 		WorldData.get_city_surface_feature(tile)
-		== WorldData.get_city_player_command_surface_feature(command_type)
+		== get_city_player_command_surface_feature(command_type)
 	)
 
 static func add_city_player_command_targets(
@@ -193,7 +278,7 @@ static func add_city_player_command_targets(
 ) -> int:
 	if (
 		WorldData.official_city_world == null
-		or not WorldData.is_valid_city_player_command_type(command_type)
+		or not is_valid_city_player_command_type(command_type)
 	):
 		return 0
 
@@ -222,37 +307,37 @@ static func add_city_player_command_targets(
 
 	clean_tiles.sort_custom(WorldData._sort_city_tiles_y_then_x)
 
-	var group_id := WorldData.next_city_player_command_group_id
-	WorldData.next_city_player_command_group_id += 1
+	var group_id := _work_state().next_player_command_group_id
+	_work_state().next_player_command_group_id += 1
 
 	for tile_position in clean_tiles:
-		var command_id := WorldData.next_city_player_command_id
-		WorldData.next_city_player_command_id += 1
+		var command_id := _work_state().next_player_command_id
+		_work_state().next_player_command_id += 1
 
 		var command := {
 			"id": command_id,
 			"group_id": group_id,
 			"type": command_type,
 			"tile_position": tile_position,
-			"status": WorldData.CITY_PLAYER_COMMAND_STATUS_PENDING,
+			"status": CITY_PLAYER_COMMAND_STATUS_PENDING,
 			"claimed_citizen_id": -1,
 			"issued_world_minute": SimulationClock.absolute_world_minutes,
 			"next_retry_world_minute": -1,
 			"work_duration_minutes": (
-				WorldData.CITY_PLAYER_COMMAND_WORK_DURATION_MINUTES
+				CITY_PLAYER_COMMAND_WORK_DURATION_MINUTES
 			),
-			"resource_yield": WorldData.CITY_PLAYER_COMMAND_RESOURCE_YIELD,
+			"resource_yield": CITY_PLAYER_COMMAND_RESOURCE_YIELD,
 			"construction_site_id": -1,
 			"created_by_construction": false,
 		}
 
-		WorldData.city_player_commands.append(command)
-		WorldData.city_player_command_index_by_id[command_id] = (
-			WorldData.city_player_commands.size() - 1
+		_work_state().player_commands.append(command)
+		_work_state().player_command_index_by_id[command_id] = (
+			_work_state().player_commands.size() - 1
 		)
-		WorldData.city_player_command_id_by_tile[tile_position] = command_id
+		_work_state().player_command_id_by_tile[tile_position] = command_id
 
-	WorldData._mark_city_player_commands_changed()
+	mark_city_player_commands_changed()
 	return clean_tiles.size()
 
 static func ensure_city_construction_clearing_command(
@@ -291,7 +376,7 @@ static func ensure_city_construction_clearing_command(
 			return -1
 
 		var command_id := int(existing_command.get("id", -1))
-		var command_index := WorldData.get_city_player_command_index_by_id(
+		var command_index := get_city_player_command_index_by_id(
 			command_id
 		)
 
@@ -305,8 +390,8 @@ static func ensure_city_construction_clearing_command(
 				false
 			)
 		)
-		WorldData.city_player_commands[command_index] = existing_command
-		WorldData._mark_city_player_commands_changed()
+		_work_state().player_commands[command_index] = existing_command
+		mark_city_player_commands_changed()
 		return command_id
 
 	if add_city_player_command_targets(
@@ -317,35 +402,35 @@ static func ensure_city_construction_clearing_command(
 
 	var command := get_city_player_command_at_tile(tile_position)
 	var command_id := int(command.get("id", -1))
-	var command_index := WorldData.get_city_player_command_index_by_id(command_id)
+	var command_index := get_city_player_command_index_by_id(command_id)
 
 	if command_index < 0:
 		return -1
 
 	command["construction_site_id"] = site_id
 	command["created_by_construction"] = true
-	WorldData.city_player_commands[command_index] = command
-	WorldData._mark_city_player_commands_changed()
+	_work_state().player_commands[command_index] = command
+	mark_city_player_commands_changed()
 	return command_id
 
 static func detach_city_player_command_from_construction(
 	command_id: int,
 	site_id: int
 ) -> bool:
-	var command_index := WorldData.get_city_player_command_index_by_id(command_id)
+	var command_index := get_city_player_command_index_by_id(command_id)
 
 	if command_index < 0:
 		return false
 
-	var command: Dictionary = WorldData.city_player_commands[command_index]
+	var command: Dictionary = _work_state().player_commands[command_index]
 
 	if int(command.get("construction_site_id", -1)) != site_id:
 		return false
 
 	command["construction_site_id"] = -1
 	command["created_by_construction"] = false
-	WorldData.city_player_commands[command_index] = command
-	WorldData._mark_city_player_commands_changed()
+	_work_state().player_commands[command_index] = command
+	mark_city_player_commands_changed()
 	return true
 
 static func city_player_command_is_for_construction(
@@ -356,20 +441,20 @@ static func city_player_command_is_for_construction(
 static func _remove_city_player_command_record(
 	command_id: int
 ) -> bool:
-	var command_index := WorldData.get_city_player_command_index_by_id(command_id)
+	var command_index := get_city_player_command_index_by_id(command_id)
 
 	if command_index < 0:
 		return false
 
-	var command: Dictionary = WorldData.city_player_commands[command_index]
+	var command: Dictionary = _work_state().player_commands[command_index]
 	var independent_group_id := -1
 
 	if int(command.get("construction_site_id", -1)) <= 0:
 		independent_group_id = int(command.get("group_id", -1))
 
-	WorldData.city_player_commands.remove_at(command_index)
+	_work_state().player_commands.remove_at(command_index)
 	rebuild_city_player_command_index()
-	WorldData._mark_city_player_commands_changed()
+	mark_city_player_commands_changed()
 	_remove_empty_command_group_order(independent_group_id)
 	return true
 
@@ -377,7 +462,7 @@ static func _remove_empty_command_group_order(group_id: int) -> void:
 	if group_id <= 0:
 		return
 
-	for raw_command in WorldData.city_player_commands:
+	for raw_command in _work_state().player_commands:
 		if (
 			raw_command is Dictionary
 			and int(raw_command.get("group_id", -1)) == group_id
@@ -387,14 +472,14 @@ static func _remove_empty_command_group_order(group_id: int) -> void:
 
 	var source_key := _make_command_group_source_key(group_id)
 	var order_id := int(
-		WorldData.city_work_order_id_by_source_key.get(source_key, -1)
+		_work_state().work_order_id_by_source_key.get(source_key, -1)
 	)
 
 	if order_id > 0:
 		_remove_order_record(order_id)
 
 static func cancel_city_player_command(command_id: int) -> bool:
-	var command := WorldData.get_city_player_command_by_id(command_id)
+	var command := get_city_player_command_by_id(command_id)
 
 	if command.is_empty():
 		return false
@@ -439,7 +524,7 @@ static func remove_city_player_commands_at_tiles(
 			continue
 
 		if (
-			command_type != WorldData.CITY_PLAYER_COMMAND_TYPE_NONE
+			command_type != CITY_PLAYER_COMMAND_TYPE_NONE
 			and str(command.get("type", "")) != command_type
 		):
 			continue
@@ -465,13 +550,13 @@ static func remove_city_player_commands_at_tiles(
 static func prune_invalid_city_player_commands() -> int:
 	var invalid_command_ids: Array[int] = []
 
-	for raw_command in WorldData.city_player_commands:
+	for raw_command in _work_state().player_commands:
 		if not raw_command is Dictionary:
 			continue
 
 		var command: Dictionary = raw_command
 
-		if WorldData.is_city_player_command_target_valid(command):
+		if is_city_player_command_target_valid(command):
 			continue
 
 		invalid_command_ids.append(int(command.get("id", -1)))
@@ -487,8 +572,8 @@ static func prune_invalid_city_player_commands() -> int:
 static func repair_stale_city_player_command_claims() -> int:
 	var repaired_count := 0
 
-	for command_index in range(WorldData.city_player_commands.size()):
-		var raw_command = WorldData.city_player_commands[command_index]
+	for command_index in range(_work_state().player_commands.size()):
+		var raw_command = _work_state().player_commands[command_index]
 
 		if not raw_command is Dictionary:
 			continue
@@ -504,7 +589,7 @@ static func repair_stale_city_player_command_claims() -> int:
 		if (
 			command_id > 0
 			and claimed_citizen_id > 0
-			and status == WorldData.CITY_PLAYER_COMMAND_STATUS_CLAIMED
+			and status == CITY_PLAYER_COMMAND_STATUS_CLAIMED
 		):
 			var citizen := WorldData.get_city_citizen_by_id(claimed_citizen_id)
 			var current_task := WorldData.get_city_citizen_current_task(
@@ -528,27 +613,27 @@ static func repair_stale_city_player_command_claims() -> int:
 
 		var has_stale_claim := (
 			claimed_citizen_id > 0
-			or status == WorldData.CITY_PLAYER_COMMAND_STATUS_CLAIMED
+			or status == CITY_PLAYER_COMMAND_STATUS_CLAIMED
 		)
 
 		if not has_stale_claim:
 			continue
 
 		command["claimed_citizen_id"] = -1
-		command["status"] = WorldData.CITY_PLAYER_COMMAND_STATUS_PENDING
+		command["status"] = CITY_PLAYER_COMMAND_STATUS_PENDING
 		command["next_retry_world_minute"] = -1
-		WorldData.city_player_commands[command_index] = command
+		_work_state().player_commands[command_index] = command
 		repaired_count += 1
 
 	if repaired_count > 0:
-		WorldData._mark_city_player_commands_changed()
+		mark_city_player_commands_changed()
 
 	return repaired_count
 
 static func city_player_command_is_assignable(
 	command: Dictionary
 ) -> bool:
-	if not WorldData.is_city_player_command_target_valid(command):
+	if not is_city_player_command_target_valid(command):
 		return false
 
 	if int(command.get("claimed_citizen_id", -1)) > 0:
@@ -556,11 +641,11 @@ static func city_player_command_is_assignable(
 
 	var status := str(command.get("status", ""))
 
-	if status == WorldData.CITY_PLAYER_COMMAND_STATUS_PENDING:
+	if status == CITY_PLAYER_COMMAND_STATUS_PENDING:
 		return true
 
 	return (
-		status == WorldData.CITY_PLAYER_COMMAND_STATUS_BLOCKED
+		status == CITY_PLAYER_COMMAND_STATUS_BLOCKED
 		and int(command.get("next_retry_world_minute", -1))
 		<= SimulationClock.absolute_world_minutes
 	)
@@ -618,7 +703,7 @@ static func get_best_assignable_city_player_command_for_citizen(
 	var best_cost := 0
 	var best_command_id := 0
 
-	for raw_command in WorldData.city_player_commands:
+	for raw_command in _work_state().player_commands:
 		if not raw_command is Dictionary:
 			continue
 
@@ -670,7 +755,7 @@ static func claim_city_player_command(
 	command_id: int,
 	citizen_id: int
 ) -> bool:
-	var command_index := WorldData.get_city_player_command_index_by_id(command_id)
+	var command_index := get_city_player_command_index_by_id(command_id)
 	var citizen := WorldData.get_city_citizen_by_id(citizen_id)
 
 	if (
@@ -681,16 +766,16 @@ static func claim_city_player_command(
 	):
 		return false
 
-	var command: Dictionary = WorldData.city_player_commands[command_index]
+	var command: Dictionary = _work_state().player_commands[command_index]
 
 	if not city_player_command_is_assignable(command):
 		return false
 
-	command["status"] = WorldData.CITY_PLAYER_COMMAND_STATUS_CLAIMED
+	command["status"] = CITY_PLAYER_COMMAND_STATUS_CLAIMED
 	command["claimed_citizen_id"] = citizen_id
 	command["next_retry_world_minute"] = -1
-	WorldData.city_player_commands[command_index] = command
-	WorldData._mark_city_player_commands_changed()
+	_work_state().player_commands[command_index] = command
+	mark_city_player_commands_changed()
 	return true
 
 
@@ -698,19 +783,19 @@ static func complete_city_player_command(
 	command_id: int,
 	citizen_id: int
 ) -> bool:
-	var command := WorldData.get_city_player_command_by_id(command_id)
+	var command := get_city_player_command_by_id(command_id)
 
 	if (
 		command.is_empty()
 		or int(command.get("claimed_citizen_id", -1)) != citizen_id
-		or not WorldData.is_city_player_command_target_valid(command)
+		or not is_city_player_command_target_valid(command)
 	):
 		return false
 
 	var city_world: WorldData = WorldData.official_city_world
 	var command_type := str(command.get("type", ""))
 	var tile_position: Vector2i = command["tile_position"]
-	var expected_feature := WorldData.get_city_player_command_surface_feature(
+	var expected_feature := get_city_player_command_surface_feature(
 		command_type
 	)
 	var resource := get_city_player_command_resource_type(command_type)
@@ -718,7 +803,7 @@ static func complete_city_player_command(
 		int(
 			command.get(
 				"resource_yield",
-				WorldData.CITY_PLAYER_COMMAND_RESOURCE_YIELD
+				CITY_PLAYER_COMMAND_RESOURCE_YIELD
 			)
 		),
 		0
@@ -878,9 +963,9 @@ static func synchronize_player_work_board() -> void:
 
 	var stale_order_ids: Array[int] = []
 
-	for raw_order_id in WorldData.city_work_orders.keys():
+	for raw_order_id in _work_state().work_orders.keys():
 		var order_id := int(raw_order_id)
-		var raw_order = WorldData.city_work_orders.get(order_id, {})
+		var raw_order = _work_state().work_orders.get(order_id, {})
 
 		if not raw_order is Dictionary:
 			stale_order_ids.append(order_id)
@@ -896,7 +981,7 @@ static func synchronize_player_work_board() -> void:
 	for order_id in stale_order_ids:
 		_remove_order_record(order_id)
 
-	var order_ids: Array = WorldData.city_work_orders.keys()
+	var order_ids: Array = _work_state().work_orders.keys()
 	order_ids.sort()
 
 	for raw_order_id in order_ids:
@@ -938,7 +1023,7 @@ static func remove_construction_work_order_for_site(site_id: int) -> void:
 
 	var source_key := _make_construction_source_key(site_id)
 	var order_id := int(
-		WorldData.city_work_order_id_by_source_key.get(source_key, -1)
+		_work_state().work_order_id_by_source_key.get(source_key, -1)
 	)
 
 	if order_id > 0:
@@ -951,7 +1036,7 @@ static func refresh_work_order_runtimes(raw_order_ids: Array) -> void:
 	for raw_order_id in raw_order_ids:
 		var order_id := int(raw_order_id)
 
-		if order_id > 0 and WorldData.city_work_orders.has(order_id):
+		if order_id > 0 and _work_state().work_orders.has(order_id):
 			order_id_lookup[order_id] = true
 
 	if order_id_lookup.is_empty():
@@ -973,7 +1058,7 @@ static func refresh_work_order_runtimes(raw_order_ids: Array) -> void:
 static func get_best_player_job_for_citizen(citizen_id: int) -> Dictionary:
 	return get_best_player_job_for_citizen_and_orders(
 		citizen_id,
-		WorldData.city_work_orders.keys()
+		_work_state().work_orders.keys()
 	)
 
 
@@ -998,7 +1083,7 @@ static func get_best_player_job_for_citizen_and_orders(
 	for raw_order_id in raw_order_ids:
 		var order_id := int(raw_order_id)
 
-		if order_id > 0 and WorldData.city_work_orders.has(order_id):
+		if order_id > 0 and _work_state().work_orders.has(order_id):
 			order_id_lookup[order_id] = true
 
 	var order_ids: Array = order_id_lookup.keys()
@@ -1302,7 +1387,7 @@ static func get_best_construction_job_for_citizen_excluding_order(
 	excluded_order_id: int
 ) -> Dictionary:
 	var construction_order_ids: Array[int] = []
-	var order_ids: Array = WorldData.city_work_orders.keys()
+	var order_ids: Array = _work_state().work_orders.keys()
 	order_ids.sort()
 
 	for raw_order_id in order_ids:
@@ -1351,7 +1436,7 @@ static func assign_player_job(
 			{
 				"kind": WorldData.CITY_CITIZEN_TASK_KIND_PLAYER_COMMAND,
 				"source": WorldData.CITY_CITIZEN_TASK_SOURCE_PLAYER,
-				"priority": WorldData.CITY_PLAYER_COMMAND_TASK_PRIORITY,
+				"priority": CITY_PLAYER_COMMAND_TASK_PRIORITY,
 				"target_object_id": command_id,
 				"player_locked": false,
 				"work_order_id": order_id,
@@ -1360,7 +1445,7 @@ static func assign_player_job(
 		)
 
 		if not assigned:
-			WorldData.release_city_player_command_claim(
+			release_city_player_command_claim(
 				command_id,
 				citizen_id
 			)
@@ -1389,13 +1474,13 @@ static func assign_player_job(
 
 static func set_order_priority(order_id: int, priority_rank: int) -> bool:
 	if (
-		not WorldData.city_work_orders.has(order_id)
+		not _work_state().work_orders.has(order_id)
 		or priority_rank < PRIORITY_LOW
 		or priority_rank > PRIORITY_URGENT
 	):
 		return false
 
-	var raw_order = WorldData.city_work_orders.get(order_id, {})
+	var raw_order = _work_state().work_orders.get(order_id, {})
 
 	if not raw_order is Dictionary:
 		return false
@@ -1406,8 +1491,8 @@ static func set_order_priority(order_id: int, priority_rank: int) -> bool:
 		return true
 
 	order["priority_rank"] = priority_rank
-	WorldData.city_work_orders[order_id] = order
-	WorldData.mark_city_work_orders_changed()
+	_work_state().work_orders[order_id] = order
+	mark_city_work_orders_changed()
 	return true
 
 
@@ -1558,14 +1643,14 @@ static func _ensure_order_for_source(descriptor: Dictionary) -> int:
 		return -1
 
 	var existing_id := int(
-		WorldData.city_work_order_id_by_source_key.get(source_key, -1)
+		_work_state().work_order_id_by_source_key.get(source_key, -1)
 	)
 
-	if existing_id > 0 and WorldData.city_work_orders.has(existing_id):
+	if existing_id > 0 and _work_state().work_orders.has(existing_id):
 		return existing_id
 
-	var order_id := WorldData.next_city_work_order_id
-	WorldData.next_city_work_order_id += 1
+	var order_id := _work_state().next_work_order_id
+	_work_state().next_work_order_id += 1
 	var created_minute := int(
 		descriptor.get(
 			"created_world_minute",
@@ -1592,25 +1677,25 @@ static func _ensure_order_for_source(descriptor: Dictionary) -> int:
 		"progress_signature": "",
 	}
 
-	WorldData.city_work_orders[order_id] = order
-	WorldData.city_work_order_id_by_source_key[source_key] = order_id
-	WorldData.mark_city_work_orders_changed()
+	_work_state().work_orders[order_id] = order
+	_work_state().work_order_id_by_source_key[source_key] = order_id
+	mark_city_work_orders_changed()
 	return order_id
 
 
 static func _remove_order_record(order_id: int) -> void:
-	if not WorldData.city_work_orders.has(order_id):
+	if not _work_state().work_orders.has(order_id):
 		return
 
-	var raw_order = WorldData.city_work_orders.get(order_id, {})
+	var raw_order = _work_state().work_orders.get(order_id, {})
 
 	if raw_order is Dictionary:
-		WorldData.city_work_order_id_by_source_key.erase(
+		_work_state().work_order_id_by_source_key.erase(
 			str(raw_order.get("source_key", ""))
 		)
 
-	WorldData.city_work_orders.erase(order_id)
-	WorldData.mark_city_work_orders_changed()
+	_work_state().work_orders.erase(order_id)
+	mark_city_work_orders_changed()
 
 
 static func _refresh_order_runtime(
@@ -1618,7 +1703,7 @@ static func _refresh_order_runtime(
 	command_snapshot: Array,
 	ground_pile_snapshot: Array
 ) -> void:
-	var raw_order = WorldData.city_work_orders.get(order_id, {})
+	var raw_order = _work_state().work_orders.get(order_id, {})
 
 	if not raw_order is Dictionary:
 		return
@@ -1661,8 +1746,8 @@ static func _refresh_order_runtime(
 	)
 
 	if order != raw_order:
-		WorldData.city_work_orders[order_id] = order
-		WorldData.mark_city_work_orders_changed()
+		_work_state().work_orders[order_id] = order
+		mark_city_work_orders_changed()
 
 
 # Source validity says that work is physically meaningful; runtime
@@ -2233,7 +2318,7 @@ static func _append_command_jobs(values: Dictionary) -> void:
 		var claimed_citizen_id := int(
 			command.get("claimed_citizen_id", -1)
 		)
-		var target_valid := WorldData.is_city_player_command_target_valid(
+		var target_valid := is_city_player_command_target_valid(
 			command
 		)
 		var assignable := city_player_command_is_assignable(command)
@@ -2702,7 +2787,7 @@ static func _get_active_citizen_ids_for_order(
 		var task_kind := str(task.get("kind", ""))
 
 		if task_kind == WorldData.CITY_CITIZEN_TASK_KIND_PLAYER_COMMAND:
-			var command := WorldData.get_city_player_command_by_id(
+			var command := get_city_player_command_by_id(
 				int(task.get("target_object_id", -1))
 			)
 
@@ -3011,7 +3096,7 @@ static func _get_construction_source_diagnostics(
 #region Attention Tracking and Shared Helpers
 
 static func _note_order_attention(order_id: int) -> void:
-	var raw_order = WorldData.city_work_orders.get(order_id, {})
+	var raw_order = _work_state().work_orders.get(order_id, {})
 
 	if not raw_order is Dictionary:
 		return
@@ -3020,8 +3105,8 @@ static func _note_order_attention(order_id: int) -> void:
 	order["last_attention_world_minute"] = (
 		SimulationClock.absolute_world_minutes
 	)
-	WorldData.city_work_orders[order_id] = order
-	WorldData.mark_city_work_orders_changed()
+	_work_state().work_orders[order_id] = order
+	mark_city_work_orders_changed()
 
 
 static func _make_command_group_source_key(group_id: int) -> String:

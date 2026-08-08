@@ -32,8 +32,8 @@ var ground_piles: Array = []
 var ground_pile_index_by_id: Dictionary = {}
 var next_ground_pile_id: int = 1
 
-# First physically extracted local subsystem. WorldData's old work fields are
-# compatibility accessors onto this object rather than stored data.
+# First physically extracted local subsystem. Its state and APIs live outside
+# WorldData and are resolved through the active settlement context.
 var work_state: CityWorkState = CityWorkState.new()
 
 var haul_reservations: Dictionary = {}
@@ -204,7 +204,5 @@ func is_bound_to_world_data_workspace() -> bool:
 		and WorldData.city_citizens == citizens
 		and WorldData.city_ground_piles == ground_piles
 		and WorldData.city_construction_sites == construction_sites
-		and WorldData.city_work_orders == work_state.work_orders
-		and WorldData.city_player_commands == work_state.player_commands
 		and WorldData.city_haul_reservations == haul_reservations
 	)

@@ -332,7 +332,7 @@ static func prepare_citizen_for_critical_food_interrupt(
 	if current_task_kind == WorldData.CITY_CITIZEN_TASK_KIND_PLAYER_COMMAND:
 		var command_id := int(current_task.get("target_object_id", -1))
 
-		WorldData.release_city_player_command_claim(
+		CityWorkSystem.release_city_player_command_claim(
 			command_id,
 			citizen_id
 		)
@@ -633,7 +633,7 @@ static func _make_player_command_task_context(
 		0
 	)
 	var command_id := int(current_task.get("target_object_id", -1))
-	var command := WorldData.get_city_player_command_by_id(command_id)
+	var command := CityWorkSystem.get_city_player_command_by_id(command_id)
 
 	if (
 		command.is_empty()
@@ -643,7 +643,7 @@ static func _make_player_command_task_context(
 		_clear_invalid_task(citizen_id)
 		return {}
 
-	if not WorldData.is_city_player_command_target_valid(command):
+	if not CityWorkSystem.is_city_player_command_target_valid(command):
 		CityWorkSystem.cancel_city_player_command(command_id)
 		return {}
 
@@ -884,7 +884,7 @@ static func _begin_player_command_work(
 		int(
 			command.get(
 				"work_duration_minutes",
-				WorldData.CITY_PLAYER_COMMAND_WORK_DURATION_MINUTES
+				CityWorkSystem.CITY_PLAYER_COMMAND_WORK_DURATION_MINUTES
 			)
 		),
 		1
@@ -916,10 +916,10 @@ static func _release_player_command_task(
 	if blocked:
 		retry_minute = (
 			SimulationClock.absolute_world_minutes
-			+ WorldData.CITY_PLAYER_COMMAND_BLOCKED_RETRY_DELAY_MINUTES
+			+ CityWorkSystem.CITY_PLAYER_COMMAND_BLOCKED_RETRY_DELAY_MINUTES
 		)
 
-	WorldData.release_city_player_command_claim(
+	CityWorkSystem.release_city_player_command_claim(
 		command_id,
 		citizen_id,
 		retry_minute

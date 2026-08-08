@@ -1885,7 +1885,7 @@ static func _validate_player_command_task_kind_state(values: Dictionary) -> void
 		return
 
 	var player_command := (
-		WorldData.get_city_player_command_by_id(
+		CityWorkSystem.get_city_player_command_by_id(
 			target_object_id
 		)
 	)
@@ -2164,7 +2164,7 @@ static func _validate_city_task_work_order_reference(
 	var source_matches_task := false
 
 	if order_type == CityWorkSystemScript.ORDER_TYPE_COMMAND_GROUP:
-		var command := WorldData.get_city_player_command_by_id(
+		var command := CityWorkSystem.get_city_player_command_by_id(
 			target_object_id
 		)
 		source_matches_task = (
@@ -2176,7 +2176,7 @@ static func _validate_city_task_work_order_reference(
 	elif order_type == CityWorkSystemScript.ORDER_TYPE_CONSTRUCTION_SITE:
 		match task_kind:
 			WorldData.CITY_CITIZEN_TASK_KIND_PLAYER_COMMAND:
-				var command := WorldData.get_city_player_command_by_id(
+				var command := CityWorkSystem.get_city_player_command_by_id(
 					target_object_id
 				)
 				source_matches_task = (

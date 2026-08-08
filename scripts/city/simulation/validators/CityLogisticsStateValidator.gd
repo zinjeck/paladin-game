@@ -551,7 +551,7 @@ static func _validate_city_work_orders(
 		"progress_signature",
 	]
 
-	for raw_order_id in WorldData.city_work_orders.keys():
+	for raw_order_id in CityWorkSystem.get_current_work_state().work_orders.keys():
 		maximum_order_id = _validate_city_work_order_entry({
 			"errors": errors,
 			"citizen_lookup": citizen_lookup,
@@ -562,9 +562,9 @@ static func _validate_city_work_orders(
 			"raw_order_id": raw_order_id,
 		})
 
-	for raw_source_key in WorldData.city_work_order_id_by_source_key.keys():
+	for raw_source_key in CityWorkSystem.get_current_work_state().work_order_id_by_source_key.keys():
 		var raw_lookup_order_id = (
-			WorldData.city_work_order_id_by_source_key.get(raw_source_key)
+			CityWorkSystem.get_current_work_state().work_order_id_by_source_key.get(raw_source_key)
 		)
 
 		if (
@@ -575,17 +575,17 @@ static func _validate_city_work_orders(
 				"Work-order source lookup contains an invalid key or ID."
 			)
 
-	if WorldData.city_work_order_id_by_source_key != expected_source_lookup:
+	if CityWorkSystem.get_current_work_state().work_order_id_by_source_key != expected_source_lookup:
 		errors.append(
 			"Work-order source lookup is not a bijection with the registry."
 		)
 
-	if WorldData.next_city_work_order_id <= maximum_order_id:
+	if CityWorkSystem.get_current_work_state().next_work_order_id <= maximum_order_id:
 		errors.append(
 			"next_city_work_order_id must exceed every work-order ID."
 		)
 
-	return WorldData.city_work_orders.size()
+	return CityWorkSystem.get_current_work_state().work_orders.size()
 
 
 
@@ -617,7 +617,7 @@ static func _validate_city_work_order_entry(
 
 	var order_id: int = raw_order_id
 	maximum_order_id = maxi(maximum_order_id, order_id)
-	var raw_order = WorldData.city_work_orders.get(order_id, {})
+	var raw_order = CityWorkSystem.get_current_work_state().work_orders.get(order_id, {})
 
 	if not raw_order is Dictionary:
 		errors.append(
@@ -1015,7 +1015,7 @@ static func _city_work_order_source_exists(
 	construction_site_lookup: Dictionary
 ) -> bool:
 	if order_type == CityWorkSystemScript.ORDER_TYPE_COMMAND_GROUP:
-		for raw_command in WorldData.city_player_commands:
+		for raw_command in CityWorkSystem.get_current_work_state().player_commands:
 			if (
 				raw_command is Dictionary
 				and int(raw_command.get("group_id", -1)) == source_id

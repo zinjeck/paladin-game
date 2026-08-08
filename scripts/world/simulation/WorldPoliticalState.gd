@@ -364,7 +364,7 @@ func get_active_city_simulation_state():
 # Compatibility owner for code paths that run before a settlement context is
 # established (primarily low-level tests and reset/setup code). Runtime city
 # work always resolves to the active settlement state once one exists.
-func get_current_city_work_state():
+func get_current_city_work_state() -> CityWorkState:
 	var active_city_state = get_active_city_simulation_state()
 	if (
 		active_city_state != null
@@ -372,6 +372,13 @@ func get_current_city_work_state():
 	):
 		return active_city_state.work_state
 	return _unbound_city_work_state
+
+
+# WorldData still owns the legacy city-session reset entry point while local
+# subsystems are extracted. Keep that entry point generic: it asks the local
+# ownership registry to reset extracted state without knowing work internals.
+func reset_extracted_city_state() -> void:
+	get_current_city_work_state().reset_all()
 
 
 func get_polity_snapshot() -> Array[Dictionary]:

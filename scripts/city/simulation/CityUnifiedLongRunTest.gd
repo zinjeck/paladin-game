@@ -399,7 +399,7 @@ func _create_mixed_work_fixture(renderer: CityRenderer) -> Dictionary:
 	natural_exclusions.append(open_relocation_tile)
 	natural_exclusions.append(lumber_source_tile)
 	var tree_targets := _prepare_deterministic_natural_targets(
-		WorldData.CITY_PLAYER_COMMAND_TYPE_CHOP_TREE,
+		CityWorkSystem.CITY_PLAYER_COMMAND_TYPE_CHOP_TREE,
 		citizen_tile,
 		natural_exclusions,
 		3
@@ -407,17 +407,17 @@ func _create_mixed_work_fixture(renderer: CityRenderer) -> Dictionary:
 	for tree_target in tree_targets:
 		natural_exclusions.append(tree_target)
 	var rock_targets := _prepare_deterministic_natural_targets(
-		WorldData.CITY_PLAYER_COMMAND_TYPE_COLLECT_ROCK,
+		CityWorkSystem.CITY_PLAYER_COMMAND_TYPE_COLLECT_ROCK,
 		citizen_tile,
 		natural_exclusions,
 		3
 	)
 	var added_trees := CityWorkSystem.add_city_player_command_targets(
-		WorldData.CITY_PLAYER_COMMAND_TYPE_CHOP_TREE,
+		CityWorkSystem.CITY_PLAYER_COMMAND_TYPE_CHOP_TREE,
 		tree_targets
 	)
 	var added_rocks := CityWorkSystem.add_city_player_command_targets(
-		WorldData.CITY_PLAYER_COMMAND_TYPE_COLLECT_ROCK,
+		CityWorkSystem.CITY_PLAYER_COMMAND_TYPE_COLLECT_ROCK,
 		rock_targets
 	)
 	_expect(
@@ -622,7 +622,7 @@ func _assert_long_run_outcomes(fixture: Dictionary) -> void:
 	for raw_command_id in fixture.get("natural_command_ids", []):
 		var command_id := int(raw_command_id)
 		_expect(
-			WorldData.get_city_player_command_by_id(command_id).is_empty(),
+			CityWorkSystem.get_city_player_command_by_id(command_id).is_empty(),
 			"Natural command " + str(command_id)
 			+ " must not starve behind construction work."
 		)
@@ -682,7 +682,7 @@ func _assert_material_conservation(
 
 			if (
 				str(expectation.get("resource", "")) == resource
-				and WorldData.get_city_player_command_by_id(command_id).is_empty()
+				and CityWorkSystem.get_city_player_command_by_id(command_id).is_empty()
 			):
 				expected_total += int(expectation.get("yield", 0))
 
@@ -832,7 +832,7 @@ func _prepare_deterministic_natural_targets(
 	var city_world: WorldData = WorldData.official_city_world
 	var feature := WorldData.CITY_SURFACE_FEATURE_TREE
 
-	if command_type == WorldData.CITY_PLAYER_COMMAND_TYPE_COLLECT_ROCK:
+	if command_type == CityWorkSystem.CITY_PLAYER_COMMAND_TYPE_COLLECT_ROCK:
 		feature = WorldData.CITY_SURFACE_FEATURE_ROCK
 
 	for radius in range(2, maxi(city_world.width, city_world.height) + 1):

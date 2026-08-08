@@ -67,6 +67,10 @@ jobs:
           set -o pipefail
           mkdir -p ci-logs
           timeout 300s godot --headless --path . --import 2>&1 | tee ci-logs/import.log
+          if grep -E "SCRIPT ERROR:|Failed to load script|Failed to create an autoload" ci-logs/import.log; then
+            echo "Godot import reported script compilation errors."
+            exit 1
+          fi
 
       - name: Run Paladin tests
         shell: bash
