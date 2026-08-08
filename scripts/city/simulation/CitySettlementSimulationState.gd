@@ -28,19 +28,10 @@ var construction_site_index_by_id: Dictionary = {}
 var construction_site_id_by_tile: Dictionary = {}
 var next_construction_site_id: int = 1
 
-var ground_piles: Array = []
-var ground_pile_index_by_id: Dictionary = {}
-var next_ground_pile_id: int = 1
-
-# First physically extracted local subsystem. Its state and APIs live outside
-# WorldData and are resolved through the active settlement context.
+# Physically extracted settlement-local subsystems. Their state is selected by
+# settlement identity rather than copied through the legacy WorldData workspace.
 var work_state: CityWorkState = CityWorkState.new()
-
-var haul_reservations: Dictionary = {}
-var haul_reservation_id_by_citizen_id: Dictionary = {}
-var haul_source_reserved_amount_by_key: Dictionary = {}
-var haul_destination_reserved_amount_by_key: Dictionary = {}
-var next_haul_reservation_id: int = 1
+var logistics_state: CityLogisticsState = CityLogisticsState.new()
 
 var citizens: Array = []
 var citizen_index_by_id: Dictionary = {}
@@ -63,8 +54,6 @@ var citizen_movement_version: int = 0
 var citizen_task_version: int = 0
 var assignment_version: int = 0
 var workplace_version: int = 0
-var ground_pile_version: int = 0
-var haul_reservation_version: int = 0
 var construction_version: int = 0
 
 
@@ -89,22 +78,6 @@ func capture_from_world_data() -> void:
 	construction_site_id_by_tile = WorldData.city_construction_site_id_by_tile
 	next_construction_site_id = WorldData.next_city_construction_site_id
 
-	ground_piles = WorldData.city_ground_piles
-	ground_pile_index_by_id = WorldData.city_ground_pile_index_by_id
-	next_ground_pile_id = WorldData.next_city_ground_pile_id
-
-	haul_reservations = WorldData.city_haul_reservations
-	haul_reservation_id_by_citizen_id = (
-		WorldData.city_haul_reservation_id_by_citizen_id
-	)
-	haul_source_reserved_amount_by_key = (
-		WorldData.city_haul_source_reserved_amount_by_key
-	)
-	haul_destination_reserved_amount_by_key = (
-		WorldData.city_haul_destination_reserved_amount_by_key
-	)
-	next_haul_reservation_id = WorldData.next_city_haul_reservation_id
-
 	citizens = WorldData.city_citizens
 	citizen_index_by_id = WorldData.city_citizen_index_by_id
 	citizen_ids_by_tile = WorldData.city_citizen_ids_by_tile
@@ -128,8 +101,6 @@ func capture_from_world_data() -> void:
 	citizen_task_version = WorldData.city_citizen_task_version
 	assignment_version = WorldData.city_assignment_version
 	workplace_version = WorldData.city_workplace_version
-	ground_pile_version = WorldData.city_ground_pile_version
-	haul_reservation_version = WorldData.city_haul_reservation_version
 	construction_version = WorldData.city_construction_version
 
 
@@ -154,22 +125,6 @@ func apply_to_world_data() -> void:
 	WorldData.city_construction_site_id_by_tile = construction_site_id_by_tile
 	WorldData.next_city_construction_site_id = next_construction_site_id
 
-	WorldData.city_ground_piles = ground_piles
-	WorldData.city_ground_pile_index_by_id = ground_pile_index_by_id
-	WorldData.next_city_ground_pile_id = next_ground_pile_id
-
-	WorldData.city_haul_reservations = haul_reservations
-	WorldData.city_haul_reservation_id_by_citizen_id = (
-		haul_reservation_id_by_citizen_id
-	)
-	WorldData.city_haul_source_reserved_amount_by_key = (
-		haul_source_reserved_amount_by_key
-	)
-	WorldData.city_haul_destination_reserved_amount_by_key = (
-		haul_destination_reserved_amount_by_key
-	)
-	WorldData.next_city_haul_reservation_id = next_haul_reservation_id
-
 	WorldData.city_citizens = citizens
 	WorldData.city_citizen_index_by_id = citizen_index_by_id
 	WorldData.city_citizen_ids_by_tile = citizen_ids_by_tile
@@ -193,8 +148,6 @@ func apply_to_world_data() -> void:
 	WorldData.city_citizen_task_version = citizen_task_version
 	WorldData.city_assignment_version = assignment_version
 	WorldData.city_workplace_version = workplace_version
-	WorldData.city_ground_pile_version = ground_pile_version
-	WorldData.city_haul_reservation_version = haul_reservation_version
 	WorldData.city_construction_version = construction_version
 
 
@@ -202,7 +155,5 @@ func is_bound_to_world_data_workspace() -> bool:
 	return (
 		WorldData.city_objects == objects
 		and WorldData.city_citizens == citizens
-		and WorldData.city_ground_piles == ground_piles
 		and WorldData.city_construction_sites == construction_sites
-		and WorldData.city_haul_reservations == haul_reservations
 	)
