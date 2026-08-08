@@ -412,9 +412,9 @@ world_final = WORLD_PATH.read_text(encoding="utf-8")
 system_final = SYSTEM_PATH.read_text(encoding="utf-8")
 for symbol in forbidden_symbols:
     patterns = (
-        rf"^\\s*static\\s+var\\s+{re.escape(symbol)}\\b",
-        rf"^\\s*const\\s+{re.escape(symbol)}\\b",
-        rf"^\\s*(?:static\\s+)?func\\s+{re.escape(symbol)}\\s*\\(",
+        rf"^\s*static\s+var\s+{re.escape(symbol)}\b",
+        rf"^\s*const\s+{re.escape(symbol)}\b",
+        rf"^\s*(?:static\s+)?func\s+{re.escape(symbol)}\s*\(",
     )
     if any(re.search(pattern, world_final, re.MULTILINE) for pattern in patterns):
         fail(f"WorldData still declares construction symbol: {symbol}")
@@ -422,15 +422,15 @@ for symbol in forbidden_symbols:
 for path in sorted(ROOT.glob("scripts/**/*.gd")):
     text = path.read_text(encoding="utf-8")
     for symbol in forbidden_symbols:
-        if re.search(rf"WorldData\\s*\\.\\s*{re.escape(symbol)}\\b", text):
+        if re.search(rf"WorldData\s*\.\s*{re.escape(symbol)}\b", text):
             fail(f"legacy construction reference remains in {path.relative_to(ROOT)}: WorldData.{symbol}")
 
 for constant in CONSTRUCTION_CONSTANTS:
-    if not re.search(rf"^const\\s+{re.escape(constant)}\\b", system_final, re.MULTILINE):
+    if not re.search(rf"^const\s+{re.escape(constant)}\b", system_final, re.MULTILINE):
         fail(f"CityConstructionSystem missing moved constant: {constant}")
 for old_name in MOVE_FUNCTIONS:
     public_name = RENAME_FUNCTIONS.get(old_name, old_name)
-    if not re.search(rf"^static\\s+func\\s+{re.escape(public_name)}\\s*\\(", system_final, re.MULTILINE):
+    if not re.search(rf"^static\s+func\s+{re.escape(public_name)}\s*\(", system_final, re.MULTILINE):
         fail(f"CityConstructionSystem missing moved function: {public_name}")
 
 print("Construction API extraction transformed successfully.")
