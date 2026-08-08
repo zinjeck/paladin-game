@@ -17,14 +17,6 @@ var backend_kind: String = BACKEND_NONE
 var local_state = null
 
 
-static func is_valid_backend_kind(value: String) -> bool:
-	return value in [
-		BACKEND_NONE,
-		BACKEND_LEGACY_CITY_WORLD_DATA,
-		BACKEND_CITY_SETTLEMENT_STATE,
-	]
-
-
 func _init(values: Dictionary = {}) -> void:
 	settlement_id = int(
 		values.get("settlement_id", SettlementData.INVALID_SETTLEMENT_ID)
@@ -41,7 +33,6 @@ func is_valid() -> bool:
 		settlement_id > 0
 		and polity_id > 0
 		and SettlementData.is_valid_settlement_type(settlement_type)
-		and is_valid_backend_kind(backend_kind)
 	)
 
 
@@ -66,7 +57,7 @@ func has_instance_owned_city_state() -> bool:
 	)
 
 
-func get_city_work_state() -> CityWorkState:
+func get_city_work_state():
 	if not has_instance_owned_city_state():
 		return null
 
