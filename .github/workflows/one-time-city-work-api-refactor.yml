@@ -20,7 +20,7 @@ jobs:
           fetch-depth: 0
 
       - name: Apply city work API extraction
-        run: python3 ci/one_time_extract_city_work_api_v2.py
+        run: python3 ci/one_time_extract_city_work_api_v3.py
 
       - name: Commit generated refactor
         shell: bash
