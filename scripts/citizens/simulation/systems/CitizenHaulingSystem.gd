@@ -1515,8 +1515,7 @@ static func _begin_next_ground_pile_pickup(
 	)
 	var additional_destination_space := (
 		CityLogisticsSystem.get_city_haul_endpoint_unreserved_destination_space(
-			destination,
-			reservation_id
+			destination
 		)
 	)
 

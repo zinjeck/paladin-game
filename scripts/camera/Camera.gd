@@ -99,7 +99,10 @@ func get_camera_movement_direction() -> Vector2:
 	if Input.is_key_pressed(KEY_W) or Input.is_action_pressed("ui_up"):
 		direction.y -= 1.0
 
-	if edge_scroll_enabled:
+	if (
+		edge_scroll_enabled
+		and get_viewport().gui_get_hovered_control() == null
+	):
 		var viewport_size: Vector2 = get_viewport_rect().size
 		var mouse_position: Vector2 = get_viewport().get_mouse_position()
 

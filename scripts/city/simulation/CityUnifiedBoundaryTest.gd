@@ -21,6 +21,9 @@ const CitizenHaulingSystemScript = preload(
 const CityCitizenStateValidatorScript = preload(
 	"res://scripts/city/simulation/validators/CityCitizenStateValidator.gd"
 )
+const CityStateValidatorScript = preload(
+	"res://scripts/city/simulation/CityStateValidator.gd"
+)
 
 const TEST_WORLD_SIZE := Vector2i(32, 24)
 const TEST_WORLD_SEED: int = 41_207
@@ -33,6 +36,7 @@ var test_primary_culture_id: int = -1
 func _ready() -> void:
 	_test_normal_order_preempts_before_pickup()
 	_test_normal_order_waits_for_picked_up_cargo_delivery()
+	_test_chained_pickup_respects_near_full_destination()
 	_test_critical_hunger_interrupts_cargo_safely()
 	_test_construction_labor_releases_at_atomic_boundary()
 	_test_world_founding_identity_commit_boundaries()
@@ -239,6 +243,99 @@ func _test_normal_order_waits_for_picked_up_cargo_delivery() -> void:
 			WorldData.RESOURCE_STONE
 		) == 0,
 		"The completed delivery must not leave an ordinary-command cargo spill."
+	)
+
+
+func _test_chained_pickup_respects_near_full_destination() -> void:
+	print("Boundary test: chained pickup destination capacity")
+	var city_world := _reset_fixture()
+	var citizen := _add_citizen(Vector2i(5, 5))
+	var citizen_id := int(citizen.get("id", -1))
+	var stockpile := _add_stockpile(city_world, Vector2i(10, 4))
+	var stockpile_id := int(stockpile.get("id", -1))
+	var stockpile_capacity := WorldData.get_city_object_storage_capacity(
+		stockpile
+	)
+	var stored_amount := WorldData.add_resource_to_city_object_storage(
+		stockpile_id,
+		WorldData.RESOURCE_LUMBER,
+		stockpile_capacity - 4
+	)
+	var first_source_id := _add_ground_resource(
+		Vector2i(5, 5),
+		WorldData.RESOURCE_LUMBER,
+		2
+	)
+	var second_source_id := _add_ground_resource(
+		Vector2i(8, 5),
+		WorldData.RESOURCE_LUMBER,
+		8
+	)
+	var haul_request := _make_cleanup_haul_request(
+		city_world,
+		citizen,
+		first_source_id
+	)
+
+	_expect(
+		stockpile_id > 0
+		and stored_amount == stockpile_capacity - 4
+		and first_source_id > 0
+		and second_source_id > 0
+		and not haul_request.is_empty()
+		and WorldData.assign_city_citizen_task(citizen_id, haul_request),
+		"The chained-pickup fixture must assign a near-full storage haul."
+	)
+
+	CitizenTaskSystemScript.run_tick(1, 2)
+	CitizenTaskSystemScript.run_tick(2, 2)
+
+	var reservation_id := (
+		CityLogisticsSystem.get_city_haul_reservation_id_for_citizen(
+			citizen_id
+		)
+	)
+	var reservation := CityLogisticsSystem.get_city_haul_reservation(
+		reservation_id
+	)
+	var destination_reserved_amount := int(
+		reservation.get("destination_reserved_amount", 0)
+	)
+	var source_reserved_amount := int(
+		reservation.get("source_reserved_amount", 0)
+	)
+	var destination_free_space := WorldData.get_city_object_storage_free_space(
+		WorldData.get_city_object_by_id(stockpile_id)
+	)
+	var validation_result := CityStateValidatorScript.validate(true, false)
+	var has_shared_capacity_error := false
+
+	for raw_error in validation_result.get("errors", []):
+		if (
+			"Destination reservations exceed shared free capacity"
+			in str(raw_error)
+		):
+			has_shared_capacity_error = true
+			break
+
+	_expect(
+		WorldData.get_city_citizen_haul_cargo_resource_amount(
+			citizen_id,
+			WorldData.RESOURCE_LUMBER
+		) == 2
+		and int(reservation.get("source", {}).get("id", -1))
+		== second_source_id,
+		"The first pickup must enter cargo and chain to the second pile."
+	)
+	_expect(
+		source_reserved_amount == 2
+		and destination_reserved_amount == 4
+		and destination_reserved_amount <= destination_free_space,
+		"A chained pickup may reserve only the destination space left after its loaded cargo."
+	)
+	_expect(
+		not has_shared_capacity_error,
+		"Chained pickup reservations must keep shared container capacity valid."
 	)
 
 

@@ -336,7 +336,7 @@ def main() -> int:
         errors.append("No GDScript files were found under scripts/.")
 
     for path in scripts:
-        relative = str(path.relative_to(ROOT))
+        relative = path.relative_to(ROOT).as_posix()
         text = path.read_text(encoding="utf-8")
         lines = text.splitlines()
         total_lines += len(lines)

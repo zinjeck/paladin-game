@@ -2096,6 +2096,9 @@ static func retarget_city_haul_reservation_source(
 	):
 		return 0
 
+	# Retargeting adds a new source claim to the destination manifest already
+	# held for loaded cargo. Include that existing claim when measuring the
+	# remaining space so it cannot be counted a second time.
 	var reserved_amount := mini(
 		requested_amount,
 		mini(
@@ -2107,13 +2110,11 @@ static func retarget_city_haul_reservation_source(
 			),
 			mini(
 				get_city_haul_endpoint_unreserved_destination_space(
-					destination,
-					reservation_id
+					destination
 				),
 				get_city_haul_endpoint_unreserved_destination_resource_space(
 					destination,
-					resource,
-					reservation_id
+					resource
 				)
 			)
 		)
