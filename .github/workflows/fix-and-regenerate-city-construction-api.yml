@@ -1,0 +1,43 @@
+name: Fix and Regenerate City Construction API
+on:
+  push:
+    branches:
+      - agent/extract-city-construction-api
+permissions:
+  contents: write
+jobs:
+  regenerate:
+    if: "!contains(github.event.head_commit.message, '[occupancy-qualified]')"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Teach transform the generic occupancy dependency
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          path = Path('ci/refactor_city_construction_api.py')
+          text = path.read_text(encoding='utf-8')
+          anchor = '        "make_rectangle_city_object_footprint_tiles",\n'
+          if anchor not in text:
+              raise SystemExit('Missing qualification-set anchor')
+          if '        "city_occupied_tiles",\n' not in text:
+              text = text.replace(anchor, anchor + '        "city_occupied_tiles",\n', 1)
+          path.write_text(text, encoding='utf-8')
+          PY
+      - name: Restore current main game code and regenerate
+        shell: bash
+        run: |
+          git fetch origin main
+          git checkout origin/main -- ci/audit_gdscript.py scripts
+          python3 ci/refactor_city_construction_api.py
+      - name: Commit corrected regeneration
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add ci/refactor_city_construction_api.py ci/audit_gdscript.py scripts
+          git diff --cached --exit-code && exit 1 || true
+          git commit -m "Qualify construction occupancy dependency [construction-api-applied] [occupancy-qualified]"
+          git push
