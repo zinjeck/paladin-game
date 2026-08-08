@@ -81,20 +81,30 @@ def top_level_block(text: str, declaration_pattern: str) -> tuple[int, int, str]
     if not match:
         fail(f"missing expected declaration: {declaration_pattern}")
     start = match.start()
-    line_end = text.find("\n", match.end())
-    if line_end < 0:
+    first_end = text.find("\n", start)
+    if first_end < 0:
         return start, len(text), text[start:]
-    pos = line_end + 1
+
+    first_line = text[start:first_end]
+    paren_balance = first_line.count("(") - first_line.count(")")
+    pos = first_end + 1
     while pos < len(text):
         next_end = text.find("\n", pos)
         if next_end < 0:
             next_end = len(text)
         line = text[pos:next_end]
-        if line.strip() and not line[0].isspace():
-            return start, pos, text[start:pos]
-        pos = next_end + 1
-    return start, len(text), text[start:]
 
+        # Multiline function/const declarations may close parentheses at column
+        # zero. Those lines are part of the declaration, not the next top-level
+        # block. Only treat a zero-indent line as a boundary after the opening
+        # declaration's parentheses are balanced.
+        if paren_balance <= 0 and line.strip() and not line[0].isspace():
+            return start, pos, text[start:pos]
+
+        paren_balance += line.count("(") - line.count(")")
+        pos = next_end + 1
+
+    return start, len(text), text[start:]
 
 def remove_top_level_function(text: str, name: str) -> tuple[str, str]:
     pattern = rf"^(?:static\s+)?func\s+{re.escape(name)}\s*\("
