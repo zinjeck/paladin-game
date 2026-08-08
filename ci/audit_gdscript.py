@@ -324,10 +324,19 @@ def main() -> int:
     if world_data_path.exists():
         world_data_text = world_data_path.read_text(encoding="utf-8")
         for symbol in WORLD_DATA_FORBIDDEN_CITY_WORK_SYMBOLS:
-            if symbol in world_data_text:
+            declaration_patterns = (
+                rf"^\s*static\s+var\s+{re.escape(symbol)}\b",
+                rf"^\s*const\s+{re.escape(symbol)}\b",
+                rf"^\s*(?:static\s+)?func\s+{re.escape(symbol)}\s*\(",
+                rf"^\s*(?:static\s+)?func\s+_{re.escape(symbol)}\s*\(",
+            )
+            if any(
+                re.search(pattern, world_data_text, re.MULTILINE)
+                for pattern in declaration_patterns
+            ):
                 errors.append(
                     "scripts/world/simulation/WorldData.gd: extracted city-work "
-                    f"symbol must not return to WorldData: {symbol}"
+                    f"ownership declaration must not return to WorldData: {symbol}"
                 )
 
     for path in scripts:

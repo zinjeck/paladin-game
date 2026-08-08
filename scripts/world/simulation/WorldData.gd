@@ -6863,7 +6863,11 @@ static func _prepare_city_player_command_task_assignment(
 		task_source != CITY_CITIZEN_TASK_SOURCE_PLAYER
 		or command.is_empty()
 		or int(command.get("claimed_citizen_id", -1)) != citizen_id
-		or not is_city_player_command_target_valid(command)
+		or not WorldPoliticalState.get_current_city_work_state().is_player_command_target_valid(
+			command,
+			official_city_world,
+			INVALID_CITY_TILE_POSITION
+		)
 	):
 		return false
 

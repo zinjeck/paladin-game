@@ -143,30 +143,10 @@ static func get_city_player_command_by_id(command_id: int) -> Dictionary:
 
 
 static func is_city_player_command_target_valid(command: Dictionary) -> bool:
-	var city_world: WorldData = WorldData.official_city_world
-	var command_type := str(
-		command.get("type", CITY_PLAYER_COMMAND_TYPE_NONE)
-	)
-	var raw_tile_position = command.get(
-		"tile_position",
+	return _work_state().is_player_command_target_valid(
+		command,
+		WorldData.official_city_world,
 		WorldData.INVALID_CITY_TILE_POSITION
-	)
-	if (
-		city_world == null
-		or not is_valid_city_player_command_type(command_type)
-		or not raw_tile_position is Vector2i
-	):
-		return false
-
-	var tile_position: Vector2i = raw_tile_position
-	if not city_world.is_in_bounds(tile_position.x, tile_position.y):
-		return false
-
-	return (
-		WorldData.get_city_surface_feature(
-			city_world.get_tile(tile_position.x, tile_position.y)
-		)
-		== get_city_player_command_surface_feature(command_type)
 	)
 
 
