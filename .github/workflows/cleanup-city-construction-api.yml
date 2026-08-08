@@ -1,0 +1,36 @@
+name: Cleanup City Construction API Tooling
+on:
+  push:
+    branches:
+      - agent/extract-city-construction-api
+permissions:
+  contents: write
+jobs:
+  cleanup:
+    if: "!contains(github.event.head_commit.message, '[construction-api-clean]')"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Remove one-time construction refactor tooling
+        shell: bash
+        run: |
+          git rm -f --ignore-unmatch \
+            .github/workflows/apply-city-construction-api.yml \
+            .github/workflows/inventory-city-construction-api.yml \
+            .github/workflows/regenerate-city-construction-api.yml \
+            .github/workflows/validate-city-construction-api.yml \
+            .github/workflows/cleanup-city-construction-api.yml \
+            .github/workflows/fix-city-construction-api-refactor.yml \
+            .github/workflows/fix-city-construction-api-parser.yml \
+            .github/workflows/fix-and-regenerate-city-construction-api.yml \
+            ci/inventory_city_construction_api.py \
+            ci/refactor_city_construction_api.py \
+            ci/fix_construction_api_refactor_guard.py \
+            ci/fix_construction_api_refactor_parser.py
+      - name: Commit clean branch
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git diff --cached --exit-code && exit 1 || true
+          git commit -m "Remove temporary construction API refactor tooling [construction-api-clean]"
+          git push
