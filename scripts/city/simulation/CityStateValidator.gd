@@ -143,11 +143,11 @@ static func validate(
 		),
 		"assignment_version": WorldData.city_assignment_version,
 		"workplace_version": WorldData.city_workplace_version,
-		"ground_pile_version": WorldData.city_ground_pile_version,
+		"ground_pile_version": CityLogisticsSystem.get_current_state().ground_pile_version,
 		"player_command_version": CityWorkSystem.get_current_work_state().player_command_version,
 		"work_order_version": CityWorkSystem.get_current_work_state().work_order_version,
 		"haul_reservation_version": (
-			WorldData.city_haul_reservation_version
+			CityLogisticsSystem.get_current_state().haul_reservation_version
 		),
 		"construction_version": WorldData.city_construction_version,
 	}
@@ -279,7 +279,7 @@ static func _validation_cache_matches_current_state() -> bool:
 
 	if (
 		int(_cached_result.get("ground_pile_version", -1))
-		!= WorldData.city_ground_pile_version
+		!= CityLogisticsSystem.get_current_state().ground_pile_version
 	):
 		return false
 
@@ -312,7 +312,7 @@ static func _validation_cache_matches_current_state() -> bool:
 				-1
 			)
 		)
-		!= WorldData.city_haul_reservation_version
+		!= CityLogisticsSystem.get_current_state().haul_reservation_version
 	):
 		return false
 

@@ -847,7 +847,7 @@ static func complete_city_player_command(
 	}
 
 	if reserved_amount > 0:
-		reserved_result = WorldData.add_resource_to_city_ground_piles_with_result({
+		reserved_result = CityLogisticsSystem.add_resource_to_city_ground_piles_with_result({
 			"tile_position": tile_position,
 			"resource": resource,
 			"amount_delta": reserved_amount,
@@ -861,7 +861,7 @@ static func complete_city_player_command(
 	}
 
 	if ordinary_amount > 0:
-		ordinary_result = WorldData.add_resource_to_city_ground_piles_with_result({
+		ordinary_result = CityLogisticsSystem.add_resource_to_city_ground_piles_with_result({
 			"tile_position": tile_position,
 			"resource": resource,
 			"amount_delta": ordinary_amount,
@@ -873,11 +873,11 @@ static func complete_city_player_command(
 		or int(ordinary_result.get("added_amount", 0))
 		!= ordinary_amount
 	):
-		WorldData.rollback_city_ground_pile_additions(
+		CityLogisticsSystem.rollback_city_ground_pile_additions(
 			resource,
 			ordinary_result.get("placements", [])
 		)
-		WorldData.rollback_city_ground_pile_additions(
+		CityLogisticsSystem.rollback_city_ground_pile_additions(
 			resource,
 			reserved_result.get("placements", [])
 		)
@@ -900,7 +900,7 @@ static func synchronize_player_work_board() -> void:
 	var construction_site_snapshot := (
 		CityConstructionSystem.get_city_construction_site_snapshot()
 	)
-	var ground_pile_snapshot := WorldData.get_city_ground_pile_snapshot()
+	var ground_pile_snapshot := CityLogisticsSystem.get_city_ground_pile_snapshot()
 	var desired_sources: Dictionary = {}
 
 	for raw_command in command_snapshot:
@@ -1043,7 +1043,7 @@ static func refresh_work_order_runtimes(raw_order_ids: Array) -> void:
 		return
 
 	var command_snapshot := get_city_player_command_snapshot()
-	var ground_pile_snapshot := WorldData.get_city_ground_pile_snapshot()
+	var ground_pile_snapshot := CityLogisticsSystem.get_city_ground_pile_snapshot()
 	var order_ids: Array = order_id_lookup.keys()
 	order_ids.sort()
 
@@ -2036,9 +2036,9 @@ static func _get_job_reservation_amounts(
 
 	for citizen_id in active_citizen_ids:
 		var reservation_id := (
-			WorldData.get_city_haul_reservation_id_for_citizen(citizen_id)
+			CityLogisticsSystem.get_city_haul_reservation_id_for_citizen(citizen_id)
 		)
-		var reservation := WorldData.get_city_haul_reservation(
+		var reservation := CityLogisticsSystem.get_city_haul_reservation(
 			reservation_id
 		)
 
@@ -2052,7 +2052,7 @@ static func _get_job_reservation_amounts(
 			)
 
 		destination_reserved_amount += (
-			WorldData.get_city_haul_reservation_destination_resource_amount(
+			CityLogisticsSystem.get_city_haul_reservation_destination_resource_amount(
 				reservation_id,
 				resource
 			)
@@ -2132,7 +2132,7 @@ static func _build_jobs_for_order(
 			if (
 				not pile_tile is Vector2i
 				or not footprint_tiles.has(pile_tile)
-				or WorldData.city_ground_pile_is_construction_reserved(pile)
+				or CityLogisticsSystem.city_ground_pile_is_construction_reserved(pile)
 			):
 				continue
 
@@ -2141,15 +2141,15 @@ static func _build_jobs_for_order(
 			)
 			var pile_id := int(pile.get("id", -1))
 			var requested_amount := maxi(
-				WorldData.get_city_haul_endpoint_resource_amount(
-					WorldData.make_city_ground_pile_haul_endpoint(pile_id),
+				CityLogisticsSystem.get_city_haul_endpoint_resource_amount(
+					CityLogisticsSystem.make_city_ground_pile_haul_endpoint(pile_id),
 					resource
 				),
 				0
 			)
 			var source_available := (
-				WorldData.get_city_haul_endpoint_unreserved_resource_amount(
-					WorldData.make_city_ground_pile_haul_endpoint(pile_id),
+				CityLogisticsSystem.get_city_haul_endpoint_unreserved_resource_amount(
+					CityLogisticsSystem.make_city_ground_pile_haul_endpoint(pile_id),
 					resource
 				)
 			)
@@ -2183,7 +2183,7 @@ static func _build_jobs_for_order(
 				"kind": JOB_KIND_CLEARING_RELOCATION,
 				"resource_type": resource,
 				"source_endpoint": (
-					WorldData.make_city_ground_pile_haul_endpoint(pile_id)
+					CityLogisticsSystem.make_city_ground_pile_haul_endpoint(pile_id)
 				),
 				"source_available_amount": source_available,
 				"requested_amount": requested_amount,
@@ -2409,7 +2409,7 @@ static func _build_progress_signature(
 
 	var ordinary_pile_amount := 0
 
-	for raw_pile in WorldData.get_city_ground_pile_snapshot():
+	for raw_pile in CityLogisticsSystem.get_city_ground_pile_snapshot():
 		if (
 			raw_pile is Dictionary
 			and footprint_tiles.has(
@@ -2418,7 +2418,7 @@ static func _build_progress_signature(
 					WorldData.INVALID_CITY_TILE_POSITION
 				)
 			)
-			and not WorldData.city_ground_pile_is_construction_reserved(
+			and not CityLogisticsSystem.city_ground_pile_is_construction_reserved(
 				raw_pile
 			)
 		):
@@ -2946,18 +2946,18 @@ static func _get_relocation_destination_diagnostics(
 			continue
 
 		compatible_public_destination_exists = true
-		var endpoint := WorldData.make_city_citizen_haul_endpoint(
+		var endpoint := CityLogisticsSystem.make_city_citizen_haul_endpoint(
 			int(city_object.get("id", -1))
 		)
 
-		if WorldData.city_haul_endpoint_can_accept_resource({
+		if CityLogisticsSystem.city_haul_endpoint_can_accept_resource({
 			"endpoint": endpoint,
 			"resource": resource,
 			"deposit_purpose": WorldData.CONTAINER_HAUL_PURPOSE_PUBLIC_STORAGE,
 			"require_unreserved_space": true,
 		}):
 			public_available_amount += (
-				WorldData.get_city_haul_endpoint_unreserved_destination_space(
+				CityLogisticsSystem.get_city_haul_endpoint_unreserved_destination_space(
 					endpoint
 				)
 			)
@@ -3030,11 +3030,11 @@ static func _get_construction_source_diagnostics(
 		if not WorldData.city_object_container_is_publicly_usable(city_object):
 			continue
 
-		var endpoint := WorldData.make_city_citizen_haul_endpoint(
+		var endpoint := CityLogisticsSystem.make_city_citizen_haul_endpoint(
 			int(city_object.get("id", -1))
 		)
 
-		if not WorldData.city_haul_endpoint_can_provide_resource({
+		if not CityLogisticsSystem.city_haul_endpoint_can_provide_resource({
 			"endpoint": endpoint,
 			"resource": resource,
 			"withdrawal_purpose": WorldData.CONTAINER_HAUL_PURPOSE_CONSTRUCTION,
@@ -3044,24 +3044,24 @@ static func _get_construction_source_diagnostics(
 
 		legal_physical_source_exists = true
 		legal_unreserved_amount += (
-			WorldData.get_city_haul_endpoint_unreserved_resource_amount(
+			CityLogisticsSystem.get_city_haul_endpoint_unreserved_resource_amount(
 				endpoint,
 				resource
 			)
 		)
 
-	for raw_pile in WorldData.get_city_ground_pile_snapshot():
+	for raw_pile in CityLogisticsSystem.get_city_ground_pile_snapshot():
 		if (
 			not raw_pile is Dictionary
-			or WorldData.city_ground_pile_is_construction_reserved(raw_pile)
+			or CityLogisticsSystem.city_ground_pile_is_construction_reserved(raw_pile)
 		):
 			continue
 
-		var endpoint := WorldData.make_city_ground_pile_haul_endpoint(
+		var endpoint := CityLogisticsSystem.make_city_ground_pile_haul_endpoint(
 			int(raw_pile.get("id", -1))
 		)
 
-		if not WorldData.city_haul_endpoint_can_provide_resource({
+		if not CityLogisticsSystem.city_haul_endpoint_can_provide_resource({
 			"endpoint": endpoint,
 			"resource": resource,
 			"withdrawal_purpose": WorldData.CONTAINER_HAUL_PURPOSE_CONSTRUCTION,
@@ -3071,7 +3071,7 @@ static func _get_construction_source_diagnostics(
 
 		legal_physical_source_exists = true
 		legal_unreserved_amount += (
-			WorldData.get_city_haul_endpoint_unreserved_resource_amount(
+			CityLogisticsSystem.get_city_haul_endpoint_unreserved_resource_amount(
 				endpoint,
 				resource
 			)

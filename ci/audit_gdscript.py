@@ -58,18 +58,86 @@ ALLOWED_QUEUE_REDRAW_CALLS = {
     "scripts/ui/city/CityInformationPanel.gd": 2,
 }
 
-WORLD_DATA_CITY_LOGISTICS_COMPATIBILITY_FIELDS = {
-    "city_ground_piles": "ground_piles",
-    "city_ground_pile_index_by_id": "ground_pile_index_by_id",
-    "next_city_ground_pile_id": "next_ground_pile_id",
-    "city_ground_pile_version": "ground_pile_version",
-    "city_haul_reservations": "haul_reservations",
-    "city_haul_reservation_id_by_citizen_id": "haul_reservation_id_by_citizen_id",
-    "city_haul_source_reserved_amount_by_key": "haul_source_reserved_amount_by_key",
-    "city_haul_destination_reserved_amount_by_key": "haul_destination_reserved_amount_by_key",
-    "next_city_haul_reservation_id": "next_haul_reservation_id",
-    "city_haul_reservation_version": "haul_reservation_version",
-}
+WORLD_DATA_FORBIDDEN_CITY_LOGISTICS_SYMBOLS = (
+    "city_ground_piles",
+    "city_ground_pile_index_by_id",
+    "next_city_ground_pile_id",
+    "city_ground_pile_version",
+    "city_haul_reservations",
+    "city_haul_reservation_id_by_citizen_id",
+    "city_haul_source_reserved_amount_by_key",
+    "city_haul_destination_reserved_amount_by_key",
+    "next_city_haul_reservation_id",
+    "city_haul_reservation_version",
+    "CITY_GROUND_PILE_CAPACITY",
+    "CITY_GROUND_PILE_MERGE_RADIUS_TILES",
+    "CITY_GROUND_DROP_RESERVATION_CAPACITY",
+    "city_surface_feature_blocks_ground_pile",
+    "_mark_city_ground_piles_changed",
+    "_mark_city_haul_reservations_changed",
+    "make_city_construction_site_haul_endpoint",
+    "get_city_ground_pile_construction_site_id",
+    "city_ground_pile_is_construction_reserved",
+    "make_city_citizen_haul_endpoint",
+    "make_city_ground_pile_haul_endpoint",
+    "make_city_ground_tile_haul_endpoint",
+    "city_citizen_haul_endpoints_match",
+    "rebuild_city_ground_pile_index",
+    "get_city_ground_pile_index_by_id",
+    "get_city_ground_pile_by_id",
+    "get_city_ground_pile_snapshot",
+    "get_city_ground_piles_at_tile",
+    "has_city_ground_pile_at_tile",
+    "can_city_ground_pile_exist_at_tile",
+    "get_city_ground_pile_free_space",
+    "get_city_ground_pile_tile_distance_squared",
+    "_find_city_ground_pile_merge_target_index",
+    "add_resource_to_city_ground_piles_with_result",
+    "add_resource_to_city_ground_pile",
+    "rollback_city_ground_pile_additions",
+    "get_city_ground_pile_resource_amount",
+    "remove_resource_from_city_ground_pile",
+    "reserve_city_ground_pile_for_construction",
+    "get_total_city_ground_pile_resource_amount",
+    "_get_city_haul_endpoint_key",
+    "_get_city_haul_source_reservation_key",
+    "_change_city_haul_reserved_source_amount",
+    "_change_city_haul_reserved_destination_amount",
+    "get_city_haul_reservation",
+    "get_city_haul_reservation_snapshot",
+    "city_haul_reservation_is_soft",
+    "get_city_soft_haul_reservation_ids_for_destination_resource",
+    "get_city_soft_haul_destination_reserved_resource_amount",
+    "release_soft_city_haul_reservation_for_reassignment",
+    "reduce_soft_city_haul_reservation_for_reassignment",
+    "preempt_soft_city_haul_reservations_for_destination_resource",
+    "get_city_haul_reservation_id_for_citizen",
+    "get_city_haul_endpoint_source_reserved_amount",
+    "get_city_haul_endpoint_destination_reserved_amount",
+    "get_city_haul_endpoint_resource_amount",
+    "get_city_haul_endpoint_unreserved_resource_amount",
+    "get_city_haul_endpoint_unreserved_destination_space",
+    "get_city_haul_endpoint_unreserved_destination_resource_space",
+    "city_haul_endpoint_can_provide_resource",
+    "city_haul_endpoint_can_accept_resource",
+    "_normalize_city_haul_resource_manifest",
+    "_get_city_haul_resource_manifest_total",
+    "get_city_haul_reservation_destination_resources",
+    "get_city_haul_reservation_destination_resource_amount",
+    "create_city_haul_reservation",
+    "_make_city_haul_reservation_context",
+    "_prepare_city_haul_reservation_amounts",
+    "_prepare_loaded_city_haul_reservation",
+    "_prepare_pending_city_haul_reservation",
+    "_commit_city_haul_reservation",
+    "expand_pending_city_haul_reservation",
+    "expand_pending_city_haul_reservations",
+    "retarget_city_haul_reservation_source",
+    "release_city_haul_reservation",
+    "release_city_haul_reservation_for_citizen",
+    "reset_city_ground_pile_state",
+    "reset_city_haul_reservation_state",
+)
 
 WORLD_DATA_FORBIDDEN_CITY_WORK_SYMBOLS = (
     "city_player_commands",
@@ -336,24 +404,19 @@ def main() -> int:
     world_data_path = ROOT / "scripts/world/simulation/WorldData.gd"
     if world_data_path.exists():
         world_data_text = world_data_path.read_text(encoding="utf-8")
-        for symbol, state_field in WORLD_DATA_CITY_LOGISTICS_COMPATIBILITY_FIELDS.items():
-            if re.search(
-                rf"^\s*static\s+var\s+{re.escape(symbol)}\b[^\n]*=",
-                world_data_text,
-                re.MULTILINE,
+        for symbol in WORLD_DATA_FORBIDDEN_CITY_LOGISTICS_SYMBOLS:
+            declaration_patterns = (
+                rf"^\s*static\s+var\s+{re.escape(symbol)}\b",
+                rf"^\s*const\s+{re.escape(symbol)}\b",
+                rf"^\s*(?:static\s+)?func\s+{re.escape(symbol)}\s*\(",
+            )
+            if any(
+                re.search(pattern, world_data_text, re.MULTILINE)
+                for pattern in declaration_patterns
             ):
                 errors.append(
-                    "scripts/world/simulation/WorldData.gd: city logistics storage "
-                    f"must not return to WorldData: {symbol}"
-                )
-            resolver = (
-                "WorldPoliticalState.get_current_city_logistics_state()."
-                + state_field
-            )
-            if world_data_text.count(resolver) < 2:
-                errors.append(
-                    "scripts/world/simulation/WorldData.gd: logistics compatibility "
-                    f"field must forward getter/setter to settlement state: {symbol}"
+                    "scripts/world/simulation/WorldData.gd: extracted city-logistics "
+                    f"ownership declaration must not return to WorldData: {symbol}"
                 )
 
         settlement_state_path = (
@@ -407,6 +470,14 @@ def main() -> int:
             if legacy_reference in text:
                 errors.append(
                     f"{relative}: legacy WorldData city-work reference remains: "
+                    f"{legacy_reference}"
+                )
+
+        for symbol in WORLD_DATA_FORBIDDEN_CITY_LOGISTICS_SYMBOLS:
+            legacy_reference = f"WorldData.{symbol}"
+            if legacy_reference in text:
+                errors.append(
+                    f"{relative}: legacy WorldData city-logistics reference remains: "
                     f"{legacy_reference}"
                 )
 

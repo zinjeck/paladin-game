@@ -222,7 +222,7 @@ static func _get_legal_food_source_endpoints_at_citizen(
 		CityResourceMatcher.city_object_is_household_home(home)
 		and WorldData.get_city_object_footprint_tiles(home).has(citizen_tile)
 	):
-		sources.append(WorldData.make_city_citizen_haul_endpoint(home_id))
+		sources.append(CityLogisticsSystem.make_city_citizen_haul_endpoint(home_id))
 
 	# Deliberate travel is owned by the decision system. At the current tile,
 	# however, every legal survival source participates in the same endpoint
@@ -265,24 +265,24 @@ static func _get_legal_food_source_endpoints_at_citizen(
 
 			if interaction_tiles.has(citizen_tile):
 				sources.append(
-					WorldData.make_city_citizen_haul_endpoint(
+					CityLogisticsSystem.make_city_citizen_haul_endpoint(
 						int(city_object.get("id", -1))
 					)
 				)
 
-	for raw_pile in WorldData.get_city_ground_pile_snapshot():
+	for raw_pile in CityLogisticsSystem.get_city_ground_pile_snapshot():
 		if not raw_pile is Dictionary:
 			continue
 
 		var pile: Dictionary = raw_pile
-		var endpoint := WorldData.make_city_ground_pile_haul_endpoint(
+		var endpoint := CityLogisticsSystem.make_city_ground_pile_haul_endpoint(
 			int(pile.get("id", -1))
 		)
 
 		if (
 			pile.get("tile_position", WorldData.INVALID_CITY_TILE_POSITION)
 			== citizen_tile
-			and not WorldData.city_ground_pile_is_construction_reserved(pile)
+			and not CityLogisticsSystem.city_ground_pile_is_construction_reserved(pile)
 		):
 			sources.append(endpoint)
 

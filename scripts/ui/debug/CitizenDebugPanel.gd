@@ -579,7 +579,7 @@ static func format_haul_endpoint(raw_endpoint) -> String:
 		endpoint_kind
 		== WorldData.CITY_CITIZEN_HAUL_ENDPOINT_KIND_GROUND_PILE
 	):
-		var ground_pile := WorldData.get_city_ground_pile_by_id(
+		var ground_pile := CityLogisticsSystem.get_city_ground_pile_by_id(
 			endpoint_id
 		)
 

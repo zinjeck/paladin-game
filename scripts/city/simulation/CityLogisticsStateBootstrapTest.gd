@@ -44,7 +44,7 @@ func _run_bootstrap_test() -> void:
 
 	# Low-level fixtures can create physical logistics state before the first
 	# simulation tick establishes the founding settlement context.
-	WorldData.city_ground_piles = [
+	CityLogisticsSystem.get_current_state().ground_piles = [
 		{
 			"id": 17,
 			"tile_position": Vector2i(3, 3),
@@ -53,17 +53,17 @@ func _run_bootstrap_test() -> void:
 			"test_owner": "bootstrap",
 		},
 	]
-	WorldData.city_ground_pile_index_by_id = {17: 0}
-	WorldData.next_city_ground_pile_id = 18
-	WorldData.city_ground_pile_version = 5
-	WorldData.city_haul_reservations = {
+	CityLogisticsSystem.get_current_state().ground_pile_index_by_id = {17: 0}
+	CityLogisticsSystem.get_current_state().next_ground_pile_id = 18
+	CityLogisticsSystem.get_current_state().ground_pile_version = 5
+	CityLogisticsSystem.get_current_state().haul_reservations = {
 		23: {"id": 23, "citizen_id": 3, "test_owner": "bootstrap"},
 	}
-	WorldData.city_haul_reservation_id_by_citizen_id = {3: 23}
-	WorldData.city_haul_source_reserved_amount_by_key = {"test:source": 2}
-	WorldData.city_haul_destination_reserved_amount_by_key = {"test:destination": 2}
-	WorldData.next_city_haul_reservation_id = 24
-	WorldData.city_haul_reservation_version = 7
+	CityLogisticsSystem.get_current_state().haul_reservation_id_by_citizen_id = {3: 23}
+	CityLogisticsSystem.get_current_state().haul_source_reserved_amount_by_key = {"test:source": 2}
+	CityLogisticsSystem.get_current_state().haul_destination_reserved_amount_by_key = {"test:destination": 2}
+	CityLogisticsSystem.get_current_state().next_haul_reservation_id = 24
+	CityLogisticsSystem.get_current_state().haul_reservation_version = 7
 
 	var bootstrap_state = WorldPoliticalState.get_current_city_logistics_state()
 	_expect(
@@ -102,10 +102,10 @@ func _run_bootstrap_test() -> void:
 		"Bootstrap haul-reservation state must survive context establishment."
 	)
 	_expect(
-		WorldData.city_ground_piles == capital_state.logistics_state.ground_piles
-		and WorldData.city_haul_reservations
+		CityLogisticsSystem.get_current_state().ground_piles == capital_state.logistics_state.ground_piles
+		and CityLogisticsSystem.get_current_state().haul_reservations
 		== capital_state.logistics_state.haul_reservations,
-		"WorldData compatibility fields must resolve to the active City's logistics state."
+		"CityLogisticsSystem must resolve to the active City's logistics state."
 	)
 
 

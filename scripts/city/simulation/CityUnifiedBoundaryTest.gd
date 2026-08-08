@@ -75,7 +75,7 @@ func _test_normal_order_preempts_before_pickup() -> void:
 		"The pre-pickup fixture must assign a real autonomous haul."
 	)
 
-	var reservation_id := WorldData.get_city_haul_reservation_id_for_citizen(
+	var reservation_id := CityLogisticsSystem.get_city_haul_reservation_id_for_citizen(
 		citizen_id
 	)
 	_expect(
@@ -99,12 +99,12 @@ func _test_normal_order_preempts_before_pickup() -> void:
 		"A Normal tree order must replace the autonomous haul before pickup."
 	)
 	_expect(
-		WorldData.get_city_haul_reservation(reservation_id).is_empty(),
+		CityLogisticsSystem.get_city_haul_reservation(reservation_id).is_empty(),
 		"Pre-pickup interruption must release the old haul reservation."
 	)
 	_expect(
-		WorldData.get_city_ground_pile_resource_amount(
-			WorldData.get_city_ground_pile_by_id(source_id),
+		CityLogisticsSystem.get_city_ground_pile_resource_amount(
+			CityLogisticsSystem.get_city_ground_pile_by_id(source_id),
 			WorldData.RESOURCE_LUMBER
 		) == 2
 		and WorldData.get_city_citizen_haul_cargo_amount(citizen_id) == 0,
@@ -195,7 +195,7 @@ func _test_normal_order_waits_for_picked_up_cargo_delivery() -> void:
 		"A Normal rock order must wait while already-picked-up cargo is delivered."
 	)
 	_expect(
-		WorldData.get_total_city_ground_pile_resource_amount(
+		CityLogisticsSystem.get_total_city_ground_pile_resource_amount(
 			WorldData.RESOURCE_STONE
 		) == 0
 		and WorldData.get_total_physical_city_resource_amount(
@@ -235,7 +235,7 @@ func _test_normal_order_waits_for_picked_up_cargo_delivery() -> void:
 		"The waiting Normal rock order must be assigned after delivery."
 	)
 	_expect(
-		WorldData.get_total_city_ground_pile_resource_amount(
+		CityLogisticsSystem.get_total_city_ground_pile_resource_amount(
 			WorldData.RESOURCE_STONE
 		) == 0,
 		"The completed delivery must not leave an ordinary-command cargo spill."
@@ -306,7 +306,7 @@ func _test_critical_hunger_interrupts_cargo_safely() -> void:
 		"Critical interruption coverage requires already-picked-up cargo."
 	)
 
-	var reservation_id := WorldData.get_city_haul_reservation_id_for_citizen(
+	var reservation_id := CityLogisticsSystem.get_city_haul_reservation_id_for_citizen(
 		citizen_id
 	)
 	var physical_before_interrupt := (
@@ -326,11 +326,11 @@ func _test_critical_hunger_interrupts_cargo_safely() -> void:
 	)
 	_expect(
 		WorldData.get_city_citizen_haul_cargo_amount(citizen_id) == 0
-		and WorldData.get_city_haul_reservation(reservation_id).is_empty(),
+		and CityLogisticsSystem.get_city_haul_reservation(reservation_id).is_empty(),
 		"Critical interruption must release cargo state and its old reservation."
 	)
 	_expect(
-		WorldData.get_total_city_ground_pile_resource_amount(
+		CityLogisticsSystem.get_total_city_ground_pile_resource_amount(
 			WorldData.RESOURCE_LUMBER
 		) == 2
 		and WorldData.get_total_physical_city_resource_amount(
@@ -762,7 +762,7 @@ func _add_ground_resource(
 	resource: String,
 	amount: int
 ) -> int:
-	var add_result := WorldData.add_resource_to_city_ground_piles_with_result({
+	var add_result := CityLogisticsSystem.add_resource_to_city_ground_piles_with_result({
 		"tile_position": tile_position,
 		"resource": resource,
 		"amount_delta": amount,
@@ -780,14 +780,14 @@ func _make_cleanup_haul_request(
 	citizen: Dictionary,
 	source_id: int
 ) -> Dictionary:
-	var source := WorldData.make_city_ground_pile_haul_endpoint(source_id)
+	var source := CityLogisticsSystem.make_city_ground_pile_haul_endpoint(source_id)
 	return CitizenHaulingSystemScript.make_public_storage_haul_task_request({
 		"city_world": city_world,
 		"citizen": citizen,
 		"source": source,
 		"requester": source,
 		"resource_type": str(
-			WorldData.get_city_ground_pile_by_id(source_id).get(
+			CityLogisticsSystem.get_city_ground_pile_by_id(source_id).get(
 				"resource_type",
 				WorldData.RESOURCE_NONE
 			)
