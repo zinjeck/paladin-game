@@ -48,6 +48,13 @@ jobs:
                   if calls:
                       print('  calls:', ', '.join(calls))
 
+          print('\n=== Every function in physical-logistics span 2568-5030 ===')
+          for pos, (start, name) in enumerate(starts):
+              end = starts[pos + 1][0] if pos + 1 < len(starts) else len(lines)
+              line_no = start + 1
+              if 2568 <= line_no <= 5030:
+                  print(f'{line_no}-{end}: {name}')
+
           print('\n=== External WorldData logistics references ===')
           reference_re = re.compile(r'WorldData\.([A-Za-z_][A-Za-z0-9_]*(?:ground_pile|haul_reservation|haul_endpoint)[A-Za-z0-9_]*)')
           for path in sorted((root / 'scripts').rglob('*.gd')):
