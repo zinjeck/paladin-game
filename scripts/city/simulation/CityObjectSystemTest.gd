@@ -330,8 +330,12 @@ func _test_object_reset_is_domain_local() -> void:
 
 	var state := CityObjectSystem.get_current_state()
 	var object_version_before := state.object_version
-	var container_version_before := WorldData.city_container_version
-	var public_storage_version_before := WorldData.city_public_storage_version
+	var container_version_before := (
+		CityResourceAccountingSystem.get_city_container_version()
+	)
+	var public_storage_version_before := (
+		CityResourceAccountingSystem.get_city_public_storage_version()
+	)
 	var assignment_version_before := WorldData.city_assignment_version
 	var workplace_version_before := WorldData.city_workplace_version
 	var logistics_state := CityLogisticsSystem.get_current_state()
@@ -350,8 +354,9 @@ func _test_object_reset_is_domain_local() -> void:
 		"Object reset must clear only its five fields and publish one object change."
 	)
 	_expect(
-		WorldData.city_container_version == container_version_before
-		and WorldData.city_public_storage_version
+		CityResourceAccountingSystem.get_city_container_version()
+		== container_version_before
+		and CityResourceAccountingSystem.get_city_public_storage_version()
 		== public_storage_version_before
 		and WorldData.city_assignment_version == assignment_version_before
 		and WorldData.city_workplace_version == workplace_version_before

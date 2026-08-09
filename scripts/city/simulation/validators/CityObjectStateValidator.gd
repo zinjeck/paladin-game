@@ -178,7 +178,7 @@ static func _validate_city_containers(
 		)
 
 		var allowed_resources := (
-			WorldData.get_city_object_storage_resources(
+			CityResourceContainerSystem.get_city_object_storage_resources(
 				city_object
 			)
 		)
@@ -224,7 +224,7 @@ static func _validate_city_containers(
 
 		for resource in allowed_resources:
 			var capacity := (
-				WorldData
+				CityResourceContainerSystem
 				.get_city_object_storage_capacity_for_resource(
 					city_object,
 					resource
@@ -292,7 +292,7 @@ static func _validate_city_containers(
 				)
 
 			var capacity := (
-				WorldData
+				CityResourceContainerSystem
 				.get_city_object_storage_capacity_for_resource(
 					city_object,
 					resource
@@ -312,12 +312,12 @@ static func _validate_city_containers(
 						+ "."
 				)
 		var total_stored_amount := (
-			WorldData.get_city_object_storage_used_capacity(
+			CityResourceContainerSystem.get_city_object_storage_used_capacity(
 				city_object
 			)
 		)
 		var total_capacity := (
-			WorldData.get_city_object_storage_capacity(
+			CityResourceContainerSystem.get_city_object_storage_capacity(
 				city_object
 			)
 		)
@@ -1425,7 +1425,7 @@ static func _validate_workplace_recipe_resources(
 		if not validate_output_storage or not resource_is_known:
 			continue
 
-		if not WorldData.can_city_object_store_resource(
+		if not CityResourceContainerSystem.can_city_object_store_resource(
 			city_object,
 			resource
 		):
@@ -1439,7 +1439,7 @@ static func _validate_workplace_recipe_resources(
 			continue
 
 		var output_capacity := (
-			WorldData.get_city_object_storage_capacity_for_resource(
+			CityResourceContainerSystem.get_city_object_storage_capacity_for_resource(
 				city_object,
 				resource
 			)

@@ -945,7 +945,7 @@ static func _get_outstanding_obligation_task_request(
 			workplace
 		):
 			var stored_amount := (
-				WorldData.get_city_object_stored_resource_amount(
+				CityResourceContainerSystem.get_city_object_stored_resource_amount(
 					workplace,
 					resource
 				)
@@ -1593,7 +1593,7 @@ static func _get_total_unreserved_public_storage_space() -> int:
 		var city_object: Dictionary = raw_city_object
 
 		if (
-			WorldData.get_city_object_public_storage_tier(city_object)
+			CityResourceContainerSystem.get_city_object_public_storage_tier(city_object)
 			== WorldData.PUBLIC_CITY_STORAGE_TIER_NONE
 		):
 			continue
@@ -1671,7 +1671,7 @@ static func _get_workplace_output_haul_opportunities() -> Array:
 static func _resource_has_unreserved_public_storage_destination(
 	resource: String
 ) -> bool:
-	for storage_tier in WorldData.get_public_city_storage_tiers():
+	for storage_tier in CityResourceContainerSystem.get_public_city_storage_tiers():
 		for raw_city_object in CityObjectSystem.get_city_objects():
 			if not raw_city_object is Dictionary:
 				continue
@@ -1679,7 +1679,7 @@ static func _resource_has_unreserved_public_storage_destination(
 			var city_object: Dictionary = raw_city_object
 
 			if (
-				WorldData.get_city_object_public_storage_tier(city_object)
+				CityResourceContainerSystem.get_city_object_public_storage_tier(city_object)
 				!= storage_tier
 			):
 				continue

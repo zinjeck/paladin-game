@@ -44,6 +44,7 @@ func _ready() -> void:
 	_test_rebalance_preserves_active_construction_clearing()
 	_test_unreachable_order_runtime_diagnostics()
 	_test_food_replenishment_cycle_and_whole_item_consumption()
+	_test_workplace_fish_production_accounting()
 	_test_household_and_public_food_reserve_targets()
 	_test_normal_home_food_preference_allowance()
 	_test_survival_food_fallback_and_reservation_accounting()
@@ -1021,6 +1022,139 @@ func _test_food_replenishment_cycle_and_whole_item_consumption() -> void:
 	)
 
 
+func _test_workplace_fish_production_accounting() -> void:
+	var city_world := _reset_fixture()
+	WorldData.player_city_founded = true
+
+	for y in range(city_world.height):
+		for x in range(city_world.width):
+			city_world.get_tile(x, y)["resource"] = WorldData.RESOURCE_FISH
+
+	city_world.mark_tile_data_changed()
+	WorkplaceProductionSystem.clear_resource_source_evaluation_cache()
+
+	var fishery := CityObjectSystem.add_city_object({
+		"object_type": WorldData.CITY_OBJECT_FISHING_GROUNDS,
+		"top_left": Vector2i(12, 8),
+		"size_tiles": WorldData.get_city_object_size_for_type(
+			WorldData.CITY_OBJECT_FISHING_GROUNDS
+		),
+		"object_owner": "player",
+		"city_world": city_world,
+	})
+	var fishery_id := int(fishery.get("id", -1))
+	var access_tiles := WorldData.get_city_object_access_tiles(
+		city_world,
+		fishery
+	)
+	_expect(
+		fishery_id > 0 and not access_tiles.is_empty(),
+		"The production fixture must create an accessible Fishing Grounds."
+	)
+
+	if fishery_id <= 0 or access_tiles.is_empty():
+		return
+
+	var worker := _add_citizen("Fish producer", access_tiles[0])
+	var worker_id := int(worker.get("id", -1))
+	var work_task := {
+		"kind": WorldData.CITY_CITIZEN_TASK_KIND_WORK,
+		"source": WorldData.CITY_CITIZEN_TASK_SOURCE_SCHEDULE,
+		"priority": 50,
+		"target_object_id": fishery_id,
+	}
+	_expect(
+		worker_id > 0
+		and WorldData.assign_city_citizen_job(worker_id, fishery_id)
+		and WorldData.assign_city_citizen_task(worker_id, work_task)
+		and WorldData.set_city_citizen_task_phase(
+			worker_id,
+			WorldData.CITY_CITIZEN_TASK_PHASE_PERFORMING
+		),
+		"One assigned worker must be physically attending the Fishery."
+	)
+
+	var accounting_state := CityResourceAccountingSystem.get_current_state()
+	var initial_owned_totals := (
+		CityResourceAccountingSystem.get_total_owned_city_resource_amounts()
+	)
+	var initial_cache: Dictionary = (
+		accounting_state.owned_resource_amount_cache
+	)
+	var initial_container_version := accounting_state.container_version
+	var initial_public_version := accounting_state.public_storage_version
+	var initial_cache_version := (
+		accounting_state.owned_resource_amount_cache_container_version
+	)
+	_expect(
+		int(initial_owned_totals.get(WorldData.RESOURCE_FISH, -1)) == 0
+		and initial_cache_version == initial_container_version,
+		"The production fixture must begin with a valid zero-fish cache."
+	)
+
+	WorkplaceProductionSystem.run_tick(1, 120)
+
+	fishery = CityObjectSystem.get_city_object_by_id(fishery_id)
+	var production_status := WorldData.get_city_object_production_status(
+		fishery
+	)
+	var cache_is_invalidated := (
+		accounting_state.owned_resource_amount_cache_container_version
+		== initial_cache_version
+		and accounting_state.container_version
+		== initial_container_version + 1
+	)
+	var public_fish := (
+		CityResourceAccountingSystem.get_total_public_city_resource_amount(
+			WorldData.RESOURCE_FISH
+		)
+	)
+	var physical_fish := WorldData.get_total_physical_city_resource_amount(
+		WorldData.RESOURCE_FISH
+	)
+	var owned_fish := (
+		CityResourceAccountingSystem.get_total_owned_city_resource_amount(
+			WorldData.RESOURCE_FISH
+		)
+	)
+
+	_expect(
+		CityResourceContainerSystem.get_city_object_stored_resource_amount(
+			fishery,
+			WorldData.RESOURCE_FISH
+		) == 1
+		and owned_fish == 1
+		and public_fish == 0
+		and physical_fish == 1,
+		"One real Fishery batch must atomically create one owned, non-public physical fish."
+	)
+	_expect(
+		cache_is_invalidated
+		and accounting_state.public_storage_version == initial_public_version
+		and not is_same(
+			accounting_state.owned_resource_amount_cache,
+			initial_cache
+		)
+		and accounting_state.owned_resource_amount_cache_container_version
+		== accounting_state.container_version,
+		"Production must invalidate and restamp owned totals without publishing a public-storage change."
+	)
+	_expect(
+		production_status == WorldData.WORKPLACE_PRODUCTION_STATUS_WORKING
+		and WorldData.is_valid_city_workplace_production_status(
+			production_status
+		)
+		and WorldData.get_city_object_production_progress_work_units(
+			fishery
+		) == 0
+		and WorldData.get_city_object_productive_worker_count(fishery) == 1
+		and WorldData.get_city_object_site_productivity_basis_points(
+			fishery
+		) == WorldData.PRODUCTIVITY_BASIS_POINTS_SCALE,
+		"The completed batch must leave valid full-productivity working state."
+	)
+
+
 func _test_household_and_public_food_reserve_targets() -> void:
 	var city_world := _reset_fixture()
 	var first := _add_citizen("Pantry first", Vector2i(8, 8))
@@ -1070,7 +1204,7 @@ func _test_household_and_public_food_reserve_targets() -> void:
 	})
 	var stockpile_id := int(stockpile.get("id", -1))
 	_expect(
-		WorldData.add_resource_to_city_object_storage(
+		CityResourceContainerSystem.add_resource_to_city_object_storage(
 			stockpile_id,
 			WorldData.RESOURCE_FISH,
 			2
@@ -1089,7 +1223,7 @@ func _test_household_and_public_food_reserve_targets() -> void:
 	)
 
 	_expect(
-		WorldData.add_resource_to_city_object_storage(
+		CityResourceContainerSystem.add_resource_to_city_object_storage(
 			stockpile_id,
 			WorldData.RESOURCE_FISH,
 			1
@@ -1156,7 +1290,7 @@ func _test_survival_food_fallback_and_reservation_accounting() -> void:
 	})
 	var fishery_id := int(fishery.get("id", -1))
 	_expect(
-		WorldData.add_resource_to_city_object_storage(
+		CityResourceContainerSystem.add_resource_to_city_object_storage(
 			fishery_id,
 			WorldData.RESOURCE_FISH,
 			1
@@ -1269,7 +1403,7 @@ func _test_unreachable_food_tier_does_not_hide_fallbacks() -> void:
 			"city_world": city_world,
 		})
 		_expect(
-			WorldData.add_resource_to_city_object_storage(
+			CityResourceContainerSystem.add_resource_to_city_object_storage(
 				int(stockpile.get("id", -1)),
 				WorldData.RESOURCE_FISH,
 				1
@@ -1289,7 +1423,7 @@ func _test_unreachable_food_tier_does_not_hide_fallbacks() -> void:
 	})
 	var fishery_id := int(fishery.get("id", -1))
 	_expect(
-		WorldData.add_resource_to_city_object_storage(
+		CityResourceContainerSystem.add_resource_to_city_object_storage(
 			fishery_id,
 			WorldData.RESOURCE_FISH,
 			1
@@ -1347,7 +1481,7 @@ func _test_unreachable_food_tier_does_not_hide_fallbacks() -> void:
 	)
 
 	_expect(
-		WorldData.remove_resource_from_city_object_storage(
+		CityResourceContainerSystem.remove_resource_from_city_object_storage(
 			fishery_id,
 			WorldData.RESOURCE_FISH,
 			1
@@ -1453,7 +1587,7 @@ func _test_unified_food_search_avoids_budget_starvation() -> void:
 
 	for food_object in [house, stockpile, keep, fishery]:
 		_expect(
-			WorldData.add_resource_to_city_object_storage(
+			CityResourceContainerSystem.add_resource_to_city_object_storage(
 				int(food_object.get("id", -1)),
 				WorldData.RESOURCE_FISH,
 				1
@@ -1553,11 +1687,11 @@ func _test_full_storage_construction_relocation_and_cancel_preview() -> void:
 		"city_world": city_world,
 	})
 	var stockpile_id := int(stockpile.get("id", -1))
-	var stockpile_capacity := WorldData.get_city_object_storage_capacity(
+	var stockpile_capacity := CityResourceContainerSystem.get_city_object_storage_capacity(
 		stockpile
 	)
 	_expect(
-		WorldData.add_resource_to_city_object_storage(
+		CityResourceContainerSystem.add_resource_to_city_object_storage(
 			stockpile_id,
 			WorldData.RESOURCE_COAL,
 			stockpile_capacity

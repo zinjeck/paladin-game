@@ -90,7 +90,7 @@ func _test_hunger_waits_for_real_food_opportunity() -> void:
 	var stockpile_id := int(stockpile.get("id", -1))
 	_expect(stockpile_id > 0, "The food fixture must create public storage.")
 
-	WorldData.add_resource_to_city_object_storage(
+	CityResourceContainerSystem.add_resource_to_city_object_storage(
 		stockpile_id,
 		WorldData.RESOURCE_FISH,
 		1
@@ -104,7 +104,7 @@ func _test_hunger_waits_for_real_food_opportunity() -> void:
 		"One available fish must interrupt the critical citizen only after the source is matched and reserved."
 	)
 
-	WorldData.add_resource_to_city_object_storage(
+	CityResourceContainerSystem.add_resource_to_city_object_storage(
 		stockpile_id,
 		WorldData.RESOURCE_FISH,
 		1
@@ -177,7 +177,7 @@ func _test_starving_food_workers_keep_survival_schedule() -> void:
 	})
 	var stockpile_id := int(stockpile.get("id", -1))
 	_expect(stockpile_id > 0, "The starvation fixture must create public storage.")
-	WorldData.add_resource_to_city_object_storage(
+	CityResourceContainerSystem.add_resource_to_city_object_storage(
 		stockpile_id,
 		WorldData.RESOURCE_FISH,
 		1
@@ -252,7 +252,7 @@ func _test_starving_residents_keep_return_home_schedule() -> void:
 		stockpile_id > 0,
 		"The return-home fixture must create public storage."
 	)
-	WorldData.add_resource_to_city_object_storage(
+	CityResourceContainerSystem.add_resource_to_city_object_storage(
 		stockpile_id,
 		WorldData.RESOURCE_FISH,
 		1

@@ -178,6 +178,107 @@ WORLD_DATA_RETIRED_RESOURCE_LEDGER_SYMBOLS = (
     "get_city_resource_amount",
 )
 
+WORLD_DATA_FORBIDDEN_CITY_RESOURCE_ACCOUNTING_SYMBOLS = (
+    "city_owned_resource_amount_cache",
+    "city_owned_resource_amount_cache_container_version",
+    "city_container_version",
+    "city_public_storage_version",
+    "get_city_container_version",
+    "get_city_public_storage_version",
+    "mark_city_container_changed",
+    "_mark_city_container_changed",
+    "reset_city_resource_accounting_state",
+    "get_total_public_city_resource_amount",
+    "get_total_public_city_resource_storage_capacity",
+    "get_total_stored_city_resource_amount",
+    "get_total_owned_city_resource_amount",
+    "get_total_owned_city_resource_amounts",
+    "get_total_city_resource_storage_capacity",
+)
+
+WORLD_DATA_FORBIDDEN_CITY_RESOURCE_CONTAINER_SYMBOLS = (
+    "make_empty_resource_container",
+    "make_sparse_resource_container",
+    "get_resource_container_resource_amount",
+    "get_resource_container_total_amount",
+    "get_resource_container_present_resources",
+    "get_food_nutrition_in_resource_container",
+    "make_empty_city_object_storage_for_type",
+    "get_city_object_container_type",
+    "get_city_object_container_access_policy",
+    "_get_container_policy_purposes",
+    "city_object_container_is_publicly_usable",
+    "city_object_counts_as_public_city_storage",
+    "get_city_object_public_storage_tier",
+    "get_public_city_storage_tiers",
+    "city_object_counts_toward_city_storage_totals",
+    "get_city_object_storage_resources",
+    "get_city_object_present_storage_resources",
+    "can_city_object_store_resource",
+    "city_object_can_provide_haul_resource",
+    "city_object_can_accept_haul_resource",
+    "city_object_allows_direct_resource_withdrawal",
+    "get_city_object_storage_capacity",
+    "get_city_object_storage_used_capacity",
+    "get_city_object_storage_free_space",
+    "get_city_object_unreserved_storage_free_space",
+    "get_city_object_storage_capacity_for_resource",
+    "get_city_object_stored_resource_amount",
+    "get_city_object_resource_free_space",
+    "set_city_object_stored_resource_amount",
+    "add_resource_to_city_object_storage",
+    "add_resource_bundle_to_city_object_storage",
+    "remove_resource_from_city_object_storage",
+)
+
+REQUIRED_CITY_RESOURCE_ACCOUNTING_SYSTEM_FUNCTIONS = (
+    "get_current_state",
+    "get_city_container_version",
+    "get_city_public_storage_version",
+    "mark_city_container_changed",
+    "reset_city_resource_accounting_state",
+    "get_total_public_city_resource_amount",
+    "get_total_public_city_resource_storage_capacity",
+    "get_total_stored_city_resource_amount",
+    "get_total_owned_city_resource_amount",
+    "get_total_owned_city_resource_amounts",
+    "get_total_city_resource_storage_capacity",
+)
+
+REQUIRED_CITY_RESOURCE_CONTAINER_SYSTEM_FUNCTIONS = (
+    "make_empty_resource_container",
+    "make_sparse_resource_container",
+    "get_resource_container_resource_amount",
+    "get_resource_container_total_amount",
+    "get_resource_container_present_resources",
+    "get_food_nutrition_in_resource_container",
+    "make_empty_city_object_storage_for_type",
+    "get_city_object_container_type",
+    "get_city_object_container_access_policy",
+    "city_object_container_is_publicly_usable",
+    "city_object_counts_as_public_city_storage",
+    "get_city_object_public_storage_tier",
+    "get_public_city_storage_tiers",
+    "city_object_counts_toward_city_storage_totals",
+    "get_city_object_storage_resources",
+    "get_city_object_present_storage_resources",
+    "can_city_object_store_resource",
+    "city_object_can_provide_haul_resource",
+    "city_object_can_accept_haul_resource",
+    "city_object_allows_direct_resource_withdrawal",
+    "get_city_object_storage_capacity",
+    "get_city_object_storage_used_capacity",
+    "get_city_object_storage_free_space",
+    "get_city_object_unreserved_storage_free_space",
+    "get_city_object_storage_capacity_for_resource",
+    "get_city_object_stored_resource_amount",
+    "get_city_object_resource_free_space",
+    "set_city_object_stored_resource_amount",
+    "add_resource_to_city_object_storage",
+    "add_resource_bundle_to_city_object_storage",
+    "remove_resource_from_city_object_storage",
+)
+
 RESOURCE_ACCOUNTING_STATE_FIELDS = {
     "owned_resource_amount_cache": "Dictionary",
     "owned_resource_amount_cache_container_version": "int",
@@ -802,17 +903,42 @@ def main() -> int:
     resource_accounting_state_path = (
         ROOT / "scripts/city/simulation/CityResourceAccountingState.gd"
     )
+    resource_accounting_system_path = (
+        ROOT
+        / "scripts/city/simulation/systems/CityResourceAccountingSystem.gd"
+    )
+    resource_container_system_path = (
+        ROOT
+        / "scripts/city/simulation/systems/CityResourceContainerSystem.gd"
+    )
     settlement_context_path = (
         ROOT / "scripts/world/simulation/SettlementSimulationContext.gd"
     )
-    if not resource_accounting_state_path.exists():
-        errors.append(
-            "scripts/city/simulation/CityResourceAccountingState.gd: missing "
-            "resource/container accounting state owner"
-        )
+    required_resource_owner_paths = (
+        (
+            resource_accounting_state_path,
+            "resource/container accounting state owner",
+        ),
+        (
+            resource_accounting_system_path,
+            "settlement resource-accounting behavior owner",
+        ),
+        (
+            resource_container_system_path,
+            "generic resource-container behavior owner",
+        ),
+    )
+    for required_path, owner_description in required_resource_owner_paths:
+        if not required_path.exists():
+            errors.append(
+                f"{required_path.relative_to(ROOT)}: missing {owner_description}"
+            )
+
     if (
         world_data_path.exists()
         and resource_accounting_state_path.exists()
+        and resource_accounting_system_path.exists()
+        and resource_container_system_path.exists()
         and city_root_state_path.exists()
         and political_state_path.exists()
         and settlement_context_path.exists()
@@ -820,6 +946,12 @@ def main() -> int:
         world_data_text = world_data_path.read_text(encoding="utf-8")
         resource_accounting_state_text = resource_accounting_state_path.read_text(
             encoding="utf-8"
+        )
+        resource_accounting_system_text = (
+            resource_accounting_system_path.read_text(encoding="utf-8")
+        )
+        resource_container_system_text = (
+            resource_container_system_path.read_text(encoding="utf-8")
         )
         city_root_state_text = city_root_state_path.read_text(encoding="utf-8")
         political_state_text = political_state_path.read_text(encoding="utf-8")
@@ -842,7 +974,7 @@ def main() -> int:
         if FUNC_RE.search(resource_accounting_state_text):
             errors.append(
                 "scripts/city/simulation/CityResourceAccountingState.gd: must "
-                "remain data-only during the ownership pass"
+                "remain data-only; behavior belongs in the resource systems"
             )
 
         for state_name, state_type in RESOURCE_ACCOUNTING_STATE_FIELDS.items():
@@ -854,64 +986,6 @@ def main() -> int:
                 errors.append(
                     "scripts/city/simulation/CityResourceAccountingState.gd: "
                     f"missing typed accounting field {state_name}"
-                )
-            if re.search(
-                rf"^var\s+{re.escape(state_name)}\b",
-                city_root_state_text,
-                re.MULTILINE,
-            ):
-                errors.append(
-                    "scripts/city/simulation/CitySettlementSimulationState.gd: "
-                    f"accounting storage {state_name} must live in "
-                    "CityResourceAccountingState"
-                )
-
-            compatibility_name = f"city_{state_name}"
-            compatibility_match = re.search(
-                rf"^static\s+var\s+{re.escape(compatibility_name)}:\s*"
-                rf"{state_type}:\s*$"
-                rf"(?P<body>.*?)(?=^static\s+var\s+)",
-                world_data_text,
-                re.MULTILINE | re.DOTALL,
-            )
-            if compatibility_match is None:
-                errors.append(
-                    "scripts/world/simulation/WorldData.gd: accounting "
-                    f"compatibility property must be accessor-only: "
-                    f"{compatibility_name}"
-                )
-            else:
-                compatibility_body = compatibility_match.group("body")
-                resolver_call_count = compatibility_body.count(
-                    "get_current_city_resource_accounting_state()"
-                )
-                getter_routes_field = re.search(
-                    rf"^\s*return\s+state\.{re.escape(state_name)}\s*$",
-                    compatibility_body,
-                    re.MULTILINE,
-                )
-                setter_routes_field = re.search(
-                    rf"^\s*state\.{re.escape(state_name)}\s*=\s*value\s*$",
-                    compatibility_body,
-                    re.MULTILINE,
-                )
-                if (
-                    resolver_call_count != 2
-                    or getter_routes_field is None
-                    or setter_routes_field is None
-                ):
-                    errors.append(
-                        "scripts/world/simulation/WorldData.gd: accounting "
-                        f"compatibility property must route getter and setter "
-                        f"through the current state: {compatibility_name}"
-                    )
-
-            legacy_workspace_reference = f"WorldData.{compatibility_name}"
-            if legacy_workspace_reference in city_root_state_text:
-                errors.append(
-                    "scripts/city/simulation/CitySettlementSimulationState.gd: "
-                    "extracted resource accounting must not return to "
-                    f"capture/apply workspace copying: {legacy_workspace_reference}"
                 )
 
         if (
@@ -931,6 +1005,62 @@ def main() -> int:
                 "scripts/city/simulation/CitySettlementSimulationState.gd: "
                 "retired duplicate resource_amounts ledger must not return"
             )
+
+        if "class_name CityResourceAccountingSystem" not in (
+            resource_accounting_system_text
+        ):
+            errors.append(
+                "scripts/city/simulation/systems/CityResourceAccountingSystem.gd: "
+                "missing CityResourceAccountingSystem class_name"
+            )
+        if "class_name CityResourceContainerSystem" not in (
+            resource_container_system_text
+        ):
+            errors.append(
+                "scripts/city/simulation/systems/CityResourceContainerSystem.gd: "
+                "missing CityResourceContainerSystem class_name"
+            )
+
+        for function_name in REQUIRED_CITY_RESOURCE_ACCOUNTING_SYSTEM_FUNCTIONS:
+            if not re.search(
+                rf"^static\s+func\s+{re.escape(function_name)}\s*\(",
+                resource_accounting_system_text,
+                re.MULTILINE,
+            ):
+                errors.append(
+                    "scripts/city/simulation/systems/"
+                    "CityResourceAccountingSystem.gd: missing required static API "
+                    f"{function_name}()"
+                )
+
+        for function_name in REQUIRED_CITY_RESOURCE_CONTAINER_SYSTEM_FUNCTIONS:
+            if not re.search(
+                rf"^static\s+func\s+{re.escape(function_name)}\s*\(",
+                resource_container_system_text,
+                re.MULTILINE,
+            ):
+                errors.append(
+                    "scripts/city/simulation/systems/"
+                    "CityResourceContainerSystem.gd: missing required static API "
+                    f"{function_name}()"
+                )
+
+        typed_accounting_state_accessor = re.search(
+            r"^static\s+func\s+get_current_state\s*\(\s*\)\s*->\s*"
+            r"CityResourceAccountingState\s*:",
+            resource_accounting_system_text,
+            re.MULTILINE,
+        )
+        resolver_call_count = resource_accounting_system_text.count(
+            "WorldPoliticalState.get_current_city_resource_accounting_state()"
+        )
+        if typed_accounting_state_accessor is None or resolver_call_count != 1:
+            errors.append(
+                "scripts/city/simulation/systems/CityResourceAccountingSystem.gd: "
+                "get_current_state() must be typed and be the system's single direct "
+                "WorldPoliticalState accounting-state resolver"
+            )
+
         required_political_accounting_surfaces = (
             "var _unbound_city_resource_accounting_state",
             "func get_current_city_resource_accounting_state() -> "
@@ -949,6 +1079,176 @@ def main() -> int:
                 "scripts/world/simulation/SettlementSimulationContext.gd: missing "
                 "resource-accounting context accessor"
             )
+
+        forbidden_resource_symbols = (
+            WORLD_DATA_FORBIDDEN_CITY_RESOURCE_ACCOUNTING_SYMBOLS
+            + WORLD_DATA_FORBIDDEN_CITY_RESOURCE_CONTAINER_SYMBOLS
+        )
+        for symbol in forbidden_resource_symbols:
+            declaration_patterns = (
+                rf"^\s*(?:static\s+)?var\s+{re.escape(symbol)}\b",
+                rf"^\s*const\s+{re.escape(symbol)}\b",
+                rf"^\s*(?:static\s+)?func\s+{re.escape(symbol)}\s*\(",
+            )
+            if any(
+                re.search(pattern, world_data_text, re.MULTILINE)
+                for pattern in declaration_patterns
+            ):
+                errors.append(
+                    "scripts/world/simulation/WorldData.gd: extracted city-resource "
+                    f"behavior/state must not return to WorldData: {symbol}"
+                )
+
+        direct_state_resolver_pattern = re.compile(
+            r"\bWorldPoliticalState\s*\.\s*"
+            r"get_current_city_resource_accounting_state\s*\("
+        )
+        dynamic_state_resolver_pattern = re.compile(
+            r"\bWorldPoliticalState\s*\.\s*(?:get|call|callv)\s*\(\s*"
+            r"[\"']get_current_city_resource_accounting_state[\"']"
+        )
+        callable_state_resolver_pattern = re.compile(
+            r"\bCallable\s*\(\s*WorldPoliticalState\s*,\s*"
+            r"[\"']get_current_city_resource_accounting_state[\"']\s*\)"
+        )
+        allowed_accounting_state_resolvers = {
+            political_state_path,
+            resource_accounting_system_path,
+        }
+        city_object_system_path = (
+            ROOT
+            / "scripts"
+            / "city"
+            / "simulation"
+            / "systems"
+            / "CityObjectSystem.gd"
+        )
+        stored_resources_write_pattern = re.compile(
+            r"(?:"
+            r"\[\s*[\"']stored_resources[\"']\s*\]"
+            r"|\.\s*stored_resources\b"
+            r"|\.\s*get\s*\(\s*[\"']stored_resources[\"'][^\)]*\)"
+            r")(?:\s*\[[^\]]+\])?\s*[+\-*/%]?=(?!=)"
+            r"|(?:"
+            r"\[\s*[\"']stored_resources[\"']\s*\]"
+            r"|\.\s*stored_resources\b"
+            r"|\.\s*get\s*\(\s*[\"']stored_resources[\"'][^\)]*\)"
+            r")\s*\.\s*(?:clear|erase|merge|set)\s*\("
+            r"|\.\s*set\s*\(\s*[\"']stored_resources[\"']\s*,"
+        )
+        accounting_state_write_patterns = []
+        for state_name in RESOURCE_ACCOUNTING_STATE_FIELDS:
+            escaped_state_name = re.escape(state_name)
+            accounting_state_write_patterns.extend(
+                [
+                    re.compile(
+                        rf"\.\s*{escaped_state_name}\b\s*"
+                        rf"[+\-*/%]?=(?!=)"
+                    ),
+                    re.compile(
+                        rf"\.\s*{escaped_state_name}\b\s*\[[^\]]+\]\s*"
+                        rf"[+\-*/%]?=(?!=)"
+                    ),
+                    re.compile(
+                        rf"\.\s*{escaped_state_name}\b\s*\.\s*"
+                        rf"(?:assign|clear|erase|merge|set)\s*\("
+                    ),
+                    re.compile(
+                        rf"\.\s*set\s*\(\s*[\"']{escaped_state_name}"
+                        rf"[\"']\s*,"
+                    ),
+                ]
+            )
+
+        for path in scripts:
+            text = path.read_text(encoding="utf-8")
+            relative = str(path.relative_to(ROOT))
+
+            if path != resource_accounting_state_path:
+                for state_name in RESOURCE_ACCOUNTING_STATE_FIELDS:
+                    if re.search(
+                        rf"^(?:static\s+)?var\s+{re.escape(state_name)}\b",
+                        text,
+                        re.MULTILINE,
+                    ):
+                        errors.append(
+                            f"{relative}: accounting storage {state_name} must "
+                            "live only in CityResourceAccountingState"
+                        )
+
+            if (
+                not path.name.endswith("Test.gd")
+                and path != resource_accounting_system_path
+                and any(
+                    pattern.search(text)
+                    for pattern in accounting_state_write_patterns
+                )
+            ):
+                errors.append(
+                    f"{relative}: CityResourceAccountingState writes must use "
+                    "CityResourceAccountingSystem"
+                )
+
+            stored_resource_write_count = len(
+                stored_resources_write_pattern.findall(text)
+            )
+            if (
+                path == city_object_system_path
+                and (
+                    stored_resource_write_count != 1
+                    or "CityResourceContainerSystem.make_empty_city_object_storage_for_type"
+                    not in text
+                )
+            ):
+                errors.append(
+                    f"{relative}: CityObjectSystem may initialize stored_resources "
+                    "exactly once through CityResourceContainerSystem"
+                )
+            elif (
+                path != city_object_system_path
+                and path != resource_container_system_path
+                and stored_resource_write_count > 0
+            ):
+                errors.append(
+                    f"{relative}: completed-object stored_resources writes must "
+                    "use CityResourceContainerSystem"
+                )
+
+            for symbol in forbidden_resource_symbols:
+                direct_reference_pattern = (
+                    rf"\bWorldData\s*\.\s*{re.escape(symbol)}\b"
+                )
+                dynamic_reference_pattern = (
+                    rf"\bWorldData\s*\.\s*(?:get|set|call|callv)\s*\(\s*"
+                    rf"[\"']{re.escape(symbol)}[\"']"
+                )
+                callable_reference_pattern = (
+                    rf"\bCallable\s*\(\s*WorldData\s*,\s*"
+                    rf"[\"']{re.escape(symbol)}[\"']\s*\)"
+                )
+                if re.search(direct_reference_pattern, text):
+                    errors.append(
+                        f"{relative}: legacy WorldData city-resource reference "
+                        f"remains: WorldData.{symbol}"
+                    )
+                if (
+                    re.search(dynamic_reference_pattern, text)
+                    or re.search(callable_reference_pattern, text)
+                ):
+                    errors.append(
+                        f"{relative}: dynamic legacy WorldData city-resource "
+                        f"reference remains: {symbol}"
+                    )
+
+            if path not in allowed_accounting_state_resolvers and (
+                direct_state_resolver_pattern.search(text)
+                or dynamic_state_resolver_pattern.search(text)
+                or callable_state_resolver_pattern.search(text)
+            ):
+                errors.append(
+                    f"{relative}: accounting state must resolve through "
+                    "CityResourceAccountingSystem, not WorldPoliticalState directly"
+                )
 
         for retired_symbol in WORLD_DATA_RETIRED_RESOURCE_LEDGER_SYMBOLS:
             declaration_patterns = (

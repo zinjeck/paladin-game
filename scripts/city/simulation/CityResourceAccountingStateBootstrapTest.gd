@@ -59,14 +59,13 @@ func _test_founding_adopts_pre_context_state() -> void:
 		WorldData.RESOURCE_FISH: 12,
 		WorldData.RESOURCE_LUMBER: 4,
 	}
-	WorldData.city_owned_resource_amount_cache = bootstrap_cache
-	WorldData.city_owned_resource_amount_cache_container_version = 7
-	WorldData.city_container_version = 7
-	WorldData.city_public_storage_version = 5
-
 	var bootstrap_state := (
-		WorldPoliticalState.get_current_city_resource_accounting_state()
+		CityResourceAccountingSystem.get_current_state()
 	)
+	bootstrap_state.owned_resource_amount_cache = bootstrap_cache
+	bootstrap_state.owned_resource_amount_cache_container_version = 7
+	bootstrap_state.container_version = 7
+	bootstrap_state.public_storage_version = 5
 	_expect(
 		bootstrap_state is CityResourceAccountingState
 		and is_same(
@@ -74,7 +73,7 @@ func _test_founding_adopts_pre_context_state() -> void:
 			bootstrap_cache
 		)
 		and is_same(
-			WorldData.city_owned_resource_amount_cache,
+			CityResourceAccountingSystem.get_current_state().owned_resource_amount_cache,
 			bootstrap_cache
 		),
 		"Pre-context accounting values must live in one exact unbound state."
@@ -105,23 +104,23 @@ func _test_founding_adopts_pre_context_state() -> void:
 			bootstrap_state
 		)
 		and is_same(
-			WorldPoliticalState.get_current_city_resource_accounting_state(),
+			CityResourceAccountingSystem.get_current_state(),
 			bootstrap_state
 		)
-		and WorldData.city_owned_resource_amount_cache_container_version == 7
-		and WorldData.city_container_version == 7
-		and WorldData.city_public_storage_version == 5,
-		"Context and compatibility access must resolve the adopted accounting state."
+		and CityResourceAccountingSystem.get_current_state().owned_resource_amount_cache_container_version == 7
+		and CityResourceAccountingSystem.get_city_container_version() == 7
+		and CityResourceAccountingSystem.get_city_public_storage_version() == 5,
+		"Context and system access must resolve the adopted accounting state."
 	)
 
 	_expect(
 		WorldPoliticalState.synchronize_foundation_with_world_data()
 		and is_same(
-			WorldPoliticalState.get_current_city_resource_accounting_state(),
+			CityResourceAccountingSystem.get_current_state(),
 			bootstrap_state
 		)
 		and is_same(
-			WorldData.city_owned_resource_amount_cache,
+			CityResourceAccountingSystem.get_current_state().owned_resource_amount_cache,
 			bootstrap_cache
 		),
 		"Repeated founding synchronization must not replace accounting state."
@@ -160,13 +159,13 @@ func _test_legacy_backend_conversion_adopts_state() -> void:
 		return
 
 	var legacy_cache: Dictionary = {WorldData.RESOURCE_STONE: 23}
-	WorldData.city_owned_resource_amount_cache = legacy_cache
-	WorldData.city_owned_resource_amount_cache_container_version = 9
-	WorldData.city_container_version = 9
-	WorldData.city_public_storage_version = 6
 	var legacy_state := (
-		WorldPoliticalState.get_current_city_resource_accounting_state()
+		CityResourceAccountingSystem.get_current_state()
 	)
+	legacy_state.owned_resource_amount_cache = legacy_cache
+	legacy_state.owned_resource_amount_cache_container_version = 9
+	legacy_state.container_version = 9
+	legacy_state.public_storage_version = 6
 
 	var city_id := int(legacy_city["id"])
 	_expect(
@@ -187,9 +186,9 @@ func _test_legacy_backend_conversion_adopts_state() -> void:
 			converted_state.resource_accounting_state.owned_resource_amount_cache,
 			legacy_cache
 		)
-		and WorldData.city_owned_resource_amount_cache_container_version == 9
-		and WorldData.city_container_version == 9
-		and WorldData.city_public_storage_version == 6,
+		and CityResourceAccountingSystem.get_current_state().owned_resource_amount_cache_container_version == 9
+		and CityResourceAccountingSystem.get_city_container_version() == 9
+		and CityResourceAccountingSystem.get_city_public_storage_version() == 6,
 		"Legacy conversion must preserve all four accounting-state values."
 	)
 
@@ -212,7 +211,7 @@ func _test_legacy_backend_conversion_adopts_state() -> void:
 		"Fixture must activate a second legacy-backed City."
 	)
 	var rotated_fallback := (
-		WorldPoliticalState.get_current_city_resource_accounting_state()
+		CityResourceAccountingSystem.get_current_state()
 	)
 	_expect(
 		not is_same(rotated_fallback, legacy_state)
@@ -225,11 +224,11 @@ func _test_legacy_backend_conversion_adopts_state() -> void:
 	_expect(
 		WorldPoliticalState.set_active_settlement(city_id)
 		and is_same(
-			WorldPoliticalState.get_current_city_resource_accounting_state(),
+			CityResourceAccountingSystem.get_current_state(),
 			legacy_state
 		)
 		and is_same(
-			WorldData.city_owned_resource_amount_cache,
+			CityResourceAccountingSystem.get_current_state().owned_resource_amount_cache,
 			legacy_cache
 		),
 		"The converted City must retain its accounting owner after fallback use."
@@ -237,7 +236,7 @@ func _test_legacy_backend_conversion_adopts_state() -> void:
 
 	WorldData.reset_runtime_session_state()
 	var reset_state := (
-		WorldPoliticalState.get_current_city_resource_accounting_state()
+		CityResourceAccountingSystem.get_current_state()
 	)
 	_expect(
 		WorldPoliticalState.settlement_city_state_by_id.is_empty()

@@ -1217,7 +1217,7 @@ static func get_city_haul_endpoint_resource_amount(
 
 	match endpoint_kind:
 		WorldData.CITY_CITIZEN_HAUL_ENDPOINT_KIND_CITY_OBJECT_CONTAINER:
-			return WorldData.get_city_object_stored_resource_amount(
+			return CityResourceContainerSystem.get_city_object_stored_resource_amount(
 				CityObjectSystem.get_city_object_by_id(endpoint_id),
 				resource
 			)
@@ -1319,7 +1319,7 @@ static func get_city_haul_endpoint_unreserved_destination_space(
 		return 0
 
 	return maxi(
-		WorldData.get_city_object_storage_free_space(city_object)
+		CityResourceContainerSystem.get_city_object_storage_free_space(city_object)
 		- get_city_haul_endpoint_destination_reserved_amount(
 			endpoint,
 			excluding_reservation_id
@@ -1384,7 +1384,7 @@ static func city_haul_endpoint_can_provide_resource(
 
 	match endpoint_kind:
 		WorldData.CITY_CITIZEN_HAUL_ENDPOINT_KIND_CITY_OBJECT_CONTAINER:
-			if not WorldData.city_object_can_provide_haul_resource(
+			if not CityResourceContainerSystem.city_object_can_provide_haul_resource(
 				CityObjectSystem.get_city_object_by_id(endpoint_id),
 				resource,
 				withdrawal_purpose
@@ -1504,7 +1504,7 @@ static func city_haul_endpoint_can_accept_resource(
 		endpoint_id
 	)
 
-	if not WorldData.city_object_can_accept_haul_resource(
+	if not CityResourceContainerSystem.city_object_can_accept_haul_resource(
 		city_object,
 		resource,
 		deposit_purpose,

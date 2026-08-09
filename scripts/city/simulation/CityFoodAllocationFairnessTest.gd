@@ -59,7 +59,7 @@ func _test_current_source_allocates_one_immediate_meal() -> void:
 		"The one-meal fixture citizen must own the pantry they are standing in."
 	)
 	_expect(
-		WorldData.add_resource_to_city_object_storage(
+		CityResourceContainerSystem.add_resource_to_city_object_storage(
 			house_id,
 			WorldData.RESOURCE_FISH,
 			2
@@ -94,7 +94,7 @@ func _test_current_source_allocates_one_immediate_meal() -> void:
 		"Immediate eating must not leave a second scarce fish pocketed as a personal reserve."
 	)
 	_expect(
-		WorldData.get_city_object_stored_resource_amount(
+		CityResourceContainerSystem.get_city_object_stored_resource_amount(
 			CityObjectSystem.get_city_object_by_id(house_id),
 			WorldData.RESOURCE_FISH
 		) == 1,
@@ -143,7 +143,7 @@ func _test_hungry_citizens_reserve_before_household_stocking() -> void:
 		"The provisioner must be assigned to the household pantry."
 	)
 	_expect(
-		WorldData.add_resource_to_city_object_storage(
+		CityResourceContainerSystem.add_resource_to_city_object_storage(
 			stockpile_id,
 			WorldData.RESOURCE_FISH,
 			5

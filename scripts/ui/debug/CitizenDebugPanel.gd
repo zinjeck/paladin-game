@@ -531,7 +531,7 @@ static func get_inventory_used(citizen: Dictionary) -> int:
 	if not inventory is Dictionary:
 		return 0
 
-	return WorldData.get_resource_container_total_amount(
+	return CityResourceContainerSystem.get_resource_container_total_amount(
 		inventory
 	)
 

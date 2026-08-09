@@ -67,8 +67,10 @@ static func get_citizen_food_need_nutrition(citizen_id: int) -> int:
 	if citizen.is_empty() or not bool(citizen.get("alive", false)):
 		return 0
 
-	var personal_food_nutrition := WorldData.get_food_nutrition_in_resource_container(
-		WorldData.get_city_citizen_inventory(citizen_id)
+	var personal_food_nutrition := (
+		CityResourceContainerSystem.get_food_nutrition_in_resource_container(
+			WorldData.get_city_citizen_inventory(citizen_id)
+		)
 	)
 	return maxi(
 		WorldData.CITIZEN_EAT_TARGET_HUNGER
@@ -228,7 +230,7 @@ static func _get_legal_food_source_endpoints_at_citizen(
 	# however, every legal survival source participates in the same endpoint
 	# policy, including workplace output and ordinary food piles.
 	for storage_tier in (
-		WorldData.get_public_city_storage_tiers()
+		CityResourceContainerSystem.get_public_city_storage_tiers()
 		+ [WorldData.PUBLIC_CITY_STORAGE_TIER_NONE]
 	):
 		for raw_city_object in CityObjectSystem.get_city_objects():
@@ -240,15 +242,15 @@ static func _get_legal_food_source_endpoints_at_citizen(
 			if (
 				(
 					storage_tier != WorldData.PUBLIC_CITY_STORAGE_TIER_NONE
-					and WorldData.get_city_object_public_storage_tier(city_object)
+					and CityResourceContainerSystem.get_city_object_public_storage_tier(city_object)
 					!= storage_tier
 				)
 				or (
 					storage_tier == WorldData.PUBLIC_CITY_STORAGE_TIER_NONE
-					and WorldData.get_city_object_container_type(city_object)
+					and CityResourceContainerSystem.get_city_object_container_type(city_object)
 					!= WorldData.CONTAINER_TYPE_WORKPLACE_STORAGE
 				)
-				or not WorldData.city_object_allows_direct_resource_withdrawal(
+				or not CityResourceContainerSystem.city_object_allows_direct_resource_withdrawal(
 					city_object,
 					WorldData.CONTAINER_DIRECT_WITHDRAWAL_PURPOSE_PERSONAL_FOOD
 				)

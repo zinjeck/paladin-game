@@ -292,7 +292,7 @@ static func get_object_text(city_object: Dictionary) -> String:
 	if city_object.has("id"):
 		object_id_text = str(city_object["id"])
 
-	var container_type := WorldData.get_city_object_container_type(
+	var container_type := CityResourceContainerSystem.get_city_object_container_type(
 		city_object
 	)
 
@@ -385,7 +385,7 @@ static func get_resource_conservation_text() -> String:
 		resource_descriptions.append(
 			resource
 			+ " "
-			+ str(WorldData.get_total_owned_city_resource_amount(resource))
+			+ str(CityResourceAccountingSystem.get_total_owned_city_resource_amount(resource))
 			+ "/"
 			+ str(
 				CityLogisticsSystem.get_total_city_ground_pile_resource_amount(
