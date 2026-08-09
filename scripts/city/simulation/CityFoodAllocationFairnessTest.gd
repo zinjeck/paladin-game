@@ -39,7 +39,7 @@ func _ready() -> void:
 
 func _test_current_source_allocates_one_immediate_meal() -> void:
 	var city_world := _reset_fixture()
-	var house := WorldData.add_city_object({
+	var house := CityObjectSystem.add_city_object({
 		"object_type": WorldData.CITY_OBJECT_HOUSE,
 		"top_left": Vector2i(8, 8),
 		"size_tiles": WorldData.get_city_object_size_for_type(
@@ -95,7 +95,7 @@ func _test_current_source_allocates_one_immediate_meal() -> void:
 	)
 	_expect(
 		WorldData.get_city_object_stored_resource_amount(
-			WorldData.get_city_object_by_id(house_id),
+			CityObjectSystem.get_city_object_by_id(house_id),
 			WorldData.RESOURCE_FISH
 		) == 1,
 		"One Needs tick must withdraw only one whole food item from any legal source."
@@ -115,7 +115,7 @@ func _test_hungry_citizens_reserve_before_household_stocking() -> void:
 	WorldData.set_city_citizen_hunger_state(hungry_b_id, 60, 0)
 	WorldData.set_city_citizen_hunger_state(provisioner_id, 100, 0)
 
-	var stockpile := WorldData.add_city_object({
+	var stockpile := CityObjectSystem.add_city_object({
 		"object_type": WorldData.CITY_OBJECT_STOCKPILE,
 		"top_left": Vector2i(10, 8),
 		"size_tiles": WorldData.get_city_object_size_for_type(
@@ -125,7 +125,7 @@ func _test_hungry_citizens_reserve_before_household_stocking() -> void:
 		"city_world": city_world,
 	})
 	var stockpile_id := int(stockpile.get("id", -1))
-	var house := WorldData.add_city_object({
+	var house := CityObjectSystem.add_city_object({
 		"object_type": WorldData.CITY_OBJECT_HOUSE,
 		"top_left": Vector2i(22, 8),
 		"size_tiles": WorldData.get_city_object_size_for_type(

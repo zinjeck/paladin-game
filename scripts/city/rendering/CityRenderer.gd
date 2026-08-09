@@ -183,6 +183,7 @@ var selected_city_construction_site_id: int:
 		return -1
 
 var observed_city_object_version: int = -1
+var observed_city_object_state: CityObjectState
 var observed_city_container_version: int = -1
 var observed_city_public_storage_version: int = -1
 var observed_city_citizen_version: int = -1
@@ -577,8 +578,18 @@ func _collect_city_world_change_flags(
 func _collect_world_data_change_flags(
 	change_flags: Dictionary
 ) -> void:
-	if observed_city_object_version != WorldData.city_object_version:
-		observed_city_object_version = WorldData.city_object_version
+	var current_object_state := CityObjectSystem.get_current_state()
+	var object_state_changed := (
+		observed_city_object_state == null
+		or not is_same(observed_city_object_state, current_object_state)
+	)
+
+	if (
+		object_state_changed
+		or observed_city_object_version != current_object_state.object_version
+	):
+		observed_city_object_state = current_object_state
+		observed_city_object_version = current_object_state.object_version
 		change_flags["city_objects_changed"] = true
 
 	if observed_city_container_version != WorldData.city_container_version:
@@ -3700,7 +3711,7 @@ func _append_selected_object_metadata(values: Dictionary) -> void:
 	)
 
 	if top_left == Vector2i(-1, -1) or size_tiles == Vector2i.ZERO:
-		var footprint_tiles := WorldData.get_city_object_footprint_tiles(
+		var footprint_tiles := CityObjectSystem.get_city_object_footprint_tiles(
 			city_object
 		)
 
@@ -4329,7 +4340,7 @@ func confirm_active_city_object_placement() -> void:
 		CityConstructionSystem.city_object_type_uses_construction(object_type)
 	)
 
-	var can_place := WorldData.can_place_city_object(
+	var can_place := CityObjectSystem.can_place_city_object(
 		city_world,
 		top_left,
 		size_tiles,
@@ -4359,7 +4370,7 @@ func confirm_active_city_object_placement() -> void:
 			"city_world": city_world,
 		})
 	else:
-		placement_result = WorldData.add_city_object({
+		placement_result = CityObjectSystem.register_completed_city_object({
 			"object_type": object_type,
 			"top_left": top_left,
 			"size_tiles": size_tiles,
@@ -4596,7 +4607,7 @@ func select_city_entity_under_mouse() -> void:
 		return
 
 	var city_object := (
-		WorldData.get_city_object_at_tile(
+		CityObjectSystem.get_city_object_at_tile(
 			tile_position
 		)
 	)
@@ -4619,7 +4630,7 @@ func select_city_object_in_drag_rect() -> void:
 	var best_object_id := -1
 	var best_area := -1.0
 
-	for city_object in WorldData.city_objects:
+	for city_object in CityObjectSystem.get_city_objects():
 		if not is_city_object_selectable(city_object):
 			continue
 
@@ -4725,7 +4736,7 @@ func set_selected_city_entity(
 
 	if selection_kind == CITY_SELECTION_KIND_OBJECT:
 		var city_object := (
-			WorldData.get_city_object_by_id(
+			CityObjectSystem.get_city_object_by_id(
 				entity_id
 			)
 		)
@@ -4888,7 +4899,7 @@ func get_city_object_by_id(object_id) -> Dictionary:
 	if safe_object_id < 0:
 		return {}
 
-	return WorldData.get_city_object_by_id(safe_object_id)
+	return CityObjectSystem.get_city_object_by_id(safe_object_id)
 
 func get_city_object_display_name(city_object: Dictionary) -> String:
 	if city_object.is_empty():
@@ -4918,7 +4929,7 @@ func get_city_object_world_rect(city_object: Dictionary) -> Rect2:
 		)
 
 	return get_city_tile_collection_world_rect(
-		WorldData.get_city_object_footprint_tiles(city_object)
+		CityObjectSystem.get_city_object_footprint_tiles(city_object)
 	)
 
 
@@ -5018,7 +5029,7 @@ func rebuild_road_preview_rectangle(start_tile: Vector2i, end_tile: Vector2i) ->
 			if road_preview_lookup.has(tile_position):
 				continue
 
-			if not WorldData.can_place_city_road_tile(city_world, tile_position):
+			if not CityConstructionSystem.can_place_city_road_tile(city_world, tile_position):
 				continue
 
 			road_preview_lookup[tile_position] = true
@@ -6343,7 +6354,7 @@ func draw_city_object_debug_names(
 
 	var world_units_per_screen_pixel := 1.0 / pixels_per_world_unit
 
-	for city_object in WorldData.city_objects:
+	for city_object in CityObjectSystem.get_city_objects():
 		if city_object.is_empty():
 			continue
 
@@ -6589,7 +6600,7 @@ func draw_city_object_visual(
 
 
 func draw_city_objects(draw_target: CanvasItem) -> void:
-	for city_object in WorldData.city_objects:
+	for city_object in CityObjectSystem.get_city_objects():
 		if city_object.is_empty():
 			continue
 
@@ -6780,7 +6791,7 @@ func refresh_selected_workplace_zone_cache() -> void:
 	if selected_city_object_id < 0:
 		return
 
-	var city_object := WorldData.get_city_object_by_id(
+	var city_object := CityObjectSystem.get_city_object_by_id(
 		selected_city_object_id
 	)
 
@@ -6833,7 +6844,7 @@ func draw_active_city_object_placement_preview(
 	var size_tiles: Vector2i = preview_object["size"]
 	var object_type := str(preview_object.get("type", ""))
 
-	var can_place := WorldData.can_place_city_object(
+	var can_place := CityObjectSystem.can_place_city_object(
 		city_world,
 		top_left,
 		size_tiles,
@@ -7021,7 +7032,7 @@ func draw_city_roads(draw_target: CanvasItem) -> void:
 		Color(0.56, 0.25, 0.10, 0.96)
 	)
 
-	for city_object in WorldData.city_objects:
+	for city_object in CityObjectSystem.get_city_objects():
 		var object_type: String = str(city_object["type"])
 
 		if object_type != WorldData.CITY_OBJECT_ROAD:
@@ -7127,7 +7138,7 @@ func get_city_hover_highlight_tiles(
 		if not construction_tiles.is_empty():
 			return construction_tiles
 
-	var city_object := WorldData.get_city_object_at_tile(
+	var city_object := CityObjectSystem.get_city_object_at_tile(
 		tile_position
 	)
 
@@ -7136,7 +7147,7 @@ func get_city_hover_highlight_tiles(
 		return fallback_tiles
 
 	var object_tiles := normalize_city_hover_footprint_tiles(
-		WorldData.get_city_object_footprint_tiles(city_object)
+		CityObjectSystem.get_city_object_footprint_tiles(city_object)
 	)
 
 	if object_tiles.is_empty():
@@ -7233,13 +7244,13 @@ func ensure_city_foundation_object_exists() -> void:
 	if not WorldData.has_player_city_foundation():
 		return
 
-	if WorldData.has_city_object_type(WorldData.CITY_OBJECT_CITY_CENTER):
+	if CityObjectSystem.has_city_object_type(WorldData.CITY_OBJECT_CITY_CENTER):
 		return
 
 	var top_left: Vector2i = WorldData.player_city_foundation_top_left
 	var size_tiles: Vector2i = WorldData.player_city_foundation_size
 
-	if not WorldData.can_place_city_object(
+	if not CityObjectSystem.can_place_city_object(
 		city_world,
 		top_left,
 		size_tiles,
@@ -7248,7 +7259,7 @@ func ensure_city_foundation_object_exists() -> void:
 		print("Could not recover city foundation object.")
 		return
 
-	var foundation_object := WorldData.add_city_object({
+	var foundation_object := CityObjectSystem.register_completed_city_object({
 		"object_type": WorldData.CITY_OBJECT_CITY_CENTER,
 		"top_left": top_left,
 		"size_tiles": size_tiles,
@@ -7436,7 +7447,7 @@ func request_debug_navigation_path() -> void:
 		return
 
 	var target_object := (
-		WorldData.get_city_object_at_tile(
+		CityObjectSystem.get_city_object_at_tile(
 			target_tile
 		)
 	)

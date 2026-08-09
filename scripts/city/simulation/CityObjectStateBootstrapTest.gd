@@ -65,28 +65,28 @@ func _test_founding_adopts_pre_context_state() -> void:
 	}]
 	var object_index_by_id: Dictionary = {17: 0}
 	var occupied_tiles: Dictionary = {tile: 17}
-	WorldData.city_objects = objects
-	WorldData.city_object_index_by_id = object_index_by_id
-	WorldData.city_occupied_tiles = occupied_tiles
-	WorldData.next_city_object_id = 18
-	WorldData.city_object_version = 5
+	CityObjectSystem.get_current_state().objects = objects
+	CityObjectSystem.get_current_state().object_index_by_id = object_index_by_id
+	CityObjectSystem.get_current_state().occupied_tiles = occupied_tiles
+	CityObjectSystem.get_current_state().next_object_id = 18
+	CityObjectSystem.get_current_state().object_version = 5
 
-	var bootstrap_state = WorldPoliticalState.get_current_city_object_state()
+	var bootstrap_state := CityObjectSystem.get_current_state()
 	_expect(
 		bootstrap_state is CityObjectState,
 		"Pre-context objects must live in the unbound CityObjectState."
 	)
 	_expect(
-		is_same(WorldData.city_objects, bootstrap_state.objects)
+		is_same(CityObjectSystem.get_current_state().objects, bootstrap_state.objects)
 		and is_same(
-			WorldData.city_object_index_by_id,
+			CityObjectSystem.get_current_state().object_index_by_id,
 			bootstrap_state.object_index_by_id
 		)
 		and is_same(
-			WorldData.city_occupied_tiles,
+			CityObjectSystem.get_current_state().occupied_tiles,
 			bootstrap_state.occupied_tiles
 		),
-		"WorldData compatibility collections must preserve exact identity."
+		"CityObjectSystem collections must preserve exact state identity."
 	)
 
 	_expect(
@@ -104,22 +104,22 @@ func _test_founding_adopts_pre_context_state() -> void:
 		context != null
 		and is_same(context.get_city_object_state(), bootstrap_state)
 		and is_same(
-			WorldPoliticalState.get_current_city_object_state(),
+			CityObjectSystem.get_current_state(),
 			bootstrap_state
 		)
-		and is_same(WorldData.city_objects, bootstrap_state.objects)
-		and WorldData.next_city_object_id == 18
-		and WorldData.city_object_version == 5,
-		"Context and compatibility access must resolve the adopted state."
+		and is_same(CityObjectSystem.get_current_state().objects, bootstrap_state.objects)
+		and CityObjectSystem.get_current_state().next_object_id == 18
+		and CityObjectSystem.get_current_state().object_version == 5,
+		"Context and CityObjectSystem access must resolve the adopted state."
 	)
 
 	_expect(
 		WorldPoliticalState.synchronize_foundation_with_world_data()
 		and is_same(
-			WorldPoliticalState.get_current_city_object_state(),
+			CityObjectSystem.get_current_state(),
 			bootstrap_state
 		)
-		and WorldData.city_objects.size() == 1,
+		and CityObjectSystem.get_current_state().objects.size() == 1,
 		"Repeated founding synchronization must not replace or duplicate object state."
 	)
 
@@ -154,20 +154,20 @@ func _test_legacy_backend_conversion_adopts_state() -> void:
 		return
 
 	var tile := Vector2i(4, 4)
-	WorldData.city_objects = [{
+	CityObjectSystem.get_current_state().objects = [{
 		"id": 29,
 		"type": WorldData.CITY_OBJECT_ROAD,
 		"tiles": [tile],
 		"owner": "legacy",
 	}]
-	WorldData.city_object_index_by_id = {29: 0}
-	WorldData.city_occupied_tiles = {tile: 29}
-	WorldData.next_city_object_id = 30
-	WorldData.city_object_version = 8
-	var legacy_object_state = WorldPoliticalState.get_current_city_object_state()
-	var legacy_objects: Array = WorldData.city_objects
-	var legacy_index: Dictionary = WorldData.city_object_index_by_id
-	var legacy_occupancy: Dictionary = WorldData.city_occupied_tiles
+	CityObjectSystem.get_current_state().object_index_by_id = {29: 0}
+	CityObjectSystem.get_current_state().occupied_tiles = {tile: 29}
+	CityObjectSystem.get_current_state().next_object_id = 30
+	CityObjectSystem.get_current_state().object_version = 8
+	var legacy_object_state := CityObjectSystem.get_current_state()
+	var legacy_objects: Array = CityObjectSystem.get_current_state().objects
+	var legacy_index: Dictionary = CityObjectSystem.get_current_state().object_index_by_id
+	var legacy_occupancy: Dictionary = CityObjectSystem.get_current_state().occupied_tiles
 
 	var city_id := int(legacy_city["id"])
 	_expect(
@@ -184,11 +184,11 @@ func _test_legacy_backend_conversion_adopts_state() -> void:
 		"Legacy conversion must adopt the exact unbound object state."
 	)
 	_expect(
-		is_same(WorldData.city_objects, legacy_objects)
-		and is_same(WorldData.city_object_index_by_id, legacy_index)
-		and is_same(WorldData.city_occupied_tiles, legacy_occupancy)
-		and WorldData.next_city_object_id == 30
-		and WorldData.city_object_version == 8,
+		is_same(CityObjectSystem.get_current_state().objects, legacy_objects)
+		and is_same(CityObjectSystem.get_current_state().object_index_by_id, legacy_index)
+		and is_same(CityObjectSystem.get_current_state().occupied_tiles, legacy_occupancy)
+		and CityObjectSystem.get_current_state().next_object_id == 30
+		and CityObjectSystem.get_current_state().object_version == 8,
 		"Legacy conversion must preserve all five object-state values."
 	)
 	var fallback_city := WorldPoliticalState.create_settlement({
@@ -209,7 +209,7 @@ func _test_legacy_backend_conversion_adopts_state() -> void:
 		),
 		"Fixture must activate a second legacy-backed City."
 	)
-	var rotated_fallback = WorldPoliticalState.get_current_city_object_state()
+	var rotated_fallback := CityObjectSystem.get_current_state()
 	_expect(
 		not is_same(rotated_fallback, legacy_object_state)
 		and rotated_fallback.objects.is_empty()
@@ -222,15 +222,15 @@ func _test_legacy_backend_conversion_adopts_state() -> void:
 	_expect(
 		WorldPoliticalState.set_active_settlement(city_id)
 		and is_same(
-			WorldPoliticalState.get_current_city_object_state(),
+			CityObjectSystem.get_current_state(),
 			legacy_object_state
 		)
-		and WorldData.city_objects.size() == 1,
+		and CityObjectSystem.get_current_state().objects.size() == 1,
 		"The converted City must retain its adopted state after fallback use."
 	)
 
 	WorldData.reset_runtime_session_state()
-	var reset_state = WorldPoliticalState.get_current_city_object_state()
+	var reset_state := CityObjectSystem.get_current_state()
 	_expect(
 		WorldPoliticalState.settlement_city_state_by_id.is_empty()
 		and not is_same(reset_state, legacy_object_state)

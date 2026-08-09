@@ -983,7 +983,7 @@ static func _make_work_task_advance_context(
 		0
 	)
 	var workplace_id := int(current_task.get("target_object_id", -1))
-	var workplace := WorldData.get_city_object_by_id(workplace_id)
+	var workplace := CityObjectSystem.get_city_object_by_id(workplace_id)
 
 	if (
 		workplace_id <= 0
@@ -1508,14 +1508,14 @@ static func _make_return_home_task_context(
 		0
 	)
 	var home_id := int(current_task.get("target_object_id", -1))
-	var home := WorldData.get_city_object_by_id(home_id)
+	var home := CityObjectSystem.get_city_object_by_id(home_id)
 	var resident_ids := WorldData.get_city_object_resident_ids(home)
 
 	if (
 		home_id <= 0
 		or home.is_empty()
 		or WorldData.get_city_object_resident_capacity(home) <= 0
-		or not WorldData.city_object_supports_citizen_interior(home)
+		or not CityObjectSystem.city_object_supports_citizen_interior(home)
 		or int(citizen.get("home_object_id", -1)) != home_id
 		or not resident_ids.has(citizen_id)
 		or not WorldData.city_citizen_can_access_object_interior(

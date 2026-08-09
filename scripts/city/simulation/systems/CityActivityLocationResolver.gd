@@ -113,7 +113,7 @@ static func get_object_interior_activity_tiles(
 	):
 		return activity_tiles
 
-	for raw_tile in WorldData.get_city_object_footprint_tiles(
+	for raw_tile in CityObjectSystem.get_city_object_footprint_tiles(
 		city_object
 	):
 		if not raw_tile is Vector2i:

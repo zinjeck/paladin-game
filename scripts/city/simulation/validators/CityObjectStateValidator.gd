@@ -15,7 +15,7 @@ static func _validate_city_foundation_state(
 		)
 
 		var city_object: Dictionary = (
-			WorldData.city_objects[object_index]
+			CityObjectSystem.get_city_objects()[object_index]
 		)
 
 		if (
@@ -55,6 +55,7 @@ static func _validate_city_occupancy(
 	object_lookup: Dictionary
 ) -> void:
 	var expected_occupancy: Dictionary = {}
+	var occupied_tiles := CityObjectSystem.get_city_occupied_tiles_snapshot()
 
 	for object_id in object_lookup.keys():
 		var object_index := int(
@@ -62,11 +63,11 @@ static func _validate_city_occupancy(
 		)
 
 		var city_object: Dictionary = (
-			WorldData.city_objects[object_index]
+			CityObjectSystem.get_city_objects()[object_index]
 		)
 
 		var footprint_tiles := (
-			WorldData.get_city_object_footprint_tiles(
+			CityObjectSystem.get_city_object_footprint_tiles(
 				city_object
 			)
 		)
@@ -107,9 +108,7 @@ static func _validate_city_occupancy(
 			else:
 				expected_occupancy[tile_position] = object_id
 
-			if not WorldData.city_occupied_tiles.has(
-				tile_position
-			):
+			if not occupied_tiles.has(tile_position):
 				errors.append(
 					"Object "
 						+ str(object_id)
@@ -121,9 +120,7 @@ static func _validate_city_occupancy(
 				continue
 
 			var occupied_object_id := int(
-				WorldData.city_occupied_tiles[
-					tile_position
-				]
+				occupied_tiles[tile_position]
 			)
 
 			if occupied_object_id != int(object_id):
@@ -137,9 +134,7 @@ static func _validate_city_occupancy(
 						+ "."
 				)
 
-	for raw_tile_position in (
-		WorldData.city_occupied_tiles.keys()
-	):
+	for raw_tile_position in occupied_tiles.keys():
 		if not raw_tile_position is Vector2i:
 			errors.append(
 				"city_occupied_tiles contains a non-Vector2i key."
@@ -148,9 +143,7 @@ static func _validate_city_occupancy(
 			continue
 
 		var tile_position: Vector2i = raw_tile_position
-		var object_id := int(
-			WorldData.city_occupied_tiles[tile_position]
-		)
+		var object_id := int(occupied_tiles[tile_position])
 
 		if not object_lookup.has(object_id):
 			errors.append(
@@ -181,7 +174,7 @@ static func _validate_city_containers(
 		)
 
 		var city_object: Dictionary = (
-			WorldData.city_objects[object_index]
+			CityObjectSystem.get_city_objects()[object_index]
 		)
 
 		var allowed_resources := (
@@ -361,7 +354,7 @@ static func _validate_city_assignments(
 		)
 
 		var city_object: Dictionary = (
-			WorldData.city_objects[object_index]
+			CityObjectSystem.get_city_objects()[object_index]
 		)
 
 		var resident_capacity := (
@@ -496,7 +489,7 @@ static func _validate_city_assignments(
 				)
 
 				var home_object: Dictionary = (
-					WorldData.city_objects[home_index]
+					CityObjectSystem.get_city_objects()[home_index]
 				)
 
 				if (
@@ -559,7 +552,7 @@ static func _validate_city_assignments(
 				)
 
 				var workplace: Dictionary = (
-					WorldData.city_objects[
+					CityObjectSystem.get_city_objects()[
 						workplace_index
 					]
 				)
@@ -1120,7 +1113,7 @@ static func _validate_city_workplace_production(
 	var citizen_lookup: Dictionary = values.get("citizen_lookup", {})
 	for object_id in object_lookup.keys():
 		var object_index := int(object_lookup[object_id])
-		var city_object: Dictionary = WorldData.city_objects[object_index]
+		var city_object: Dictionary = CityObjectSystem.get_city_objects()[object_index]
 
 		if not WorldData.city_object_is_workplace(city_object):
 			continue

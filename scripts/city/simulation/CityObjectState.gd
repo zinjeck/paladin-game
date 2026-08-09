@@ -4,8 +4,8 @@ class_name CityObjectState
 # Settlement-owned mutable completed-object registry state for one CITY.
 #
 # This object owns only completed-object collections, indexes, occupancy,
-# identity allocation, and the focused object change version. WorldData keeps
-# the compatibility behavior surface during this ownership-only pass.
+# identity allocation, and the focused object change version. CityObjectSystem
+# owns every mutation and query that governs those fields.
 #
 # Keep this class a small state container rather than a second simulation brain.
 

@@ -9,6 +9,7 @@ const CityObjectStateValidator := preload("res://scripts/city/simulation/validat
 const MAX_REPORTED_PROBLEMS: int = 24
 
 static var _cached_result: Dictionary = {}
+static var _cached_object_state: CityObjectState
 
 
 #region Validation Entry Point and Cache
@@ -121,7 +122,9 @@ static func validate(
 		"warnings": warnings,
 		"checked_objects": object_lookup.size(),
 		"checked_citizens": citizen_lookup.size(),
-		"checked_occupied_tiles": WorldData.city_occupied_tiles.size(),
+		"checked_occupied_tiles": (
+			CityObjectSystem.get_city_occupied_tiles_snapshot().size()
+		),
 		"checked_containers": checked_container_count,
 		"checked_inventories": checked_inventory_count,
 		"checked_ground_piles": ground_pile_lookup.size(),
@@ -129,7 +132,10 @@ static func validate(
 		"checked_work_orders": checked_work_order_count,
 		"checked_construction_sites": construction_site_lookup.size(),
 		"duration_usec": validation_duration_usec,
-		"object_version": WorldData.city_object_version,
+		"object_version": CityObjectSystem.get_city_object_version(),
+		"object_state_instance_id": int(
+			CityObjectSystem.get_current_state().get_instance_id()
+		),
 		"container_version": WorldData.city_container_version,
 		"citizen_version": WorldData.city_citizen_version,
 		"citizen_spatial_version": (
@@ -153,6 +159,7 @@ static func validate(
 	}
 
 	_cached_result = result
+	_cached_object_state = CityObjectSystem.get_current_state()
 
 	if report_problems:
 		_report_validation_problems(result)
@@ -216,6 +223,14 @@ static func _validation_cache_matches_current_state() -> bool:
 	if _cached_result.is_empty():
 		return false
 	if (
+		_cached_object_state == null
+		or not is_same(
+			_cached_object_state,
+			CityObjectSystem.get_current_state()
+		)
+	):
+		return false
+	if (
 		int(
 			_cached_result.get(
 				"citizen_task_version",
@@ -227,7 +242,7 @@ static func _validation_cache_matches_current_state() -> bool:
 		return false
 	if (
 		int(_cached_result.get("object_version", -1))
-		!= WorldData.city_object_version
+		!= CityObjectSystem.get_city_object_version()
 	):
 		return false
 
@@ -335,9 +350,11 @@ static func _validate_city_object_index(
 ) -> Dictionary:
 	var object_lookup: Dictionary = {}
 	var maximum_object_id := 0
+	var city_objects := CityObjectSystem.get_city_objects()
+	var object_index_by_id := CityObjectSystem.get_city_object_index_snapshot()
 
-	for object_index in range(WorldData.city_objects.size()):
-		var raw_city_object = WorldData.city_objects[object_index]
+	for object_index in range(city_objects.size()):
+		var raw_city_object = city_objects[object_index]
 
 		if not raw_city_object is Dictionary:
 			errors.append(
@@ -407,7 +424,7 @@ static func _validate_city_object_index(
 				+ "'."
 			)
 
-		if not WorldData.city_object_index_by_id.has(
+		if not object_index_by_id.has(
 			object_id
 		):
 			errors.append(
@@ -417,7 +434,7 @@ static func _validate_city_object_index(
 			)
 		else:
 			var indexed_array_position := int(
-				WorldData.city_object_index_by_id[
+				object_index_by_id[
 					object_id
 				]
 			)
@@ -433,7 +450,7 @@ static func _validate_city_object_index(
 					+ "."
 				)
 
-	for raw_object_id in WorldData.city_object_index_by_id.keys():
+	for raw_object_id in object_index_by_id.keys():
 		if typeof(raw_object_id) != TYPE_INT:
 			errors.append(
 				"City object index contains non-integer key "
@@ -453,13 +470,13 @@ static func _validate_city_object_index(
 			)
 
 	if (
-		WorldData.city_object_index_by_id.size()
+		object_index_by_id.size()
 		!= object_lookup.size()
 	):
 		errors.append(
 			"City object index contains "
 				+ str(
-					WorldData.city_object_index_by_id.size()
+					object_index_by_id.size()
 				)
 				+ " entries, but "
 				+ str(object_lookup.size())
@@ -468,12 +485,12 @@ static func _validate_city_object_index(
 
 	if (
 		not object_lookup.is_empty()
-		and WorldData.next_city_object_id
+		and CityObjectSystem.get_next_city_object_id()
 		<= maximum_object_id
 	):
 		errors.append(
 			"next_city_object_id is "
-				+ str(WorldData.next_city_object_id)
+				+ str(CityObjectSystem.get_next_city_object_id())
 				+ ", but existing object ID "
 				+ str(maximum_object_id)
 				+ " is equal or greater."

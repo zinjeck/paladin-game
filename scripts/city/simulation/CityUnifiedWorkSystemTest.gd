@@ -79,7 +79,7 @@ func _test_roads_optimize_travel_time() -> void:
 		var road_tile := Vector2i(x, 3)
 		road_tiles.append(road_tile)
 		_expect(
-			not WorldData.add_city_road_object(
+			not CityObjectSystem.add_city_road_object(
 				[road_tile],
 				"player",
 				city_world
@@ -1025,7 +1025,7 @@ func _test_household_and_public_food_reserve_targets() -> void:
 	var city_world := _reset_fixture()
 	var first := _add_citizen("Pantry first", Vector2i(8, 8))
 	var second := _add_citizen("Pantry second", Vector2i(9, 8))
-	var house := WorldData.add_city_object({
+	var house := CityObjectSystem.add_city_object({
 		"object_type": WorldData.CITY_OBJECT_HOUSE,
 		"top_left": Vector2i(4, 4),
 		"size_tiles": WorldData.get_city_object_size_for_type(
@@ -1043,7 +1043,7 @@ func _test_household_and_public_food_reserve_targets() -> void:
 		),
 		"Both pantry-test citizens must reside in the same house."
 	)
-	house = WorldData.get_city_object_by_id(house_id)
+	house = CityObjectSystem.get_city_object_by_id(house_id)
 	_expect(
 		CityResourceMatcherScript.get_city_home_food_target_nutrition(house)
 		== 80
@@ -1059,7 +1059,7 @@ func _test_household_and_public_food_reserve_targets() -> void:
 		"Two living citizens must protect a half-day public reserve of 40 nutrition."
 	)
 
-	var stockpile := WorldData.add_city_object({
+	var stockpile := CityObjectSystem.add_city_object({
 		"object_type": WorldData.CITY_OBJECT_STOCKPILE,
 		"top_left": Vector2i(12, 6),
 		"size_tiles": WorldData.get_city_object_size_for_type(
@@ -1147,7 +1147,7 @@ func _test_survival_food_fallback_and_reservation_accounting() -> void:
 	var fishery_size := WorldData.get_city_object_size_for_type(
 		WorldData.CITY_OBJECT_FISHING_GROUNDS
 	)
-	var fishery := WorldData.add_city_object({
+	var fishery := CityObjectSystem.add_city_object({
 		"object_type": WorldData.CITY_OBJECT_FISHING_GROUNDS,
 		"top_left": Vector2i(10, 9),
 		"size_tiles": fishery_size,
@@ -1261,7 +1261,7 @@ func _test_unreachable_food_tier_does_not_hide_fallbacks() -> void:
 	]
 
 	for top_left in stockpile_positions:
-		var stockpile := WorldData.add_city_object({
+		var stockpile := CityObjectSystem.add_city_object({
 			"object_type": WorldData.CITY_OBJECT_STOCKPILE,
 			"top_left": top_left,
 			"size_tiles": stockpile_size,
@@ -1280,7 +1280,7 @@ func _test_unreachable_food_tier_does_not_hide_fallbacks() -> void:
 	var fishery_size := WorldData.get_city_object_size_for_type(
 		WorldData.CITY_OBJECT_FISHING_GROUNDS
 	)
-	var fishery := WorldData.add_city_object({
+	var fishery := CityObjectSystem.add_city_object({
 		"object_type": WorldData.CITY_OBJECT_FISHING_GROUNDS,
 		"top_left": Vector2i(23, 8),
 		"size_tiles": fishery_size,
@@ -1408,28 +1408,28 @@ func _test_unified_food_search_avoids_budget_starvation() -> void:
 	var second := _add_hungry_citizen("Second scan", Vector2i(28, 15))
 	var first_id := int(first.get("id", -1))
 	var second_id := int(second.get("id", -1))
-	var house := WorldData.add_city_object({
+	var house := CityObjectSystem.add_city_object({
 		"object_type": WorldData.CITY_OBJECT_HOUSE,
 		"top_left": Vector2i(7, 2),
 		"size_tiles": WorldData.get_city_object_size_for_type(WorldData.CITY_OBJECT_HOUSE),
 		"object_owner": "player",
 		"city_world": city_world,
 	})
-	var stockpile := WorldData.add_city_object({
+	var stockpile := CityObjectSystem.add_city_object({
 		"object_type": WorldData.CITY_OBJECT_STOCKPILE,
 		"top_left": Vector2i(11, 2),
 		"size_tiles": WorldData.get_city_object_size_for_type(WorldData.CITY_OBJECT_STOCKPILE),
 		"object_owner": "player",
 		"city_world": city_world,
 	})
-	var keep := WorldData.add_city_object({
+	var keep := CityObjectSystem.add_city_object({
 		"object_type": WorldData.CITY_OBJECT_CITY_CENTER,
 		"top_left": Vector2i(15, 1),
 		"size_tiles": WorldData.get_city_object_size_for_type(WorldData.CITY_OBJECT_CITY_CENTER),
 		"object_owner": "player",
 		"city_world": city_world,
 	})
-	var fishery := WorldData.add_city_object({
+	var fishery := CityObjectSystem.add_city_object({
 		"object_type": WorldData.CITY_OBJECT_FISHING_GROUNDS,
 		"top_left": Vector2i(21, 2),
 		"size_tiles": WorldData.get_city_object_size_for_type(
@@ -1545,7 +1545,7 @@ func _test_full_storage_construction_relocation_and_cancel_preview() -> void:
 	var stockpile_size := WorldData.get_city_object_size_for_type(
 		WorldData.CITY_OBJECT_STOCKPILE
 	)
-	var stockpile := WorldData.add_city_object({
+	var stockpile := CityObjectSystem.add_city_object({
 		"object_type": WorldData.CITY_OBJECT_STOCKPILE,
 		"top_left": Vector2i(2, 2),
 		"size_tiles": stockpile_size,
@@ -1825,11 +1825,11 @@ func _test_cargo_ready_demand_preempts_soft_claim() -> void:
 	)
 
 	for tile_position in (
-		WorldData.make_rectangle_city_object_footprint_tiles(
+		CityObjectSystem.make_rectangle_city_object_footprint_tiles(
 			Vector2i(2, 2),
 			keep_size
 		)
-		+ WorldData.make_rectangle_city_object_footprint_tiles(
+		+ CityObjectSystem.make_rectangle_city_object_footprint_tiles(
 			Vector2i(12, 9),
 			house_size
 		)
@@ -1840,7 +1840,7 @@ func _test_cargo_ready_demand_preempts_soft_claim() -> void:
 			tile_position.y
 		).erase("surface_feature")
 
-	var keep := WorldData.add_city_object({
+	var keep := CityObjectSystem.add_city_object({
 		"object_type": WorldData.CITY_OBJECT_CITY_CENTER,
 		"top_left": Vector2i(2, 2),
 		"size_tiles": keep_size,
@@ -2097,7 +2097,7 @@ func _test_resource_demand_priorities_are_adjustable() -> void:
 func _test_off_shift_homeless_idle_wander() -> void:
 	var city_world := _reset_fixture()
 	CitizenDecisionSystemScript.reset_runtime_state()
-	var keep := WorldData.add_city_object({
+	var keep := CityObjectSystem.add_city_object({
 		"object_type": WorldData.CITY_OBJECT_CITY_CENTER,
 		"top_left": Vector2i(2, 2),
 		"size_tiles": WorldData.get_city_object_size_for_type(
@@ -2117,7 +2117,7 @@ func _test_off_shift_homeless_idle_wander() -> void:
 	var starting_tile := Vector2i(26, 16)
 	var citizen := _add_citizen("Off Shift Wanderer", starting_tile)
 	var citizen_id := int(citizen.get("id", -1))
-	var fishery := WorldData.add_city_object({
+	var fishery := CityObjectSystem.add_city_object({
 		"object_type": WorldData.CITY_OBJECT_FISHING_GROUNDS,
 		"top_left": Vector2i(21, 14),
 		"size_tiles": WorldData.get_city_object_size_for_type(

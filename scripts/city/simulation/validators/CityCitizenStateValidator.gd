@@ -1367,7 +1367,7 @@ static func _validate_work_task_kind_state(values: Dictionary) -> void:
 		return
 
 	var target_object := (
-		WorldData.get_city_object_by_id(
+		CityObjectSystem.get_city_object_by_id(
 			target_object_id
 		)
 	)
@@ -1980,7 +1980,7 @@ static func _validate_return_home_task_kind_state(values: Dictionary) -> void:
 		)
 		return
 
-	var target_home := WorldData.get_city_object_by_id(
+	var target_home := CityObjectSystem.get_city_object_by_id(
 		target_object_id
 	)
 
@@ -1988,7 +1988,7 @@ static func _validate_return_home_task_kind_state(values: Dictionary) -> void:
 		WorldData.get_city_object_resident_capacity(
 			target_home
 		) <= 0
-		or not WorldData.city_object_supports_citizen_interior(
+		or not CityObjectSystem.city_object_supports_citizen_interior(
 			target_home
 		)
 	):

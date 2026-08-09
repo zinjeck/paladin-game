@@ -78,7 +78,7 @@ func _test_hunger_waits_for_real_food_opportunity() -> void:
 		"Normal hunger must not speculatively release work before a food source exists."
 	)
 
-	var stockpile := WorldData.add_city_object({
+	var stockpile := CityObjectSystem.add_city_object({
 		"object_type": WorldData.CITY_OBJECT_STOCKPILE,
 		"top_left": Vector2i(4, 10),
 		"size_tiles": WorldData.get_city_object_size_for_type(
@@ -128,7 +128,7 @@ func _test_starving_food_workers_keep_survival_schedule() -> void:
 		citizen_ids.append(citizen_id)
 		WorldData.set_city_citizen_hunger_state(citizen_id, 0, 0)
 
-	var fishery := WorldData.add_city_object({
+	var fishery := CityObjectSystem.add_city_object({
 		"object_type": WorldData.CITY_OBJECT_FISHING_GROUNDS,
 		"top_left": Vector2i(15, 8),
 		"size_tiles": WorldData.get_city_object_size_for_type(
@@ -141,7 +141,7 @@ func _test_starving_food_workers_keep_survival_schedule() -> void:
 	_expect(fishery_id > 0, "The starvation fixture must create a Fishery.")
 
 	CityEmploymentSystemScript.run_tick(1, 2)
-	fishery = WorldData.get_city_object_by_id(fishery_id)
+	fishery = CityObjectSystem.get_city_object_by_id(fishery_id)
 	_expect(
 		WorldData.get_city_object_worker_count(fishery) == 4,
 		"The starvation fixture must assign all four Fishery workers."
@@ -166,7 +166,7 @@ func _test_starving_food_workers_keep_survival_schedule() -> void:
 			"The starvation fixture must assign each generated Work request."
 		)
 
-	var stockpile := WorldData.add_city_object({
+	var stockpile := CityObjectSystem.add_city_object({
 		"object_type": WorldData.CITY_OBJECT_STOCKPILE,
 		"top_left": Vector2i(8, 12),
 		"size_tiles": WorldData.get_city_object_size_for_type(
@@ -208,7 +208,7 @@ func _test_starving_residents_keep_return_home_schedule() -> void:
 	var citizen_id := int(citizen.get("id", -1))
 	WorldData.set_city_citizen_hunger_state(citizen_id, 0, 0)
 
-	var house := WorldData.add_city_object({
+	var house := CityObjectSystem.add_city_object({
 		"object_type": WorldData.CITY_OBJECT_HOUSE,
 		"top_left": Vector2i(20, 12),
 		"size_tiles": WorldData.get_city_object_size_for_type(
@@ -238,7 +238,7 @@ func _test_starving_residents_keep_return_home_schedule() -> void:
 		"The return-home fixture must assign the generated Return Home request."
 	)
 
-	var stockpile := WorldData.add_city_object({
+	var stockpile := CityObjectSystem.add_city_object({
 		"object_type": WorldData.CITY_OBJECT_STOCKPILE,
 		"top_left": Vector2i(8, 12),
 		"size_tiles": WorldData.get_city_object_size_for_type(
@@ -283,7 +283,7 @@ func _test_persistent_workplace_staffing_policy() -> void:
 		"The staffing fixture must make the first unemployed candidate temporarily unavailable."
 	)
 
-	var fishery := WorldData.add_city_object({
+	var fishery := CityObjectSystem.add_city_object({
 		"object_type": WorldData.CITY_OBJECT_FISHING_GROUNDS,
 		"top_left": Vector2i(15, 8),
 		"size_tiles": WorldData.get_city_object_size_for_type(
@@ -296,7 +296,7 @@ func _test_persistent_workplace_staffing_policy() -> void:
 	_expect(fishery_id > 0, "The staffing fixture must create a Fishery.")
 
 	CityEmploymentSystemScript.run_tick(1, 2)
-	fishery = WorldData.get_city_object_by_id(fishery_id)
+	fishery = CityObjectSystem.get_city_object_by_id(fishery_id)
 
 	_expect(
 		CityEmploymentSystemScript.get_workplace_staffing_mode(fishery)
@@ -317,7 +317,7 @@ func _test_persistent_workplace_staffing_policy() -> void:
 
 	WorldData.set_city_citizen_haul_cargo_resources(blocked_citizen_id, {})
 	CityEmploymentSystemScript.run_tick(2, 2)
-	fishery = WorldData.get_city_object_by_id(fishery_id)
+	fishery = CityObjectSystem.get_city_object_by_id(fishery_id)
 	_expect(
 		WorldData.get_city_object_worker_count(fishery) == 4
 		and int(
@@ -338,7 +338,7 @@ func _test_persistent_workplace_staffing_policy() -> void:
 	)
 	var removed_worker_id := int(
 		WorldData.get_city_object_worker_ids(
-			WorldData.get_city_object_by_id(fishery_id)
+			CityObjectSystem.get_city_object_by_id(fishery_id)
 		)[0]
 	)
 	_expect(
@@ -348,7 +348,7 @@ func _test_persistent_workplace_staffing_policy() -> void:
 	CityEmploymentSystemScript.run_tick(3, 2)
 	_expect(
 		WorldData.get_city_object_worker_count(
-			WorldData.get_city_object_by_id(fishery_id)
+			CityObjectSystem.get_city_object_by_id(fishery_id)
 		) == 3,
 		"Manual staffing mode must preserve an intentional vacancy instead of automatically refilling it."
 	)
@@ -360,7 +360,7 @@ func _test_persistent_workplace_staffing_policy() -> void:
 	CityEmploymentSystemScript.run_tick(4, 2)
 	_expect(
 		WorldData.get_city_object_worker_count(
-			WorldData.get_city_object_by_id(fishery_id)
+			CityObjectSystem.get_city_object_by_id(fishery_id)
 		) == 4,
 		"Returning to automatic staffing must reconcile the open vacancy through the same assignment framework."
 	)

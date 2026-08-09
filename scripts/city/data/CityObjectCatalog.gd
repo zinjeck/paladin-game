@@ -5,8 +5,9 @@ const CityResourceCatalogScript = preload(
 	"res://scripts/city/data/CityResourceCatalog.gd"
 )
 
-# City object identity and immutable definition policy live here. WorldData
-# remains the public facade for callers and owns all mutable object state.
+# City object identity and immutable definition policy live here. Mutable
+# completed-object state lives in CityObjectState and is governed through
+# CityObjectSystem.
 const CITY_OBJECT_CITY_CENTER := "city_center"
 const CITY_OBJECT_HOUSE := "house"
 const CITY_OBJECT_STOCKPILE := "stockpile"

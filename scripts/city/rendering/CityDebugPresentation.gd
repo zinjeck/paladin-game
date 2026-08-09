@@ -182,7 +182,7 @@ static func get_panel_text(values: Dictionary) -> String:
 	if fertility >= 0.0:
 		fertility_text = "%.1f" % fertility
 
-	var city_object := WorldData.get_city_object_at_tile(
+	var city_object := CityObjectSystem.get_city_object_at_tile(
 		inspected_tile
 	)
 
@@ -238,7 +238,7 @@ static func get_panel_text(values: Dictionary) -> String:
 		+ "\n"
 		+ "Buildable 1x1: "
 		+ DebugPanel.bool_to_yes_no(
-			WorldData.can_place_city_object(
+			CityObjectSystem.can_place_city_object(
 				city_world,
 				inspected_tile,
 				Vector2i(1, 1)
@@ -247,7 +247,7 @@ static func get_panel_text(values: Dictionary) -> String:
 		+ "\n"
 		+ "Road placeable: "
 		+ DebugPanel.bool_to_yes_no(
-			WorldData.can_place_city_road_tile(
+			CityConstructionSystem.can_place_city_road_tile(
 				city_world,
 				inspected_tile
 			)
@@ -561,7 +561,7 @@ static func get_selection_text(values: Dictionary) -> String:
 	var selected_object_id := int(
 		values.get("selected_city_object_id", -1)
 	)
-	var selected_object := WorldData.get_city_object_by_id(
+	var selected_object := CityObjectSystem.get_city_object_by_id(
 		selected_object_id
 	)
 

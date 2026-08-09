@@ -639,7 +639,7 @@ static func _citizen_needs_scheduled_work_task(
 	if workplace_id <= 0:
 		return false
 
-	var workplace := WorldData.get_city_object_by_id(
+	var workplace := CityObjectSystem.get_city_object_by_id(
 		workplace_id
 	)
 
@@ -675,13 +675,13 @@ static func _citizen_needs_scheduled_return_home_task(
 	if home_id <= 0:
 		return false
 
-	var home := WorldData.get_city_object_by_id(home_id)
+	var home := CityObjectSystem.get_city_object_by_id(home_id)
 	var citizen_id := int(citizen.get("id", -1))
 
 	if (
 		home.is_empty()
 		or WorldData.get_city_object_resident_capacity(home) <= 0
-		or not WorldData.city_object_supports_citizen_interior(home)
+		or not CityObjectSystem.city_object_supports_citizen_interior(home)
 		or not WorldData.get_city_object_resident_ids(
 			home
 		).has(citizen_id)
@@ -712,7 +712,7 @@ static func _citizen_has_satisfied_home_arrival(
 	citizen: Dictionary,
 	home: Dictionary
 ) -> bool:
-	var home_tiles := WorldData.get_city_object_footprint_tiles(
+	var home_tiles := CityObjectSystem.get_city_object_footprint_tiles(
 		home
 	)
 	var raw_current_tile = citizen.get(
@@ -910,7 +910,7 @@ static func _get_outstanding_obligation_task_request(
 		return {}
 
 	var home_id := int(citizen.get("home_object_id", -1))
-	var home := WorldData.get_city_object_by_id(home_id)
+	var home := CityObjectSystem.get_city_object_by_id(home_id)
 	var has_satisfied_home_arrival := (
 		home_id > 0
 		and not home.is_empty()
@@ -920,7 +920,7 @@ static func _get_outstanding_obligation_task_request(
 	var workplace_id := int(
 		citizen.get("job_object_id", -1)
 	)
-	var workplace := WorldData.get_city_object_by_id(
+	var workplace := CityObjectSystem.get_city_object_by_id(
 		workplace_id
 	)
 
@@ -998,7 +998,7 @@ static func _get_scheduled_home_food_delivery_task_request(
 ) -> Dictionary:
 	var citizen_id := int(citizen.get("id", -1))
 	var home_id := int(citizen.get("home_object_id", -1))
-	var home := WorldData.get_city_object_by_id(home_id)
+	var home := CityObjectSystem.get_city_object_by_id(home_id)
 	var raw_current_tile = citizen.get(
 		"city_tile_position",
 		WorldData.INVALID_CITY_TILE_POSITION
@@ -1586,7 +1586,7 @@ static func _get_active_ground_pile_chain_capacity() -> int:
 static func _get_total_unreserved_public_storage_space() -> int:
 	var total_space := 0
 
-	for raw_city_object in WorldData.city_objects:
+	for raw_city_object in CityObjectSystem.get_city_objects():
 		if not raw_city_object is Dictionary:
 			continue
 
@@ -1614,7 +1614,7 @@ static func _get_workplace_output_haul_opportunities() -> Array:
 	var opportunities: Array = []
 	var deliverable_resource_lookup: Dictionary = {}
 
-	for raw_city_object in WorldData.city_objects:
+	for raw_city_object in CityObjectSystem.get_city_objects():
 		if not raw_city_object is Dictionary:
 			continue
 
@@ -1672,7 +1672,7 @@ static func _resource_has_unreserved_public_storage_destination(
 	resource: String
 ) -> bool:
 	for storage_tier in WorldData.get_public_city_storage_tiers():
-		for raw_city_object in WorldData.city_objects:
+		for raw_city_object in CityObjectSystem.get_city_objects():
 			if not raw_city_object is Dictionary:
 				continue
 
@@ -2242,7 +2242,7 @@ static func _citizen_is_available_for_idle_behavior(
 	if workplace_id <= 0:
 		return true
 
-	var workplace := WorldData.get_city_object_by_id(
+	var workplace := CityObjectSystem.get_city_object_by_id(
 		workplace_id
 	)
 
@@ -2362,7 +2362,7 @@ static func _get_idle_anchor_tile(
 
 static func _get_citizen_life_anchor_tile(citizen: Dictionary) -> Vector2i:
 	var citizen_id := int(citizen.get("id", -1))
-	var home := WorldData.get_city_object_by_id(
+	var home := CityObjectSystem.get_city_object_by_id(
 		int(citizen.get("home_object_id", -1))
 	)
 
@@ -2370,7 +2370,7 @@ static func _get_citizen_life_anchor_tile(citizen: Dictionary) -> Vector2i:
 		CityResourceMatcher.city_object_is_household_home(home)
 		and WorldData.get_city_object_resident_ids(home).has(citizen_id)
 	):
-		var home_tiles := WorldData.get_city_object_footprint_tiles(home)
+		var home_tiles := CityObjectSystem.get_city_object_footprint_tiles(home)
 		var resident_ids := WorldData.get_city_object_resident_ids(home)
 		resident_ids.sort()
 		var resident_index := resident_ids.find(citizen_id)
@@ -2385,7 +2385,7 @@ static func _get_citizen_life_anchor_tile(citizen: Dictionary) -> Vector2i:
 
 	# Homeless citizens retain a civic center instead of anchoring to a random
 	# roadside tile. City Keep access tiles remain legal without an interior task.
-	for raw_city_object in WorldData.city_objects:
+	for raw_city_object in CityObjectSystem.get_city_objects():
 		if not raw_city_object is Dictionary:
 			continue
 

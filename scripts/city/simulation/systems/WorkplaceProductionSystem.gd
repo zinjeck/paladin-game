@@ -276,7 +276,7 @@ static func _get_unique_footprint_tiles(
 	var unique_tiles: Array = []
 	var tile_lookup: Dictionary = {}
 
-	for raw_tile in WorldData.get_city_object_footprint_tiles(
+	for raw_tile in CityObjectSystem.get_city_object_footprint_tiles(
 		city_object
 	):
 		if not raw_tile is Vector2i:
@@ -498,7 +498,7 @@ static func run_tick(
 	if not WorldData.has_player_city():
 		return
 
-	for raw_city_object in WorldData.city_objects:
+	for raw_city_object in CityObjectSystem.get_city_objects():
 		if not raw_city_object is Dictionary:
 			continue
 
@@ -896,7 +896,7 @@ static func _commit_workplace_tick_output(
 	):
 		new_progress = 0
 
-	var updated_city_object := WorldData.get_city_object_by_id(object_id)
+	var updated_city_object := CityObjectSystem.get_city_object_by_id(object_id)
 	var remaining_output_capacity := _get_output_capacity_in_batches(
 		updated_city_object,
 		outputs
@@ -1112,7 +1112,7 @@ static func _find_workplace_overflow_tile(
 	if candidate_tiles.is_empty():
 		return WorldData.INVALID_CITY_TILE_POSITION
 
-	candidate_tiles.sort_custom(WorldData._sort_city_tiles_y_then_x)
+	candidate_tiles.sort_custom(CityObjectSystem._sort_city_tiles_y_then_x)
 
 	# If buildings or roads consume the immediate ring, select the cheapest
 	# reachable tile inside the configured radius rather than spawning loose
@@ -1156,7 +1156,7 @@ static func _find_workplace_overflow_tile(
 			path_cost < best_path_cost
 			or (
 				path_cost == best_path_cost
-				and WorldData._sort_city_tiles_y_then_x(
+				and CityObjectSystem._sort_city_tiles_y_then_x(
 					candidate_tile,
 					best_tile
 				)

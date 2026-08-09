@@ -214,13 +214,13 @@ static func _get_legal_food_source_endpoints_at_citizen(
 	var citizen_tile: Vector2i = raw_citizen_tile
 	var citizen_id := int(citizen.get("id", -1))
 	var home_id := int(citizen.get("home_object_id", -1))
-	var home := WorldData.get_city_object_by_id(home_id)
+	var home := CityObjectSystem.get_city_object_by_id(home_id)
 
 	# A resident's own home is always their first legal food source. Other homes
 	# never enter this list, even if the citizen is standing beside one.
 	if (
 		CityResourceMatcher.city_object_is_household_home(home)
-		and WorldData.get_city_object_footprint_tiles(home).has(citizen_tile)
+		and CityObjectSystem.get_city_object_footprint_tiles(home).has(citizen_tile)
 	):
 		sources.append(CityLogisticsSystem.make_city_citizen_haul_endpoint(home_id))
 
@@ -231,7 +231,7 @@ static func _get_legal_food_source_endpoints_at_citizen(
 		WorldData.get_public_city_storage_tiers()
 		+ [WorldData.PUBLIC_CITY_STORAGE_TIER_NONE]
 	):
-		for raw_city_object in WorldData.city_objects:
+		for raw_city_object in CityObjectSystem.get_city_objects():
 			if not raw_city_object is Dictionary:
 				continue
 

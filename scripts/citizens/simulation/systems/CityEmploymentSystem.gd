@@ -35,9 +35,10 @@ static func is_valid_staffing_mode(staffing_mode: String) -> bool:
 
 static func ensure_workplace_staffing_state() -> int:
 	var normalized_count := 0
+	var city_objects := CityObjectSystem.get_city_objects()
 
-	for object_index in range(WorldData.city_objects.size()):
-		var raw_city_object = WorldData.city_objects[object_index]
+	for object_index in range(city_objects.size()):
+		var raw_city_object = city_objects[object_index]
 
 		if not raw_city_object is Dictionary:
 			continue
@@ -77,7 +78,12 @@ static func ensure_workplace_staffing_state() -> int:
 		if normalized == city_object:
 			continue
 
-		WorldData.city_objects[object_index] = normalized
+		if not CityObjectSystem.write_city_object_at_index(
+			object_index,
+			normalized
+		):
+			continue
+
 		normalized_count += 1
 
 	if normalized_count > 0:
@@ -130,12 +136,12 @@ static func set_workplace_staffing_mode(
 	if workplace_id <= 0 or not is_valid_staffing_mode(staffing_mode):
 		return false
 
-	var object_index := WorldData.get_city_object_index_by_id(workplace_id)
+	var object_index := CityObjectSystem.get_city_object_index_by_id(workplace_id)
 
 	if object_index < 0:
 		return false
 
-	var raw_workplace = WorldData.city_objects[object_index]
+	var raw_workplace = CityObjectSystem.get_city_objects()[object_index]
 
 	if not raw_workplace is Dictionary:
 		return false
@@ -149,7 +155,12 @@ static func set_workplace_staffing_mode(
 		return true
 
 	workplace[WORKPLACE_STAFFING_MODE_FIELD] = staffing_mode
-	WorldData.city_objects[object_index] = workplace
+	if not CityObjectSystem.write_city_object_at_index(
+		object_index,
+		workplace
+	):
+		return false
+
 	WorldData._mark_city_workplaces_changed()
 	return true
 
@@ -158,12 +169,12 @@ static func set_workplace_desired_worker_count(
 	workplace_id: int,
 	desired_worker_count: int
 ) -> bool:
-	var object_index := WorldData.get_city_object_index_by_id(workplace_id)
+	var object_index := CityObjectSystem.get_city_object_index_by_id(workplace_id)
 
 	if object_index < 0:
 		return false
 
-	var raw_workplace = WorldData.city_objects[object_index]
+	var raw_workplace = CityObjectSystem.get_city_objects()[object_index]
 
 	if not raw_workplace is Dictionary:
 		return false
@@ -185,7 +196,12 @@ static func set_workplace_desired_worker_count(
 		return true
 
 	workplace[WORKPLACE_DESIRED_WORKER_COUNT_FIELD] = desired_worker_count
-	WorldData.city_objects[object_index] = workplace
+	if not CityObjectSystem.write_city_object_at_index(
+		object_index,
+		workplace
+	):
+		return false
+
 	WorldData._mark_city_workplaces_changed()
 	return true
 
@@ -214,7 +230,7 @@ static func remove_citizen_job(citizen_id: int) -> bool:
 static func reconcile_automatic_workplaces() -> int:
 	var workplace_ids: Array[int] = []
 
-	for raw_city_object in WorldData.city_objects:
+	for raw_city_object in CityObjectSystem.get_city_objects():
 		if not raw_city_object is Dictionary:
 			continue
 
@@ -235,7 +251,7 @@ static func reconcile_automatic_workplaces() -> int:
 		if assigned_count >= MAX_AUTOMATIC_ASSIGNMENTS_PER_TICK:
 			break
 
-		var workplace := WorldData.get_city_object_by_id(workplace_id)
+		var workplace := CityObjectSystem.get_city_object_by_id(workplace_id)
 
 		if workplace.is_empty():
 			continue
@@ -271,7 +287,7 @@ static func reconcile_automatic_workplaces() -> int:
 
 				assigned_count += 1
 				filled_one_slot = true
-				workplace = WorldData.get_city_object_by_id(workplace_id)
+				workplace = CityObjectSystem.get_city_object_by_id(workplace_id)
 				break
 
 			if not filled_one_slot:
