@@ -114,33 +114,6 @@ static var city_resource_amounts: Dictionary = {}
 static var city_owned_resource_amount_cache: Dictionary = {}
 static var city_owned_resource_amount_cache_container_version: int = -1
 
-# Completed-object ownership is settlement-local. These accessor-only
-# compatibility properties preserve the historical WorldData surface while
-# routing every read and mutation to the currently selected CityObjectState.
-static var city_objects: Array:
-	get:
-		return WorldPoliticalState.get_current_city_object_state().objects
-	set(value):
-		WorldPoliticalState.get_current_city_object_state().objects = value
-
-static var city_object_index_by_id: Dictionary:
-	get:
-		return WorldPoliticalState.get_current_city_object_state().object_index_by_id
-	set(value):
-		WorldPoliticalState.get_current_city_object_state().object_index_by_id = value
-
-static var city_occupied_tiles: Dictionary:
-	get:
-		return WorldPoliticalState.get_current_city_object_state().occupied_tiles
-	set(value):
-		WorldPoliticalState.get_current_city_object_state().occupied_tiles = value
-
-static var next_city_object_id: int:
-	get:
-		return WorldPoliticalState.get_current_city_object_state().next_object_id
-	set(value):
-		WorldPoliticalState.get_current_city_object_state().next_object_id = value
-
 # Construction registry ownership is settlement-local. These compatibility
 # properties preserve the historical WorldData API during the ownership-only
 # pass while resolving to the active City's CityConstructionState.
@@ -165,11 +138,6 @@ static var next_city_citizen_id: int = 1
 #
 # These let observers refresh only the parts of the city that actually
 # changed instead of treating every mutation as a generic storage change.
-static var city_object_version: int:
-	get:
-		return WorldPoliticalState.get_current_city_object_state().object_version
-	set(value):
-		WorldPoliticalState.get_current_city_object_state().object_version = value
 static var city_container_version: int = 0
 static var city_public_storage_version: int = 0
 static var city_citizen_version: int = 0
@@ -723,12 +691,12 @@ static func set_city_workplace_production_state(
 	var site_productivity_basis_points := int(
 		values["site_productivity_basis_points"]
 	)
-	var object_index := get_city_object_index_by_id(object_id)
+	var object_index := CityObjectSystem.get_city_object_index_by_id(object_id)
 
 	if object_index < 0:
 		return false
 
-	var raw_city_object = city_objects[object_index]
+	var raw_city_object = CityObjectSystem.get_city_objects()[object_index]
 
 	if not raw_city_object is Dictionary:
 		return false
@@ -793,7 +761,11 @@ static func set_city_workplace_production_state(
 		safe_site_productivity
 	)
 
-	city_objects[object_index] = city_object
+	if not CityObjectSystem.write_city_object_at_index(
+		object_index,
+		city_object
+	):
+		return false
 	_mark_city_workplaces_changed()
 
 	return true
@@ -1628,7 +1600,7 @@ static func get_city_resource_amount(resource: String) -> int:
 static func get_total_public_city_resource_amount(resource: String) -> int:
 	var total := 0
 
-	for city_object in city_objects:
+	for city_object in CityObjectSystem.get_city_objects():
 		if not city_object is Dictionary:
 			continue
 
@@ -1645,7 +1617,7 @@ static func get_total_public_city_resource_storage_capacity(
 ) -> int:
 	var total_capacity := 0
 
-	for city_object in city_objects:
+	for city_object in CityObjectSystem.get_city_objects():
 		if not city_object is Dictionary:
 			continue
 
@@ -1677,7 +1649,7 @@ static func get_total_stored_city_resource_amount(
 ) -> int:
 	var total_amount := 0
 
-	for city_object in city_objects:
+	for city_object in CityObjectSystem.get_city_objects():
 		if not city_object is Dictionary:
 			continue
 
@@ -1720,7 +1692,7 @@ static func get_total_owned_city_resource_amounts() -> Dictionary:
 	for resource in get_city_resource_types():
 		totals[resource] = 0
 
-	for raw_city_object in city_objects:
+	for raw_city_object in CityObjectSystem.get_city_objects():
 		if not raw_city_object is Dictionary:
 			continue
 
@@ -1767,7 +1739,7 @@ static func get_total_city_resource_storage_capacity(
 ) -> int:
 	var total_capacity := 0
 
-	for city_object in city_objects:
+	for city_object in CityObjectSystem.get_city_objects():
 		if not city_object is Dictionary:
 			continue
 
@@ -1798,9 +1770,6 @@ static func get_total_city_resource_storage_capacity(
 
 #region Change Versions and Runtime Indexes
 
-static func _mark_city_objects_changed() -> void:
-	city_object_version += 1
-
 static func _mark_city_container_changed(
 	city_object: Dictionary
 ) -> void:
@@ -1826,31 +1795,6 @@ static func _mark_city_assignments_changed() -> void:
 
 static func _mark_city_workplaces_changed() -> void:
 	city_workplace_version += 1
-
-
-static func rebuild_city_object_index() -> void:
-	city_object_index_by_id.clear()
-
-	for object_index in range(city_objects.size()):
-		var raw_city_object = city_objects[object_index]
-
-		if not raw_city_object is Dictionary:
-			continue
-
-		var city_object: Dictionary = raw_city_object
-		var object_id := int(city_object.get("id", -1))
-
-		if object_id < 0:
-			continue
-
-		if city_object_index_by_id.has(object_id):
-			push_error(
-				"Duplicate city object ID while rebuilding index: "
-				+ str(object_id)
-			)
-			continue
-
-		city_object_index_by_id[object_id] = object_index
 
 
 static func rebuild_city_citizen_index() -> void:
@@ -2171,43 +2115,10 @@ static func has_living_city_citizen_at_tile(
 	return false
 
 static func rebuild_city_entity_indexes() -> void:
-	rebuild_city_object_index()
+	CityObjectSystem.rebuild_city_object_index()
 	rebuild_city_citizen_index()
 	rebuild_city_citizen_spatial_index()
 	rebuild_city_active_mover_registry()
-
-static func _register_city_object_index(
-	city_object: Dictionary,
-	object_index: int
-) -> void:
-	if city_object.is_empty():
-		return
-
-	if object_index < 0 or object_index >= city_objects.size():
-		push_error(
-			"Cannot register city object index outside the object array: "
-			+ str(object_index)
-		)
-		return
-
-	var object_id := int(city_object.get("id", -1))
-
-	if object_id < 0:
-		push_error("Cannot register city object without a valid ID.")
-		return
-
-	if city_object_index_by_id.has(object_id):
-		var existing_index := int(city_object_index_by_id[object_id])
-
-		if existing_index != object_index:
-			push_error(
-				"Duplicate city object ID detected: "
-				+ str(object_id)
-			)
-			return
-
-	city_object_index_by_id[object_id] = object_index
-
 
 static func _register_city_citizen_index(
 	citizen: Dictionary,
@@ -2240,52 +2151,6 @@ static func _register_city_citizen_index(
 			return
 
 	city_citizen_index_by_id[citizen_id] = citizen_index
-
-
-static func get_city_object_index_by_id(object_id: int) -> int:
-	if object_id < 0:
-		return -1
-
-	if not city_object_index_by_id.has(object_id):
-		return -1
-
-	var object_index := int(city_object_index_by_id[object_id])
-
-	if object_index < 0 or object_index >= city_objects.size():
-		push_error(
-			"Stale city object index for object ID "
-			+ str(object_id)
-		)
-
-		city_object_index_by_id.erase(object_id)
-		return -1
-
-	var raw_city_object = city_objects[object_index]
-
-	if not raw_city_object is Dictionary:
-		push_error(
-			"City object index points to non-Dictionary data for object ID "
-			+ str(object_id)
-		)
-
-		city_object_index_by_id.erase(object_id)
-		return -1
-
-	var city_object: Dictionary = raw_city_object
-	var indexed_object_id := int(city_object.get("id", -1))
-
-	if indexed_object_id != object_id:
-		push_error(
-			"City object index mismatch for requested ID "
-			+ str(object_id)
-			+ ". Indexed object contains ID "
-			+ str(indexed_object_id)
-		)
-
-		city_object_index_by_id.erase(object_id)
-		return -1
-
-	return object_index
 
 
 static func get_city_citizen_index_by_id(citizen_id: int) -> int:
@@ -2334,20 +2199,6 @@ static func get_city_citizen_index_by_id(citizen_id: int) -> int:
 	return citizen_index
 
 
-static func get_city_object_by_id(object_id: int) -> Dictionary:
-	var object_index := get_city_object_index_by_id(object_id)
-
-	if object_index < 0:
-		return {}
-
-	var raw_city_object = city_objects[object_index]
-
-	if not raw_city_object is Dictionary:
-		return {}
-
-	return raw_city_object
-
-
 #endregion
 
 
@@ -2390,7 +2241,7 @@ static func get_total_physical_city_resource_amount(
 
 	# Conservation includes every physical object container, even private homes
 	# and other storage excluded from the player-facing secured city total.
-	for raw_city_object in city_objects:
+	for raw_city_object in CityObjectSystem.get_city_objects():
 		if not raw_city_object is Dictionary:
 			continue
 
@@ -4200,7 +4051,7 @@ static func _prepare_city_work_task_assignment(
 ) -> bool:
 	var citizen: Dictionary = assignment.get("citizen", {})
 	var target_object_id := int(assignment.get("target_object_id", -1))
-	var workplace := get_city_object_by_id(target_object_id)
+	var workplace := CityObjectSystem.get_city_object_by_id(target_object_id)
 
 	if workplace.is_empty() or not city_object_is_workplace(workplace):
 		return false
@@ -4498,12 +4349,12 @@ static func _prepare_city_return_home_task_assignment(
 	var citizen_id := int(assignment.get("citizen_id", -1))
 	var citizen: Dictionary = assignment.get("citizen", {})
 	var target_object_id := int(assignment.get("target_object_id", -1))
-	var home := get_city_object_by_id(target_object_id)
+	var home := CityObjectSystem.get_city_object_by_id(target_object_id)
 
 	if (
 		home.is_empty()
 		or get_city_object_resident_capacity(home) <= 0
-		or not city_object_supports_citizen_interior(home)
+		or not CityObjectSystem.city_object_supports_citizen_interior(home)
 	):
 		return false
 
@@ -5371,7 +5222,7 @@ static func _make_city_citizen_movement_rejection(
 	if final_tile is Vector2i:
 		rejection["final_tile"] = final_tile
 		rejection["occupying_object_id"] = int(
-			city_occupied_tiles.get(final_tile, -1)
+			CityObjectSystem.get_city_object_id_at_tile(final_tile)
 		)
 
 	return rejection
@@ -6043,7 +5894,7 @@ static func get_city_object_resident_names(city_object: Dictionary) -> Array:
 static func get_total_city_resident_capacity() -> int:
 	var total_capacity := 0
 
-	for city_object in city_objects:
+	for city_object in CityObjectSystem.get_city_objects():
 		if not city_object is Dictionary:
 			continue
 
@@ -6214,7 +6065,7 @@ static func is_city_citizen_attending_workplace(
 	if citizen_id <= 0 or workplace_id <= 0:
 		return false
 
-	var workplace := get_city_object_by_id(workplace_id)
+	var workplace := CityObjectSystem.get_city_object_by_id(workplace_id)
 
 	if (
 		workplace.is_empty()
@@ -6428,8 +6279,8 @@ static func assign_unemployed_citizens_to_available_workplaces() -> int:
 
 	var assigned_count := 0
 
-	for object_index in range(city_objects.size()):
-		var raw_city_object = city_objects[object_index]
+	for object_index in range(CityObjectSystem.get_city_objects().size()):
+		var raw_city_object = CityObjectSystem.get_city_objects()[object_index]
 
 		if not raw_city_object is Dictionary:
 			continue
@@ -6454,7 +6305,7 @@ static func assign_unemployed_citizens_to_available_workplaces() -> int:
 			continue
 
 		while true:
-			var current_workplace := get_city_object_by_id(
+			var current_workplace := CityObjectSystem.get_city_object_by_id(
 				workplace_id
 			)
 
@@ -6530,8 +6381,8 @@ static func assign_homeless_citizens_to_available_housing() -> int:
 
 	var assigned_count := 0
 
-	for object_index in range(city_objects.size()):
-		var raw_city_object = city_objects[object_index]
+	for object_index in range(CityObjectSystem.get_city_objects().size()):
+		var raw_city_object = CityObjectSystem.get_city_objects()[object_index]
 
 		if not raw_city_object is Dictionary:
 			continue
@@ -6550,7 +6401,7 @@ static func assign_homeless_citizens_to_available_housing() -> int:
 			continue
 
 		while true:
-			var current_house := get_city_object_by_id(
+			var current_house := CityObjectSystem.get_city_object_by_id(
 				house_id
 			)
 
@@ -6615,21 +6466,11 @@ static func reset_player_city_state() -> void:
 	city_owned_resource_amount_cache.clear()
 	city_owned_resource_amount_cache_container_version = -1
 	WorldPoliticalState.reset_extracted_city_state()
-	reset_city_object_state()
-	reset_city_citizen_state()
-
-
-static func reset_city_object_state() -> void:
 	CityLogisticsSystem.reset_city_haul_reservation_state()
 	CityLogisticsSystem.reset_city_ground_pile_state()
 	CityConstructionSystem.reset_city_construction_state()
 	city_object_access_tile_cache.clear()
-	city_objects.clear()
-	city_object_index_by_id.clear()
-	city_occupied_tiles.clear()
-	next_city_object_id = 1
-
-	_mark_city_objects_changed()
+	CityObjectSystem.reset_city_object_state()
 	_mark_city_workplaces_changed()
 
 	# Clearing city objects also removes every object container and every
@@ -6640,21 +6481,11 @@ static func reset_city_object_state() -> void:
 	# Houses and workplaces no longer exist, so assignment observers must
 	# invalidate any relationship displays.
 	_mark_city_assignments_changed()
+	reset_city_citizen_state()
 
 #endregion
 
 #region City Object Placement and Traversal
-
-static func city_object_type_preserves_citizen_walkability(
-	object_type: String
-) -> bool:
-	# Roads alter movement cost but remain publicly traversable. Every current
-	# building type replaces open ground with controlled or blocked occupancy.
-	# Keeping this policy centralized makes future bridges, floors, gates, and
-	# similar topology types opt in deliberately instead of acquiring exceptions
-	# throughout construction and movement code.
-	return object_type == CITY_OBJECT_ROAD
-
 
 static func get_living_city_citizen_ids_in_tiles(
 	raw_tiles: Array
@@ -6693,318 +6524,6 @@ static func get_living_city_citizen_ids_in_tiles(
 	return citizen_ids
 
 
-static func get_city_object_topology_blocking_citizen_ids(
-	object_type: String,
-	footprint_tiles: Array
-) -> Array[int]:
-	if city_object_type_preserves_citizen_walkability(object_type):
-		return []
-
-	return get_living_city_citizen_ids_in_tiles(footprint_tiles)
-
-
-static func validate_city_object_topology_mutation(
-	values: Dictionary
-) -> Dictionary:
-	var result := {
-		"success": false,
-		"failure_reason": CITY_TOPOLOGY_MUTATION_FAILURE_INVALID_REQUEST,
-		"blocking_citizen_ids": [],
-	}
-	var city_world: WorldData = values.get("city_world")
-	var object_type := str(values.get("object_type", ""))
-	var raw_footprint_tiles = values.get("footprint_tiles", [])
-	var allowed_construction_site_id := int(
-		values.get("allowed_construction_site_id", -1)
-	)
-	var allowed_occupied_object_id := int(
-		values.get("allowed_occupied_object_id", -1)
-	)
-
-	if (
-		city_world == null
-		or get_city_object_definition(object_type).is_empty()
-		or not raw_footprint_tiles is Array
-		or raw_footprint_tiles.is_empty()
-	):
-		return result
-
-	var footprint_tiles: Array[Vector2i] = []
-	var footprint_lookup: Dictionary = {}
-
-	for raw_tile in raw_footprint_tiles:
-		if not raw_tile is Vector2i:
-			return result
-
-		var tile_position: Vector2i = raw_tile
-
-		if footprint_lookup.has(tile_position):
-			continue
-
-		if not city_world.is_in_bounds(tile_position.x, tile_position.y):
-			return result
-
-		var tile: Dictionary = city_world.get_tile(
-			tile_position.x,
-			tile_position.y
-		)
-
-		if (
-			str(tile.get("terrain", TERRAIN_WATER)) in [
-				TERRAIN_WATER,
-				TERRAIN_MOUNTAIN,
-			]
-			or not bool(tile.get("is_land", false))
-		):
-			return result
-
-		var occupied_object_id := int(
-			city_occupied_tiles.get(tile_position, -1)
-		)
-
-		if (
-			occupied_object_id > 0
-			and occupied_object_id != allowed_occupied_object_id
-		):
-			result["failure_reason"] = (
-				CITY_TOPOLOGY_MUTATION_FAILURE_TILE_BLOCKED
-			)
-			return result
-
-		var construction_site_id := int(
-			CityConstructionSystem.get_current_state().construction_site_id_by_tile.get(tile_position, -1)
-		)
-
-		if (
-			construction_site_id > 0
-			and construction_site_id != allowed_construction_site_id
-		):
-			result["failure_reason"] = (
-				CITY_TOPOLOGY_MUTATION_FAILURE_TILE_BLOCKED
-			)
-			return result
-
-		if CityLogisticsSystem.has_city_ground_pile_at_tile(tile_position):
-			result["failure_reason"] = (
-				CITY_TOPOLOGY_MUTATION_FAILURE_TILE_BLOCKED
-			)
-			return result
-
-		footprint_lookup[tile_position] = true
-		footprint_tiles.append(tile_position)
-
-	var blocking_citizen_ids := (
-		get_city_object_topology_blocking_citizen_ids(
-			object_type,
-			footprint_tiles
-		)
-	)
-
-	if not blocking_citizen_ids.is_empty():
-		result["failure_reason"] = (
-			CITY_TOPOLOGY_MUTATION_FAILURE_FOOTPRINT_OCCUPIED
-		)
-		result["blocking_citizen_ids"] = blocking_citizen_ids
-		return result
-
-	result["success"] = true
-	result["failure_reason"] = CITY_TOPOLOGY_MUTATION_FAILURE_NONE
-	result["footprint_tiles"] = footprint_tiles
-	return result
-
-
-static func can_place_city_object(
-	city_world: WorldData,
-	top_left: Vector2i,
-	size_tiles: Vector2i,
-	object_type: String = ""
-) -> bool:
-	if city_world == null:
-		return false
-
-	if size_tiles.x <= 0 or size_tiles.y <= 0:
-		return false
-
-	if top_left.x < 0 or top_left.y < 0:
-		return false
-
-	if top_left.x + size_tiles.x > city_world.width:
-		return false
-
-	if top_left.y + size_tiles.y > city_world.height:
-		return false
-
-	for y in range(top_left.y, top_left.y + size_tiles.y):
-		for x in range(top_left.x, top_left.x + size_tiles.x):
-			var tile_position := Vector2i(x, y)
-
-			if city_occupied_tiles.has(tile_position):
-				return false
-
-			if CityConstructionSystem.get_current_state().construction_site_id_by_tile.has(tile_position):
-				return false
-
-			# Ground piles stay outside the blocking-object registry so citizens
-			# can walk across them. Placement still waits until loose resources
-			# have been secured instead of silently building over them.
-			if CityLogisticsSystem.has_city_ground_pile_at_tile(tile_position):
-				return false
-
-			if has_living_city_citizen_at_tile(
-				tile_position
-			):
-				return false
-
-			var tile: Dictionary = city_world.get_tile(x, y)
-
-			if tile["terrain"] == TERRAIN_WATER:
-				return false
-
-			if tile["terrain"] == TERRAIN_MOUNTAIN:
-				return false
-
-	if (
-		object_type == CITY_OBJECT_CITY_CENTER
-		and not city_object_placement_has_walkable_access_tile(
-			city_world,
-			top_left,
-			size_tiles
-		)
-	):
-		return false
-
-	return true
-
-
-static func city_object_placement_has_walkable_access_tile(
-	city_world: WorldData,
-	top_left: Vector2i,
-	size_tiles: Vector2i
-) -> bool:
-	if city_world == null:
-		return false
-
-	var footprint_lookup: Dictionary = {}
-
-	for y in range(top_left.y, top_left.y + size_tiles.y):
-		for x in range(top_left.x, top_left.x + size_tiles.x):
-			footprint_lookup[Vector2i(x, y)] = true
-
-	for raw_footprint_tile in footprint_lookup:
-		if not raw_footprint_tile is Vector2i:
-			continue
-
-		var footprint_tile: Vector2i = raw_footprint_tile
-
-		for offset in CITY_CARDINAL_TILE_OFFSETS:
-			var candidate_tile: Vector2i = (
-				footprint_tile + Vector2i(offset)
-			)
-
-			if footprint_lookup.has(candidate_tile):
-				continue
-
-			if is_city_tile_walkable_for_citizen(
-				city_world,
-				candidate_tile
-			):
-				return true
-
-	return false
-
-
-static func make_rectangle_city_object_footprint_tiles(
-	top_left: Vector2i,
-	size_tiles: Vector2i
-) -> Array:
-	var footprint_tiles := []
-
-	if size_tiles.x <= 0 or size_tiles.y <= 0:
-		return footprint_tiles
-
-	for y in range(top_left.y, top_left.y + size_tiles.y):
-		for x in range(top_left.x, top_left.x + size_tiles.x):
-			footprint_tiles.append(Vector2i(x, y))
-
-	return footprint_tiles
-
-
-static func get_city_object_footprint_tiles(city_object: Dictionary) -> Array:
-	var footprint_tiles := []
-
-	if city_object.is_empty():
-		return footprint_tiles
-
-	if city_object.has("footprint_tiles"):
-		var raw_footprint_tiles = city_object.get("footprint_tiles", [])
-
-		if raw_footprint_tiles is Array:
-			for tile_position in raw_footprint_tiles:
-				if tile_position is Vector2i:
-					footprint_tiles.append(tile_position)
-
-			return footprint_tiles
-
-	if city_object.has("tiles"):
-		var raw_tiles = city_object.get("tiles", [])
-
-		if raw_tiles is Array:
-			for tile_position in raw_tiles:
-				if tile_position is Vector2i:
-					footprint_tiles.append(tile_position)
-
-			return footprint_tiles
-
-	if city_object.has("top_left") and city_object.has("size"):
-		var top_left: Vector2i = city_object.get("top_left", Vector2i(-1, -1))
-		var size_tiles: Vector2i = city_object.get("size", Vector2i.ZERO)
-		return make_rectangle_city_object_footprint_tiles(top_left, size_tiles)
-
-	return footprint_tiles
-
-
-static func city_object_supports_citizen_interior(
-	city_object: Dictionary
-) -> bool:
-	var definition := get_city_object_definition_from_object(
-		city_object
-	)
-
-	if definition.is_empty():
-		return false
-
-	return bool(
-		definition.get("supports_citizen_interior", false)
-	)
-
-
-static func get_city_object_citizen_interior_access_mode(
-	city_object: Dictionary
-) -> String:
-	var definition := get_city_object_definition_from_object(
-		city_object
-	)
-
-	if definition.is_empty():
-		return CITY_OBJECT_INTERIOR_ACCESS_NONE
-
-	return str(
-		definition.get(
-			"citizen_interior_access_mode",
-			CITY_OBJECT_INTERIOR_ACCESS_NONE
-		)
-	)
-
-
-static func get_city_object_citizen_entry_policy(
-	city_object: Dictionary
-) -> Dictionary:
-	return _get_city_object_definition_dictionary(
-		city_object,
-		"citizen_entry_policy"
-	)
-
-
 static func city_citizen_can_access_object_interior(
 	citizen_id: int,
 	city_object: Dictionary
@@ -7012,7 +6531,7 @@ static func city_citizen_can_access_object_interior(
 	if (
 		citizen_id <= 0
 		or city_object.is_empty()
-		or not city_object_supports_citizen_interior(city_object)
+		or not CityObjectSystem.city_object_supports_citizen_interior(city_object)
 	):
 		return false
 
@@ -7030,7 +6549,7 @@ static func city_citizen_can_access_object_interior(
 		return false
 
 	var access_mode := (
-		get_city_object_citizen_interior_access_mode(
+		CityObjectSystem.get_city_object_citizen_interior_access_mode(
 			city_object
 		)
 	)
@@ -7105,76 +6624,6 @@ static func city_citizen_can_access_object_interior(
 	return false
 
 
-static func get_city_object_citizen_entry_tiles(
-	city_object: Dictionary
-) -> Array[Vector2i]:
-	var entry_tiles: Array[Vector2i] = []
-	var raw_entry_tiles = city_object.get(
-		"citizen_entry_tiles",
-		[]
-	)
-
-	if not raw_entry_tiles is Array:
-		return entry_tiles
-
-	for raw_entry_tile in raw_entry_tiles:
-		if raw_entry_tile is Vector2i:
-			entry_tiles.append(raw_entry_tile)
-
-	entry_tiles.sort_custom(_sort_city_tiles_y_then_x)
-	return entry_tiles
-
-
-static func _city_object_boundary_tile_allows_entry(
-	city_object: Dictionary,
-	boundary_tile: Vector2i
-) -> bool:
-	if not city_object_supports_citizen_interior(city_object):
-		return true
-
-	var entry_policy := get_city_object_citizen_entry_policy(
-		city_object
-	)
-	var entry_mode := str(
-		entry_policy.get(
-			"mode",
-			CITY_OBJECT_ENTRY_MODE_ANY_BOUNDARY
-		)
-	)
-
-	match entry_mode:
-		CITY_OBJECT_ENTRY_MODE_ANY_BOUNDARY:
-			return get_city_object_footprint_tiles(
-				city_object
-			).has(boundary_tile)
-
-		CITY_OBJECT_ENTRY_MODE_EXPLICIT_TILES:
-			return get_city_object_citizen_entry_tiles(
-				city_object
-			).has(boundary_tile)
-
-	return false
-
-
-static func is_completed_city_road_tile(
-	tile_position: Vector2i
-) -> bool:
-	var object_id := int(
-		city_occupied_tiles.get(tile_position, -1)
-	)
-
-	if object_id <= 0:
-		return false
-
-	var city_object := get_city_object_by_id(object_id)
-
-	return (
-		not city_object.is_empty()
-		and str(city_object.get("type", ""))
-		== CITY_OBJECT_ROAD
-	)
-
-
 static func get_city_citizen_movement_step_cost(
 	from_tile: Vector2i,
 	to_tile: Vector2i
@@ -7188,7 +6637,7 @@ static func get_city_citizen_movement_step_cost(
 	if delta_x == 0 and delta_y == 0:
 		return 0
 
-	var destination_is_road := is_completed_city_road_tile(
+	var destination_is_road := CityObjectSystem.is_completed_city_road_tile(
 		to_tile
 	)
 
@@ -7279,23 +6728,23 @@ static func _city_citizen_can_cross_object_boundary(
 	citizen_id: int
 ) -> bool:
 	var from_object_id := int(
-		city_occupied_tiles.get(from_tile, -1)
+		CityObjectSystem.get_city_object_id_at_tile(from_tile)
 	)
 	var to_object_id := int(
-		city_occupied_tiles.get(to_tile, -1)
+		CityObjectSystem.get_city_object_id_at_tile(to_tile)
 	)
 
 	if from_object_id == to_object_id:
 		return true
 
 	if from_object_id > 0:
-		var from_object := get_city_object_by_id(
+		var from_object := CityObjectSystem.get_city_object_by_id(
 			from_object_id
 		)
 
 		if (
-			city_object_supports_citizen_interior(from_object)
-			and not _city_object_boundary_tile_allows_entry(
+			CityObjectSystem.city_object_supports_citizen_interior(from_object)
+			and not CityObjectSystem.city_object_boundary_tile_allows_entry(
 				from_object,
 				from_tile
 			)
@@ -7303,16 +6752,16 @@ static func _city_citizen_can_cross_object_boundary(
 			return false
 
 	if to_object_id > 0:
-		var to_object := get_city_object_by_id(to_object_id)
+		var to_object := CityObjectSystem.get_city_object_by_id(to_object_id)
 
-		if city_object_supports_citizen_interior(to_object):
+		if CityObjectSystem.city_object_supports_citizen_interior(to_object):
 			if not city_citizen_can_access_object_interior(
 				citizen_id,
 				to_object
 			):
 				return false
 
-			if not _city_object_boundary_tile_allows_entry(
+			if not CityObjectSystem.city_object_boundary_tile_allows_entry(
 				to_object,
 				to_tile
 			):
@@ -7342,13 +6791,13 @@ static func is_city_tile_walkable_for_citizen(
 	if str(tile.get("terrain", "")) != TERRAIN_LAND:
 		return false
 
-	if not city_occupied_tiles.has(tile_position):
+	if not CityObjectSystem.has_city_object_at_tile(tile_position):
 		return true
 
 	var object_id := int(
-		city_occupied_tiles.get(tile_position, -1)
+		CityObjectSystem.get_city_object_id_at_tile(tile_position)
 	)
-	var occupying_object := get_city_object_by_id(object_id)
+	var occupying_object := CityObjectSystem.get_city_object_by_id(object_id)
 
 	if occupying_object.is_empty():
 		return false
@@ -7381,12 +6830,12 @@ static func is_city_tile_walkable_for_citizen(
 	# saves and defensive recovery only, and never authorizes re-entry.
 	if (
 		current_position is Vector2i
-		and int(city_occupied_tiles.get(current_position, -1))
+		and CityObjectSystem.get_city_object_id_at_tile(current_position)
 		== object_id
 	):
 		return true
 
-	if not city_object_supports_citizen_interior(occupying_object):
+	if not CityObjectSystem.city_object_supports_citizen_interior(occupying_object):
 		return false
 
 	return city_citizen_can_access_object_interior(
@@ -7416,7 +6865,7 @@ static func get_city_object_access_tiles(
 	if city_object.is_empty():
 		return access_tiles
 
-	var footprint_tiles := get_city_object_footprint_tiles(
+	var footprint_tiles := CityObjectSystem.get_city_object_footprint_tiles(
 		city_object
 	)
 	var object_id := int(city_object.get("id", -1))
@@ -7437,7 +6886,7 @@ static func get_city_object_access_tiles(
 				and int(cache_entry.get("tile_data_version", -1))
 				== city_world.tile_data_version
 				and int(cache_entry.get("city_object_version", -1))
-				== city_object_version
+				== CityObjectSystem.get_city_object_version()
 				and int(cache_entry.get("footprint_hash", -1))
 				== footprint_hash_value
 			):
@@ -7501,7 +6950,7 @@ static func get_city_object_access_tiles(
 				city_world.get_instance_id()
 			),
 			"tile_data_version": city_world.tile_data_version,
-			"city_object_version": city_object_version,
+			"city_object_version": CityObjectSystem.get_city_object_version(),
 			"footprint_hash": footprint_hash_value,
 			"access_tiles": access_tiles.duplicate(),
 		}
@@ -7512,7 +6961,7 @@ static func get_city_object_access_tiles(
 static func get_starting_city_citizen_spawn_tiles(
 	city_world: WorldData
 ) -> Array:
-	for raw_city_object in city_objects:
+	for raw_city_object in CityObjectSystem.get_city_objects():
 		if not raw_city_object is Dictionary:
 			continue
 
@@ -7531,146 +6980,6 @@ static func get_starting_city_citizen_spawn_tiles(
 
 	return []
 
-static func add_city_object(
-	values: Dictionary
-) -> Dictionary:
-	var object_type := str(values.get("object_type", ""))
-	var top_left: Vector2i = values.get(
-		"top_left",
-		INVALID_CITY_TILE_POSITION
-	)
-	var size_tiles: Vector2i = values.get("size_tiles", Vector2i.ZERO)
-	var object_owner := str(values.get("object_owner", "player"))
-	var city_world: WorldData = values.get("city_world")
-	var city_object := {
-		"id": next_city_object_id,
-		"type": object_type,
-		"top_left": top_left,
-		"size": size_tiles,
-		"owner": object_owner
-	}
-
-	var definition := get_city_object_definition(object_type)
-	var shape_mode := str(definition.get("shape_mode", CITY_OBJECT_SHAPE_RECTANGLE))
-	var footprint_tiles := make_rectangle_city_object_footprint_tiles(top_left, size_tiles)
-	var topology_validation := validate_city_object_topology_mutation({
-		"city_world": city_world,
-		"object_type": object_type,
-		"footprint_tiles": footprint_tiles,
-		"allowed_construction_site_id": int(
-			values.get("allowed_construction_site_id", -1)
-		),
-		"allowed_occupied_object_id": int(
-			values.get("allowed_occupied_object_id", -1)
-		),
-	})
-
-	if not bool(topology_validation.get("success", false)):
-		push_warning(
-			"Rejected city-object topology mutation for "
-				+ object_type
-				+ ". Reason: "
-				+ str(topology_validation.get("failure_reason", ""))
-				+ ". Blocking citizens: "
-				+ str(topology_validation.get("blocking_citizen_ids", []))
-		)
-		return {}
-
-	city_object["shape_mode"] = shape_mode
-	city_object["footprint_tiles"] = footprint_tiles
-
-	var resident_capacity := int(definition.get("resident_capacity", 0))
-
-	if resident_capacity > 0:
-		city_object["resident_capacity"] = resident_capacity
-		city_object["resident_ids"] = []
-
-	if bool(definition.get("is_workplace", false)):
-		city_object["is_workplace"] = true
-		city_object["workplace_kind"] = str(
-			definition.get(
-				"workplace_kind",
-				WORKPLACE_KIND_NONE
-			)
-		)
-		city_object["worker_capacity"] = int(
-			definition.get("worker_capacity", 0)
-		)
-		city_object["assigned_worker_ids"] = []
-		city_object["output_resource"] = str(
-			definition.get(
-				"output_resource",
-				RESOURCE_NONE
-			)
-		)
-
-		var production_recipe = definition.get(
-			"production_recipe",
-			{}
-		)
-
-		if production_recipe is Dictionary:
-			if not production_recipe.is_empty():
-				city_object["production_progress_work_units"] = 0
-				city_object["production_status"] = (
-					WORKPLACE_PRODUCTION_STATUS_IDLE_NO_WORKERS
-				)
-				city_object["productive_worker_count"] = 0
-				city_object["site_productivity_basis_points"] = (
-					DEFAULT_WORKPLACE_SITE_PRODUCTIVITY_BASIS_POINTS
-				)
-
-	var raw_allowed_storage_resources = definition.get(
-		"storage_resources",
-		[]
-	)
-	var has_resource_storage: bool = false
-
-	if raw_allowed_storage_resources is Array:
-		has_resource_storage = (
-			not raw_allowed_storage_resources.is_empty()
-		)
-	var starting_storage := (
-		make_empty_city_object_storage_for_type(object_type)
-	)
-
-	if has_resource_storage:
-		city_object["stored_resources"] = starting_storage
-
-	var feature_world := city_world
-
-	if feature_world == null:
-		feature_world = official_city_world
-
-	clear_city_surface_features_at_tiles(
-		feature_world,
-		footprint_tiles
-	)
-
-	next_city_object_id += 1
-
-	city_objects.append(city_object)
-
-	var object_index := city_objects.size() - 1
-	_register_city_object_index(city_object, object_index)
-
-	occupy_city_object_tiles(city_object)
-
-	_mark_city_objects_changed()
-
-	if city_object_is_workplace(city_object):
-		_mark_city_workplaces_changed()
-
-	if has_resource_storage:
-		_mark_city_container_changed(city_object)
-
-	if object_type == CITY_OBJECT_HOUSE:
-		assign_homeless_citizens_to_available_housing()
-
-	# Employment is not a one-shot completion side effect. The persistent
-	# CityEmploymentSystem staffing policy fills and maintains this workplace
-	# on simulation ticks, while preserving future manual assignment control.
-	return city_object
 
 #endregion
 
@@ -8087,7 +7396,7 @@ static func get_city_citizen_direct_withdrawal_target_tiles(
 				== int(city_object.get("id", -1))
 				and get_city_object_resident_ids(city_object).has(citizen_id)
 			):
-				return get_city_object_footprint_tiles(city_object)
+				return CityObjectSystem.get_city_object_footprint_tiles(city_object)
 
 		CONTAINER_TYPE_PUBLIC_CITY_STORAGE:
 			if city_object_container_is_publicly_usable(city_object):
@@ -8127,7 +7436,7 @@ static func city_citizen_can_withdraw_food_from_endpoint(
 		CITY_CITIZEN_HAUL_ENDPOINT_KIND_CITY_OBJECT_CONTAINER:
 			return city_citizen_can_directly_withdraw_resource(
 				citizen_id,
-				get_city_object_by_id(endpoint_id),
+				CityObjectSystem.get_city_object_by_id(endpoint_id),
 				resource,
 				CONTAINER_DIRECT_WITHDRAWAL_PURPOSE_PERSONAL_FOOD
 			)
@@ -8159,7 +7468,7 @@ static func get_city_citizen_food_endpoint_target_tiles(
 		CITY_CITIZEN_HAUL_ENDPOINT_KIND_CITY_OBJECT_CONTAINER:
 			return get_city_citizen_direct_withdrawal_target_tiles(
 				citizen_id,
-				get_city_object_by_id(int(endpoint.get("id", -1))),
+				CityObjectSystem.get_city_object_by_id(int(endpoint.get("id", -1))),
 				CONTAINER_DIRECT_WITHDRAWAL_PURPOSE_PERSONAL_FOOD
 			)
 
@@ -8336,7 +7645,7 @@ static func transfer_city_object_resource_to_citizen_inventory(
 	if requested_amount <= 0:
 		return 0
 
-	var city_object := get_city_object_by_id(object_id)
+	var city_object := CityObjectSystem.get_city_object_by_id(object_id)
 
 	if not city_citizen_can_directly_withdraw_resource(
 		citizen_id,
@@ -8513,12 +7822,12 @@ static func set_city_object_stored_resource_amount(
 	amount: int,
 	reservation_id: int = INVALID_CITY_CITIZEN_HAUL_RESERVATION_ID
 ) -> int:
-	var object_index := get_city_object_index_by_id(object_id)
+	var object_index := CityObjectSystem.get_city_object_index_by_id(object_id)
 
 	if object_index < 0:
 		return 0
 
-	var raw_city_object = city_objects[object_index]
+	var raw_city_object = CityObjectSystem.get_city_objects()[object_index]
 
 	if not raw_city_object is Dictionary:
 		return 0
@@ -8584,7 +7893,11 @@ static func set_city_object_stored_resource_amount(
 		return safe_amount
 
 	city_object["stored_resources"] = stored_resources
-	city_objects[object_index] = city_object
+	if not CityObjectSystem.write_city_object_at_index(
+		object_index,
+		city_object
+	):
+		return old_amount
 
 	_mark_city_container_changed(city_object)
 	return safe_amount
@@ -8598,12 +7911,12 @@ static func add_resource_to_city_object_storage(
 	if amount_delta <= 0:
 		return 0
 
-	var object_index := get_city_object_index_by_id(object_id)
+	var object_index := CityObjectSystem.get_city_object_index_by_id(object_id)
 
 	if object_index < 0:
 		return 0
 
-	var raw_city_object = city_objects[object_index]
+	var raw_city_object = CityObjectSystem.get_city_objects()[object_index]
 
 	if not raw_city_object is Dictionary:
 		return 0
@@ -8671,14 +7984,14 @@ static func add_resource_bundle_to_city_object_storage(
 	if requested_resources.is_empty():
 		return false
 
-	var object_index := get_city_object_index_by_id(
+	var object_index := CityObjectSystem.get_city_object_index_by_id(
 		object_id
 	)
 
 	if object_index < 0:
 		return false
 
-	var raw_city_object = city_objects[object_index]
+	var raw_city_object = CityObjectSystem.get_city_objects()[object_index]
 
 	if not raw_city_object is Dictionary:
 		return false
@@ -8736,7 +8049,11 @@ static func add_resource_bundle_to_city_object_storage(
 		)
 
 	city_object["stored_resources"] = stored_resources
-	city_objects[object_index] = city_object
+	if not CityObjectSystem.write_city_object_at_index(
+		object_index,
+		city_object
+	):
+		return false
 	_mark_city_container_changed(city_object)
 	return true
 
@@ -8750,7 +8067,7 @@ static func remove_resource_from_city_object_storage(
 	if requested_amount <= 0:
 		return 0
 
-	var city_object := get_city_object_by_id(object_id)
+	var city_object := CityObjectSystem.get_city_object_by_id(object_id)
 
 	if city_object.is_empty():
 		return 0
@@ -8819,115 +8136,6 @@ static func remove_resource_from_city_object_storage(
 	return maxi(current_amount - final_amount, 0)
 
 #endregion
-
-#region Placed Objects and Roads
-
-static func occupy_city_object_tiles(city_object: Dictionary) -> void:
-	var object_id: int = int(city_object.get("id", -1))
-
-	if object_id < 0:
-		return
-
-	var footprint_tiles := get_city_object_footprint_tiles(city_object)
-
-	for tile_position in footprint_tiles:
-		if not tile_position is Vector2i:
-			continue
-
-		city_occupied_tiles[tile_position] = object_id
-
-static func get_city_object_at_tile(tile_position: Vector2i) -> Dictionary:
-	if not city_occupied_tiles.has(tile_position):
-		return {}
-
-	var object_id := int(city_occupied_tiles[tile_position])
-	return get_city_object_by_id(object_id)
-
-static func has_city_object_type(object_type: String) -> bool:
-	for city_object in city_objects:
-		if str(city_object["type"]) == object_type:
-			return true
-
-	return false
-
-static func can_place_city_road_tile(city_world: WorldData, tile_position: Vector2i) -> bool:
-	return (
-		CityConstructionSystem.city_object_type_uses_construction(CITY_OBJECT_ROAD)
-		and CityConstructionSystem.can_place_city_construction_footprint(
-			city_world,
-			[tile_position]
-		)
-	)
-
-static func add_city_road_object(
-	tile_positions: Array,
-	object_owner: String = "player",
-	city_world: WorldData = null,
-	allowed_construction_site_id: int = -1
-) -> Dictionary:
-	var clean_tiles: Array = []
-
-	for tile_position in tile_positions:
-		if not tile_position is Vector2i:
-			continue
-
-		if city_occupied_tiles.has(tile_position):
-			continue
-
-		if CityLogisticsSystem.has_city_ground_pile_at_tile(tile_position):
-			continue
-
-		clean_tiles.append(tile_position)
-
-	# A road object is exactly one tile. Drag strokes are decomposed into
-	# independent construction sites before completion, and this guard prevents
-	# any future caller from quietly recreating stroke-sized road objects.
-	if clean_tiles.size() != 1:
-		return {}
-
-	var feature_world := city_world
-
-	if feature_world == null:
-		feature_world = official_city_world
-
-	var topology_validation := validate_city_object_topology_mutation({
-		"city_world": feature_world,
-		"object_type": CITY_OBJECT_ROAD,
-		"footprint_tiles": clean_tiles,
-		"allowed_construction_site_id": allowed_construction_site_id,
-	})
-
-	if not bool(topology_validation.get("success", false)):
-		return {}
-
-	clear_city_surface_features_at_tiles(
-		feature_world,
-		clean_tiles
-	)
-
-	var city_object := {
-		"id": next_city_object_id,
-		"type": CITY_OBJECT_ROAD,
-		"tiles": clean_tiles,
-		"owner": object_owner
-	}
-
-	next_city_object_id += 1
-	city_objects.append(city_object)
-
-	var object_index := city_objects.size() - 1
-	_register_city_object_index(city_object, object_index)
-
-	for tile_position in clean_tiles:
-		city_occupied_tiles[tile_position] = int(city_object["id"])
-
-	_mark_city_objects_changed()
-
-	return city_object
-
-#endregion
-
-
 
 #region Simulation Tick and Session Reset
 
@@ -9062,10 +8270,10 @@ static func _write_city_object_assignment_ids(
 	object_id_list_field: String,
 	assignment_ids: Array
 ) -> bool:
-	if object_index < 0 or object_index >= city_objects.size():
+	if object_index < 0 or object_index >= CityObjectSystem.get_city_objects().size():
 		return false
 
-	var raw_city_object = city_objects[object_index]
+	var raw_city_object = CityObjectSystem.get_city_objects()[object_index]
 
 	if not raw_city_object is Dictionary:
 		return false
@@ -9083,9 +8291,10 @@ static func _write_city_object_assignment_ids(
 		return false
 
 	city_object[object_id_list_field] = assignment_ids.duplicate()
-	city_objects[object_index] = city_object
-
-	return true
+	return CityObjectSystem.write_city_object_at_index(
+		object_index,
+		city_object
+	)
 
 
 static func _remove_citizen_from_city_object_assignment(
@@ -9094,12 +8303,12 @@ static func _remove_citizen_from_city_object_assignment(
 	object_id_list_field: String,
 	citizen_object_id_field: String
 ) -> bool:
-	var object_index := get_city_object_index_by_id(object_id)
+	var object_index := CityObjectSystem.get_city_object_index_by_id(object_id)
 
 	if object_index < 0:
 		return false
 
-	var raw_city_object = city_objects[object_index]
+	var raw_city_object = CityObjectSystem.get_city_objects()[object_index]
 
 	if not raw_city_object is Dictionary:
 		return false
@@ -9148,12 +8357,12 @@ static func assign_city_citizen_home(
 	if not bool(citizen.get("alive", true)):
 		return false
 
-	var house_index := get_city_object_index_by_id(house_id)
+	var house_index := CityObjectSystem.get_city_object_index_by_id(house_id)
 
 	if house_index < 0:
 		return false
 
-	var raw_house = city_objects[house_index]
+	var raw_house = CityObjectSystem.get_city_objects()[house_index]
 
 	if not raw_house is Dictionary:
 		return false
@@ -9339,14 +8548,14 @@ static func assign_city_citizen_job(
 	if not bool(citizen.get("alive", true)):
 		return false
 
-	var workplace_index := get_city_object_index_by_id(
+	var workplace_index := CityObjectSystem.get_city_object_index_by_id(
 		workplace_id
 	)
 
 	if workplace_index < 0:
 		return false
 
-	var raw_workplace = city_objects[workplace_index]
+	var raw_workplace = CityObjectSystem.get_city_objects()[workplace_index]
 
 	if not raw_workplace is Dictionary:
 		return false

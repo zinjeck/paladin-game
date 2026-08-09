@@ -43,7 +43,7 @@ func _test_low_level_topology_gate_is_generic() -> void:
 		var city_world := _reset_fixture()
 		var top_left := Vector2i(10, 8)
 		var citizen := _add_citizen(top_left)
-		var created_object := WorldData.add_city_object({
+		var created_object := CityObjectSystem.add_city_object({
 			"object_type": object_type,
 			"top_left": top_left,
 			"size_tiles": WorldData.get_city_object_size_for_type(
@@ -60,7 +60,7 @@ func _test_low_level_topology_gate_is_generic() -> void:
 				+ " while a living citizen occupies its footprint."
 		)
 		_expect(
-			WorldData.get_city_object_at_tile(top_left).is_empty()
+			CityObjectSystem.get_city_object_at_tile(top_left).is_empty()
 			and citizen.get("city_tile_position") == top_left,
 			"Rejected topology mutations must leave both object and citizen state untouched."
 		)
@@ -68,7 +68,7 @@ func _test_low_level_topology_gate_is_generic() -> void:
 	var road_world := _reset_fixture()
 	var road_tile := Vector2i(10, 8)
 	var road_citizen := _add_citizen(road_tile)
-	var road := WorldData.add_city_road_object(
+	var road := CityObjectSystem.add_city_road_object(
 		[road_tile],
 		"player",
 		road_world
@@ -146,7 +146,7 @@ func _test_construction_waits_for_footprint_clearance() -> void:
 		),
 		"The fixture must start an unrelated mover."
 	)
-	var object_state := WorldPoliticalState.get_current_city_object_state()
+	var object_state := CityObjectSystem.get_current_state()
 	var object_count_before := object_state.objects.size()
 	var next_object_id_before := object_state.next_object_id
 	var object_version_before := object_state.object_version
@@ -193,12 +193,12 @@ func _test_construction_waits_for_footprint_clearance() -> void:
 		if CityConstructionSystem.get_city_construction_site_by_id(site_id).is_empty():
 			break
 
-	var completed_fishery := WorldData.get_city_object_at_tile(top_left)
+	var completed_fishery := CityObjectSystem.get_city_object_at_tile(top_left)
 	var trapped_after_completion := WorldData.get_city_citizen_by_id(trapped_id)
 	var unrelated_after_completion := WorldData.get_city_citizen_by_id(
 		unrelated_id
 	)
-	var footprint_tiles := WorldData.make_rectangle_city_object_footprint_tiles(
+	var footprint_tiles := CityObjectSystem.make_rectangle_city_object_footprint_tiles(
 		top_left,
 		fishery_size
 	)
@@ -211,13 +211,13 @@ func _test_construction_waits_for_footprint_clearance() -> void:
 		"The Fishing Grounds must finalize once its footprint is physically clear."
 	)
 	_expect(
-		is_same(WorldData.city_objects, object_state.objects)
+		is_same(CityObjectSystem.get_current_state().objects, object_state.objects)
 		and is_same(
-			WorldData.city_object_index_by_id,
+			CityObjectSystem.get_current_state().object_index_by_id,
 			object_state.object_index_by_id
 		)
 		and is_same(
-			WorldData.city_occupied_tiles,
+			CityObjectSystem.get_current_state().occupied_tiles,
 			object_state.occupied_tiles
 		),
 		"Construction finalization must mutate the selected object state by identity."
@@ -231,6 +231,17 @@ func _test_construction_waits_for_footprint_clearance() -> void:
 		and object_state.next_object_id == next_object_id_before + 1
 		and object_state.object_version == object_version_before + 1,
 		"Construction finalization must register exactly one indexed object and advance its state once."
+	)
+	var finalized_count := object_state.objects.size()
+	var finalized_next_id := object_state.next_object_id
+	var finalized_version := object_state.object_version
+	CityConstructionSystemScript.refresh_all_city_construction_sites()
+	CityConstructionSystemScript.refresh_all_city_construction_sites()
+	_expect(
+		object_state.objects.size() == finalized_count
+		and object_state.next_object_id == finalized_next_id
+		and object_state.object_version == finalized_version,
+		"Refreshing after finalization must not register the completed object a second time."
 	)
 	var footprint_is_registered := true
 	for tile_position in footprint_tiles:
@@ -313,7 +324,7 @@ func _test_legacy_occupant_can_escape_but_not_reenter() -> void:
 	print("Topology test: defensive legacy escape")
 	var city_world := _reset_fixture()
 	var top_left := Vector2i(12, 8)
-	var fishery := WorldData.add_city_object({
+	var fishery := CityObjectSystem.add_city_object({
 		"object_type": WorldData.CITY_OBJECT_FISHING_GROUNDS,
 		"top_left": top_left,
 		"size_tiles": WorldData.get_city_object_size_for_type(

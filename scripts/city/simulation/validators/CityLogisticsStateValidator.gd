@@ -102,7 +102,7 @@ static func _validate_city_construction_state(
 					+ "."
 				)
 		else:
-			var target_object := WorldData.get_city_object_by_id(
+			var target_object := CityObjectSystem.get_city_object_by_id(
 				target_object_id
 			)
 
@@ -186,11 +186,10 @@ static func _validate_city_construction_state(
 						+ "."
 					)
 
-				if WorldData.city_occupied_tiles.has(tile_position):
+				if CityObjectSystem.has_city_object_at_tile(tile_position):
 					var completed_object_id := int(
-						WorldData.city_occupied_tiles.get(
-							tile_position,
-							-1
+						CityObjectSystem.get_city_object_id_at_tile(
+							tile_position
 						)
 					)
 
@@ -1305,7 +1304,7 @@ static func _validate_city_haul_reservations(
 				WorldData.CITY_CITIZEN_HAUL_ENDPOINT_KIND_NONE
 			)
 		)
-		var city_object := WorldData.get_city_object_by_id(
+		var city_object := CityObjectSystem.get_city_object_by_id(
 			int(destination.get("id", -1))
 		)
 		var reserved_amount := int(
@@ -1999,7 +1998,7 @@ static func _validate_city_haul_reservation_destination(
 				+ "."
 			)
 
-		var destination_object := WorldData.get_city_object_by_id(
+		var destination_object := CityObjectSystem.get_city_object_by_id(
 			int(destination.get("id", -1))
 		)
 		var destination_kind := str(
@@ -2087,7 +2086,7 @@ static func _city_haul_endpoint_exists(
 		)
 	):
 		WorldData.CITY_CITIZEN_HAUL_ENDPOINT_KIND_CITY_OBJECT_CONTAINER:
-			return not WorldData.get_city_object_by_id(
+			return not CityObjectSystem.get_city_object_by_id(
 				int(endpoint.get("id", -1))
 			).is_empty()
 

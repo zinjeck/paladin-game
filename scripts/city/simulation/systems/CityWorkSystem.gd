@@ -305,7 +305,7 @@ static func add_city_player_command_targets(
 	if clean_tiles.is_empty():
 		return 0
 
-	clean_tiles.sort_custom(WorldData._sort_city_tiles_y_then_x)
+	clean_tiles.sort_custom(CityObjectSystem._sort_city_tiles_y_then_x)
 
 	var group_id := _work_state().next_player_command_group_id
 	_work_state().next_player_command_group_id += 1
@@ -678,7 +678,7 @@ static func get_city_player_command_work_tiles(
 			):
 				work_tiles.append(candidate_tile)
 
-	work_tiles.sort_custom(WorldData._sort_city_tiles_y_then_x)
+	work_tiles.sort_custom(CityObjectSystem._sort_city_tiles_y_then_x)
 	return work_tiles
 
 static func get_best_assignable_city_player_command_for_citizen(
@@ -1302,7 +1302,7 @@ static func _get_best_command_candidate_for_construction_sites(
 		return {}
 
 	var work_tiles: Array = work_tile_lookup.keys()
-	work_tiles.sort_custom(WorldData._sort_city_tiles_y_then_x)
+	work_tiles.sort_custom(CityObjectSystem._sort_city_tiles_y_then_x)
 	var path_result := CityNavigationSystemScript.find_path_to_any_city_tile({
 		"city_world": WorldData.official_city_world,
 		"start_tile": citizen_tile,
@@ -1603,7 +1603,7 @@ static func get_cancel_preview_tiles(raw_tiles: Array) -> Array[Vector2i]:
 		if raw_tile is Vector2i:
 			preview_tiles.append(raw_tile)
 
-	preview_tiles.sort_custom(WorldData._sort_city_tiles_y_then_x)
+	preview_tiles.sort_custom(CityObjectSystem._sort_city_tiles_y_then_x)
 	return preview_tiles
 
 
@@ -2562,7 +2562,7 @@ static func _get_best_command_candidate(
 		return {}
 
 	var work_tiles: Array = work_tile_lookup.keys()
-	work_tiles.sort_custom(WorldData._sort_city_tiles_y_then_x)
+	work_tiles.sort_custom(CityObjectSystem._sort_city_tiles_y_then_x)
 	var path_result := CityNavigationSystemScript.find_path_to_any_city_tile({
 		"city_world": WorldData.official_city_world,
 		"start_tile": citizen_tile,
@@ -2928,7 +2928,7 @@ static func _get_relocation_destination_diagnostics(
 	var compatible_public_destination_exists := false
 	var public_available_amount := 0
 
-	for raw_object in WorldData.city_objects:
+	for raw_object in CityObjectSystem.get_city_objects():
 		if not raw_object is Dictionary:
 			continue
 
@@ -3021,7 +3021,7 @@ static func _get_construction_source_diagnostics(
 	var legal_physical_source_exists := false
 	var legal_unreserved_amount := 0
 
-	for raw_object in WorldData.city_objects:
+	for raw_object in CityObjectSystem.get_city_objects():
 		if not raw_object is Dictionary:
 			continue
 

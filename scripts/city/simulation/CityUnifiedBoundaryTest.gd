@@ -228,7 +228,7 @@ func _test_normal_order_waits_for_picked_up_cargo_delivery() -> void:
 
 	_expect(
 		WorldData.get_city_object_stored_resource_amount(
-			WorldData.get_city_object_by_id(stockpile_id),
+			CityObjectSystem.get_city_object_by_id(stockpile_id),
 			WorldData.RESOURCE_STONE
 		) == 2
 		and WorldData.get_city_citizen_haul_cargo_amount(citizen_id) == 0,
@@ -305,7 +305,7 @@ func _test_chained_pickup_respects_near_full_destination() -> void:
 		reservation.get("source_reserved_amount", 0)
 	)
 	var destination_free_space := WorldData.get_city_object_storage_free_space(
-		WorldData.get_city_object_by_id(stockpile_id)
+		CityObjectSystem.get_city_object_by_id(stockpile_id)
 	)
 	var validation_result := CityStateValidatorScript.validate(true, false)
 	var has_shared_capacity_error := false
@@ -348,7 +348,7 @@ func _test_critical_hunger_interrupts_cargo_safely() -> void:
 	var fishery_size := WorldData.get_city_object_size_for_type(
 		WorldData.CITY_OBJECT_FISHING_GROUNDS
 	)
-	var fishery := WorldData.add_city_object({
+	var fishery := CityObjectSystem.add_city_object({
 		"object_type": WorldData.CITY_OBJECT_FISHING_GROUNDS,
 		"top_left": Vector2i(12, 9),
 		"size_tiles": fishery_size,
@@ -843,7 +843,7 @@ func _add_stockpile(
 	city_world: WorldData,
 	top_left: Vector2i
 ) -> Dictionary:
-	return WorldData.add_city_object({
+	return CityObjectSystem.add_city_object({
 		"object_type": WorldData.CITY_OBJECT_STOCKPILE,
 		"top_left": top_left,
 		"size_tiles": WorldData.get_city_object_size_for_type(

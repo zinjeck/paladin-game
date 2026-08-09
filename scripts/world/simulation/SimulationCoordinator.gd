@@ -433,7 +433,7 @@ func _get_workload_debug_text() -> String:
 	var working_workplace_count := 0
 	var blocked_workplace_count := 0
 
-	for raw_city_object in WorldData.city_objects:
+	for raw_city_object in CityObjectSystem.get_city_objects():
 		if not raw_city_object is Dictionary:
 			continue
 
@@ -467,7 +467,7 @@ func _get_workload_debug_text() -> String:
 		+ str(WorldData.city_active_mover_ids.size())
 		+ "\n"
 		+ "City: Objects "
-		+ str(WorldData.city_objects.size())
+		+ str(CityObjectSystem.get_city_objects().size())
 		+ " | Workplaces "
 		+ str(workplace_count)
 		+ " | Working "

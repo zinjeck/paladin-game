@@ -139,6 +139,39 @@ WORLD_DATA_FORBIDDEN_CITY_LOGISTICS_SYMBOLS = (
     "reset_city_haul_reservation_state",
 )
 
+WORLD_DATA_FORBIDDEN_CITY_OBJECT_SYMBOLS = (
+    "city_objects",
+    "city_object_index_by_id",
+    "city_occupied_tiles",
+    "next_city_object_id",
+    "city_object_version",
+    "_mark_city_objects_changed",
+    "rebuild_city_object_index",
+    "_register_city_object_index",
+    "get_city_object_index_by_id",
+    "get_city_object_by_id",
+    "reset_city_object_state",
+    "city_object_type_preserves_citizen_walkability",
+    "get_city_object_topology_blocking_citizen_ids",
+    "validate_city_object_topology_mutation",
+    "can_place_city_object",
+    "city_object_placement_has_walkable_access_tile",
+    "make_rectangle_city_object_footprint_tiles",
+    "get_city_object_footprint_tiles",
+    "city_object_supports_citizen_interior",
+    "get_city_object_citizen_interior_access_mode",
+    "get_city_object_citizen_entry_policy",
+    "get_city_object_citizen_entry_tiles",
+    "_city_object_boundary_tile_allows_entry",
+    "is_completed_city_road_tile",
+    "add_city_object",
+    "occupy_city_object_tiles",
+    "get_city_object_at_tile",
+    "has_city_object_type",
+    "can_place_city_road_tile",
+    "add_city_road_object",
+)
+
 WORLD_DATA_FORBIDDEN_CITY_CONSTRUCTION_SYMBOLS = (
     "city_construction_sites",
     "city_construction_site_index_by_id",
@@ -584,20 +617,30 @@ def main() -> int:
             )
 
     object_state_path = ROOT / "scripts/city/simulation/CityObjectState.gd"
+    object_system_path = (
+        ROOT / "scripts/city/simulation/systems/CityObjectSystem.gd"
+    )
     political_state_path = ROOT / "scripts/world/simulation/WorldPoliticalState.gd"
     if not object_state_path.exists():
         errors.append(
             "scripts/city/simulation/CityObjectState.gd: missing completed-object "
             "state owner"
         )
+    if not object_system_path.exists():
+        errors.append(
+            "scripts/city/simulation/systems/CityObjectSystem.gd: missing "
+            "completed-object behavior owner"
+        )
     if (
         world_data_path.exists()
         and object_state_path.exists()
+        and object_system_path.exists()
         and city_root_state_path.exists()
         and political_state_path.exists()
     ):
         world_data_text = world_data_path.read_text(encoding="utf-8")
         object_state_text = object_state_path.read_text(encoding="utf-8")
+        object_system_text = object_system_path.read_text(encoding="utf-8")
         city_root_state_text = city_root_state_path.read_text(encoding="utf-8")
         political_state_text = political_state_path.read_text(encoding="utf-8")
         object_state_fields = {
@@ -608,7 +651,11 @@ def main() -> int:
             "object_version": "int",
         }
         declared_object_state_fields = set(
-            re.findall(r"^var\s+([A-Za-z_][A-Za-z0-9_]*)\b", object_state_text, re.MULTILINE)
+            re.findall(
+                r"^var\s+([A-Za-z_][A-Za-z0-9_]*)\b",
+                object_state_text,
+                re.MULTILINE,
+            )
         )
         if declared_object_state_fields != set(object_state_fields):
             errors.append(
@@ -616,12 +663,21 @@ def main() -> int:
                 "objects, object_index_by_id, occupied_tiles, next_object_id, "
                 "and object_version"
             )
+        if FUNC_RE.search(object_state_text):
+            errors.append(
+                "scripts/city/simulation/CityObjectState.gd: must remain data-only; "
+                "completed-object behavior belongs in CityObjectSystem"
+            )
 
         for state_name, state_type in object_state_fields.items():
             declaration_pattern = (
                 rf"^var\s+{re.escape(state_name)}:\s*{state_type}\s*="
             )
-            if not re.search(declaration_pattern, object_state_text, re.MULTILINE):
+            if not re.search(
+                declaration_pattern,
+                object_state_text,
+                re.MULTILINE,
+            ):
                 errors.append(
                     "scripts/city/simulation/CityObjectState.gd: missing typed "
                     f"object-state field {state_name}"
@@ -641,39 +697,6 @@ def main() -> int:
                 "scripts/city/simulation/CitySettlementSimulationState.gd: "
                 "missing object_state owner"
             )
-
-        compatibility_fields = {
-            "city_objects": "Array",
-            "city_object_index_by_id": "Dictionary",
-            "city_occupied_tiles": "Dictionary",
-            "next_city_object_id": "int",
-            "city_object_version": "int",
-        }
-        for field_name, field_type in compatibility_fields.items():
-            if f"WorldData.{field_name}" in city_root_state_text:
-                errors.append(
-                    "scripts/city/simulation/CitySettlementSimulationState.gd: "
-                    f"extracted object state must not be workspace-copied through {field_name}"
-                )
-            accessor_pattern = (
-                rf"^static\s+var\s+{re.escape(field_name)}:\s*"
-                rf"{field_type}\s*:\s*$"
-            )
-            if not re.search(accessor_pattern, world_data_text, re.MULTILINE):
-                errors.append(
-                    "scripts/world/simulation/WorldData.gd: missing accessor-only "
-                    f"compatibility property {field_name}"
-                )
-            if re.search(
-                rf"^static\s+var\s+{re.escape(field_name)}\b[^\n]*=",
-                world_data_text,
-                re.MULTILINE,
-            ):
-                errors.append(
-                    "scripts/world/simulation/WorldData.gd: completed-object "
-                    f"ownership must not return to initialized field {field_name}"
-                )
-
         if "var _unbound_city_object_state" not in political_state_text:
             errors.append(
                 "scripts/world/simulation/WorldPoliticalState.gd: missing "
@@ -686,6 +709,81 @@ def main() -> int:
             errors.append(
                 "scripts/world/simulation/WorldPoliticalState.gd: missing typed "
                 "current CityObjectState resolver"
+            )
+
+        required_object_system_surfaces = (
+            "static func get_current_state() -> CityObjectState:",
+            "static func get_city_object_snapshot() -> Array:",
+            "static func get_city_object_index_by_id(object_id: int) -> int:",
+            "static func get_city_object_by_id(object_id: int) -> Dictionary:",
+            "static func get_city_object_at_tile(tile_position: Vector2i) -> Dictionary:",
+            "static func register_completed_city_object(values: Dictionary) -> Dictionary:",
+            "static func reset_city_object_state() -> void:",
+        )
+        for required_surface in required_object_system_surfaces:
+            if required_surface not in object_system_text:
+                errors.append(
+                    "scripts/city/simulation/systems/CityObjectSystem.gd: "
+                    f"missing required API: {required_surface}"
+                )
+
+        for symbol in WORLD_DATA_FORBIDDEN_CITY_OBJECT_SYMBOLS:
+            declaration_patterns = (
+                rf"^\s*static\s+var\s+{re.escape(symbol)}\b",
+                rf"^\s*const\s+{re.escape(symbol)}\b",
+                rf"^\s*(?:static\s+)?func\s+{re.escape(symbol)}\s*\(",
+            )
+            if any(
+                re.search(pattern, world_data_text, re.MULTILINE)
+                for pattern in declaration_patterns
+            ):
+                errors.append(
+                    "scripts/world/simulation/WorldData.gd: extracted city-object "
+                    f"behavior/state must not return to WorldData: {symbol}"
+                )
+
+        for path in scripts:
+            text = path.read_text(encoding="utf-8")
+            relative = str(path.relative_to(ROOT))
+            for symbol in WORLD_DATA_FORBIDDEN_CITY_OBJECT_SYMBOLS:
+                legacy_reference_pattern = (
+                    rf"\bWorldData\s*\.\s*{re.escape(symbol)}\b"
+                )
+                dynamic_reference_pattern = (
+                    rf"\bWorldData\s*\.\s*(?:get|set|call)\s*\(\s*"
+                    rf"[\"']{re.escape(symbol)}[\"']"
+                )
+                if re.search(legacy_reference_pattern, text):
+                    errors.append(
+                        f"{relative}: legacy WorldData city-object reference "
+                        f"remains: WorldData.{symbol}"
+                    )
+                if re.search(dynamic_reference_pattern, text):
+                    errors.append(
+                        f"{relative}: dynamic legacy WorldData city-object "
+                        f"reference remains: {symbol}"
+                    )
+
+            if (
+                path not in {object_system_path, political_state_path}
+                and "WorldPoliticalState.get_current_city_object_state(" in text
+            ):
+                errors.append(
+                    f"{relative}: completed-object state must resolve through "
+                    "CityObjectSystem, not WorldPoliticalState directly"
+                )
+
+        construction_system_text = construction_system_path.read_text(
+            encoding="utf-8"
+        )
+        completion_call_count = construction_system_text.count(
+            "CityObjectSystem.register_completed_city_object("
+        )
+        if completion_call_count != 1:
+            errors.append(
+                "scripts/city/simulation/systems/CityConstructionSystem.gd: "
+                "construction finalization must call the completed-object API "
+                f"exactly once in source; found {completion_call_count} calls"
             )
 
     report = {

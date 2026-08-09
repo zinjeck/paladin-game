@@ -136,7 +136,7 @@ func _get_cached(values: Dictionary) -> Dictionary:
 		"size",
 		Vector2i.ZERO
 	)
-	var footprint_tiles := WorldData.get_city_object_footprint_tiles(
+	var footprint_tiles := CityObjectSystem.get_city_object_footprint_tiles(
 		city_object
 	)
 	var footprint_hash_value := int(hash(footprint_tiles))

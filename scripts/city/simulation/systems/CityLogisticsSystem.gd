@@ -257,7 +257,7 @@ static func can_city_ground_pile_exist_at_tile(
 	if not city_world.is_in_bounds(tile_position.x, tile_position.y):
 		return false
 
-	if WorldData.city_occupied_tiles.has(tile_position):
+	if CityObjectSystem.has_city_object_at_tile(tile_position):
 		return false
 
 	var tile := city_world.get_tile(tile_position.x, tile_position.y)
@@ -1218,7 +1218,7 @@ static func get_city_haul_endpoint_resource_amount(
 	match endpoint_kind:
 		WorldData.CITY_CITIZEN_HAUL_ENDPOINT_KIND_CITY_OBJECT_CONTAINER:
 			return WorldData.get_city_object_stored_resource_amount(
-				WorldData.get_city_object_by_id(endpoint_id),
+				CityObjectSystem.get_city_object_by_id(endpoint_id),
 				resource
 			)
 
@@ -1313,7 +1313,7 @@ static func get_city_haul_endpoint_unreserved_destination_space(
 	):
 		return 0
 
-	var city_object := WorldData.get_city_object_by_id(endpoint_id)
+	var city_object := CityObjectSystem.get_city_object_by_id(endpoint_id)
 
 	if city_object.is_empty():
 		return 0
@@ -1385,7 +1385,7 @@ static func city_haul_endpoint_can_provide_resource(
 	match endpoint_kind:
 		WorldData.CITY_CITIZEN_HAUL_ENDPOINT_KIND_CITY_OBJECT_CONTAINER:
 			if not WorldData.city_object_can_provide_haul_resource(
-				WorldData.get_city_object_by_id(endpoint_id),
+				CityObjectSystem.get_city_object_by_id(endpoint_id),
 				resource,
 				withdrawal_purpose
 			):
@@ -1500,7 +1500,7 @@ static func city_haul_endpoint_can_accept_resource(
 	):
 		return false
 
-	var city_object := WorldData.get_city_object_by_id(
+	var city_object := CityObjectSystem.get_city_object_by_id(
 		endpoint_id
 	)
 

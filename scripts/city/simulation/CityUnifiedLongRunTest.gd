@@ -185,7 +185,7 @@ func _create_mixed_work_fixture(renderer: CityRenderer) -> Dictionary:
 	if keep_top_left == WorldData.INVALID_CITY_TILE_POSITION:
 		return {}
 
-	var keep := WorldData.add_city_object({
+	var keep := CityObjectSystem.add_city_object({
 		"object_type": WorldData.CITY_OBJECT_CITY_CENTER,
 		"top_left": keep_top_left,
 		"size_tiles": keep_size,
@@ -230,7 +230,7 @@ func _create_mixed_work_fixture(renderer: CityRenderer) -> Dictionary:
 		return {}
 
 	var fishery_footprint := (
-		WorldData.make_rectangle_city_object_footprint_tiles(
+		CityObjectSystem.make_rectangle_city_object_footprint_tiles(
 			fishery_top_left,
 			fishery_size
 		)
@@ -240,7 +240,7 @@ func _create_mixed_work_fixture(renderer: CityRenderer) -> Dictionary:
 		fishery_footprint
 	)
 
-	var fishery := WorldData.add_city_object({
+	var fishery := CityObjectSystem.add_city_object({
 		"object_type": WorldData.CITY_OBJECT_FISHING_GROUNDS,
 		"top_left": fishery_top_left,
 		"size_tiles": fishery_size,
@@ -318,7 +318,7 @@ func _create_mixed_work_fixture(renderer: CityRenderer) -> Dictionary:
 		return {}
 
 	var footprint_tiles := (
-		WorldData.make_rectangle_city_object_footprint_tiles(
+		CityObjectSystem.make_rectangle_city_object_footprint_tiles(
 			house_top_left,
 			house_size
 		)
@@ -470,7 +470,7 @@ func _create_mixed_work_fixture(renderer: CityRenderer) -> Dictionary:
 
 func _update_food_liveness(fixture: Dictionary) -> void:
 	var fishery_id := int(fixture.get("fishery_id", -1))
-	var fishery := WorldData.get_city_object_by_id(fishery_id)
+	var fishery := CityObjectSystem.get_city_object_by_id(fishery_id)
 	var fish_available := WorldData.get_city_object_stored_resource_amount(
 		fishery,
 		WorldData.RESOURCE_FISH
@@ -596,7 +596,7 @@ func _assert_long_run_outcomes(fixture: Dictionary) -> void:
 	)
 	_expect(
 		str(
-			WorldData.get_city_object_at_tile(
+			CityObjectSystem.get_city_object_at_tile(
 				fixture.get(
 					"house_top_left",
 					WorldData.INVALID_CITY_TILE_POSITION
@@ -846,7 +846,7 @@ func _prepare_deterministic_natural_targets(
 				if (
 					not city_world.is_in_bounds(tile_position.x, tile_position.y)
 					or excluded_tiles.has(tile_position)
-					or not WorldData.get_city_object_at_tile(tile_position).is_empty()
+					or not CityObjectSystem.get_city_object_at_tile(tile_position).is_empty()
 					or not CityConstructionSystem.get_city_construction_site_at_tile(
 						tile_position
 					).is_empty()
@@ -969,7 +969,7 @@ func _find_and_prepare_reachable_rectangle(
 					continue
 
 				var footprint_tiles := (
-					WorldData.make_rectangle_city_object_footprint_tiles(
+					CityObjectSystem.make_rectangle_city_object_footprint_tiles(
 						top_left,
 						size_tiles
 					)
@@ -1046,7 +1046,7 @@ func _find_and_prepare_reachable_rectangle(
 				if not bool(path_result.get("success", false)):
 					continue
 
-				var can_place := WorldData.can_place_city_object(
+				var can_place := CityObjectSystem.can_place_city_object(
 					city_world,
 					top_left,
 					size_tiles,
@@ -1095,7 +1095,7 @@ func _select_external_access_target(
 				footprint_lookup.has(candidate)
 				or candidates.has(candidate)
 				or not city_world.is_in_bounds(candidate.x, candidate.y)
-				or not WorldData.get_city_object_at_tile(candidate).is_empty()
+				or not CityObjectSystem.get_city_object_at_tile(candidate).is_empty()
 				or not CityConstructionSystem.get_city_construction_site_at_tile(
 					candidate
 				).is_empty()
@@ -1253,7 +1253,7 @@ func _fixture_path_is_clear(path_tiles: Array[Vector2i]) -> bool:
 		var tile_position := path_tiles[path_index]
 
 		if (
-			not WorldData.get_city_object_at_tile(tile_position).is_empty()
+			not CityObjectSystem.get_city_object_at_tile(tile_position).is_empty()
 			or not CityConstructionSystem.get_city_construction_site_at_tile(
 				tile_position
 			).is_empty()
@@ -1308,7 +1308,7 @@ func _footprint_is_unoccupied(footprint_tiles: Array) -> bool:
 			return false
 
 		if (
-			not WorldData.get_city_object_at_tile(raw_tile).is_empty()
+			not CityObjectSystem.get_city_object_at_tile(raw_tile).is_empty()
 			or not CityConstructionSystem.get_city_construction_site_at_tile(
 				raw_tile
 			).is_empty()
@@ -1349,7 +1349,7 @@ func _find_placeable_rectangle(
 		for x in range(city_world.width - size_tiles.x + 1):
 			var top_left := Vector2i(x, y)
 
-			if WorldData.can_place_city_object(
+			if CityObjectSystem.can_place_city_object(
 				city_world,
 				top_left,
 				size_tiles,

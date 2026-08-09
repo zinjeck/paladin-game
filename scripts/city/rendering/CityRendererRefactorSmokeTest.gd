@@ -800,7 +800,7 @@ func _test_city_keep_accepts_tree_covered_access() -> void:
 				)
 
 	_expect(
-		WorldData.can_place_city_object(
+		CityObjectSystem.can_place_city_object(
 			test_world,
 			keep_top_left,
 			keep_size,
@@ -1123,7 +1123,7 @@ func _place_and_validate_city_fixture(
 		return
 
 	var keep_footprint := (
-		WorldData.make_rectangle_city_object_footprint_tiles(
+		CityObjectSystem.make_rectangle_city_object_footprint_tiles(
 			keep_top_left,
 			keep_size
 		)
@@ -1156,7 +1156,7 @@ func _place_and_validate_city_fixture(
 	)
 
 	_expect(
-		WorldData.can_place_city_object(
+		CityObjectSystem.can_place_city_object(
 			renderer.city_world,
 			keep_top_left,
 			keep_size,
@@ -1165,7 +1165,7 @@ func _place_and_validate_city_fixture(
 		"Surface features must not invalidate building placement."
 	)
 
-	var keep := WorldData.add_city_object({
+	var keep := CityObjectSystem.add_city_object({
 		"object_type": WorldData.CITY_OBJECT_CITY_CENTER,
 		"top_left": keep_top_left,
 		"size_tiles": keep_size,
@@ -1405,7 +1405,7 @@ func _test_universal_construction_core(
 	var citizen_id := int(WorldData.city_citizens[0].get("id", -1))
 	var keep_access_tiles: Array = []
 
-	for raw_object in WorldData.city_objects:
+	for raw_object in CityObjectSystem.get_city_objects():
 		if (
 			raw_object is Dictionary
 			and str(raw_object.get("type", ""))
@@ -1445,7 +1445,7 @@ func _test_universal_construction_core(
 		return
 
 	var house_footprint := (
-		WorldData.make_rectangle_city_object_footprint_tiles(
+		CityObjectSystem.make_rectangle_city_object_footprint_tiles(
 			house_top_left,
 			house_size
 		)
@@ -1589,7 +1589,7 @@ func _test_universal_construction_core(
 		)
 
 	_expect(
-		WorldData.get_city_object_at_tile(house_top_left).is_empty(),
+		CityObjectSystem.get_city_object_at_tile(house_top_left).is_empty(),
 		"A House blueprint must not be an operational city object."
 	)
 	_expect(
@@ -1935,7 +1935,7 @@ func _test_universal_construction_core(
 	_expect(
 		not completed_road.is_empty()
 		and renderer.is_city_object_selectable(completed_road)
-		and WorldData.get_city_object_footprint_tiles(
+		and CityObjectSystem.get_city_object_footprint_tiles(
 			completed_road
 		) == [road_tiles[0]],
 		"A completed road tile must become one selectable one-tile object."
@@ -1967,7 +1967,7 @@ func _find_clear_road_construction_tiles(
 			var tile_position := Vector2i(x, y)
 
 			if (
-				WorldData.can_place_city_road_tile(
+				CityConstructionSystem.can_place_city_road_tile(
 					city_world,
 					tile_position
 				)
@@ -2052,7 +2052,7 @@ func _find_reachable_construction_rectangle(
 					continue
 
 				var footprint_tiles := (
-					WorldData.make_rectangle_city_object_footprint_tiles(
+					CityObjectSystem.make_rectangle_city_object_footprint_tiles(
 						top_left,
 						size_tiles
 					)
@@ -2063,7 +2063,7 @@ func _find_reachable_construction_rectangle(
 					if (
 						raw_tile is Vector2i
 						and (
-							not WorldData.get_city_object_at_tile(
+							not CityObjectSystem.get_city_object_at_tile(
 								raw_tile
 							).is_empty()
 							or not CityConstructionSystem.get_city_construction_site_at_tile(
@@ -2202,7 +2202,7 @@ func _fixture_path_is_clear(path_tiles: Array[Vector2i]) -> bool:
 		var tile_position := path_tiles[path_index]
 
 		if (
-			not WorldData.get_city_object_at_tile(tile_position).is_empty()
+			not CityObjectSystem.get_city_object_at_tile(tile_position).is_empty()
 			or not CityConstructionSystem.get_city_construction_site_at_tile(
 				tile_position
 			).is_empty()
@@ -2243,7 +2243,7 @@ func _find_placeable_rectangle(
 		for x in range(city_world.width - size_tiles.x + 1):
 			var top_left := Vector2i(x, y)
 
-			if WorldData.can_place_city_object(
+			if CityObjectSystem.can_place_city_object(
 				city_world,
 				top_left,
 				size_tiles,

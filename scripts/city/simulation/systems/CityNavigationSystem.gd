@@ -345,7 +345,7 @@ static func _get_clean_destination_tiles(
 		destination_tiles.append(destination_tile)
 
 	destination_tiles.sort_custom(
-		WorldData._sort_city_tiles_y_then_x
+		CityObjectSystem._sort_city_tiles_y_then_x
 	)
 
 	return destination_tiles

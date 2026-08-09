@@ -12,6 +12,7 @@ var failure_count: int = 0
 
 func _ready() -> void:
 	_run_state_isolation_test()
+	_test_validator_cache_tracks_object_state_identity()
 	WorldPoliticalState.reset_state()
 	WorldData.reset_runtime_session_state()
 
@@ -88,18 +89,18 @@ func _run_state_isolation_test() -> void:
 		WorldData.RESOURCE_FISH: 7,
 	}
 	var shared_object_tile := Vector2i(2, 2)
-	WorldData.next_city_object_id = 16
-	WorldData.city_object_version = 3
-	var player_road := WorldData.add_city_road_object(
+	CityObjectSystem.get_current_state().next_object_id = 16
+	CityObjectSystem.get_current_state().object_version = 3
+	var player_road := CityObjectSystem.add_city_road_object(
 		[shared_object_tile],
 		"player",
 		player_city_world
 	)
 	_expect(
 		int(player_road.get("id", -1)) == 16
-		and WorldData.next_city_object_id == 17
-		and WorldData.city_object_version == 4,
-		"Player object mutation must route through the compatibility API."
+		and CityObjectSystem.get_current_state().next_object_id == 17
+		and CityObjectSystem.get_current_state().object_version == 4,
+		"Player object mutation must route through CityObjectSystem."
 	)
 	var player_objects: Array = player_state.object_state.objects
 	var player_object_index: Dictionary = (
@@ -236,26 +237,26 @@ func _run_state_isolation_test() -> void:
 	)
 	_expect(
 		WorldData.city_resource_amounts.is_empty()
-		and WorldData.city_objects.is_empty(),
+		and CityObjectSystem.get_current_state().objects.is_empty(),
 		"A fresh city must begin with independent resources and objects."
 	)
 	_expect(
-		WorldData.next_city_object_id == 1
-		and WorldData.city_object_version == 0
+		CityObjectSystem.get_current_state().next_object_id == 1
+		and CityObjectSystem.get_current_state().object_version == 0
 		and WorldData.city_assignment_version == 0,
 		"A fresh city must begin with independent counters and change versions."
 	)
 	_expect(
-		is_same(WorldData.city_objects, cpu_state.object_state.objects)
+		is_same(CityObjectSystem.get_current_state().objects, cpu_state.object_state.objects)
 		and is_same(
-			WorldData.city_object_index_by_id,
+			CityObjectSystem.get_current_state().object_index_by_id,
 			cpu_state.object_state.object_index_by_id
 		)
 		and is_same(
-			WorldData.city_occupied_tiles,
+			CityObjectSystem.get_current_state().occupied_tiles,
 			cpu_state.object_state.occupied_tiles
 		),
-		"WorldData must expose the active CPU City's exact object collections."
+		"CityObjectSystem must expose the active CPU City's exact object collections."
 	)
 	_expect(
 		CityWorkSystem.get_current_work_state().player_commands.is_empty()
@@ -289,18 +290,18 @@ func _run_state_isolation_test() -> void:
 	WorldData.city_resource_amounts = {
 		WorldData.RESOURCE_FISH: 31,
 	}
-	WorldData.next_city_object_id = 54
-	WorldData.city_object_version = 11
-	var cpu_road := WorldData.add_city_road_object(
+	CityObjectSystem.get_current_state().next_object_id = 54
+	CityObjectSystem.get_current_state().object_version = 11
+	var cpu_road := CityObjectSystem.add_city_road_object(
 		[shared_object_tile],
 		"cpu",
 		cpu_city_world
 	)
 	_expect(
 		int(cpu_road.get("id", -1)) == 54
-		and WorldData.next_city_object_id == 55
-		and WorldData.city_object_version == 12,
-		"CPU object mutation must route through the compatibility API."
+		and CityObjectSystem.get_current_state().next_object_id == 55
+		and CityObjectSystem.get_current_state().object_version == 12,
+		"CPU object mutation must route through CityObjectSystem."
 	)
 	var cpu_objects: Array = cpu_state.object_state.objects
 	var cpu_object_index: Dictionary = cpu_state.object_state.object_index_by_id
@@ -367,20 +368,20 @@ func _run_state_isolation_test() -> void:
 	)
 	_expect(
 		int(WorldData.city_resource_amounts.get(WorldData.RESOURCE_FISH, 0)) == 7
-		and int(WorldData.city_objects[0].get("id", -1)) == 16
-		and int(WorldData.city_object_index_by_id.get(16, -1)) == 0
-		and int(WorldData.city_occupied_tiles.get(shared_object_tile, -1)) == 16,
+		and int(CityObjectSystem.get_current_state().objects[0].get("id", -1)) == 16
+		and int(CityObjectSystem.get_current_state().object_index_by_id.get(16, -1)) == 0
+		and int(CityObjectSystem.get_current_state().occupied_tiles.get(shared_object_tile, -1)) == 16,
 		"Returning to the player city must restore its resources and objects."
 	)
 	_expect(
-		is_same(WorldData.city_objects, player_objects)
-		and is_same(WorldData.city_object_index_by_id, player_object_index)
-		and is_same(WorldData.city_occupied_tiles, player_occupancy),
+		is_same(CityObjectSystem.get_current_state().objects, player_objects)
+		and is_same(CityObjectSystem.get_current_state().object_index_by_id, player_object_index)
+		and is_same(CityObjectSystem.get_current_state().occupied_tiles, player_occupancy),
 		"Returning to the player City must restore exact collection identity."
 	)
 	_expect(
-		WorldData.next_city_object_id == 17
-		and WorldData.city_object_version == 4
+		CityObjectSystem.get_current_state().next_object_id == 17
+		and CityObjectSystem.get_current_state().object_version == 4
 		and WorldData.city_assignment_version == 9,
 		"Returning to the player city must restore its counters and versions."
 	)
@@ -414,20 +415,20 @@ func _run_state_isolation_test() -> void:
 	)
 	_expect(
 		int(WorldData.city_resource_amounts.get(WorldData.RESOURCE_FISH, 0)) == 31
-		and int(WorldData.city_objects[0].get("id", -1)) == 54
-		and int(WorldData.city_object_index_by_id.get(54, -1)) == 0
-		and int(WorldData.city_occupied_tiles.get(shared_object_tile, -1)) == 54,
+		and int(CityObjectSystem.get_current_state().objects[0].get("id", -1)) == 54
+		and int(CityObjectSystem.get_current_state().object_index_by_id.get(54, -1)) == 0
+		and int(CityObjectSystem.get_current_state().occupied_tiles.get(shared_object_tile, -1)) == 54,
 		"Reactivating the CPU city must restore its own resources and objects."
 	)
 	_expect(
-		is_same(WorldData.city_objects, cpu_objects)
-		and is_same(WorldData.city_object_index_by_id, cpu_object_index)
-		and is_same(WorldData.city_occupied_tiles, cpu_occupancy),
+		is_same(CityObjectSystem.get_current_state().objects, cpu_objects)
+		and is_same(CityObjectSystem.get_current_state().object_index_by_id, cpu_object_index)
+		and is_same(CityObjectSystem.get_current_state().occupied_tiles, cpu_occupancy),
 		"Reactivating the CPU City must restore exact collection identity."
 	)
 	_expect(
-		WorldData.next_city_object_id == 55
-		and WorldData.city_object_version == 12
+		CityObjectSystem.get_current_state().next_object_id == 55
+		and CityObjectSystem.get_current_state().object_version == 12
 		and WorldData.city_assignment_version == 21,
 		"Reactivating the CPU city must restore its own counters and versions."
 	)
@@ -454,9 +455,45 @@ func _run_state_isolation_test() -> void:
 		"Independent city states must preserve political registry integrity."
 	)
 
-	# Leave the compatibility workspace on the player's city so existing tests
-	# and session teardown see the same player-facing state they expect.
+	# Leave the player settlement selected so existing tests and session teardown
+	# see the same player-facing state they expect.
 	WorldPoliticalState.set_active_settlement(player_city_id)
+
+
+func _test_validator_cache_tracks_object_state_identity() -> void:
+	WorldPoliticalState.reset_state()
+	WorldData.reset_runtime_session_state()
+	var city_world := _make_world(8, 8, 91_303)
+	WorldData.store_city_world_save(city_world, 91_303)
+	var shared_tile := Vector2i(3, 3)
+	var first_road := CityObjectSystem.add_city_road_object(
+		[shared_tile],
+		"first_state",
+		city_world
+	)
+	var first_state := CityObjectSystem.get_current_state()
+	var first_result := CityStateValidatorScript.validate(true, false)
+
+	_expect(
+		not first_road.is_empty()
+		and int(first_result.get("checked_objects", -1)) == 1,
+		"The validator-cache fixture must cache one object for its first state."
+	)
+
+	# Rotate only the selected object-state owner. Every numeric version used by
+	# the validator remains equal, so identity is the only valid cache boundary.
+	WorldPoliticalState.reset_state()
+	var second_state := CityObjectSystem.get_current_state()
+	second_state.object_version = first_state.object_version
+	var second_result := CityStateValidatorScript.validate(false, false)
+
+	_expect(
+		not is_same(second_state, first_state)
+		and second_state.objects.is_empty()
+		and second_state.object_version == first_state.object_version
+		and int(second_result.get("checked_objects", -1)) == 0,
+		"CityStateValidator must invalidate equal-version cache data when object-state identity changes."
+	)
 
 
 func _make_world(width: int, height: int, seed: int) -> WorldData:

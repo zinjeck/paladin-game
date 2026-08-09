@@ -432,7 +432,7 @@ func _test_completed_road_doubles_visual_travel_speed() -> void:
 
 	WorldData.store_city_world_save(city_world, 91_733)
 	_expect(
-		not WorldData.add_city_road_object(
+		not CityObjectSystem.add_city_road_object(
 			[Vector2i(1, 0)],
 			"player",
 			city_world

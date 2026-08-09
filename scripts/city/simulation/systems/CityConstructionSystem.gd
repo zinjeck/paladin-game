@@ -71,6 +71,19 @@ static func city_object_type_uses_construction(
 		.city_object_type_uses_construction(object_type)
 	)
 
+
+static func can_place_city_road_tile(
+	city_world: WorldData,
+	tile_position: Vector2i
+) -> bool:
+	return (
+		city_object_type_uses_construction(WorldData.CITY_OBJECT_ROAD)
+		and can_place_city_construction_footprint(
+			city_world,
+			[tile_position]
+		)
+	)
+
 static func mark_city_construction_changed() -> void:
 	get_current_state().construction_version += 1
 
@@ -137,11 +150,13 @@ static func can_place_city_construction_footprint(
 		if get_current_state().construction_site_id_by_tile.has(tile_position):
 			return false
 
+		var occupied_object_id := (
+			CityObjectSystem.get_city_object_id_at_tile(tile_position)
+		)
+
 		if (
-			WorldData.city_occupied_tiles.has(tile_position)
-			and int(
-				WorldData.city_occupied_tiles.get(tile_position, -1)
-			) != allowed_occupied_object_id
+			occupied_object_id > 0
+			and occupied_object_id != allowed_occupied_object_id
 		):
 			return false
 
@@ -369,7 +384,7 @@ static func can_place_city_object_construction(
 
 	return can_place_city_construction_footprint(
 		city_world,
-		WorldData.make_rectangle_city_object_footprint_tiles(
+		CityObjectSystem.make_rectangle_city_object_footprint_tiles(
 			top_left,
 			size_tiles
 		),
@@ -439,7 +454,7 @@ static func create_city_construction_site(
 		footprint_lookup[tile_position] = true
 		footprint_tiles.append(tile_position)
 
-	footprint_tiles.sort_custom(WorldData._sort_city_tiles_y_then_x)
+	footprint_tiles.sort_custom(CityObjectSystem._sort_city_tiles_y_then_x)
 
 	var target_kind := str(
 		values.get(
@@ -453,7 +468,7 @@ static func create_city_construction_site(
 	var allowed_occupied_object_id := -1
 
 	if target_kind == CITY_CONSTRUCTION_TARGET_MODIFICATION:
-		var target_object := WorldData.get_city_object_by_id(
+		var target_object := CityObjectSystem.get_city_object_by_id(
 			target_object_id
 		)
 
@@ -480,7 +495,7 @@ static func create_city_construction_site(
 	if (
 		target_kind == CITY_CONSTRUCTION_TARGET_MODIFICATION
 		and str(
-			WorldData.get_city_object_by_id(target_object_id).get(
+			CityObjectSystem.get_city_object_by_id(target_object_id).get(
 				"type",
 				""
 			)
@@ -522,7 +537,7 @@ static func create_city_construction_site(
 			work_position_lookup[work_position] = true
 			work_positions.append(work_position)
 
-	work_positions.sort_custom(WorldData._sort_city_tiles_y_then_x)
+	work_positions.sort_custom(CityObjectSystem._sort_city_tiles_y_then_x)
 
 	if work_positions.is_empty():
 		return {}
@@ -605,7 +620,7 @@ static func update_city_construction_site(
 		updated_footprint_lookup[tile_position] = true
 		updated_footprint.append(tile_position)
 
-	updated_footprint.sort_custom(WorldData._sort_city_tiles_y_then_x)
+	updated_footprint.sort_custom(CityObjectSystem._sort_city_tiles_y_then_x)
 
 	if updated_footprint.is_empty():
 		return false
@@ -693,9 +708,9 @@ static func _can_update_city_construction_site_footprint(
 		if other_site_id > 0 and other_site_id != site_id:
 			return false
 
-		if WorldData.city_occupied_tiles.has(tile_position):
-			var occupied_object_id := int(
-				WorldData.city_occupied_tiles.get(tile_position, -1)
+		if CityObjectSystem.has_city_object_at_tile(tile_position):
+			var occupied_object_id := (
+				CityObjectSystem.get_city_object_id_at_tile(tile_position)
 			)
 
 			if (
@@ -791,7 +806,7 @@ static func get_city_construction_site_access_tiles(
 		):
 			access_tiles.append(raw_tile)
 
-	access_tiles.sort_custom(WorldData._sort_city_tiles_y_then_x)
+	access_tiles.sort_custom(CityObjectSystem._sort_city_tiles_y_then_x)
 	return access_tiles
 
 
@@ -1088,7 +1103,7 @@ static func create_rectangular_site(values: Dictionary) -> Dictionary:
 
 	var definition := WorldData.get_city_object_definition(object_type)
 	var footprint_tiles := (
-		WorldData.make_rectangle_city_object_footprint_tiles(
+		CityObjectSystem.make_rectangle_city_object_footprint_tiles(
 			top_left,
 			size_tiles
 		)
@@ -1162,7 +1177,7 @@ static func create_road_sites(
 
 		if (
 			tile_lookup.has(tile_position)
-			or not WorldData.can_place_city_road_tile(
+			or not can_place_city_road_tile(
 				resolved_world,
 				tile_position
 			)
@@ -1172,7 +1187,7 @@ static func create_road_sites(
 		tile_lookup[tile_position] = true
 		clean_tiles.append(tile_position)
 
-	clean_tiles.sort_custom(WorldData._sort_city_tiles_y_then_x)
+	clean_tiles.sort_custom(CityObjectSystem._sort_city_tiles_y_then_x)
 
 	if clean_tiles.is_empty():
 		return []
@@ -1352,7 +1367,7 @@ static func _build_external_work_positions(
 			position_lookup[candidate_tile] = true
 			positions.append(candidate_tile)
 
-	positions.sort_custom(WorldData._sort_city_tiles_y_then_x)
+	positions.sort_custom(CityObjectSystem._sort_city_tiles_y_then_x)
 	return positions
 
 
@@ -1978,7 +1993,7 @@ static func get_best_assignable_batchable_road_work_for_citizen(
 	if labor_positions.is_empty():
 		return best_candidate
 
-	labor_positions.sort_custom(WorldData._sort_city_tiles_y_then_x)
+	labor_positions.sort_custom(CityObjectSystem._sort_city_tiles_y_then_x)
 	var path_result := (
 		CityNavigationSystemScript.find_path_to_any_city_tile({
 			"city_world": WorldData.official_city_world,
@@ -2349,7 +2364,7 @@ static func _find_nearest_ground_relocation_tile(
 
 				candidate_tiles.append(candidate_tile)
 
-		candidate_tiles.sort_custom(WorldData._sort_city_tiles_y_then_x)
+		candidate_tiles.sort_custom(CityObjectSystem._sort_city_tiles_y_then_x)
 
 		if candidate_tiles.is_empty():
 			continue
@@ -3041,7 +3056,7 @@ static func _advance_city_construction_finalization(
 	var object_type := str(site.get("object_type", ""))
 	var footprint_tiles: Array = site.get("footprint_tiles", [])
 	var blocking_citizen_ids := (
-		WorldData.get_city_object_topology_blocking_citizen_ids(
+		CityObjectSystem.get_city_object_topology_blocking_citizen_ids(
 			object_type,
 			footprint_tiles
 		)
@@ -3067,30 +3082,18 @@ static func _advance_city_construction_finalization(
 	):
 		return {}
 
-	var completed_object: Dictionary = {}
-
-	if (
-		str(site.get("shape_mode", ""))
-		== WorldData.CITY_OBJECT_SHAPE_TILE_AREA
-	):
-		completed_object = WorldData.add_city_road_object(
-			footprint_tiles,
-			str(site.get("owner", "player")),
-			city_world,
-			site_id
-		)
-	else:
-		completed_object = WorldData.add_city_object({
-			"object_type": object_type,
-			"top_left": site.get(
-				"top_left",
-				WorldData.INVALID_CITY_TILE_POSITION
-			),
-			"size_tiles": site.get("size", Vector2i.ZERO),
-			"object_owner": str(site.get("owner", "player")),
-			"city_world": city_world,
-			"allowed_construction_site_id": site_id,
-		})
+	var completed_object := CityObjectSystem.register_completed_city_object({
+		"object_type": object_type,
+		"top_left": site.get(
+			"top_left",
+			WorldData.INVALID_CITY_TILE_POSITION
+		),
+		"size_tiles": site.get("size", Vector2i.ZERO),
+		"footprint_tiles": footprint_tiles,
+		"object_owner": str(site.get("owner", "player")),
+		"city_world": city_world,
+		"allowed_construction_site_id": site_id,
+	})
 
 	if completed_object.is_empty():
 		_restore_site_materials(site, consumed_materials)

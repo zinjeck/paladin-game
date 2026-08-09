@@ -146,7 +146,7 @@ static func get_city_object_unreserved_food_amount(
 static func get_city_public_unreserved_food_nutrition() -> int:
 	var total_nutrition := 0
 
-	for raw_city_object in WorldData.city_objects:
+	for raw_city_object in CityObjectSystem.get_city_objects():
 		if not raw_city_object is Dictionary:
 			continue
 
@@ -839,7 +839,7 @@ static func _find_nearest_eligible_public_storage_source_in_tier(
 	var endpoint_ids_by_access_tile: Dictionary = {}
 	var source_tiles: Array = []
 
-	for raw_city_object in WorldData.city_objects:
+	for raw_city_object in CityObjectSystem.get_city_objects():
 		if not raw_city_object is Dictionary:
 			continue
 
@@ -1022,7 +1022,7 @@ static func _find_nearest_eligible_destination_in_tier(
 	# This is the replaceable destination-eligibility policy boundary. The
 	# current policy deliberately scans every compatible public container in
 	# the city; later radii, priorities, filters, and preferences belong here.
-	for raw_city_object in WorldData.city_objects:
+	for raw_city_object in CityObjectSystem.get_city_objects():
 		if not raw_city_object is Dictionary:
 			continue
 
@@ -1223,7 +1223,7 @@ static func _find_nearest_eligible_destination_for_resources_in_tier(
 	var endpoint_ids_by_access_tile: Dictionary = {}
 	var destination_tiles: Array = []
 
-	for raw_city_object in WorldData.city_objects:
+	for raw_city_object in CityObjectSystem.get_city_objects():
 		if not raw_city_object is Dictionary:
 			continue
 
@@ -1677,7 +1677,7 @@ static func get_resource_supply_candidates(
 	):
 		return candidates
 
-	for raw_object in WorldData.city_objects:
+	for raw_object in CityObjectSystem.get_city_objects():
 		if not raw_object is Dictionary:
 			continue
 
@@ -2040,14 +2040,14 @@ static func _get_survival_source_groups(
 	var workplace_group: Array[Dictionary] = []
 	var ground_pile_group: Array[Dictionary] = []
 	var home_id := int(citizen.get("home_object_id", -1))
-	var home := WorldData.get_city_object_by_id(home_id)
+	var home := CityObjectSystem.get_city_object_by_id(home_id)
 
 	if city_object_is_household_home(home):
 		own_home_group.append(
 			CityLogisticsSystem.make_city_citizen_haul_endpoint(home_id)
 		)
 
-	for raw_object in WorldData.city_objects:
+	for raw_object in CityObjectSystem.get_city_objects():
 		if not raw_object is Dictionary:
 			continue
 
@@ -2103,7 +2103,7 @@ static func _get_household_source_groups() -> Array:
 	var workplace_group: Array[Dictionary] = []
 	var ground_pile_group: Array[Dictionary] = []
 
-	for raw_object in WorldData.city_objects:
+	for raw_object in CityObjectSystem.get_city_objects():
 		if not raw_object is Dictionary:
 			continue
 
@@ -2383,7 +2383,7 @@ static func _get_endpoint_access_tiles(
 		WorldData.CITY_CITIZEN_HAUL_ENDPOINT_KIND_CITY_OBJECT_CONTAINER:
 			return WorldData.get_city_object_access_tiles(
 				WorldData.official_city_world,
-				WorldData.get_city_object_by_id(int(endpoint.get("id", -1)))
+				CityObjectSystem.get_city_object_by_id(int(endpoint.get("id", -1)))
 			)
 
 		WorldData.CITY_CITIZEN_HAUL_ENDPOINT_KIND_GROUND_PILE:
@@ -2482,7 +2482,7 @@ static func _get_container_object_for_endpoint(
 	):
 		return {}
 
-	return WorldData.get_city_object_by_id(int(endpoint.get("id", -1)))
+	return CityObjectSystem.get_city_object_by_id(int(endpoint.get("id", -1)))
 
 
 static func _source_result_is_better(

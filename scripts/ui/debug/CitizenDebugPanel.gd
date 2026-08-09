@@ -391,7 +391,7 @@ static func get_home_text(citizen: Dictionary) -> String:
 	if home_object_id < 0:
 		return "none"
 
-	var home_object := WorldData.get_city_object_by_id(home_object_id)
+	var home_object := CityObjectSystem.get_city_object_by_id(home_object_id)
 
 	if home_object.is_empty():
 		return "missing #" + str(home_object_id)
@@ -405,7 +405,7 @@ static func get_job_text(citizen: Dictionary) -> String:
 	if job_object_id < 0:
 		return "none"
 
-	var job_object := WorldData.get_city_object_by_id(job_object_id)
+	var job_object := CityObjectSystem.get_city_object_by_id(job_object_id)
 
 	if job_object.is_empty():
 		return "missing #" + str(job_object_id)
@@ -508,7 +508,7 @@ static func get_task_text(citizen: Dictionary) -> String:
 		)
 
 	if target_object_id > 0:
-		var target_object := WorldData.get_city_object_by_id(
+		var target_object := CityObjectSystem.get_city_object_by_id(
 			target_object_id
 		)
 
@@ -626,7 +626,7 @@ static func format_haul_endpoint(raw_endpoint) -> String:
 	):
 		return endpoint_kind + " #" + str(endpoint_id)
 
-	var city_object := WorldData.get_city_object_by_id(endpoint_id)
+	var city_object := CityObjectSystem.get_city_object_by_id(endpoint_id)
 
 	if city_object.is_empty():
 		return "missing #" + str(endpoint_id)
