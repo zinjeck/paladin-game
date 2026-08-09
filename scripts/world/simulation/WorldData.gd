@@ -110,9 +110,34 @@ static var official_region_size: int = 0
 
 static var official_world_scene_path: String = ""
 static var official_city_scene_path: String = ""
-static var city_resource_amounts: Dictionary = {}
-static var city_owned_resource_amount_cache: Dictionary = {}
-static var city_owned_resource_amount_cache_container_version: int = -1
+
+# Resource/container accounting ownership is settlement-local. These
+# compatibility properties preserve the historical WorldData behavior API
+# during the ownership-only pass while routing all four mutable accounting
+# fields to the active City's CityResourceAccountingState.
+static var city_owned_resource_amount_cache: Dictionary:
+	get:
+		var state := (
+			WorldPoliticalState.get_current_city_resource_accounting_state()
+		)
+		return state.owned_resource_amount_cache
+	set(value):
+		var state := (
+			WorldPoliticalState.get_current_city_resource_accounting_state()
+		)
+		state.owned_resource_amount_cache = value
+
+static var city_owned_resource_amount_cache_container_version: int:
+	get:
+		var state := (
+			WorldPoliticalState.get_current_city_resource_accounting_state()
+		)
+		return state.owned_resource_amount_cache_container_version
+	set(value):
+		var state := (
+			WorldPoliticalState.get_current_city_resource_accounting_state()
+		)
+		state.owned_resource_amount_cache_container_version = value
 
 # Construction registry ownership is settlement-local. These compatibility
 # properties preserve the historical WorldData API during the ownership-only
@@ -138,8 +163,30 @@ static var next_city_citizen_id: int = 1
 #
 # These let observers refresh only the parts of the city that actually
 # changed instead of treating every mutation as a generic storage change.
-static var city_container_version: int = 0
-static var city_public_storage_version: int = 0
+static var city_container_version: int:
+	get:
+		var state := (
+			WorldPoliticalState.get_current_city_resource_accounting_state()
+		)
+		return state.container_version
+	set(value):
+		var state := (
+			WorldPoliticalState.get_current_city_resource_accounting_state()
+		)
+		state.container_version = value
+
+static var city_public_storage_version: int:
+	get:
+		var state := (
+			WorldPoliticalState.get_current_city_resource_accounting_state()
+		)
+		return state.public_storage_version
+	set(value):
+		var state := (
+			WorldPoliticalState.get_current_city_resource_accounting_state()
+		)
+		state.public_storage_version = value
+
 static var city_citizen_version: int = 0
 static var city_citizen_spatial_version: int = 0
 static var city_citizen_movement_version: int = 0
@@ -1578,24 +1625,6 @@ static func get_city_food_task_reserved_endpoint_amount(
 #endregion
 
 #region City Resource Totals
-
-static func ensure_city_resource_amounts() -> void:
-	city_resource_amounts = make_sparse_resource_container(
-		city_resource_amounts
-	)
-
-
-static func get_city_resource_amount(resource: String) -> int:
-	ensure_city_resource_amounts()
-
-	if not is_city_resource_type(resource):
-		return 0
-
-	return get_resource_container_resource_amount(
-		city_resource_amounts,
-		resource
-	)
-
 
 static func get_total_public_city_resource_amount(resource: String) -> int:
 	var total := 0
@@ -6462,7 +6491,6 @@ static func reset_player_city_state() -> void:
 	player_city_data.clear()
 	player_city_foundation_top_left = Vector2i(-1, -1)
 	player_city_foundation_size = Vector2i.ZERO
-	city_resource_amounts.clear()
 	city_owned_resource_amount_cache.clear()
 	city_owned_resource_amount_cache_container_version = -1
 	WorldPoliticalState.reset_extracted_city_state()

@@ -20,6 +20,9 @@ const CitySettlementSimulationStateScript = preload(
 const CityObjectStateScript = preload(
 	"res://scripts/city/simulation/CityObjectState.gd"
 )
+const CityResourceAccountingStateScript = preload(
+	"res://scripts/city/simulation/CityResourceAccountingState.gd"
+)
 const CityWorkStateScript = preload(
 	"res://scripts/city/simulation/CityWorkState.gd"
 )
@@ -42,6 +45,9 @@ var active_settlement_id: int = SettlementDataScript.INVALID_SETTLEMENT_ID
 
 var _foundation_world_fingerprint: String = ""
 var _unbound_city_object_state = CityObjectStateScript.new()
+var _unbound_city_resource_accounting_state = (
+	CityResourceAccountingStateScript.new()
+)
 var _unbound_city_work_state = CityWorkStateScript.new()
 var _unbound_city_logistics_state = CityLogisticsStateScript.new()
 var _unbound_city_construction_state = CityConstructionStateScript.new()
@@ -58,6 +64,9 @@ func reset_state() -> void:
 	active_settlement_id = SettlementDataScript.INVALID_SETTLEMENT_ID
 	_foundation_world_fingerprint = ""
 	_unbound_city_object_state = CityObjectStateScript.new()
+	_unbound_city_resource_accounting_state = (
+		CityResourceAccountingStateScript.new()
+	)
 	_unbound_city_work_state = CityWorkStateScript.new()
 	_unbound_city_logistics_state = CityLogisticsStateScript.new()
 	_unbound_city_construction_state = CityConstructionStateScript.new()
@@ -79,6 +88,9 @@ func synchronize_foundation_with_world_data() -> bool:
 	# carry it across an already-live political registry into another world.
 	var should_adopt_unbound_city_state := not _has_live_foundation_registry()
 	var unbound_object_state_to_adopt = _unbound_city_object_state
+	var unbound_resource_accounting_state_to_adopt = (
+		_unbound_city_resource_accounting_state
+	)
 	var unbound_work_state_to_adopt = _unbound_city_work_state
 	var unbound_logistics_state_to_adopt = _unbound_city_logistics_state
 	var unbound_construction_state_to_adopt = _unbound_city_construction_state
@@ -135,6 +147,9 @@ func synchronize_foundation_with_world_data() -> bool:
 		return false
 	if should_adopt_unbound_city_state:
 		capital_state.object_state = unbound_object_state_to_adopt
+		capital_state.resource_accounting_state = (
+			unbound_resource_accounting_state_to_adopt
+		)
 		capital_state.work_state = unbound_work_state_to_adopt
 		capital_state.logistics_state = unbound_logistics_state_to_adopt
 		capital_state.construction_state = unbound_construction_state_to_adopt
@@ -339,12 +354,18 @@ func set_settlement_simulation_backend(
 			and previous_backend_kind
 			== SettlementSimulationContextScript.BACKEND_LEGACY_CITY_WORLD_DATA
 		):
-			# Completed-object ownership still resolves through the unbound
-			# compatibility state while the legacy backend is active. Transfer
-			# that exact state once; capture_from_world_data() intentionally no
-			# longer copies extracted object storage.
+			# Extracted object and resource-accounting ownership still resolve
+			# through unbound compatibility state while the legacy backend is
+			# active. Transfer those exact owners once; capture_from_world_data()
+			# intentionally no longer copies either extracted domain.
 			city_state.object_state = _unbound_city_object_state
 			_unbound_city_object_state = CityObjectStateScript.new()
+			city_state.resource_accounting_state = (
+				_unbound_city_resource_accounting_state
+			)
+			_unbound_city_resource_accounting_state = (
+				CityResourceAccountingStateScript.new()
+			)
 			city_state.capture_from_world_data()
 
 		settlement_city_state_by_id[settlement_id] = city_state
@@ -399,6 +420,16 @@ func get_current_city_object_state() -> CityObjectState:
 	):
 		return active_city_state.object_state
 	return _unbound_city_object_state
+
+
+func get_current_city_resource_accounting_state() -> CityResourceAccountingState:
+	var active_city_state = get_active_city_simulation_state()
+	if (
+		active_city_state != null
+		and active_city_state.resource_accounting_state is CityResourceAccountingState
+	):
+		return active_city_state.resource_accounting_state
+	return _unbound_city_resource_accounting_state
 
 
 func get_current_city_work_state() -> CityWorkState:

@@ -14,13 +14,12 @@ var city_world = null
 var city_seed: int = 0
 var city_runtime_data: Dictionary = {}
 
-var resource_amounts: Dictionary = {}
-var owned_resource_amount_cache: Dictionary = {}
-var owned_resource_amount_cache_container_version: int = -1
-
 # Physically extracted settlement-local subsystems. Their state is selected by
 # settlement identity rather than copied through the legacy WorldData workspace.
 var object_state: CityObjectState = CityObjectState.new()
+var resource_accounting_state: CityResourceAccountingState = (
+	CityResourceAccountingState.new()
+)
 var work_state: CityWorkState = CityWorkState.new()
 var logistics_state: CityLogisticsState = CityLogisticsState.new()
 var construction_state: CityConstructionState = CityConstructionState.new()
@@ -37,8 +36,6 @@ var active_task_id_lookup: Dictionary = {}
 var object_access_tile_cache: Dictionary = {}
 var next_citizen_id: int = 1
 
-var container_version: int = 0
-var public_storage_version: int = 0
 var citizen_version: int = 0
 var citizen_spatial_version: int = 0
 var citizen_movement_version: int = 0
@@ -51,12 +48,6 @@ func capture_from_world_data() -> void:
 	city_world = WorldData.official_city_world
 	city_seed = WorldData.official_city_seed
 	city_runtime_data = WorldData.player_city_data
-
-	resource_amounts = WorldData.city_resource_amounts
-	owned_resource_amount_cache = WorldData.city_owned_resource_amount_cache
-	owned_resource_amount_cache_container_version = (
-		WorldData.city_owned_resource_amount_cache_container_version
-	)
 
 	citizens = WorldData.city_citizens
 	citizen_index_by_id = WorldData.city_citizen_index_by_id
@@ -72,8 +63,6 @@ func capture_from_world_data() -> void:
 	object_access_tile_cache = WorldData.city_object_access_tile_cache
 	next_citizen_id = WorldData.next_city_citizen_id
 
-	container_version = WorldData.city_container_version
-	public_storage_version = WorldData.city_public_storage_version
 	citizen_version = WorldData.city_citizen_version
 	citizen_spatial_version = WorldData.city_citizen_spatial_version
 	citizen_movement_version = WorldData.city_citizen_movement_version
@@ -86,12 +75,6 @@ func apply_to_world_data() -> void:
 	WorldData.official_city_world = city_world
 	WorldData.official_city_seed = city_seed
 	WorldData.player_city_data = city_runtime_data
-
-	WorldData.city_resource_amounts = resource_amounts
-	WorldData.city_owned_resource_amount_cache = owned_resource_amount_cache
-	WorldData.city_owned_resource_amount_cache_container_version = (
-		owned_resource_amount_cache_container_version
-	)
 
 	WorldData.city_citizens = citizens
 	WorldData.city_citizen_index_by_id = citizen_index_by_id
@@ -107,8 +90,6 @@ func apply_to_world_data() -> void:
 	WorldData.city_object_access_tile_cache = object_access_tile_cache
 	WorldData.next_city_citizen_id = next_citizen_id
 
-	WorldData.city_container_version = container_version
-	WorldData.city_public_storage_version = public_storage_version
 	WorldData.city_citizen_version = citizen_version
 	WorldData.city_citizen_spatial_version = citizen_spatial_version
 	WorldData.city_citizen_movement_version = citizen_movement_version
