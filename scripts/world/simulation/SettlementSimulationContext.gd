@@ -97,3 +97,13 @@ func get_city_citizen_registry_state():
 	if raw_citizen_registry_state is CityCitizenRegistryState:
 		return raw_citizen_registry_state
 	return null
+
+
+func get_city_citizen_spatial_state():
+	if not has_instance_owned_city_state():
+		return null
+
+	var raw_citizen_spatial_state = local_state.citizen_spatial_state
+	if raw_citizen_spatial_state is CityCitizenSpatialState:
+		return raw_citizen_spatial_state
+	return null

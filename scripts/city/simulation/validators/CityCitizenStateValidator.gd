@@ -43,6 +43,8 @@ static func _validate_city_citizen_spatial_state(
 				citizen_index
 			]
 		)
+		if not bool(citizen.get("alive", false)):
+			continue
 
 		if not citizen.has("city_tile_position"):
 			errors.append(
@@ -226,6 +228,15 @@ static func _validate_city_citizen_spatial_state(
 					citizen_index
 				]
 			)
+			if not bool(citizen.get("alive", false)):
+				errors.append(
+					"Citizen spatial index at "
+						+ str(tile_position)
+						+ " references non-living citizen "
+						+ str(citizen_id)
+						+ "."
+				)
+				continue
 			var indexed_position = citizen.get(
 				"city_tile_position",
 				WorldData.INVALID_CITY_TILE_POSITION

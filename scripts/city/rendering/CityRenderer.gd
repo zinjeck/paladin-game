@@ -189,6 +189,7 @@ var observed_city_container_version: int = -1
 var observed_city_public_storage_version: int = -1
 var observed_city_citizen_registry_state: CityCitizenRegistryState
 var observed_city_citizen_version: int = -1
+var observed_city_citizen_spatial_state: CityCitizenSpatialState
 var observed_city_citizen_spatial_version: int = -1
 var observed_city_citizen_movement_version: int = -1
 var synchronized_city_citizen_movement_version: int = -1
@@ -657,12 +658,27 @@ func _collect_world_data_change_flags(
 			citizen_registry_state_changed
 		)
 
+	var current_citizen_spatial_state := (
+		WorldPoliticalState.get_current_city_citizen_spatial_state()
+	)
+	var citizen_spatial_state_changed := (
+		observed_city_citizen_spatial_state == null
+		or not is_same(
+			observed_city_citizen_spatial_state,
+			current_citizen_spatial_state
+		)
+	)
+
 	if (
-		observed_city_citizen_spatial_version
-		!= WorldData.city_citizen_spatial_version
+		citizen_spatial_state_changed
+		or observed_city_citizen_spatial_version
+		!= current_citizen_spatial_state.citizen_spatial_version
 	):
+		observed_city_citizen_spatial_state = (
+			current_citizen_spatial_state
+		)
 		observed_city_citizen_spatial_version = (
-			WorldData.city_citizen_spatial_version
+			current_citizen_spatial_state.citizen_spatial_version
 		)
 		change_flags["city_citizen_spatial_changed"] = true
 
