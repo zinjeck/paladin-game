@@ -2749,7 +2749,7 @@ static func _remove_resource_from_endpoint(values: Dictionary) -> int:
 
 	match endpoint_kind:
 		WorldData.CITY_CITIZEN_HAUL_ENDPOINT_KIND_CITY_OBJECT_CONTAINER:
-			return WorldData.remove_resource_from_city_object_storage(
+			return CityResourceContainerSystem.remove_resource_from_city_object_storage(
 				endpoint_id,
 				resource,
 				requested_amount,
@@ -2883,7 +2883,7 @@ static func _deposit_to_endpoint(values: Dictionary) -> int:
 			accepted_amount = int(add_result.get("added_amount", 0))
 			ground_drop_placements = add_result.get("placements", [])
 	else:
-		accepted_amount = WorldData.add_resource_to_city_object_storage(
+		accepted_amount = CityResourceContainerSystem.add_resource_to_city_object_storage(
 			object_id,
 			resource,
 			amount_to_deposit,
@@ -2939,7 +2939,7 @@ static func _deposit_to_endpoint(values: Dictionary) -> int:
 			removed_from_destination = accepted_amount
 	else:
 		removed_from_destination = (
-			WorldData.remove_resource_from_city_object_storage(
+			CityResourceContainerSystem.remove_resource_from_city_object_storage(
 				object_id,
 				resource,
 				accepted_amount

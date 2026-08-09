@@ -828,7 +828,7 @@ static func _register_completed_rectangle(
 
 	if has_resource_storage:
 		city_object["stored_resources"] = (
-			WorldData.make_empty_city_object_storage_for_type(object_type)
+			CityResourceContainerSystem.make_empty_city_object_storage_for_type(object_type)
 		)
 
 	if not _can_append_completed_city_object(city_object):
@@ -981,7 +981,7 @@ static func _append_completed_city_object(
 		WorldData._mark_city_workplaces_changed()
 
 	if city_object.has("stored_resources"):
-		WorldData._mark_city_container_changed(city_object)
+		CityResourceAccountingSystem.mark_city_container_changed(city_object)
 
 	return true
 

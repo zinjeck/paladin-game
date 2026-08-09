@@ -37,6 +37,7 @@ func _ready() -> void:
 	_test_normal_order_preempts_before_pickup()
 	_test_normal_order_waits_for_picked_up_cargo_delivery()
 	_test_chained_pickup_respects_near_full_destination()
+	_test_public_storage_keep_fallback()
 	_test_critical_hunger_interrupts_cargo_safely()
 	_test_construction_labor_releases_at_atomic_boundary()
 	_test_world_founding_identity_commit_boundaries()
@@ -227,7 +228,7 @@ func _test_normal_order_waits_for_picked_up_cargo_delivery() -> void:
 			break
 
 	_expect(
-		WorldData.get_city_object_stored_resource_amount(
+		CityResourceContainerSystem.get_city_object_stored_resource_amount(
 			CityObjectSystem.get_city_object_by_id(stockpile_id),
 			WorldData.RESOURCE_STONE
 		) == 2
@@ -251,12 +252,21 @@ func _test_chained_pickup_respects_near_full_destination() -> void:
 	var city_world := _reset_fixture()
 	var citizen := _add_citizen(Vector2i(5, 5))
 	var citizen_id := int(citizen.get("id", -1))
+	var keep := CityObjectSystem.add_city_object({
+		"object_type": WorldData.CITY_OBJECT_CITY_CENTER,
+		"top_left": Vector2i(20, 10),
+		"size_tiles": WorldData.get_city_object_size_for_type(
+			WorldData.CITY_OBJECT_CITY_CENTER
+		),
+		"object_owner": "player",
+		"city_world": city_world,
+	})
 	var stockpile := _add_stockpile(city_world, Vector2i(10, 4))
 	var stockpile_id := int(stockpile.get("id", -1))
-	var stockpile_capacity := WorldData.get_city_object_storage_capacity(
+	var stockpile_capacity := CityResourceContainerSystem.get_city_object_storage_capacity(
 		stockpile
 	)
-	var stored_amount := WorldData.add_resource_to_city_object_storage(
+	var stored_amount := CityResourceContainerSystem.add_resource_to_city_object_storage(
 		stockpile_id,
 		WorldData.RESOURCE_LUMBER,
 		stockpile_capacity - 4
@@ -278,7 +288,8 @@ func _test_chained_pickup_respects_near_full_destination() -> void:
 	)
 
 	_expect(
-		stockpile_id > 0
+		not keep.is_empty()
+		and stockpile_id > 0
 		and stored_amount == stockpile_capacity - 4
 		and first_source_id > 0
 		and second_source_id > 0
@@ -304,7 +315,7 @@ func _test_chained_pickup_respects_near_full_destination() -> void:
 	var source_reserved_amount := int(
 		reservation.get("source_reserved_amount", 0)
 	)
-	var destination_free_space := WorldData.get_city_object_storage_free_space(
+	var destination_free_space := CityResourceContainerSystem.get_city_object_storage_free_space(
 		CityObjectSystem.get_city_object_by_id(stockpile_id)
 	)
 	var validation_result := CityStateValidatorScript.validate(true, false)
@@ -338,6 +349,317 @@ func _test_chained_pickup_respects_near_full_destination() -> void:
 		"Chained pickup reservations must keep shared container capacity valid."
 	)
 
+	var container_version_before_deposit := (
+		CityResourceAccountingSystem.get_city_container_version()
+	)
+	var public_version_before_deposit := (
+		CityResourceAccountingSystem.get_city_public_storage_version()
+	)
+	var physical_lumber_before_deposit := (
+		WorldData.get_total_physical_city_resource_amount(
+			WorldData.RESOURCE_LUMBER
+		)
+	)
+	var unreserved_accepted := (
+		CityResourceContainerSystem.add_resource_to_city_object_storage(
+			stockpile_id,
+			WorldData.RESOURCE_LUMBER,
+			1
+		)
+	)
+	var wrong_reservation_accepted := (
+		CityResourceContainerSystem.add_resource_to_city_object_storage(
+			stockpile_id,
+			WorldData.RESOURCE_LUMBER,
+			1,
+			reservation_id + 10_000
+		)
+	)
+
+	_expect(
+		unreserved_accepted == 0
+		and wrong_reservation_accepted == 0,
+		"Reserved near-full capacity must reject unreserved and wrong-reservation deposits."
+	)
+	_expect(
+		CityResourceAccountingSystem.get_city_container_version()
+		== container_version_before_deposit
+		and CityResourceAccountingSystem.get_city_public_storage_version()
+		== public_version_before_deposit,
+		"Rejected deposits must not publish container or public-storage changes."
+	)
+
+	var haul_completed := false
+
+	for tick_index in range(3, 48):
+		SimulationClock.absolute_world_minutes += 2
+		CitizenMovementSystemScript.run_tick(tick_index, 2)
+		CitizenTaskSystemScript.run_tick(tick_index, 2)
+
+		if (
+			WorldData.get_city_citizen_haul_cargo_amount(citizen_id) == 0
+			and CityLogisticsSystem
+			.get_city_haul_reservation(reservation_id).is_empty()
+			and CityResourceContainerSystem
+			.get_city_object_storage_free_space(
+				CityObjectSystem.get_city_object_by_id(stockpile_id)
+			) == 0
+		):
+			haul_completed = true
+			break
+
+	var final_stockpile := CityObjectSystem.get_city_object_by_id(
+		stockpile_id
+	)
+	var final_validation := CityStateValidatorScript.validate(true, true)
+
+	_expect(
+		haul_completed
+		and CityResourceContainerSystem.get_city_object_stored_resource_amount(
+			final_stockpile,
+			WorldData.RESOURCE_LUMBER
+		) == stockpile_capacity
+		and CityResourceContainerSystem.get_city_object_storage_free_space(
+			final_stockpile
+		) == 0,
+		"The reserved haul must complete by filling the Stockpile exactly to capacity."
+	)
+	_expect(
+		CityLogisticsSystem.get_city_ground_pile_resource_amount(
+			CityLogisticsSystem.get_city_ground_pile_by_id(second_source_id),
+			WorldData.RESOURCE_LUMBER
+		) == 6,
+		"The chained source must retain the six units that could not fit."
+	)
+	_expect(
+		WorldData.get_city_citizen_haul_cargo_amount(citizen_id) == 0
+		and CityLogisticsSystem
+		.get_city_haul_reservation(reservation_id).is_empty(),
+		"Completed delivery must clear both citizen cargo and its reservation."
+	)
+	_expect(
+		bool(final_validation.get("valid", false))
+		and final_validation.get("errors", []).is_empty(),
+		"The completed near-full haul must leave the unified city state valid."
+	)
+	_expect(
+		WorldData.get_total_physical_city_resource_amount(
+			WorldData.RESOURCE_LUMBER
+		) == physical_lumber_before_deposit,
+		"The chained pickup and reserved deposit must conserve physical lumber."
+	)
+	_expect(
+		CityResourceAccountingSystem.get_city_container_version()
+		== container_version_before_deposit + 1
+		and CityResourceAccountingSystem.get_city_public_storage_version()
+		== public_version_before_deposit + 1,
+		"Only the real Stockpile deposit may advance container and public-storage versions."
+	)
+
+
+func _test_public_storage_keep_fallback() -> void:
+	print("Boundary test: public storage Keep fallback")
+	var city_world := _reset_fixture()
+	var citizen := _add_citizen(Vector2i(5, 5))
+	var citizen_id := int(citizen.get("id", -1))
+	var keep := CityObjectSystem.add_city_object({
+		"object_type": WorldData.CITY_OBJECT_CITY_CENTER,
+		"top_left": Vector2i(20, 10),
+		"size_tiles": WorldData.get_city_object_size_for_type(
+			WorldData.CITY_OBJECT_CITY_CENTER
+		),
+		"object_owner": "player",
+		"city_world": city_world,
+	})
+	var keep_id := int(keep.get("id", -1))
+	var stockpile := _add_stockpile(city_world, Vector2i(10, 4))
+	var stockpile_id := int(stockpile.get("id", -1))
+	var fallback_amount := 3
+	var source_id := _add_ground_resource(
+		Vector2i(5, 5),
+		WorldData.RESOURCE_LUMBER,
+		fallback_amount
+	)
+	var versions_before_stockpile_probe := {
+		"container": CityResourceAccountingSystem.get_city_container_version(),
+		"public": CityResourceAccountingSystem.get_city_public_storage_version(),
+	}
+	var stockpile_probe_request := _make_cleanup_haul_request(
+		city_world,
+		citizen,
+		source_id
+	)
+	var stockpile_probe_assigned := (
+		not stockpile_probe_request.is_empty()
+		and WorldData.assign_city_citizen_task(
+			citizen_id,
+			stockpile_probe_request
+		)
+	)
+	var stockpile_probe_reservation_id := (
+		CityLogisticsSystem.get_city_haul_reservation_id_for_citizen(
+			citizen_id
+		)
+	)
+	var stockpile_probe_reservation := (
+		CityLogisticsSystem.get_city_haul_reservation(
+			stockpile_probe_reservation_id
+		)
+	)
+
+	_expect(
+		keep_id > 0
+		and stockpile_id > 0
+		and source_id > 0
+		and stockpile_probe_assigned
+		and int(
+			stockpile_probe_reservation
+			.get("destination", {}).get("id", -1)
+		) == stockpile_id,
+		"Cleanup hauling must prefer a Stockpile while it has unreserved space."
+	)
+	_expect(
+		WorldData.clear_city_citizen_task(
+			citizen_id,
+			WorldData.CITY_CITIZEN_TASK_SOURCE_AUTONOMY
+		)
+		and CityLogisticsSystem.get_city_haul_reservation(
+			stockpile_probe_reservation_id
+		).is_empty()
+		and WorldData.get_city_citizen_haul_cargo_amount(citizen_id) == 0
+		and CityResourceAccountingSystem.get_city_container_version()
+		== int(versions_before_stockpile_probe["container"])
+		and CityResourceAccountingSystem.get_city_public_storage_version()
+		== int(versions_before_stockpile_probe["public"]),
+		"Routing and canceling the Stockpile probe must release state without publishing storage changes."
+	)
+
+	var stockpile_capacity := (
+		CityResourceContainerSystem.get_city_object_storage_capacity(
+			stockpile
+		)
+	)
+	var accepted_filler := (
+		CityResourceContainerSystem.add_resource_to_city_object_storage(
+			stockpile_id,
+			WorldData.RESOURCE_COAL,
+			stockpile_capacity
+		)
+	)
+	var container_version_before_keep_delivery := (
+		CityResourceAccountingSystem.get_city_container_version()
+	)
+	var public_version_before_keep_delivery := (
+		CityResourceAccountingSystem.get_city_public_storage_version()
+	)
+	var physical_lumber_before_keep_delivery := (
+		WorldData.get_total_physical_city_resource_amount(
+			WorldData.RESOURCE_LUMBER
+		)
+	)
+
+	citizen = WorldData.get_city_citizen_by_id(citizen_id)
+	var keep_request := _make_cleanup_haul_request(
+		city_world,
+		citizen,
+		source_id
+	)
+	var keep_haul_assigned := (
+		accepted_filler == stockpile_capacity
+		and CityResourceContainerSystem.get_city_object_storage_free_space(
+			CityObjectSystem.get_city_object_by_id(stockpile_id)
+		) == 0
+		and not keep_request.is_empty()
+		and WorldData.assign_city_citizen_task(citizen_id, keep_request)
+	)
+	var keep_reservation_id := (
+		CityLogisticsSystem.get_city_haul_reservation_id_for_citizen(
+			citizen_id
+		)
+	)
+	var keep_reservation := CityLogisticsSystem.get_city_haul_reservation(
+		keep_reservation_id
+	)
+
+	_expect(
+		keep_haul_assigned
+		and int(keep_reservation.get("destination", {}).get("id", -1))
+		== keep_id
+		and int(keep_reservation.get("destination_reserved_amount", 0))
+		== fallback_amount,
+		"A full Stockpile must route a fresh cleanup haul to the City Keep."
+	)
+	_expect(
+		CityResourceAccountingSystem.get_city_container_version()
+		== container_version_before_keep_delivery
+		and CityResourceAccountingSystem.get_city_public_storage_version()
+		== public_version_before_keep_delivery,
+		"Fallback matching and reservation must not publish a storage mutation."
+	)
+
+	var keep_delivery_completed := false
+
+	for tick_index in range(1, 64):
+		SimulationClock.absolute_world_minutes += 2
+		CitizenMovementSystemScript.run_tick(tick_index, 2)
+		CitizenTaskSystemScript.run_tick(tick_index, 2)
+
+		if (
+			WorldData.get_city_citizen_haul_cargo_amount(citizen_id) == 0
+			and CityLogisticsSystem
+			.get_city_haul_reservation(keep_reservation_id).is_empty()
+			and CityResourceContainerSystem
+			.get_city_object_stored_resource_amount(
+				CityObjectSystem.get_city_object_by_id(keep_id),
+				WorldData.RESOURCE_LUMBER
+			) == fallback_amount
+		):
+			keep_delivery_completed = true
+			break
+
+	var final_keep := CityObjectSystem.get_city_object_by_id(keep_id)
+	var final_validation := CityStateValidatorScript.validate(true, true)
+
+	_expect(
+		keep_delivery_completed
+		and CityResourceContainerSystem.get_city_object_stored_resource_amount(
+			final_keep,
+			WorldData.RESOURCE_LUMBER
+		) == fallback_amount,
+		"The fallback haul must deliver the exact cleanup amount to the Keep."
+	)
+	_expect(
+		CityLogisticsSystem.get_city_ground_pile_by_id(source_id).is_empty()
+		and CityLogisticsSystem.get_total_city_ground_pile_resource_amount(
+			WorldData.RESOURCE_LUMBER
+		) == 0,
+		"The completed Keep fallback must empty the cleanup pile."
+	)
+	_expect(
+		WorldData.get_city_citizen_haul_cargo_amount(citizen_id) == 0
+		and CityLogisticsSystem
+		.get_city_haul_reservation(keep_reservation_id).is_empty(),
+		"The completed Keep fallback must clear cargo and its reservation."
+	)
+	_expect(
+		bool(final_validation.get("valid", false))
+		and final_validation.get("errors", []).is_empty(),
+		"The Keep fallback must leave the unified city state valid."
+	)
+	_expect(
+		WorldData.get_total_physical_city_resource_amount(
+			WorldData.RESOURCE_LUMBER
+		) == physical_lumber_before_keep_delivery,
+		"The Keep fallback must conserve physical lumber."
+	)
+	_expect(
+		CityResourceAccountingSystem.get_city_container_version()
+		== container_version_before_keep_delivery + 1
+		and CityResourceAccountingSystem.get_city_public_storage_version()
+		== public_version_before_keep_delivery + 1,
+		"Only the real Keep deposit may advance container and public-storage versions during fallback."
+	)
+
 
 func _test_critical_hunger_interrupts_cargo_safely() -> void:
 	print("Boundary test: critical-hunger interruption")
@@ -357,7 +679,7 @@ func _test_critical_hunger_interrupts_cargo_safely() -> void:
 	})
 	var fishery_id := int(fishery.get("id", -1))
 	_expect(
-		WorldData.add_resource_to_city_object_storage(
+		CityResourceContainerSystem.add_resource_to_city_object_storage(
 			fishery_id,
 			WorldData.RESOURCE_FISH,
 			2

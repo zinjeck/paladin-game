@@ -1348,7 +1348,7 @@ static func _validate_city_haul_reservations(
 		elif (
 			not city_object.is_empty()
 			and reserved_amount
-			> WorldData.get_city_object_storage_free_space(city_object)
+			> CityResourceContainerSystem.get_city_object_storage_free_space(city_object)
 		):
 			errors.append(
 				"Destination reservations exceed shared free capacity at "
@@ -2030,7 +2030,7 @@ static func _validate_city_haul_reservation_destination(
 		if (
 			destination_access_purpose
 			== WorldData.CONTAINER_HAUL_PURPOSE_PUBLIC_STORAGE
-			and WorldData.get_city_object_public_storage_tier(
+			and CityResourceContainerSystem.get_city_object_public_storage_tier(
 				destination_object
 			)
 			== WorldData.PUBLIC_CITY_STORAGE_TIER_NONE

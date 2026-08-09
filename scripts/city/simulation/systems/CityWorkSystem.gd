@@ -2935,8 +2935,8 @@ static func _get_relocation_destination_diagnostics(
 		var city_object: Dictionary = raw_object
 
 		if (
-			not WorldData.city_object_container_is_publicly_usable(city_object)
-			or not WorldData.city_object_can_accept_haul_resource(
+			not CityResourceContainerSystem.city_object_container_is_publicly_usable(city_object)
+			or not CityResourceContainerSystem.city_object_can_accept_haul_resource(
 				city_object,
 				resource,
 				WorldData.CONTAINER_HAUL_PURPOSE_PUBLIC_STORAGE,
@@ -3027,7 +3027,7 @@ static func _get_construction_source_diagnostics(
 
 		var city_object: Dictionary = raw_object
 
-		if not WorldData.city_object_container_is_publicly_usable(city_object):
+		if not CityResourceContainerSystem.city_object_container_is_publicly_usable(city_object):
 			continue
 
 		var endpoint := CityLogisticsSystem.make_city_citizen_haul_endpoint(

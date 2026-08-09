@@ -1248,7 +1248,7 @@ func _place_and_validate_city_fixture(
 
 	var keep_id := int(keep.get("id", -1))
 	var before_totals := (
-		WorldData.get_total_owned_city_resource_amounts()
+		CityResourceAccountingSystem.get_total_owned_city_resource_amounts()
 	)
 	_expect(
 		int(before_totals.get(WorldData.RESOURCE_FISH, 0))
@@ -1257,7 +1257,7 @@ func _place_and_validate_city_fixture(
 	)
 
 	var accepted_fish := (
-		WorldData.add_resource_to_city_object_storage(
+		CityResourceContainerSystem.add_resource_to_city_object_storage(
 			keep_id,
 			WorldData.RESOURCE_FISH,
 			3
@@ -1265,7 +1265,7 @@ func _place_and_validate_city_fixture(
 	)
 	_expect(accepted_fish == 3, "Keep must accept three fish.")
 	_expect(
-		WorldData.get_total_owned_city_resource_amount(
+		CityResourceAccountingSystem.get_total_owned_city_resource_amount(
 			WorldData.RESOURCE_FISH
 		)
 		== 3,
@@ -1275,7 +1275,7 @@ func _place_and_validate_city_fixture(
 
 	var first_citizen: Dictionary = WorldData.city_citizens[0]
 	var first_citizen_id := int(first_citizen.get("id", -1))
-	var removed_fish := WorldData.remove_resource_from_city_object_storage(
+	var removed_fish := CityResourceContainerSystem.remove_resource_from_city_object_storage(
 		keep_id,
 		WorldData.RESOURCE_FISH,
 		1
@@ -1287,7 +1287,7 @@ func _place_and_validate_city_fixture(
 	)
 	_expect(removed_fish == 1 and carried_fish == 1, "Fixture haul pickup must succeed.")
 	_expect(
-		WorldData.get_total_owned_city_resource_amount(
+		CityResourceAccountingSystem.get_total_owned_city_resource_amount(
 			WorldData.RESOURCE_FISH
 		)
 		== 2,
@@ -1305,7 +1305,7 @@ func _place_and_validate_city_fixture(
 		WorldData.RESOURCE_NONE,
 		0
 	)
-	WorldData.add_resource_to_city_object_storage(
+	CityResourceContainerSystem.add_resource_to_city_object_storage(
 		keep_id,
 		WorldData.RESOURCE_FISH,
 		1

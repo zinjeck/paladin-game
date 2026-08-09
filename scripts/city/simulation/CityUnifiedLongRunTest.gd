@@ -248,7 +248,7 @@ func _create_mixed_work_fixture(renderer: CityRenderer) -> Dictionary:
 		"city_world": city_world,
 	})
 	var fishery_id := int(fishery.get("id", -1))
-	var accepted_fish := WorldData.add_resource_to_city_object_storage(
+	var accepted_fish := CityResourceContainerSystem.add_resource_to_city_object_storage(
 		fishery_id,
 		WorldData.RESOURCE_FISH,
 		WORKPLACE_FISH_FIXTURE_AMOUNT
@@ -268,15 +268,15 @@ func _create_mixed_work_fixture(renderer: CityRenderer) -> Dictionary:
 	)
 
 	var keep_id := int(keep.get("id", -1))
-	var keep_capacity := WorldData.get_city_object_storage_capacity(keep)
-	var accepted_coal := WorldData.add_resource_to_city_object_storage(
+	var keep_capacity := CityResourceContainerSystem.get_city_object_storage_capacity(keep)
+	var accepted_coal := CityResourceContainerSystem.add_resource_to_city_object_storage(
 		keep_id,
 		WorldData.RESOURCE_COAL,
 		keep_capacity
 	)
 	_expect(
 		accepted_coal == keep_capacity
-		and WorldData.get_city_object_storage_free_space(keep) == 0,
+		and CityResourceContainerSystem.get_city_object_storage_free_space(keep) == 0,
 		"The public Keep must be completely full for relocation fallback."
 	)
 
@@ -471,7 +471,7 @@ func _create_mixed_work_fixture(renderer: CityRenderer) -> Dictionary:
 func _update_food_liveness(fixture: Dictionary) -> void:
 	var fishery_id := int(fixture.get("fishery_id", -1))
 	var fishery := CityObjectSystem.get_city_object_by_id(fishery_id)
-	var fish_available := WorldData.get_city_object_stored_resource_amount(
+	var fish_available := CityResourceContainerSystem.get_city_object_stored_resource_amount(
 		fishery,
 		WorldData.RESOURCE_FISH
 	) > 0

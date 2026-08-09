@@ -64,37 +64,37 @@ func _test_container_accounting_and_cache_invalidation() -> void:
 	var house_id := int(house["id"])
 	var fishery_id := int(fishery["id"])
 	_expect(
-		WorldData.add_resource_to_city_object_storage(
+		CityResourceContainerSystem.add_resource_to_city_object_storage(
 			keep_id,
 			WorldData.RESOURCE_FISH,
 			3
 		) == 3
-		and WorldData.add_resource_to_city_object_storage(
+		and CityResourceContainerSystem.add_resource_to_city_object_storage(
 			keep_id,
 			WorldData.RESOURCE_LUMBER,
 			17
 		) == 17
-		and WorldData.add_resource_to_city_object_storage(
+		and CityResourceContainerSystem.add_resource_to_city_object_storage(
 			stockpile_id,
 			WorldData.RESOURCE_FISH,
 			5
 		) == 5
-		and WorldData.add_resource_to_city_object_storage(
+		and CityResourceContainerSystem.add_resource_to_city_object_storage(
 			stockpile_id,
 			WorldData.RESOURCE_STONE,
 			25
 		) == 25
-		and WorldData.add_resource_to_city_object_storage(
+		and CityResourceContainerSystem.add_resource_to_city_object_storage(
 			house_id,
 			WorldData.RESOURCE_FISH,
 			7
 		) == 7
-		and WorldData.add_resource_to_city_object_storage(
+		and CityResourceContainerSystem.add_resource_to_city_object_storage(
 			house_id,
 			WorldData.RESOURCE_MEAT,
 			8
 		) == 8
-		and WorldData.add_resource_to_city_object_storage(
+		and CityResourceContainerSystem.add_resource_to_city_object_storage(
 			fishery_id,
 			WorldData.RESOURCE_FISH,
 			11
@@ -107,37 +107,37 @@ func _test_container_accounting_and_cache_invalidation() -> void:
 	house = CityObjectSystem.get_city_object_by_id(house_id)
 	fishery = CityObjectSystem.get_city_object_by_id(fishery_id)
 	_expect(
-		WorldData.city_object_counts_as_public_city_storage(keep)
-		and WorldData.city_object_counts_as_public_city_storage(stockpile)
-		and not WorldData.city_object_counts_as_public_city_storage(house)
-		and not WorldData.city_object_counts_as_public_city_storage(fishery)
-		and WorldData.get_city_object_public_storage_tier(keep)
+		CityResourceContainerSystem.city_object_counts_as_public_city_storage(keep)
+		and CityResourceContainerSystem.city_object_counts_as_public_city_storage(stockpile)
+		and not CityResourceContainerSystem.city_object_counts_as_public_city_storage(house)
+		and not CityResourceContainerSystem.city_object_counts_as_public_city_storage(fishery)
+		and CityResourceContainerSystem.get_city_object_public_storage_tier(keep)
 		== WorldData.PUBLIC_CITY_STORAGE_TIER_CITY_KEEP
-		and WorldData.get_city_object_public_storage_tier(stockpile)
+		and CityResourceContainerSystem.get_city_object_public_storage_tier(stockpile)
 		== WorldData.PUBLIC_CITY_STORAGE_TIER_STOCKPILE
-		and WorldData.get_city_object_public_storage_tier(house)
+		and CityResourceContainerSystem.get_city_object_public_storage_tier(house)
 		== WorldData.PUBLIC_CITY_STORAGE_TIER_NONE
-		and WorldData.get_city_object_public_storage_tier(fishery)
+		and CityResourceContainerSystem.get_city_object_public_storage_tier(fishery)
 		== WorldData.PUBLIC_CITY_STORAGE_TIER_NONE,
 		"Public/private container classification must remain unchanged."
 	)
 	_expect(
-		WorldData.city_object_counts_toward_city_storage_totals(keep)
-		and WorldData.city_object_counts_toward_city_storage_totals(stockpile)
-		and not WorldData.city_object_counts_toward_city_storage_totals(house)
-		and WorldData.city_object_counts_toward_city_storage_totals(fishery),
+		CityResourceContainerSystem.city_object_counts_toward_city_storage_totals(keep)
+		and CityResourceContainerSystem.city_object_counts_toward_city_storage_totals(stockpile)
+		and not CityResourceContainerSystem.city_object_counts_toward_city_storage_totals(house)
+		and CityResourceContainerSystem.city_object_counts_toward_city_storage_totals(fishery),
 		"Owned totals must include public and workplace output, but not pantries."
 	)
 
-	var owned_totals := WorldData.get_total_owned_city_resource_amounts()
+	var owned_totals := CityResourceAccountingSystem.get_total_owned_city_resource_amounts()
 	var accounting_state := (
-		WorldPoliticalState.get_current_city_resource_accounting_state()
+		CityResourceAccountingSystem.get_current_state()
 	)
 	_expect(
-		WorldData.get_total_public_city_resource_amount(
+		CityResourceAccountingSystem.get_total_public_city_resource_amount(
 			WorldData.RESOURCE_FISH
 		) == 8
-		and WorldData.get_total_stored_city_resource_amount(
+		and CityResourceAccountingSystem.get_total_stored_city_resource_amount(
 			WorldData.RESOURCE_FISH
 		) == 19
 		and int(owned_totals.get(WorldData.RESOURCE_FISH, 0)) == 19
@@ -148,7 +148,7 @@ func _test_container_accounting_and_cache_invalidation() -> void:
 	)
 	_expect(
 		is_same(
-			WorldData.city_owned_resource_amount_cache,
+			CityResourceAccountingSystem.get_current_state().owned_resource_amount_cache,
 			accounting_state.owned_resource_amount_cache
 		)
 		and is_same(
@@ -161,24 +161,24 @@ func _test_container_accounting_and_cache_invalidation() -> void:
 	)
 
 	_expect(
-		WorldData.get_city_object_storage_used_capacity(keep) == 20
-		and WorldData.get_city_object_storage_free_space(keep) == 30
-		and WorldData.get_city_object_storage_used_capacity(stockpile) == 30
-		and WorldData.get_city_object_storage_free_space(stockpile) == 170
-		and WorldData.get_city_object_storage_used_capacity(house) == 15
-		and WorldData.get_city_object_storage_free_space(house) == 35
-		and WorldData.get_city_object_storage_used_capacity(fishery) == 11
-		and WorldData.get_city_object_storage_free_space(fishery) == 39,
+		CityResourceContainerSystem.get_city_object_storage_used_capacity(keep) == 20
+		and CityResourceContainerSystem.get_city_object_storage_free_space(keep) == 30
+		and CityResourceContainerSystem.get_city_object_storage_used_capacity(stockpile) == 30
+		and CityResourceContainerSystem.get_city_object_storage_free_space(stockpile) == 170
+		and CityResourceContainerSystem.get_city_object_storage_used_capacity(house) == 15
+		and CityResourceContainerSystem.get_city_object_storage_free_space(house) == 35
+		and CityResourceContainerSystem.get_city_object_storage_used_capacity(fishery) == 11
+		and CityResourceContainerSystem.get_city_object_storage_free_space(fishery) == 39,
 		"Used and free capacity must be derived from physical container contents."
 	)
 	_expect(
-		WorldData.get_total_public_city_resource_storage_capacity(
+		CityResourceAccountingSystem.get_total_public_city_resource_storage_capacity(
 			WorldData.RESOURCE_FISH
 		) == 208
-		and WorldData.get_total_city_resource_storage_capacity(
+		and CityResourceAccountingSystem.get_total_city_resource_storage_capacity(
 			WorldData.RESOURCE_FISH
 		) == 258
-		and WorldData.get_city_object_storage_capacity_for_resource(
+		and CityResourceContainerSystem.get_city_object_storage_capacity_for_resource(
 			fishery,
 			WorldData.RESOURCE_LUMBER
 		) == 0,
@@ -222,7 +222,7 @@ func _test_cache_invalidation_and_capacity_edges(
 	var container_before_private_mutation := accounting_state.container_version
 	var public_before_private_mutation := accounting_state.public_storage_version
 	_expect(
-		WorldData.add_resource_to_city_object_storage(
+		CityResourceContainerSystem.add_resource_to_city_object_storage(
 			house_id,
 			WorldData.RESOURCE_FISH,
 			1
@@ -236,7 +236,7 @@ func _test_cache_invalidation_and_capacity_edges(
 		"Private pantry mutation must invalidate owned cache without public versioning."
 	)
 	_expect(
-		WorldData.get_total_owned_city_resource_amount(
+		CityResourceAccountingSystem.get_total_owned_city_resource_amount(
 			WorldData.RESOURCE_FISH
 		) == 19
 		and not is_same(
@@ -251,7 +251,7 @@ func _test_cache_invalidation_and_capacity_edges(
 	var public_before_workplace_mutation := accounting_state.public_storage_version
 	var container_before_workplace_mutation := accounting_state.container_version
 	_expect(
-		WorldData.add_resource_to_city_object_storage(
+		CityResourceContainerSystem.add_resource_to_city_object_storage(
 			fishery_id,
 			WorldData.RESOURCE_FISH,
 			1
@@ -260,7 +260,7 @@ func _test_cache_invalidation_and_capacity_edges(
 		== container_before_workplace_mutation + 1
 		and accounting_state.public_storage_version
 		== public_before_workplace_mutation
-		and WorldData.get_total_owned_city_resource_amount(
+		and CityResourceAccountingSystem.get_total_owned_city_resource_amount(
 			WorldData.RESOURCE_FISH
 		) == 20,
 		"Workplace output must invalidate owned totals without becoming public storage."
@@ -269,7 +269,7 @@ func _test_cache_invalidation_and_capacity_edges(
 	var container_before_public_mutation := accounting_state.container_version
 	var public_before_public_mutation := accounting_state.public_storage_version
 	_expect(
-		WorldData.add_resource_to_city_object_storage(
+		CityResourceContainerSystem.add_resource_to_city_object_storage(
 			stockpile_id,
 			WorldData.RESOURCE_FISH,
 			1
@@ -278,29 +278,29 @@ func _test_cache_invalidation_and_capacity_edges(
 		== container_before_public_mutation + 1
 		and accounting_state.public_storage_version
 		== public_before_public_mutation + 1
-		and WorldData.get_total_owned_city_resource_amount(
+		and CityResourceAccountingSystem.get_total_owned_city_resource_amount(
 			WorldData.RESOURCE_FISH
 		) == 21
-		and WorldData.get_total_public_city_resource_amount(
+		and CityResourceAccountingSystem.get_total_public_city_resource_amount(
 			WorldData.RESOURCE_FISH
 		) == 9,
 		"Stockpile mutation must version both accounting and public availability."
 	)
 
 	stockpile = CityObjectSystem.get_city_object_by_id(stockpile_id)
-	var current_stockpile_fish := WorldData.get_city_object_stored_resource_amount(
+	var current_stockpile_fish := CityResourceContainerSystem.get_city_object_stored_resource_amount(
 		stockpile,
 		WorldData.RESOURCE_FISH
 	)
 	var container_before_no_op := accounting_state.container_version
 	var public_before_no_op := accounting_state.public_storage_version
 	_expect(
-		WorldData.set_city_object_stored_resource_amount(
+		CityResourceContainerSystem.set_city_object_stored_resource_amount(
 			stockpile_id,
 			WorldData.RESOURCE_FISH,
 			current_stockpile_fish
 		) == current_stockpile_fish
-		and WorldData.add_resource_to_city_object_storage(
+		and CityResourceContainerSystem.add_resource_to_city_object_storage(
 			stockpile_id,
 			WorldData.RESOURCE_NONE,
 			1
@@ -311,10 +311,10 @@ func _test_cache_invalidation_and_capacity_edges(
 	)
 
 	stockpile = CityObjectSystem.get_city_object_by_id(stockpile_id)
-	var stockpile_free_space := WorldData.get_city_object_storage_free_space(
+	var stockpile_free_space := CityResourceContainerSystem.get_city_object_storage_free_space(
 		stockpile
 	)
-	var accepted_gold := WorldData.add_resource_to_city_object_storage(
+	var accepted_gold := CityResourceContainerSystem.add_resource_to_city_object_storage(
 		stockpile_id,
 		WorldData.RESOURCE_GOLD,
 		999
@@ -322,7 +322,7 @@ func _test_cache_invalidation_and_capacity_edges(
 	_expect(
 		accepted_gold == stockpile_free_space
 		and accepted_gold == 169
-		and WorldData.get_city_object_storage_used_capacity(
+		and CityResourceContainerSystem.get_city_object_storage_used_capacity(
 			CityObjectSystem.get_city_object_by_id(stockpile_id)
 		) == 200,
 		"Over-capacity deposits must accept only the physical free space."
@@ -330,7 +330,7 @@ func _test_cache_invalidation_and_capacity_edges(
 	var container_at_capacity := accounting_state.container_version
 	var public_at_capacity := accounting_state.public_storage_version
 	_expect(
-		WorldData.add_resource_to_city_object_storage(
+		CityResourceContainerSystem.add_resource_to_city_object_storage(
 			stockpile_id,
 			WorldData.RESOURCE_GOLD,
 			1
@@ -340,7 +340,7 @@ func _test_cache_invalidation_and_capacity_edges(
 		"A full Stockpile must reject deposits without publishing false changes."
 	)
 
-	var removed_fish := WorldData.remove_resource_from_city_object_storage(
+	var removed_fish := CityResourceContainerSystem.remove_resource_from_city_object_storage(
 		stockpile_id,
 		WorldData.RESOURCE_FISH,
 		999
@@ -349,17 +349,17 @@ func _test_cache_invalidation_and_capacity_edges(
 		removed_fish == current_stockpile_fish
 		and accounting_state.container_version == container_at_capacity + 1
 		and accounting_state.public_storage_version == public_at_capacity + 1
-		and WorldData.get_city_object_stored_resource_amount(
+		and CityResourceContainerSystem.get_city_object_stored_resource_amount(
 			CityObjectSystem.get_city_object_by_id(stockpile_id),
 			WorldData.RESOURCE_FISH
 		) == 0,
 		"Over-requested removal must remove only the physical stored amount."
 	)
 	_expect(
-		WorldData.get_total_owned_city_resource_amount(
+		CityResourceAccountingSystem.get_total_owned_city_resource_amount(
 			WorldData.RESOURCE_FISH
 		) == 15
-		and WorldData.get_total_public_city_resource_amount(
+		and CityResourceAccountingSystem.get_total_public_city_resource_amount(
 			WorldData.RESOURCE_FISH
 		) == 3
 		and accounting_state.owned_resource_amount_cache_container_version

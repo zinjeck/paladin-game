@@ -594,7 +594,7 @@ func _collect_world_data_change_flags(
 		change_flags["city_objects_changed"] = true
 
 	var current_resource_accounting_state := (
-		WorldPoliticalState.get_current_city_resource_accounting_state()
+		CityResourceAccountingSystem.get_current_state()
 	)
 	var resource_accounting_state_changed := (
 		observed_city_resource_accounting_state == null
@@ -1141,15 +1141,15 @@ func add_debug_resource_to_selected_stockpile(resource: String, amount_delta: in
 		print("Debug storage add blocked: selected object not found.")
 		return
 
-	if not WorldData.city_object_counts_as_public_city_storage(city_object):
+	if not CityResourceContainerSystem.city_object_counts_as_public_city_storage(city_object):
 		print("Debug storage add blocked: selected object is not public city storage.")
 		return
 
-	if not WorldData.can_city_object_store_resource(city_object, resource):
+	if not CityResourceContainerSystem.can_city_object_store_resource(city_object, resource):
 		print("Debug storage add blocked: selected storage cannot store resource: ", resource)
 		return
 
-	var accepted_amount := WorldData.add_resource_to_city_object_storage(
+	var accepted_amount := CityResourceContainerSystem.add_resource_to_city_object_storage(
 		selected_city_object_id,
 		resource,
 		amount_delta
@@ -1884,7 +1884,7 @@ func get_city_resource_order() -> Array[String]:
 func update_resource_bar_values() -> void:
 	var resource_order := get_city_resource_order()
 	var owned_resource_amounts := (
-		WorldData.get_total_owned_city_resource_amounts()
+		CityResourceAccountingSystem.get_total_owned_city_resource_amounts()
 	)
 
 	for i in range(resource_amount_labels.size()):
@@ -2795,7 +2795,7 @@ func get_container_type_display_name(container_type: String) -> String:
 
 
 func get_storage_panel_title_for_object(city_object: Dictionary) -> String:
-	var container_type := WorldData.get_city_object_container_type(city_object)
+	var container_type := CityResourceContainerSystem.get_city_object_container_type(city_object)
 
 	match container_type:
 		WorldData.CONTAINER_TYPE_PUBLIC_CITY_STORAGE:
@@ -2941,7 +2941,7 @@ func update_selected_city_citizen_panel() -> void:
 			+ str(WorldData.MAX_CITIZEN_HUNGER),
 		"Personal food: "
 			+ str(
-				WorldData.get_food_nutrition_in_resource_container(
+				CityResourceContainerSystem.get_food_nutrition_in_resource_container(
 					WorldData.get_city_citizen_inventory(citizen_id)
 				)
 			)
@@ -3113,12 +3113,12 @@ func update_citizen_inventory_display(
 
 	var inventory: Dictionary = raw_inventory
 	var present_resources := (
-		WorldData.get_resource_container_present_resources(
+		CityResourceContainerSystem.get_resource_container_present_resources(
 			inventory
 		)
 	)
 	var used_capacity := (
-		WorldData.get_resource_container_total_amount(
+		CityResourceContainerSystem.get_resource_container_total_amount(
 			inventory
 		)
 	)
@@ -3165,7 +3165,7 @@ func update_citizen_inventory_display(
 
 		var resource: String = present_resources[i]
 		var amount := (
-			WorldData.get_resource_container_resource_amount(
+			CityResourceContainerSystem.get_resource_container_resource_amount(
 				inventory,
 				resource
 			)
@@ -3750,7 +3750,7 @@ func _append_selected_object_metadata(values: Dictionary) -> void:
 				roundi(footprint_rect.size.x / float(city_tile_size)),
 				roundi(footprint_rect.size.y / float(city_tile_size))
 			)
-	var container_type := WorldData.get_city_object_container_type(
+	var container_type := CityResourceContainerSystem.get_city_object_container_type(
 		city_object
 	)
 
@@ -3777,7 +3777,7 @@ func update_object_info_storage_display(
 	city_object: Dictionary
 ) -> void:
 	var allowed_resources := (
-		WorldData.get_city_object_storage_resources(
+		CityResourceContainerSystem.get_city_object_storage_resources(
 			city_object
 		)
 	)
@@ -3787,17 +3787,17 @@ func update_object_info_storage_display(
 		return
 
 	var stored_resources := (
-		WorldData.get_city_object_present_storage_resources(
+		CityResourceContainerSystem.get_city_object_present_storage_resources(
 			city_object
 		)
 	)
 	var used_capacity := (
-		WorldData.get_city_object_storage_used_capacity(
+		CityResourceContainerSystem.get_city_object_storage_used_capacity(
 			city_object
 		)
 	)
 	var total_capacity := (
-		WorldData.get_city_object_storage_capacity(
+		CityResourceContainerSystem.get_city_object_storage_capacity(
 			city_object
 		)
 	)
@@ -3824,7 +3824,7 @@ func update_object_info_storage_display(
 
 		var resource: String = stored_resources[i]
 		var amount := (
-			WorldData.get_city_object_stored_resource_amount(
+			CityResourceContainerSystem.get_city_object_stored_resource_amount(
 				city_object,
 				resource
 			)

@@ -55,7 +55,7 @@ static func city_object_is_household_home(
 ) -> bool:
 	return (
 		not city_object.is_empty()
-		and WorldData.get_city_object_container_type(city_object)
+		and CityResourceContainerSystem.get_city_object_container_type(city_object)
 		== WorldData.CONTAINER_TYPE_PRIVATE_HOME_STORAGE
 		and WorldData.get_city_object_resident_capacity(city_object) > 0
 	)
@@ -133,7 +133,7 @@ static func get_city_object_unreserved_food_amount(
 	var endpoint := CityLogisticsSystem.make_city_citizen_haul_endpoint(object_id)
 
 	return maxi(
-		WorldData.get_city_object_stored_resource_amount(city_object, resource)
+		CityResourceContainerSystem.get_city_object_stored_resource_amount(city_object, resource)
 		- CityLogisticsSystem.get_city_haul_endpoint_source_reserved_amount(endpoint, resource)
 		- get_city_food_task_reserved_source_amount(
 			object_id,
@@ -153,9 +153,9 @@ static func get_city_public_unreserved_food_nutrition() -> int:
 		var city_object: Dictionary = raw_city_object
 
 		if (
-			WorldData.get_city_object_public_storage_tier(city_object)
+			CityResourceContainerSystem.get_city_object_public_storage_tier(city_object)
 			== WorldData.PUBLIC_CITY_STORAGE_TIER_NONE
-			or not WorldData.city_object_container_is_publicly_usable(city_object)
+			or not CityResourceContainerSystem.city_object_container_is_publicly_usable(city_object)
 		):
 			continue
 
@@ -180,7 +180,7 @@ static func get_city_home_stored_food_nutrition(
 	if not city_object_is_household_home(home):
 		return 0
 
-	return WorldData.get_food_nutrition_in_resource_container(
+	return CityResourceContainerSystem.get_food_nutrition_in_resource_container(
 		home.get("stored_resources", {})
 	)
 
@@ -784,7 +784,7 @@ static func _resource_demand_candidate_is_better(
 static func find_nearest_eligible_public_storage_source(
 	values: Dictionary
 ) -> Dictionary:
-	for storage_tier in WorldData.get_public_city_storage_tiers():
+	for storage_tier in CityResourceContainerSystem.get_public_city_storage_tiers():
 		var source_result := (
 			_find_nearest_eligible_public_storage_source_in_tier(
 				values,
@@ -846,7 +846,7 @@ static func _find_nearest_eligible_public_storage_source_in_tier(
 		var city_object: Dictionary = raw_city_object
 
 		if (
-			WorldData.get_city_object_public_storage_tier(city_object)
+			CityResourceContainerSystem.get_city_object_public_storage_tier(city_object)
 			!= storage_tier
 		):
 			continue
@@ -955,7 +955,7 @@ static func find_nearest_eligible_destination(
 ) -> Dictionary:
 	# Storage tiers are absolute policy boundaries. A reachable Stockpile wins
 	# before the City Keep is even considered, regardless of distance.
-	for storage_tier in WorldData.get_public_city_storage_tiers():
+	for storage_tier in CityResourceContainerSystem.get_public_city_storage_tiers():
 		var destination_result := (
 			_find_nearest_eligible_destination_in_tier(
 				values,
@@ -1029,7 +1029,7 @@ static func _find_nearest_eligible_destination_in_tier(
 		var city_object: Dictionary = raw_city_object
 
 		if (
-			WorldData.get_city_object_public_storage_tier(
+			CityResourceContainerSystem.get_city_object_public_storage_tier(
 				city_object
 			)
 			!= storage_tier
@@ -1159,7 +1159,7 @@ static func _find_nearest_eligible_destination_in_tier(
 static func find_nearest_eligible_destination_for_resources(
 	values: Dictionary
 ) -> Dictionary:
-	for storage_tier in WorldData.get_public_city_storage_tiers():
+	for storage_tier in CityResourceContainerSystem.get_public_city_storage_tiers():
 		var destination_result := (
 			_find_nearest_eligible_destination_for_resources_in_tier(
 				values,
@@ -1230,7 +1230,7 @@ static func _find_nearest_eligible_destination_for_resources_in_tier(
 		var city_object: Dictionary = raw_city_object
 
 		if (
-			WorldData.get_city_object_public_storage_tier(
+			CityResourceContainerSystem.get_city_object_public_storage_tier(
 				city_object
 			)
 			!= storage_tier
@@ -1517,7 +1517,7 @@ static func make_destination_result_for_endpoint_resources(
 		"path": raw_path.duplicate(),
 		"path_cost": int(path_result.get("path_cost", 0)),
 		"available_amount": available_amount,
-		"storage_tier": WorldData.get_city_object_public_storage_tier(
+		"storage_tier": CityResourceContainerSystem.get_city_object_public_storage_tier(
 			_get_container_object_for_endpoint(destination)
 		),
 	}
@@ -1653,7 +1653,7 @@ static func make_destination_result_for_endpoint(
 		"path": raw_path.duplicate(),
 		"path_cost": int(path_result.get("path_cost", 0)),
 		"available_amount": available_amount,
-		"storage_tier": WorldData.get_city_object_public_storage_tier(
+		"storage_tier": CityResourceContainerSystem.get_city_object_public_storage_tier(
 			_get_container_object_for_endpoint(destination)
 		),
 	}
@@ -1683,7 +1683,7 @@ static func get_resource_supply_candidates(
 
 		var city_object: Dictionary = raw_object
 
-		if not WorldData.city_object_container_is_publicly_usable(city_object):
+		if not CityResourceContainerSystem.city_object_container_is_publicly_usable(city_object):
 			continue
 
 		var endpoint := CityLogisticsSystem.make_city_citizen_haul_endpoint(
@@ -1782,7 +1782,7 @@ static func _append_supply_candidate(values: Dictionary) -> void:
 
 static func _get_public_storage_source_tier(city_object: Dictionary) -> int:
 	if (
-		WorldData.get_city_object_public_storage_tier(city_object)
+		CityResourceContainerSystem.get_city_object_public_storage_tier(city_object)
 		== WorldData.PUBLIC_CITY_STORAGE_TIER_STOCKPILE
 	):
 		return 0
@@ -2054,7 +2054,7 @@ static func _get_survival_source_groups(
 		var city_object: Dictionary = raw_object
 		var object_id := int(city_object.get("id", -1))
 		var endpoint := CityLogisticsSystem.make_city_citizen_haul_endpoint(object_id)
-		var storage_tier := WorldData.get_city_object_public_storage_tier(
+		var storage_tier := CityResourceContainerSystem.get_city_object_public_storage_tier(
 			city_object
 		)
 
@@ -2062,7 +2062,7 @@ static func _get_survival_source_groups(
 			stockpile_group.append(endpoint)
 		elif storage_tier == WorldData.PUBLIC_CITY_STORAGE_TIER_CITY_KEEP:
 			keep_group.append(endpoint)
-		elif WorldData.get_city_object_container_type(city_object) == (
+		elif CityResourceContainerSystem.get_city_object_container_type(city_object) == (
 			WorldData.CONTAINER_TYPE_WORKPLACE_STORAGE
 		):
 			workplace_group.append(endpoint)
@@ -2111,7 +2111,7 @@ static func _get_household_source_groups() -> Array:
 		var endpoint := CityLogisticsSystem.make_city_citizen_haul_endpoint(
 			int(city_object.get("id", -1))
 		)
-		var storage_tier := WorldData.get_city_object_public_storage_tier(
+		var storage_tier := CityResourceContainerSystem.get_city_object_public_storage_tier(
 			city_object
 		)
 		var source := {
@@ -2127,7 +2127,7 @@ static func _get_household_source_groups() -> Array:
 			stockpile_group.append(source)
 		elif storage_tier == WorldData.PUBLIC_CITY_STORAGE_TIER_CITY_KEEP:
 			keep_group.append(source)
-		elif WorldData.get_city_object_container_type(city_object) == (
+		elif CityResourceContainerSystem.get_city_object_container_type(city_object) == (
 			WorldData.CONTAINER_TYPE_WORKPLACE_STORAGE
 		):
 			source["source_access_purpose"] = (

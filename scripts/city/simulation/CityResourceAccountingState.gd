@@ -9,8 +9,9 @@ class_name CityResourceAccountingState
 # aggregate cache, cache stamp, and focused change versions used to account for
 # those physical stores.
 #
-# WorldData retains the existing accounting behavior during the ownership-only
-# pass. Keep this class data-only until that behavior is extracted separately.
+# CityResourceAccountingSystem governs aggregate/cache behavior while
+# CityResourceContainerSystem governs one-container queries and mutations.
+# Keep this class strictly data-only.
 
 var owned_resource_amount_cache: Dictionary = {}
 var owned_resource_amount_cache_container_version: int = -1

@@ -960,7 +960,7 @@ static func _outputs_are_valid_for_workplace(
 		if int(raw_amount_per_batch) <= 0:
 			return false
 
-		if not WorldData.can_city_object_store_resource(
+		if not CityResourceContainerSystem.can_city_object_store_resource(
 			city_object,
 			resource
 		):
@@ -997,7 +997,7 @@ static func _get_output_capacity_in_batches(
 	# Object containers use one shared total capacity. A multi-output batch must
 	# fit the sum of every output after incoming haul reservations are removed.
 	var shared_free_space := (
-		WorldData.get_city_object_unreserved_storage_free_space(
+		CityResourceContainerSystem.get_city_object_unreserved_storage_free_space(
 			city_object
 		)
 	)
@@ -1251,7 +1251,7 @@ static func _store_recipe_outputs(
 
 		requested_resources[resource] = requested_amount
 
-	return WorldData.add_resource_bundle_to_city_object_storage(
+	return CityResourceContainerSystem.add_resource_bundle_to_city_object_storage(
 		object_id,
 		requested_resources
 	)
@@ -1362,7 +1362,7 @@ static func _rollback_recipe_outputs_from_city_object(
 			* batch_count
 		)
 		var removed_amount := (
-			WorldData.remove_resource_from_city_object_storage(
+			CityResourceContainerSystem.remove_resource_from_city_object_storage(
 				object_id,
 				resource,
 				requested_amount

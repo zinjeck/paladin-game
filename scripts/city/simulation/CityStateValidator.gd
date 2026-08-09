@@ -137,11 +137,12 @@ static func validate(
 		"object_state_instance_id": int(
 			CityObjectSystem.get_current_state().get_instance_id()
 		),
-		"container_version": WorldData.city_container_version,
+		"container_version": (
+			CityResourceAccountingSystem.get_city_container_version()
+		),
 		"resource_accounting_state_instance_id": int(
-			WorldPoliticalState
-			.get_current_city_resource_accounting_state()
-			.get_instance_id()
+			CityResourceAccountingSystem
+			.get_current_state().get_instance_id()
 		),
 		"citizen_version": WorldData.city_citizen_version,
 		"citizen_spatial_version": (
@@ -167,7 +168,7 @@ static func validate(
 	_cached_result = result
 	_cached_object_state = CityObjectSystem.get_current_state()
 	_cached_resource_accounting_state = (
-		WorldPoliticalState.get_current_city_resource_accounting_state()
+		CityResourceAccountingSystem.get_current_state()
 	)
 
 	if report_problems:
@@ -243,7 +244,7 @@ static func _validation_cache_matches_current_state() -> bool:
 		_cached_resource_accounting_state == null
 		or not is_same(
 			_cached_resource_accounting_state,
-			WorldPoliticalState.get_current_city_resource_accounting_state()
+			CityResourceAccountingSystem.get_current_state()
 		)
 	):
 		return false
@@ -265,7 +266,7 @@ static func _validation_cache_matches_current_state() -> bool:
 
 	if (
 		int(_cached_result.get("container_version", -1))
-		!= WorldData.city_container_version
+		!= CityResourceAccountingSystem.get_city_container_version()
 	):
 		return false
 
