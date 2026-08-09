@@ -187,6 +187,7 @@ var observed_city_object_state: CityObjectState
 var observed_city_resource_accounting_state: CityResourceAccountingState
 var observed_city_container_version: int = -1
 var observed_city_public_storage_version: int = -1
+var observed_city_citizen_registry_state: CityCitizenRegistryState
 var observed_city_citizen_version: int = -1
 var observed_city_citizen_spatial_version: int = -1
 var observed_city_citizen_movement_version: int = -1
@@ -512,6 +513,7 @@ func _collect_city_change_flags() -> Dictionary:
 		"city_containers_changed": false,
 		"public_storage_changed": false,
 		"city_citizens_changed": false,
+		"city_citizen_registry_changed": false,
 		"city_citizen_spatial_changed": false,
 		"city_citizen_movement_changed": false,
 		"city_citizen_task_changed": false,
@@ -628,9 +630,32 @@ func _collect_world_data_change_flags(
 		current_resource_accounting_state
 	)
 
-	if observed_city_citizen_version != WorldData.city_citizen_version:
-		observed_city_citizen_version = WorldData.city_citizen_version
+	var current_citizen_registry_state := (
+		WorldPoliticalState.get_current_city_citizen_registry_state()
+	)
+	var citizen_registry_state_changed := (
+		observed_city_citizen_registry_state == null
+		or not is_same(
+			observed_city_citizen_registry_state,
+			current_citizen_registry_state
+		)
+	)
+
+	if (
+		citizen_registry_state_changed
+		or observed_city_citizen_version
+		!= current_citizen_registry_state.citizen_version
+	):
+		observed_city_citizen_registry_state = (
+			current_citizen_registry_state
+		)
+		observed_city_citizen_version = (
+			current_citizen_registry_state.citizen_version
+		)
 		change_flags["city_citizens_changed"] = true
+		change_flags["city_citizen_registry_changed"] = (
+			citizen_registry_state_changed
+		)
 
 	if (
 		observed_city_citizen_spatial_version
@@ -717,6 +742,16 @@ func _collect_world_data_change_flags(
 func _synchronize_city_citizen_movement(
 	change_flags: Dictionary
 ) -> void:
+	if bool(change_flags.get("city_citizen_registry_changed", false)):
+		# Citizen IDs are settlement-local. Reinitialize cosmetic movement state
+		# before considering a new City's movement version so ID reuse cannot
+		# animate one settlement's citizen from another settlement's position.
+		city_citizen_movement_presentation.initialize()
+		synchronized_city_citizen_movement_version = (
+			observed_city_citizen_movement_version
+		)
+		return
+
 	var movement_changed := bool(
 		change_flags.get("city_citizen_movement_changed", false)
 	)

@@ -23,6 +23,9 @@ const CityObjectStateScript = preload(
 const CityResourceAccountingStateScript = preload(
 	"res://scripts/city/simulation/CityResourceAccountingState.gd"
 )
+const CityCitizenRegistryStateScript = preload(
+	"res://scripts/city/simulation/CityCitizenRegistryState.gd"
+)
 const CityWorkStateScript = preload(
 	"res://scripts/city/simulation/CityWorkState.gd"
 )
@@ -48,6 +51,9 @@ var _unbound_city_object_state = CityObjectStateScript.new()
 var _unbound_city_resource_accounting_state = (
 	CityResourceAccountingStateScript.new()
 )
+var _unbound_city_citizen_registry_state = (
+	CityCitizenRegistryStateScript.new()
+)
 var _unbound_city_work_state = CityWorkStateScript.new()
 var _unbound_city_logistics_state = CityLogisticsStateScript.new()
 var _unbound_city_construction_state = CityConstructionStateScript.new()
@@ -66,6 +72,9 @@ func reset_state() -> void:
 	_unbound_city_object_state = CityObjectStateScript.new()
 	_unbound_city_resource_accounting_state = (
 		CityResourceAccountingStateScript.new()
+	)
+	_unbound_city_citizen_registry_state = (
+		CityCitizenRegistryStateScript.new()
 	)
 	_unbound_city_work_state = CityWorkStateScript.new()
 	_unbound_city_logistics_state = CityLogisticsStateScript.new()
@@ -90,6 +99,9 @@ func synchronize_foundation_with_world_data() -> bool:
 	var unbound_object_state_to_adopt = _unbound_city_object_state
 	var unbound_resource_accounting_state_to_adopt = (
 		_unbound_city_resource_accounting_state
+	)
+	var unbound_citizen_registry_state_to_adopt = (
+		_unbound_city_citizen_registry_state
 	)
 	var unbound_work_state_to_adopt = _unbound_city_work_state
 	var unbound_logistics_state_to_adopt = _unbound_city_logistics_state
@@ -149,6 +161,9 @@ func synchronize_foundation_with_world_data() -> bool:
 		capital_state.object_state = unbound_object_state_to_adopt
 		capital_state.resource_accounting_state = (
 			unbound_resource_accounting_state_to_adopt
+		)
+		capital_state.citizen_registry_state = (
+			unbound_citizen_registry_state_to_adopt
 		)
 		capital_state.work_state = unbound_work_state_to_adopt
 		capital_state.logistics_state = unbound_logistics_state_to_adopt
@@ -354,10 +369,9 @@ func set_settlement_simulation_backend(
 			and previous_backend_kind
 			== SettlementSimulationContextScript.BACKEND_LEGACY_CITY_WORLD_DATA
 		):
-			# Extracted object and resource-accounting ownership still resolve
-			# through unbound compatibility state while the legacy backend is
-			# active. Transfer those exact owners once; capture_from_world_data()
-			# intentionally no longer copies either extracted domain.
+			# Extracted ownership still resolves through unbound compatibility
+			# state while the legacy backend is active. Transfer those exact
+			# owners once; capture_from_world_data() no longer copies them.
 			city_state.object_state = _unbound_city_object_state
 			_unbound_city_object_state = CityObjectStateScript.new()
 			city_state.resource_accounting_state = (
@@ -365,6 +379,12 @@ func set_settlement_simulation_backend(
 			)
 			_unbound_city_resource_accounting_state = (
 				CityResourceAccountingStateScript.new()
+			)
+			city_state.citizen_registry_state = (
+				_unbound_city_citizen_registry_state
+			)
+			_unbound_city_citizen_registry_state = (
+				CityCitizenRegistryStateScript.new()
 			)
 			city_state.capture_from_world_data()
 
@@ -430,6 +450,16 @@ func get_current_city_resource_accounting_state() -> CityResourceAccountingState
 	):
 		return active_city_state.resource_accounting_state
 	return _unbound_city_resource_accounting_state
+
+
+func get_current_city_citizen_registry_state() -> CityCitizenRegistryState:
+	var active_city_state = get_active_city_simulation_state()
+	if (
+		active_city_state != null
+		and active_city_state.citizen_registry_state is CityCitizenRegistryState
+	):
+		return active_city_state.citizen_registry_state
+	return _unbound_city_citizen_registry_state
 
 
 func get_current_city_work_state() -> CityWorkState:

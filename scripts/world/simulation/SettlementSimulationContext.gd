@@ -87,3 +87,13 @@ func get_city_resource_accounting_state():
 	if raw_resource_accounting_state is CityResourceAccountingState:
 		return raw_resource_accounting_state
 	return null
+
+
+func get_city_citizen_registry_state():
+	if not has_instance_owned_city_state():
+		return null
+
+	var raw_citizen_registry_state = local_state.citizen_registry_state
+	if raw_citizen_registry_state is CityCitizenRegistryState:
+		return raw_citizen_registry_state
+	return null
