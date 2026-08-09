@@ -5,8 +5,9 @@ class_name CityCitizenRegistryState
 #
 # This pass relocates only the four registry fields below. Citizen record
 # schema and embedded needs, inventory, employment, movement, and task behavior
-# remain unchanged and await their own focused boundaries. Spatial and runtime
-# indexes also remain outside this owner until their dedicated passes.
+# remain unchanged and await their own focused boundaries. Spatial ownership is
+# isolated in CityCitizenSpatialState; movement and task runtime indexes remain
+# outside this owner until their dedicated passes.
 #
 # WorldData retains the existing citizen behavior during this ownership-only
 # pass. Keep this class strictly data-only.

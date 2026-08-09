@@ -229,13 +229,24 @@ func _test_equal_version_city_isolation() -> void:
 		and city_b_root is CitySettlementSimulationState
 		and is_same(city_a_root.citizen_registry_state, state_a)
 		and is_same(city_b_root.citizen_registry_state, state_b)
-		and is_same(city_a_root.citizen_ids_by_tile, spatial_a)
-		and is_same(city_b_root.citizen_ids_by_tile, spatial_b)
+		and not is_same(
+			city_a_root.citizen_spatial_state,
+			city_b_root.citizen_spatial_state
+		)
+		and is_same(
+			city_a_root.citizen_spatial_state.citizen_ids_by_tile,
+			spatial_a
+		)
+		and is_same(
+			city_b_root.citizen_spatial_state.citizen_ids_by_tile,
+			spatial_b
+		)
 		and is_same(city_a_root.active_mover_ids, mover_ids_a)
 		and is_same(city_b_root.active_mover_ids, mover_ids_b)
 		and is_same(city_a_root.active_task_ids, task_ids_a)
 		and is_same(city_b_root.active_task_ids, task_ids_b),
-		"Deferred spatial, movement, and task domains must remain separate roots."
+		"Registry and spatial owners must be isolated while movement and task "
+		+ "runtime remain separate deferred roots."
 	)
 
 

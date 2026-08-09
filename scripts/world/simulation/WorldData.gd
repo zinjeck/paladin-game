@@ -139,11 +139,25 @@ static var city_citizen_index_by_id: Dictionary:
 		)
 		state.citizen_index_by_id = value
 
+# Citizen spatial-index ownership is settlement-local. Citizen records retain
+# authoritative positions; this compatibility property exposes the active
+# City's derived CityCitizenSpatialState index.
+static var city_citizen_ids_by_tile: Dictionary:
+	get:
+		var state := (
+			WorldPoliticalState.get_current_city_citizen_spatial_state()
+		)
+		return state.citizen_ids_by_tile
+	set(value):
+		var state := (
+			WorldPoliticalState.get_current_city_citizen_spatial_state()
+		)
+		state.citizen_ids_by_tile = value
+
 # Physical ground-pile and haul-reservation ownership lives in
 # CityLogisticsState/CityLogisticsSystem for the active settlement. Citizen
-# spatial, movement, and task runtime fields remain in the legacy workspace
-# until their separate extraction passes.
-static var city_citizen_ids_by_tile: Dictionary = {}
+# movement and task runtime fields remain in the legacy workspace until their
+# separate extraction passes.
 static var city_active_mover_ids: Array[int] = []
 static var city_active_mover_id_lookup: Dictionary = {}
 # Transient, non-saved movement deltas consumed by the city presentation after
@@ -181,7 +195,17 @@ static var city_citizen_version: int:
 			WorldPoliticalState.get_current_city_citizen_registry_state()
 		)
 		state.citizen_version = value
-static var city_citizen_spatial_version: int = 0
+static var city_citizen_spatial_version: int:
+	get:
+		var state := (
+			WorldPoliticalState.get_current_city_citizen_spatial_state()
+		)
+		return state.citizen_spatial_version
+	set(value):
+		var state := (
+			WorldPoliticalState.get_current_city_citizen_spatial_state()
+		)
+		state.citizen_spatial_version = value
 static var city_citizen_movement_version: int = 0
 static var city_citizen_task_version: int = 0
 static var city_assignment_version: int = 0
@@ -1789,12 +1813,12 @@ static func get_city_active_task_ids_snapshot() -> Array[int]:
 static func _add_city_citizen_to_spatial_index(
 	citizen_id: int,
 	tile_position: Vector2i
-) -> void:
+) -> bool:
 	if citizen_id <= 0:
-		return
+		return false
 
 	if tile_position == INVALID_CITY_TILE_POSITION:
-		return
+		return false
 
 	var citizen_ids: Array = []
 	var raw_citizen_ids = city_citizen_ids_by_tile.get(
@@ -1806,7 +1830,7 @@ static func _add_city_citizen_to_spatial_index(
 		citizen_ids = raw_citizen_ids
 
 	if citizen_ids.has(citizen_id):
-		return
+		return false
 
 	citizen_ids.insert(
 		citizen_ids.bsearch(citizen_id),
@@ -1816,16 +1840,17 @@ static func _add_city_citizen_to_spatial_index(
 	city_citizen_ids_by_tile[tile_position] = (
 		citizen_ids
 	)
+	return true
 
 
 static func _remove_city_citizen_from_spatial_index(
 	citizen_id: int,
 	tile_position: Vector2i
-) -> void:
+) -> bool:
 	if not city_citizen_ids_by_tile.has(
 		tile_position
 	):
-		return
+		return false
 
 	var raw_citizen_ids = city_citizen_ids_by_tile[
 		tile_position
@@ -1835,27 +1860,37 @@ static func _remove_city_citizen_from_spatial_index(
 		city_citizen_ids_by_tile.erase(
 			tile_position
 		)
-		return
+		return true
 
 	var citizen_ids: Array = raw_citizen_ids
-	citizen_ids.erase(citizen_id)
+	var contained_citizen := false
+
+	while citizen_ids.has(citizen_id):
+		contained_citizen = true
+		citizen_ids.erase(citizen_id)
 
 	if citizen_ids.is_empty():
 		city_citizen_ids_by_tile.erase(
 			tile_position
 		)
-		return
+		return true
+
+	if not contained_citizen:
+		return false
 
 	city_citizen_ids_by_tile[tile_position] = (
 		citizen_ids
 	)
+	return true
 
 
 static func _register_city_citizen_spatial_index_entry(
 	citizen: Dictionary
-) -> void:
+) -> bool:
 	if citizen.is_empty():
-		return
+		return false
+	if not bool(citizen.get("alive", false)):
+		return false
 
 	var citizen_id := int(
 		citizen.get("id", -1)
@@ -1866,15 +1901,16 @@ static func _register_city_citizen_spatial_index_entry(
 	)
 
 	if not raw_position is Vector2i:
-		return
+		return false
 
-	_add_city_citizen_to_spatial_index(
+	return _add_city_citizen_to_spatial_index(
 		citizen_id,
 		raw_position
 	)
 
 
-static func rebuild_city_citizen_spatial_index() -> void:
+static func rebuild_city_citizen_spatial_index() -> bool:
+	var previous_index := city_citizen_ids_by_tile.duplicate(true)
 	city_citizen_ids_by_tile.clear()
 
 	for raw_citizen in city_citizens:
@@ -1884,6 +1920,12 @@ static func rebuild_city_citizen_spatial_index() -> void:
 		_register_city_citizen_spatial_index_entry(
 			raw_citizen
 		)
+
+	if previous_index == city_citizen_ids_by_tile:
+		return false
+
+	_mark_city_citizen_spatial_changed()
+	return true
 
 
 static func get_city_citizen_ids_at_tile(
@@ -4627,7 +4669,9 @@ static func ensure_city_citizen_spatial_state(
 		return 0
 
 	if city_citizens.is_empty():
-		city_citizen_ids_by_tile.clear()
+		if not city_citizen_ids_by_tile.is_empty():
+			city_citizen_ids_by_tile.clear()
+			_mark_city_citizen_spatial_changed()
 		return 0
 
 	var citizens_missing_position := []
@@ -4643,6 +4687,9 @@ static func ensure_city_citizen_spatial_state(
 			continue
 
 		var citizen: Dictionary = raw_citizen
+
+		if not bool(citizen.get("alive", false)):
+			continue
 
 		if citizen.has("city_tile_position"):
 			continue
@@ -4696,9 +4743,13 @@ static func ensure_city_citizen_spatial_state(
 			)
 			initialized_count += 1
 
+	var spatial_version_before_rebuild := city_citizen_spatial_version
 	rebuild_city_citizen_spatial_index()
 
-	if initialized_count > 0:
+	if (
+		initialized_count > 0
+		and city_citizen_spatial_version == spatial_version_before_rebuild
+	):
 		_mark_city_citizen_spatial_changed()
 
 	return initialized_count
@@ -4753,12 +4804,16 @@ static func set_city_citizen_tile_position(
 		return false
 
 	var citizen: Dictionary = raw_citizen
+	if not bool(citizen.get("alive", false)):
+		return false
 	var current_position = citizen.get(
 		"city_tile_position",
 		INVALID_CITY_TILE_POSITION
 	)
 
 	if current_position == tile_position:
+		if _add_city_citizen_to_spatial_index(citizen_id, tile_position):
+			_mark_city_citizen_spatial_changed()
 		return true
 
 	if current_position is Vector2i:
@@ -5001,6 +5056,9 @@ static func commit_city_citizen_movement_tick(
 	var moved_citizen_count := int(
 		application_result.get("moved_citizen_count", 0)
 	)
+	var spatial_index_changed := bool(
+		application_result.get("spatial_index_changed", false)
+	)
 	var quarantined_count := (
 		_quarantine_rejected_city_citizen_movement_updates(
 			rejected_updates
@@ -5019,7 +5077,7 @@ static func commit_city_citizen_movement_tick(
 	):
 		_mark_city_citizen_movement_changed()
 
-	if moved_citizen_count > 0:
+	if spatial_index_changed:
 		_mark_city_citizen_spatial_changed()
 
 	city_citizen_movement_visual_events = application_result.get(
@@ -5135,20 +5193,6 @@ static func _normalize_city_citizen_movement_updates(
 			)
 			continue
 
-		if not is_city_tile_walkable_for_citizen(
-			city_world,
-			raw_final_tile,
-			citizen_id
-		):
-			rejected_updates.append(
-				_make_city_citizen_movement_rejection(
-					citizen_id,
-					"final_tile_not_walkable",
-					raw_final_tile
-				)
-			)
-			continue
-
 		var citizen_index := get_city_citizen_index_by_id(citizen_id)
 
 		if citizen_index < 0:
@@ -5187,17 +5231,57 @@ static func _normalize_city_citizen_movement_updates(
 			)
 			continue
 
-		if not (
-			existing_citizen.get(
-				"city_tile_position",
-				INVALID_CITY_TILE_POSITION
-			)
-			is Vector2i
-		):
+		var authoritative_position = existing_citizen.get(
+			"city_tile_position",
+			INVALID_CITY_TILE_POSITION
+		)
+
+		if not authoritative_position is Vector2i:
 			rejected_updates.append(
 				_make_city_citizen_movement_rejection(
 					citizen_id,
 					"authoritative_position_invalid",
+					raw_final_tile
+				)
+			)
+			continue
+
+		# A dead active mover still emits one same-tile update so its movement
+		# state and spatial membership can be retired. The tile may have become
+		# non-walkable since the citizen was placed, so that cleanup must not be
+		# blocked by the normal destination gate.
+		var is_non_living_same_tile_cleanup: bool = (
+			not bool(existing_citizen.get("alive", false))
+			and not bool(updated_citizen.get("alive", false))
+			and raw_final_tile == authoritative_position
+		)
+		var includes_non_living_citizen: bool = (
+			not bool(existing_citizen.get("alive", false))
+			or not bool(updated_citizen.get("alive", false))
+		)
+
+		if includes_non_living_citizen and not is_non_living_same_tile_cleanup:
+			rejected_updates.append(
+				_make_city_citizen_movement_rejection(
+					citizen_id,
+					"non_living_movement_relocation",
+					raw_final_tile
+				)
+			)
+			continue
+
+		if (
+			not is_non_living_same_tile_cleanup
+			and not is_city_tile_walkable_for_citizen(
+				city_world,
+				raw_final_tile,
+				citizen_id
+			)
+		):
+			rejected_updates.append(
+				_make_city_citizen_movement_rejection(
+					citizen_id,
+					"final_tile_not_walkable",
 					raw_final_tile
 				)
 			)
@@ -5341,6 +5425,7 @@ static func _apply_city_citizen_movement_updates(
 	clean_updates: Array
 ) -> Dictionary:
 	var moved_citizen_count := 0
+	var spatial_index_changed := false
 	var movement_visual_events: Array = []
 
 	for clean_update in clean_updates:
@@ -5368,15 +5453,24 @@ static func _apply_city_citizen_movement_updates(
 			movement_visual_events.append(movement_visual_event)
 
 		if old_tile != final_tile:
-			_remove_city_citizen_from_spatial_index(citizen_id, old_tile)
+			if _remove_city_citizen_from_spatial_index(citizen_id, old_tile):
+				spatial_index_changed = true
 			moved_citizen_count += 1
+		elif not bool(updated_citizen.get("alive", false)):
+			if _remove_city_citizen_from_spatial_index(citizen_id, old_tile):
+				spatial_index_changed = true
 
 		updated_citizen["city_tile_position"] = final_tile
 		city_citizens[citizen_index] = updated_citizen
-		_add_city_citizen_to_spatial_index(citizen_id, final_tile)
+		if (
+			bool(updated_citizen.get("alive", false))
+			and _add_city_citizen_to_spatial_index(citizen_id, final_tile)
+		):
+			spatial_index_changed = true
 
 	return {
 		"moved_citizen_count": moved_citizen_count,
+		"spatial_index_changed": spatial_index_changed,
 		"movement_visual_events": movement_visual_events,
 	}
 
