@@ -11,6 +11,7 @@ const MAX_REPORTED_PROBLEMS: int = 24
 static var _cached_result: Dictionary = {}
 static var _cached_object_state: CityObjectState
 static var _cached_resource_accounting_state: CityResourceAccountingState
+static var _cached_citizen_registry_state: CityCitizenRegistryState
 
 
 #region Validation Entry Point and Cache
@@ -144,6 +145,11 @@ static func validate(
 			CityResourceAccountingSystem
 			.get_current_state().get_instance_id()
 		),
+		"citizen_registry_state_instance_id": int(
+			WorldPoliticalState
+			.get_current_city_citizen_registry_state()
+			.get_instance_id()
+		),
 		"citizen_version": WorldData.city_citizen_version,
 		"citizen_spatial_version": (
 			WorldData.city_citizen_spatial_version
@@ -169,6 +175,9 @@ static func validate(
 	_cached_object_state = CityObjectSystem.get_current_state()
 	_cached_resource_accounting_state = (
 		CityResourceAccountingSystem.get_current_state()
+	)
+	_cached_citizen_registry_state = (
+		WorldPoliticalState.get_current_city_citizen_registry_state()
 	)
 
 	if report_problems:
@@ -245,6 +254,14 @@ static func _validation_cache_matches_current_state() -> bool:
 		or not is_same(
 			_cached_resource_accounting_state,
 			CityResourceAccountingSystem.get_current_state()
+		)
+	):
+		return false
+	if (
+		_cached_citizen_registry_state == null
+		or not is_same(
+			_cached_citizen_registry_state,
+			WorldPoliticalState.get_current_city_citizen_registry_state()
 		)
 	):
 		return false

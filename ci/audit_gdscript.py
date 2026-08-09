@@ -286,6 +286,38 @@ RESOURCE_ACCOUNTING_STATE_FIELDS = {
     "public_storage_version": "int",
 }
 
+CITIZEN_REGISTRY_STATE_FIELDS = {
+    "citizens": ("Array", "[]"),
+    "citizen_index_by_id": ("Dictionary", "{}"),
+    "next_citizen_id": ("int", "1"),
+    "citizen_version": ("int", "0"),
+}
+
+WORLD_DATA_CITIZEN_REGISTRY_PROPERTIES = {
+    "city_citizens": ("Array", "citizens"),
+    "city_citizen_index_by_id": ("Dictionary", "citizen_index_by_id"),
+    "next_city_citizen_id": ("int", "next_citizen_id"),
+    "city_citizen_version": ("int", "citizen_version"),
+}
+
+DEFERRED_CITIZEN_ROOT_FIELDS = {
+    "citizen_ids_by_tile": "city_citizen_ids_by_tile",
+    "active_mover_ids": "city_active_mover_ids",
+    "active_mover_id_lookup": "city_active_mover_id_lookup",
+    "citizen_movement_visual_events": "city_citizen_movement_visual_events",
+    "citizen_movement_visual_tick_index": (
+        "city_citizen_movement_visual_tick_index"
+    ),
+    "active_task_ids": "city_active_task_ids",
+    "active_task_id_lookup": "city_active_task_id_lookup",
+    "object_access_tile_cache": "city_object_access_tile_cache",
+    "citizen_spatial_version": "city_citizen_spatial_version",
+    "citizen_movement_version": "city_citizen_movement_version",
+    "citizen_task_version": "city_citizen_task_version",
+    "assignment_version": "city_assignment_version",
+    "workplace_version": "city_workplace_version",
+}
+
 WORLD_DATA_FORBIDDEN_CITY_CONSTRUCTION_SYMBOLS = (
     "city_construction_sites",
     "city_construction_site_index_by_id",
@@ -1291,6 +1323,298 @@ def main() -> int:
                         f"{relative}: dynamic retired WorldData resource-ledger "
                         f"reference remains: {retired_symbol}"
                     )
+
+    citizen_registry_state_path = (
+        ROOT / "scripts/city/simulation/CityCitizenRegistryState.gd"
+    )
+    citizen_registry_required_paths = (
+        (citizen_registry_state_path, "citizen registry state owner"),
+        (city_root_state_path, "City settlement root state"),
+        (political_state_path, "settlement ownership registry"),
+        (settlement_context_path, "settlement simulation context"),
+        (world_data_path, "WorldData compatibility API"),
+    )
+    for required_path, owner_description in citizen_registry_required_paths:
+        if not required_path.exists():
+            errors.append(
+                f"{required_path.relative_to(ROOT)}: missing {owner_description}"
+            )
+
+    if all(path.exists() for path, _ in citizen_registry_required_paths):
+        citizen_registry_state_text = citizen_registry_state_path.read_text(
+            encoding="utf-8"
+        )
+        city_root_state_text = city_root_state_path.read_text(encoding="utf-8")
+        political_state_text = political_state_path.read_text(encoding="utf-8")
+        settlement_context_text = settlement_context_path.read_text(
+            encoding="utf-8"
+        )
+        world_data_text = world_data_path.read_text(encoding="utf-8")
+
+        if "extends RefCounted" not in citizen_registry_state_text:
+            errors.append(
+                "scripts/city/simulation/CityCitizenRegistryState.gd: must "
+                "extend RefCounted"
+            )
+        if "class_name CityCitizenRegistryState" not in citizen_registry_state_text:
+            errors.append(
+                "scripts/city/simulation/CityCitizenRegistryState.gd: missing "
+                "CityCitizenRegistryState class_name"
+            )
+
+        declared_registry_fields = set(
+            re.findall(
+                r"^var\s+([A-Za-z_][A-Za-z0-9_]*)\b",
+                citizen_registry_state_text,
+                re.MULTILINE,
+            )
+        )
+        if declared_registry_fields != set(CITIZEN_REGISTRY_STATE_FIELDS):
+            errors.append(
+                "scripts/city/simulation/CityCitizenRegistryState.gd: must own "
+                "exactly citizens, citizen_index_by_id, next_citizen_id, and "
+                "citizen_version"
+            )
+        if FUNC_RE.search(citizen_registry_state_text):
+            errors.append(
+                "scripts/city/simulation/CityCitizenRegistryState.gd: must "
+                "remain data-only during the ownership pass"
+            )
+
+        for state_name, (state_type, default_value) in (
+            CITIZEN_REGISTRY_STATE_FIELDS.items()
+        ):
+            declaration_pattern = (
+                rf"^var\s+{re.escape(state_name)}:\s*{state_type}\s*=\s*"
+                rf"{re.escape(default_value)}\s*$"
+            )
+            if not re.search(
+                declaration_pattern,
+                citizen_registry_state_text,
+                re.MULTILINE,
+            ):
+                errors.append(
+                    "scripts/city/simulation/CityCitizenRegistryState.gd: "
+                    f"missing typed default for {state_name}"
+                )
+
+            for path in scripts:
+                if path == citizen_registry_state_path:
+                    continue
+                text = path.read_text(encoding="utf-8")
+                if re.search(
+                    rf"^(?:static\s+)?var\s+{re.escape(state_name)}\b",
+                    text,
+                    re.MULTILINE,
+                ):
+                    errors.append(
+                        f"{path.relative_to(ROOT)}: duplicate top-level citizen "
+                        f"registry storage must not return: {state_name}"
+                    )
+
+        if (
+            "var citizen_registry_state: CityCitizenRegistryState"
+            not in city_root_state_text
+        ):
+            errors.append(
+                "scripts/city/simulation/CitySettlementSimulationState.gd: "
+                "missing citizen_registry_state owner"
+            )
+
+        for world_data_symbol in WORLD_DATA_CITIZEN_REGISTRY_PROPERTIES:
+            if f"WorldData.{world_data_symbol}" in city_root_state_text:
+                errors.append(
+                    "scripts/city/simulation/CitySettlementSimulationState.gd: "
+                    "extracted citizen registry must not be captured/applied "
+                    f"through WorldData.{world_data_symbol}"
+                )
+
+            dynamic_root_reference = re.search(
+                rf"\bWorldData\s*\.\s*(?:get|set|call|callv)\s*\(\s*"
+                rf"[\"']{re.escape(world_data_symbol)}[\"']",
+                city_root_state_text,
+            )
+            callable_root_reference = re.search(
+                rf"\bCallable\s*\(\s*WorldData\s*,\s*"
+                rf"[\"']{re.escape(world_data_symbol)}[\"']\s*\)",
+                city_root_state_text,
+            )
+            if dynamic_root_reference or callable_root_reference:
+                errors.append(
+                    "scripts/city/simulation/CitySettlementSimulationState.gd: "
+                    "dynamic citizen-registry workspace copying is forbidden: "
+                    f"{world_data_symbol}"
+                )
+
+        for state_field, world_data_symbol in DEFERRED_CITIZEN_ROOT_FIELDS.items():
+            if not re.search(
+                rf"^var\s+{re.escape(state_field)}\b",
+                city_root_state_text,
+                re.MULTILINE,
+            ):
+                errors.append(
+                    "scripts/city/simulation/CitySettlementSimulationState.gd: "
+                    f"deferred citizen field left its root early: {state_field}"
+                )
+            capture_pattern = (
+                rf"\b{re.escape(state_field)}\s*=\s*(?:\(\s*)?"
+                rf"WorldData\s*\.\s*{re.escape(world_data_symbol)}\b"
+            )
+            apply_pattern = (
+                rf"\bWorldData\s*\.\s*{re.escape(world_data_symbol)}\s*=\s*"
+                rf"(?:\(\s*)?{re.escape(state_field)}\b"
+            )
+            if not re.search(
+                capture_pattern,
+                city_root_state_text,
+                re.MULTILINE | re.DOTALL,
+            ):
+                errors.append(
+                    "scripts/city/simulation/CitySettlementSimulationState.gd: "
+                    f"missing deferred capture route for {state_field}"
+                )
+            if not re.search(
+                apply_pattern,
+                city_root_state_text,
+                re.MULTILINE | re.DOTALL,
+            ):
+                errors.append(
+                    "scripts/city/simulation/CitySettlementSimulationState.gd: "
+                    f"missing deferred apply route for {state_field}"
+                )
+
+            if not re.search(
+                rf"^static\s+var\s+{re.escape(world_data_symbol)}\b",
+                world_data_text,
+                re.MULTILINE,
+            ):
+                errors.append(
+                    "scripts/world/simulation/WorldData.gd: deferred citizen "
+                    f"workspace field moved during Pass 4: {world_data_symbol}"
+                )
+
+        required_political_registry_surfaces = (
+            (
+                "state preload",
+                r"^const\s+CityCitizenRegistryStateScript\s*=\s*preload\(",
+            ),
+            (
+                "unbound owner",
+                r"^var\s+_unbound_city_citizen_registry_state\b",
+            ),
+            (
+                "typed current-state resolver",
+                r"^func\s+get_current_city_citizen_registry_state\s*\(\s*\)"
+                r"\s*->\s*CityCitizenRegistryState\s*:",
+            ),
+            (
+                "founding adoption",
+                r"^\s*capital_state\.citizen_registry_state\s*=",
+            ),
+            (
+                "legacy adoption",
+                r"^\s*city_state\.citizen_registry_state\s*=",
+            ),
+        )
+        for surface_description, required_pattern in (
+            required_political_registry_surfaces
+        ):
+            if not re.search(
+                required_pattern,
+                political_state_text,
+                re.MULTILINE,
+            ):
+                errors.append(
+                    "scripts/world/simulation/WorldPoliticalState.gd: missing "
+                    "citizen-registry ownership surface: "
+                    f"{surface_description}"
+                )
+        if political_state_text.count("CityCitizenRegistryStateScript.new()") < 3:
+            errors.append(
+                "scripts/world/simulation/WorldPoliticalState.gd: citizen "
+                "registry fallback must be created initially, on reset, and "
+                "after legacy adoption"
+            )
+        if not re.search(
+            r"^func\s+get_city_citizen_registry_state\s*\(\s*\)\s*:",
+            settlement_context_text,
+            re.MULTILINE,
+        ):
+            errors.append(
+                "scripts/world/simulation/SettlementSimulationContext.gd: "
+                "missing citizen-registry context accessor"
+            )
+
+        for property_name, (property_type, state_field) in (
+            WORLD_DATA_CITIZEN_REGISTRY_PROPERTIES.items()
+        ):
+            declaration_matches = re.findall(
+                rf"^static\s+var\s+{re.escape(property_name)}\b",
+                world_data_text,
+                re.MULTILINE,
+            )
+            property_match = re.search(
+                rf"^static\s+var\s+{re.escape(property_name)}:\s*"
+                rf"{property_type}:\s*\n"
+                rf"(?P<body>.*?)"
+                rf"(?=^static\s+var\s+|^const\s+|^#region\b|\Z)",
+                world_data_text,
+                re.MULTILINE | re.DOTALL,
+            )
+            if len(declaration_matches) != 1 or property_match is None:
+                errors.append(
+                    "scripts/world/simulation/WorldData.gd: citizen registry "
+                    f"compatibility property must be accessor-only: {property_name}"
+                )
+                continue
+
+            property_body = property_match.group("body")
+            resolver_count = property_body.count(
+                "WorldPoliticalState.get_current_city_citizen_registry_state()"
+            )
+            if (
+                resolver_count != 2
+                or not re.search(
+                    rf"return\s+state\s*\.\s*{re.escape(state_field)}\b",
+                    property_body,
+                )
+                or not re.search(
+                    rf"state\s*\.\s*{re.escape(state_field)}\s*=\s*value\b",
+                    property_body,
+                )
+            ):
+                errors.append(
+                    "scripts/world/simulation/WorldData.gd: citizen registry "
+                    f"property must route getter/setter through one owner: {property_name}"
+                )
+
+        renderer_path = ROOT / "scripts/city/rendering/CityRenderer.gd"
+        validator_path = ROOT / "scripts/city/simulation/CityStateValidator.gd"
+        if renderer_path.exists():
+            renderer_text = renderer_path.read_text(encoding="utf-8")
+            if (
+                "var observed_city_citizen_registry_state: "
+                "CityCitizenRegistryState" not in renderer_text
+                or "citizen_registry_state_changed" not in renderer_text
+                or 'change_flags["city_citizen_registry_changed"]' not in renderer_text
+                or "city_citizen_movement_presentation.initialize()"
+                not in renderer_text
+            ):
+                errors.append(
+                    "scripts/city/rendering/CityRenderer.gd: citizen refresh "
+                    "must include registry-state identity"
+                )
+        if validator_path.exists():
+            validator_text = validator_path.read_text(encoding="utf-8")
+            if (
+                "static var _cached_citizen_registry_state: "
+                "CityCitizenRegistryState" not in validator_text
+                or '"citizen_registry_state_instance_id"' not in validator_text
+            ):
+                errors.append(
+                    "scripts/city/simulation/CityStateValidator.gd: validation "
+                    "cache must include citizen-registry identity"
+                )
 
     report = {
         "script_count": len(scripts),

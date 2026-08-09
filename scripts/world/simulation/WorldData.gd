@@ -111,13 +111,38 @@ static var official_region_size: int = 0
 static var official_world_scene_path: String = ""
 static var official_city_scene_path: String = ""
 
-# Construction registry ownership is settlement-local. These compatibility
-# properties preserve the historical WorldData API during the ownership-only
-# pass while resolving to the active City's CityConstructionState.
+# Citizen core-registry ownership is settlement-local. These compatibility
+# properties retain the historical WorldData behavior API during this
+# ownership-only pass while routing the four mutable registry fields to the
+# active City's CityCitizenRegistryState.
+static var city_citizens: Array:
+	get:
+		var state := (
+			WorldPoliticalState.get_current_city_citizen_registry_state()
+		)
+		return state.citizens
+	set(value):
+		var state := (
+			WorldPoliticalState.get_current_city_citizen_registry_state()
+		)
+		state.citizens = value
+
+static var city_citizen_index_by_id: Dictionary:
+	get:
+		var state := (
+			WorldPoliticalState.get_current_city_citizen_registry_state()
+		)
+		return state.citizen_index_by_id
+	set(value):
+		var state := (
+			WorldPoliticalState.get_current_city_citizen_registry_state()
+		)
+		state.citizen_index_by_id = value
+
 # Physical ground-pile and haul-reservation ownership lives in
-# CityLogisticsState/CityLogisticsSystem for the active settlement.
-static var city_citizens: Array = []
-static var city_citizen_index_by_id: Dictionary = {}
+# CityLogisticsState/CityLogisticsSystem for the active settlement. Citizen
+# spatial, movement, and task runtime fields remain in the legacy workspace
+# until their separate extraction passes.
 static var city_citizen_ids_by_tile: Dictionary = {}
 static var city_active_mover_ids: Array[int] = []
 static var city_active_mover_id_lookup: Dictionary = {}
@@ -129,13 +154,33 @@ static var city_citizen_movement_visual_tick_index: int = -1
 static var city_active_task_ids: Array[int] = []
 static var city_active_task_id_lookup: Dictionary = {}
 static var city_object_access_tile_cache: Dictionary = {}
-static var next_city_citizen_id: int = 1
+static var next_city_citizen_id: int:
+	get:
+		var state := (
+			WorldPoliticalState.get_current_city_citizen_registry_state()
+		)
+		return state.next_citizen_id
+	set(value):
+		var state := (
+			WorldPoliticalState.get_current_city_citizen_registry_state()
+		)
+		state.next_citizen_id = value
 
-# Citizen/assignment change versions still awaiting their focused extraction.
+# Related citizen/assignment versions still awaiting focused extraction.
 #
 # These let observers refresh only the parts of the city that actually
 # changed instead of treating every mutation as a generic storage change.
-static var city_citizen_version: int = 0
+static var city_citizen_version: int:
+	get:
+		var state := (
+			WorldPoliticalState.get_current_city_citizen_registry_state()
+		)
+		return state.citizen_version
+	set(value):
+		var state := (
+			WorldPoliticalState.get_current_city_citizen_registry_state()
+		)
+		state.citizen_version = value
 static var city_citizen_spatial_version: int = 0
 static var city_citizen_movement_version: int = 0
 static var city_citizen_task_version: int = 0

@@ -20,12 +20,13 @@ var object_state: CityObjectState = CityObjectState.new()
 var resource_accounting_state: CityResourceAccountingState = (
 	CityResourceAccountingState.new()
 )
+var citizen_registry_state: CityCitizenRegistryState = (
+	CityCitizenRegistryState.new()
+)
 var work_state: CityWorkState = CityWorkState.new()
 var logistics_state: CityLogisticsState = CityLogisticsState.new()
 var construction_state: CityConstructionState = CityConstructionState.new()
 
-var citizens: Array = []
-var citizen_index_by_id: Dictionary = {}
 var citizen_ids_by_tile: Dictionary = {}
 var active_mover_ids: Array[int] = []
 var active_mover_id_lookup: Dictionary = {}
@@ -34,9 +35,7 @@ var citizen_movement_visual_tick_index: int = -1
 var active_task_ids: Array[int] = []
 var active_task_id_lookup: Dictionary = {}
 var object_access_tile_cache: Dictionary = {}
-var next_citizen_id: int = 1
 
-var citizen_version: int = 0
 var citizen_spatial_version: int = 0
 var citizen_movement_version: int = 0
 var citizen_task_version: int = 0
@@ -49,8 +48,6 @@ func capture_from_world_data() -> void:
 	city_seed = WorldData.official_city_seed
 	city_runtime_data = WorldData.player_city_data
 
-	citizens = WorldData.city_citizens
-	citizen_index_by_id = WorldData.city_citizen_index_by_id
 	citizen_ids_by_tile = WorldData.city_citizen_ids_by_tile
 	active_mover_ids = WorldData.city_active_mover_ids
 	active_mover_id_lookup = WorldData.city_active_mover_id_lookup
@@ -61,9 +58,7 @@ func capture_from_world_data() -> void:
 	active_task_ids = WorldData.city_active_task_ids
 	active_task_id_lookup = WorldData.city_active_task_id_lookup
 	object_access_tile_cache = WorldData.city_object_access_tile_cache
-	next_citizen_id = WorldData.next_city_citizen_id
 
-	citizen_version = WorldData.city_citizen_version
 	citizen_spatial_version = WorldData.city_citizen_spatial_version
 	citizen_movement_version = WorldData.city_citizen_movement_version
 	citizen_task_version = WorldData.city_citizen_task_version
@@ -76,8 +71,6 @@ func apply_to_world_data() -> void:
 	WorldData.official_city_seed = city_seed
 	WorldData.player_city_data = city_runtime_data
 
-	WorldData.city_citizens = citizens
-	WorldData.city_citizen_index_by_id = citizen_index_by_id
 	WorldData.city_citizen_ids_by_tile = citizen_ids_by_tile
 	WorldData.city_active_mover_ids = active_mover_ids
 	WorldData.city_active_mover_id_lookup = active_mover_id_lookup
@@ -88,9 +81,7 @@ func apply_to_world_data() -> void:
 	WorldData.city_active_task_ids = active_task_ids
 	WorldData.city_active_task_id_lookup = active_task_id_lookup
 	WorldData.city_object_access_tile_cache = object_access_tile_cache
-	WorldData.next_city_citizen_id = next_citizen_id
 
-	WorldData.city_citizen_version = citizen_version
 	WorldData.city_citizen_spatial_version = citizen_spatial_version
 	WorldData.city_citizen_movement_version = citizen_movement_version
 	WorldData.city_citizen_task_version = citizen_task_version
@@ -99,4 +90,7 @@ func apply_to_world_data() -> void:
 
 
 func is_bound_to_world_data_workspace() -> bool:
-	return WorldData.city_citizens == citizens
+	return is_same(
+		WorldData.city_citizen_ids_by_tile,
+		citizen_ids_by_tile
+	)
