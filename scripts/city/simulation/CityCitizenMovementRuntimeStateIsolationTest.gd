@@ -135,10 +135,10 @@ func _test_renderer_identity_invalidation(
 	original_state: CityCitizenMovementRuntimeState
 ) -> void:
 	var registry_state := (
-		WorldPoliticalState.get_current_city_citizen_registry_state()
+		CityCitizenRegistrySystem.get_current_state()
 	)
 	var spatial_state := (
-		WorldPoliticalState.get_current_city_citizen_spatial_state()
+		CityCitizenSpatialSystem.get_current_state()
 	)
 	var renderer := CityRenderer.new()
 	renderer.observed_city_citizen_registry_state = registry_state
@@ -255,7 +255,7 @@ func _test_event_consumption_and_unequal_state(values: Dictionary) -> void:
 	var events_a: Array = values["events_a"]
 	var events_b: Array = values["events_b"]
 	var version_b_before_take := state_b.citizen_movement_version
-	var taken_b := WorldData.take_city_citizen_movement_visual_events(
+	var taken_b := CityCitizenMovementRuntimeSystem.take_city_citizen_movement_visual_events(
 		SHARED_VISUAL_TICK
 	)
 	_expect(
@@ -264,7 +264,7 @@ func _test_event_consumption_and_unequal_state(values: Dictionary) -> void:
 		and state_b.citizen_movement_visual_events.is_empty()
 		and state_b.citizen_movement_visual_tick_index == -1
 		and state_b.citizen_movement_version == version_b_before_take
-		and WorldData.take_city_citizen_movement_visual_events(
+		and CityCitizenMovementRuntimeSystem.take_city_citizen_movement_visual_events(
 			SHARED_VISUAL_TICK
 		).is_empty(),
 		"Matching take must transfer City B's buffer once without invalidating."
@@ -273,28 +273,27 @@ func _test_event_consumption_and_unequal_state(values: Dictionary) -> void:
 	_expect(
 		WorldPoliticalState.set_active_settlement(city_a_id)
 		and is_same(
-			WorldPoliticalState
-			.get_current_city_citizen_movement_runtime_state(),
+			CityCitizenMovementRuntimeSystem.get_current_state(),
 			state_a
 		)
 		and is_same(
-			WorldData.city_citizen_movement_visual_events,
+			CityCitizenMovementRuntimeSystem.get_current_state().citizen_movement_visual_events,
 			events_a
 		)
-		and WorldData.city_citizen_movement_visual_tick_index
+		and CityCitizenMovementRuntimeSystem.get_current_state().citizen_movement_visual_tick_index
 		== SHARED_VISUAL_TICK
-		and WorldData.city_citizen_movement_version == 2,
+		and CityCitizenMovementRuntimeSystem.get_current_state().citizen_movement_version == 2,
 		"Consuming City B's equal tick must leave City A untouched."
 	)
 
 	_expect(
 		WorldPoliticalState.set_active_settlement(city_b_id)
-		and WorldData.cancel_city_citizen_movement(1),
+		and CityCitizenMovementRuntimeSystem.cancel_city_citizen_movement(1),
 		"City B's mover must cancel through the real movement API."
 	)
-	WorldData.begin_city_citizen_movement_visual_tick(802)
-	WorldData.city_citizen_movement_visual_events.append({"marker": "B-late"})
-	var late_events_b: Array = WorldData.city_citizen_movement_visual_events
+	CityCitizenMovementRuntimeSystem.begin_city_citizen_movement_visual_tick(802)
+	CityCitizenMovementRuntimeSystem.get_current_state().citizen_movement_visual_events.append({"marker": "B-late"})
+	var late_events_b: Array = CityCitizenMovementRuntimeSystem.get_current_state().citizen_movement_visual_events
 	_expect(
 		state_b.citizen_movement_version == 3
 		and state_b.active_mover_ids.is_empty()
@@ -312,7 +311,7 @@ func _test_event_consumption_and_unequal_state(values: Dictionary) -> void:
 		== SHARED_VISUAL_TICK,
 		"City A must retain its earlier version, mover, event buffer, and tick."
 	)
-	var taken_a := WorldData.take_city_citizen_movement_visual_events(
+	var taken_a := CityCitizenMovementRuntimeSystem.take_city_citizen_movement_visual_events(
 		SHARED_VISUAL_TICK
 	)
 	_expect(
@@ -324,12 +323,12 @@ func _test_event_consumption_and_unequal_state(values: Dictionary) -> void:
 	_expect(
 		WorldPoliticalState.set_active_settlement(city_b_id)
 		and is_same(
-			WorldData.city_citizen_movement_visual_events,
+			CityCitizenMovementRuntimeSystem.get_current_state().citizen_movement_visual_events,
 			late_events_b
 		)
-		and WorldData.city_citizen_movement_visual_tick_index == 802
-		and WorldData.city_citizen_movement_version == 3
-		and WorldData.take_city_citizen_movement_visual_events(801).is_empty()
+		and CityCitizenMovementRuntimeSystem.get_current_state().citizen_movement_visual_tick_index == 802
+		and CityCitizenMovementRuntimeSystem.get_current_state().citizen_movement_version == 3
+		and CityCitizenMovementRuntimeSystem.take_city_citizen_movement_visual_events(801).is_empty()
 		and state_b.citizen_movement_visual_events.is_empty()
 		and state_b.citizen_movement_visual_tick_index == -1
 		and state_b.citizen_movement_version == 3,
@@ -361,7 +360,7 @@ func _prepare_active_city_movement(values: Dictionary) -> Dictionary:
 	var citizen_id := int(citizen.get("id", -1))
 	_expect(
 		citizen_id == 1
-		and WorldData.assign_city_citizen_movement_order(
+		and CityCitizenMovementRuntimeSystem.assign_city_citizen_movement_order(
 			citizen_id,
 			[SHARED_CITIZEN_TILE, destination]
 		),
@@ -372,8 +371,7 @@ func _prepare_active_city_movement(values: Dictionary) -> Dictionary:
 
 	CitizenMovementSystem.run_tick(SHARED_VISUAL_TICK, 1)
 	var movement_state := (
-		WorldPoliticalState
-		.get_current_city_citizen_movement_runtime_state()
+		CityCitizenMovementRuntimeSystem.get_current_state()
 	)
 	return {
 		"citizen_id": citizen_id,

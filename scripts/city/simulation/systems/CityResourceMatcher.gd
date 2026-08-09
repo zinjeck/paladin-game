@@ -87,7 +87,7 @@ static func get_city_home_one_day_food_target_nutrition(
 static func get_living_city_citizen_count() -> int:
 	var living_count := 0
 
-	for raw_citizen in WorldData.city_citizens:
+	for raw_citizen in CityCitizenRegistrySystem.get_current_state().citizens:
 		if not raw_citizen is Dictionary:
 			continue
 
@@ -113,7 +113,7 @@ static func get_city_food_task_reserved_source_amount(
 	resource: String,
 	excluding_citizen_id: int = -1
 ) -> int:
-	return WorldData.get_city_food_task_reserved_endpoint_amount(
+	return CityCitizenTaskRuntimeSystem.get_city_food_task_reserved_endpoint_amount(
 		WorldData.CITY_CITIZEN_HAUL_ENDPOINT_KIND_CITY_OBJECT_CONTAINER,
 		object_id,
 		resource,
@@ -2397,7 +2397,7 @@ static func _get_endpoint_access_tiles(
 
 			if (
 				raw_tile is Vector2i
-				and WorldData.is_city_tile_walkable_for_citizen(
+				and CityNavigationSystem.is_city_tile_walkable_for_citizen(
 					WorldData.official_city_world,
 					raw_tile,
 					citizen_id

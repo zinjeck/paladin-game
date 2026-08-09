@@ -12,7 +12,7 @@ static func run_tick(
 	tick_index: int,
 	minutes_advanced: int
 ) -> void:
-	WorldData.begin_city_citizen_movement_visual_tick(tick_index)
+	CityCitizenMovementRuntimeSystem.begin_city_citizen_movement_visual_tick(tick_index)
 
 	if minutes_advanced <= 0:
 		return
@@ -22,7 +22,7 @@ static func run_tick(
 	if city_world == null:
 		return
 
-	var active_mover_ids := WorldData.get_city_active_mover_ids_snapshot()
+	var active_mover_ids := CityCitizenMovementRuntimeSystem.get_city_active_mover_ids_snapshot()
 
 	if active_mover_ids.is_empty():
 		return
@@ -42,7 +42,7 @@ static func run_tick(
 			"citizen_id": int(citizen_id),
 		})
 
-	var commit_result := WorldData.commit_city_citizen_movement_tick(
+	var commit_result := CityCitizenMovementRuntimeSystem.commit_city_citizen_movement_tick(
 		city_world,
 		tick_context.get("citizen_updates", []),
 		next_active_mover_ids
@@ -70,12 +70,12 @@ static func run_tick(
 static func _advance_active_mover(values: Dictionary) -> void:
 	var tick_context: Dictionary = values.get("tick_context", {})
 	var citizen_id := int(values.get("citizen_id", -1))
-	var citizen_index := WorldData.get_city_citizen_index_by_id(citizen_id)
+	var citizen_index := CityCitizenRegistrySystem.get_city_citizen_index_by_id(citizen_id)
 
 	if citizen_index < 0:
 		return
 
-	var raw_citizen = WorldData.city_citizens[citizen_index]
+	var raw_citizen = CityCitizenRegistrySystem.get_current_state().citizens[citizen_index]
 
 	if not raw_citizen is Dictionary:
 		return
@@ -169,7 +169,7 @@ static func _prepare_active_mover_path(context: Dictionary) -> bool:
 		and movement_path[movement_path_index - 1] is Vector2i
 		and movement_path[movement_path_index] is Vector2i
 	):
-		current_step_cost = WorldData.get_city_citizen_movement_step_cost(
+		current_step_cost = CityNavigationSystem.get_city_citizen_movement_step_cost(
 			movement_path[movement_path_index - 1],
 			movement_path[movement_path_index]
 		)
@@ -243,7 +243,7 @@ static func _advance_active_mover_path(context: Dictionary) -> void:
 			break
 
 		var next_tile: Vector2i = raw_next_tile
-		var step_cost := WorldData.get_city_citizen_movement_step_cost(
+		var step_cost := CityNavigationSystem.get_city_citizen_movement_step_cost(
 			current_tile,
 			next_tile
 		)
@@ -257,7 +257,7 @@ static func _advance_active_mover_path(context: Dictionary) -> void:
 			movement_was_blocked = true
 			break
 
-		if not WorldData.can_city_citizen_traverse_step(
+		if not CityNavigationSystem.can_city_citizen_traverse_step(
 			city_world,
 			current_tile,
 			next_tile,

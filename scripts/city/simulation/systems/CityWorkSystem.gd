@@ -489,7 +489,7 @@ static func cancel_city_player_command(command_id: int) -> bool:
 	)
 
 	if claimed_citizen_id > 0:
-		var current_task := WorldData.get_city_citizen_current_task(
+		var current_task := CityCitizenTaskRuntimeSystem.get_city_citizen_current_task(
 			claimed_citizen_id
 		)
 
@@ -499,11 +499,11 @@ static func cancel_city_player_command(command_id: int) -> bool:
 			and int(current_task.get("target_object_id", -1))
 			== command_id
 		):
-			WorldData.clear_city_citizen_task(
+			CityCitizenTaskRuntimeSystem.clear_city_citizen_task(
 				claimed_citizen_id,
 				WorldData.CITY_CITIZEN_TASK_SOURCE_PLAYER
 			)
-			WorldData.cancel_city_citizen_movement(claimed_citizen_id)
+			CityCitizenMovementRuntimeSystem.cancel_city_citizen_movement(claimed_citizen_id)
 
 	return _remove_city_player_command_record(command_id)
 
@@ -591,8 +591,8 @@ static func repair_stale_city_player_command_claims() -> int:
 			and claimed_citizen_id > 0
 			and status == CITY_PLAYER_COMMAND_STATUS_CLAIMED
 		):
-			var citizen := WorldData.get_city_citizen_by_id(claimed_citizen_id)
-			var current_task := WorldData.get_city_citizen_current_task(
+			var citizen := CityCitizenRegistrySystem.get_city_citizen_by_id(claimed_citizen_id)
+			var current_task := CityCitizenTaskRuntimeSystem.get_city_citizen_current_task(
 				claimed_citizen_id
 			)
 
@@ -671,7 +671,7 @@ static func get_city_player_command_work_tiles(
 				command_tile + Vector2i(offset_x, offset_y)
 			)
 
-			if WorldData.is_city_tile_walkable_for_citizen(
+			if CityNavigationSystem.is_city_tile_walkable_for_citizen(
 				WorldData.official_city_world,
 				candidate_tile,
 				citizen_id
@@ -684,7 +684,7 @@ static func get_city_player_command_work_tiles(
 static func get_best_assignable_city_player_command_for_citizen(
 	citizen_id: int
 ) -> Dictionary:
-	var citizen := WorldData.get_city_citizen_by_id(citizen_id)
+	var citizen := CityCitizenRegistrySystem.get_city_citizen_by_id(citizen_id)
 	var raw_citizen_tile = citizen.get(
 		"city_tile_position",
 		WorldData.INVALID_CITY_TILE_POSITION
@@ -756,7 +756,7 @@ static func claim_city_player_command(
 	citizen_id: int
 ) -> bool:
 	var command_index := get_city_player_command_index_by_id(command_id)
-	var citizen := WorldData.get_city_citizen_by_id(citizen_id)
+	var citizen := CityCitizenRegistrySystem.get_city_citizen_by_id(citizen_id)
 
 	if (
 		command_index < 0
@@ -1069,7 +1069,7 @@ static func get_best_player_job_for_citizen_and_orders(
 	citizen_id: int,
 	raw_order_ids: Array
 ) -> Dictionary:
-	var citizen := WorldData.get_city_citizen_by_id(citizen_id)
+	var citizen := CityCitizenRegistrySystem.get_city_citizen_by_id(citizen_id)
 
 	if (
 		citizen.is_empty()
@@ -1246,7 +1246,7 @@ static func _get_best_command_candidate_for_construction_sites(
 	citizen_id: int,
 	order_id_by_site_id: Dictionary
 ) -> Dictionary:
-	var citizen := WorldData.get_city_citizen_by_id(citizen_id)
+	var citizen := CityCitizenRegistrySystem.get_city_citizen_by_id(citizen_id)
 	var raw_citizen_tile = citizen.get(
 		"city_tile_position",
 		WorldData.INVALID_CITY_TILE_POSITION
@@ -1357,7 +1357,7 @@ static func get_player_job_for_citizen_and_order(
 	citizen_id: int,
 	order_id: int
 ) -> Dictionary:
-	var citizen := WorldData.get_city_citizen_by_id(citizen_id)
+	var citizen := CityCitizenRegistrySystem.get_city_citizen_by_id(citizen_id)
 
 	if (
 		citizen.is_empty()
@@ -1431,7 +1431,7 @@ static func assign_player_job(
 		if not claim_city_player_command(command_id, citizen_id):
 			return false
 
-		assigned = WorldData.assign_city_citizen_task(
+		assigned = CityCitizenTaskRuntimeSystem.assign_city_citizen_task(
 			citizen_id,
 			{
 				"kind": WorldData.CITY_CITIZEN_TASK_KIND_PLAYER_COMMAND,
@@ -1807,7 +1807,7 @@ static func _apply_runtime_worker_actionability(
 static func _get_runtime_eligible_worker_ids() -> Array[int]:
 	var citizen_ids: Array[int] = []
 
-	for raw_citizen in WorldData.city_citizens:
+	for raw_citizen in CityCitizenRegistrySystem.get_current_state().citizens:
 		if not raw_citizen is Dictionary:
 			continue
 
@@ -1822,7 +1822,7 @@ static func _get_runtime_eligible_worker_ids() -> Array[int]:
 		):
 			continue
 
-		var current_task := WorldData.get_city_citizen_current_task(
+		var current_task := CityCitizenTaskRuntimeSystem.get_city_citizen_current_task(
 			citizen_id
 		)
 
@@ -1942,7 +1942,7 @@ static func _get_active_citizen_ids_for_job(
 	if job_id.begins_with("command:"):
 		command_id = job_id.trim_prefix("command:").to_int()
 
-	for raw_citizen in WorldData.city_citizens:
+	for raw_citizen in CityCitizenRegistrySystem.get_current_state().citizens:
 		if not raw_citizen is Dictionary:
 			continue
 
@@ -2496,7 +2496,7 @@ static func _get_best_command_candidate(
 	group_id: int,
 	construction_site_id: int
 ) -> Dictionary:
-	var citizen := WorldData.get_city_citizen_by_id(citizen_id)
+	var citizen := CityCitizenRegistrySystem.get_city_citizen_by_id(citizen_id)
 	var raw_citizen_tile = citizen.get(
 		"city_tile_position",
 		WorldData.INVALID_CITY_TILE_POSITION
@@ -2765,7 +2765,7 @@ static func _get_active_citizen_ids_for_order(
 	var source_id := int(order.get("source_id", -1))
 	var order_id := int(order.get("id", -1))
 
-	for raw_citizen in WorldData.city_citizens:
+	for raw_citizen in CityCitizenRegistrySystem.get_current_state().citizens:
 		if not raw_citizen is Dictionary:
 			continue
 
@@ -2842,7 +2842,7 @@ static func _count_active_workers_for_order(order: Dictionary) -> int:
 static func _count_construction_workers(site_id: int) -> int:
 	var count := 0
 
-	for raw_citizen in WorldData.city_citizens:
+	for raw_citizen in CityCitizenRegistrySystem.get_current_state().citizens:
 		if not raw_citizen is Dictionary:
 			continue
 

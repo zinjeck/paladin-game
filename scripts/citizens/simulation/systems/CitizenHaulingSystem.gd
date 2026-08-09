@@ -35,7 +35,7 @@ static func drop_citizen_haul_cargo_for_priority_interrupt(
 	if city_world == null or citizen_id <= 0:
 		return false
 
-	var citizen := WorldData.get_city_citizen_by_id(citizen_id)
+	var citizen := CityCitizenRegistrySystem.get_city_citizen_by_id(citizen_id)
 
 	if citizen.is_empty() or not bool(citizen.get("alive", false)):
 		return false
@@ -110,7 +110,7 @@ static func drop_citizen_haul_cargo_for_priority_interrupt(
 			)
 			return false
 
-	if not WorldData.clear_city_citizen_task(
+	if not CityCitizenTaskRuntimeSystem.clear_city_citizen_task(
 		citizen_id,
 		requesting_source
 	):
@@ -133,8 +133,8 @@ static func drop_citizen_haul_cargo_for_priority_interrupt(
 
 		return false
 
-	WorldData.cancel_city_citizen_movement(citizen_id)
-	WorldData.set_city_citizen_current_haul(
+	CityCitizenMovementRuntimeSystem.cancel_city_citizen_movement(citizen_id)
+	CityCitizenTaskRuntimeSystem.set_city_citizen_current_haul(
 		citizen_id,
 		CityCitizens.make_city_citizen_haul()
 	)
@@ -316,7 +316,7 @@ static func make_public_storage_haul_task_request(
 		== WorldData.CONTAINER_HAUL_PURPOSE_NONE
 		or task_priority
 		<= WorldData.CITY_CITIZEN_TASK_PRIORITY_NONE
-		or not WorldData.is_valid_city_citizen_task_source(
+		or not CityCitizens.is_valid_city_citizen_task_source(
 			task_source
 		)
 		or task_source == WorldData.CITY_CITIZEN_TASK_SOURCE_NONE
@@ -592,7 +592,7 @@ static func make_directed_haul_task_request(
 		or destination_access_purpose
 		== WorldData.CONTAINER_HAUL_PURPOSE_NONE
 		or task_priority <= WorldData.CITY_CITIZEN_TASK_PRIORITY_NONE
-		or not WorldData.is_valid_city_citizen_task_source(task_source)
+		or not CityCitizens.is_valid_city_citizen_task_source(task_source)
 		or task_source == WorldData.CITY_CITIZEN_TASK_SOURCE_NONE
 		or not CityCitizens.is_valid_city_citizen_haul_endpoint(source)
 		or not CityCitizens.is_valid_city_citizen_haul_endpoint(
@@ -750,7 +750,7 @@ static func advance_haul_task(
 	):
 		return path_requests_remaining
 
-	var haul := WorldData.get_city_citizen_current_haul(
+	var haul := CityCitizenTaskRuntimeSystem.get_city_citizen_current_haul(
 		citizen_id
 	)
 	var cargo_amount := (
@@ -804,11 +804,11 @@ static func advance_haul_task(
 			)
 			and not has_reserved_next_source
 		):
-			WorldData.cancel_city_citizen_movement(citizen_id)
+			CityCitizenMovementRuntimeSystem.cancel_city_citizen_movement(citizen_id)
 			haul["phase"] = (
 				WorldData.CITY_CITIZEN_HAUL_PHASE_PENDING_DESTINATION
 			)
-			WorldData.set_city_citizen_current_haul(
+			CityCitizenTaskRuntimeSystem.set_city_citizen_current_haul(
 				citizen_id,
 				haul
 			)
@@ -834,7 +834,7 @@ static func advance_haul_task(
 		):
 			return path_requests_remaining
 
-		haul = WorldData.get_city_citizen_current_haul(
+		haul = CityCitizenTaskRuntimeSystem.get_city_citizen_current_haul(
 			citizen_id
 		)
 		haul_phase = str(
@@ -843,8 +843,8 @@ static func advance_haul_task(
 				WorldData.CITY_CITIZEN_HAUL_PHASE_NONE
 			)
 		)
-		citizen = WorldData.get_city_citizen_by_id(citizen_id)
-		current_task = WorldData.get_city_citizen_current_task(
+		citizen = CityCitizenRegistrySystem.get_city_citizen_by_id(citizen_id)
+		current_task = CityCitizenTaskRuntimeSystem.get_city_citizen_current_task(
 			citizen_id
 		)
 
@@ -950,7 +950,7 @@ static func _advance_pending_source(
 			haul["phase"] = (
 				WorldData.CITY_CITIZEN_HAUL_PHASE_PENDING_DESTINATION
 			)
-			WorldData.set_city_citizen_current_haul(citizen_id, haul)
+			CityCitizenTaskRuntimeSystem.set_city_citizen_current_haul(citizen_id, haul)
 			return _advance_pending_destination(
 				city_world,
 				values
@@ -970,7 +970,7 @@ static func _advance_pending_source(
 			haul["phase"] = (
 				WorldData.CITY_CITIZEN_HAUL_PHASE_PENDING_DESTINATION
 			)
-			WorldData.set_city_citizen_current_haul(citizen_id, haul)
+			CityCitizenTaskRuntimeSystem.set_city_citizen_current_haul(citizen_id, haul)
 			return _advance_pending_destination(
 				city_world,
 				values
@@ -987,7 +987,7 @@ static func _advance_pending_source(
 		haul["phase"] = (
 			WorldData.CITY_CITIZEN_HAUL_PHASE_PENDING_DESTINATION
 		)
-		WorldData.set_city_citizen_current_haul(citizen_id, haul)
+		CityCitizenTaskRuntimeSystem.set_city_citizen_current_haul(citizen_id, haul)
 		return _advance_pending_destination(city_world, values)
 
 	var raw_current_tile = citizen.get(
@@ -1006,11 +1006,11 @@ static func _advance_pending_source(
 	var current_tile: Vector2i = raw_current_tile
 
 	if source_access_tiles.has(current_tile):
-		WorldData.cancel_city_citizen_movement(citizen_id)
+		CityCitizenMovementRuntimeSystem.cancel_city_citizen_movement(citizen_id)
 		haul["phase"] = WorldData.CITY_CITIZEN_HAUL_PHASE_PICKING_UP
 		haul["source_tile"] = current_tile
-		WorldData.set_city_citizen_current_haul(citizen_id, haul)
-		WorldData.set_city_citizen_task_phase(
+		CityCitizenTaskRuntimeSystem.set_city_citizen_current_haul(citizen_id, haul)
+		CityCitizenTaskRuntimeSystem.set_city_citizen_task_phase(
 			citizen_id,
 			WorldData.CITY_CITIZEN_TASK_PHASE_PERFORMING
 		)
@@ -1054,29 +1054,29 @@ static func _advance_pending_source(
 		WorldData.CITY_CITIZEN_HAUL_PHASE_TRAVELING_TO_SOURCE
 	)
 	haul["source_tile"] = source_tile
-	WorldData.set_city_citizen_current_haul(citizen_id, haul)
-	WorldData.set_city_citizen_task_activity_state({
+	CityCitizenTaskRuntimeSystem.set_city_citizen_current_haul(citizen_id, haul)
+	CityCitizenTaskRuntimeSystem.set_city_citizen_task_activity_state({
 		"citizen_id": citizen_id,
 		"target_tile": source_tile,
 	})
 
 	if movement_path.size() <= 1:
 		haul["phase"] = WorldData.CITY_CITIZEN_HAUL_PHASE_PICKING_UP
-		WorldData.set_city_citizen_current_haul(citizen_id, haul)
-		WorldData.set_city_citizen_task_phase(
+		CityCitizenTaskRuntimeSystem.set_city_citizen_current_haul(citizen_id, haul)
+		CityCitizenTaskRuntimeSystem.set_city_citizen_task_phase(
 			citizen_id,
 			WorldData.CITY_CITIZEN_TASK_PHASE_PERFORMING
 		)
 		return path_requests_remaining
 
-	if not WorldData.assign_city_citizen_movement_order(
+	if not CityCitizenMovementRuntimeSystem.assign_city_citizen_movement_order(
 		citizen_id,
 		movement_path
 	):
 		_set_haul_blocked(citizen_id, haul)
 		return path_requests_remaining
 
-	WorldData.set_city_citizen_task_phase(
+	CityCitizenTaskRuntimeSystem.set_city_citizen_task_phase(
 		citizen_id,
 		WorldData.CITY_CITIZEN_TASK_PHASE_TRAVELING
 	)
@@ -1125,16 +1125,16 @@ static func _advance_traveling_to_source(
 	):
 		haul["phase"] = WorldData.CITY_CITIZEN_HAUL_PHASE_PICKING_UP
 		haul["source_tile"] = raw_current_tile
-		WorldData.set_city_citizen_current_haul(citizen_id, haul)
-		WorldData.set_city_citizen_task_phase(
+		CityCitizenTaskRuntimeSystem.set_city_citizen_current_haul(citizen_id, haul)
+		CityCitizenTaskRuntimeSystem.set_city_citizen_task_phase(
 			citizen_id,
 			WorldData.CITY_CITIZEN_TASK_PHASE_PERFORMING
 		)
 		return path_requests_remaining
 
 	haul["phase"] = WorldData.CITY_CITIZEN_HAUL_PHASE_PENDING_SOURCE
-	WorldData.set_city_citizen_current_haul(citizen_id, haul)
-	WorldData.set_city_citizen_task_phase(
+	CityCitizenTaskRuntimeSystem.set_city_citizen_current_haul(citizen_id, haul)
+	CityCitizenTaskRuntimeSystem.set_city_citizen_task_phase(
 		citizen_id,
 		WorldData.CITY_CITIZEN_TASK_PHASE_PENDING
 	)
@@ -1171,7 +1171,7 @@ static func _attempt_pickup(
 		or not source_access_tiles.has(raw_current_tile)
 	):
 		haul["phase"] = WorldData.CITY_CITIZEN_HAUL_PHASE_PENDING_SOURCE
-		WorldData.set_city_citizen_current_haul(citizen_id, haul)
+		CityCitizenTaskRuntimeSystem.set_city_citizen_current_haul(citizen_id, haul)
 		return path_requests_remaining
 
 	var resource := str(
@@ -1218,7 +1218,7 @@ static func _attempt_pickup(
 			haul["phase"] = (
 				WorldData.CITY_CITIZEN_HAUL_PHASE_PENDING_DESTINATION
 			)
-			WorldData.set_city_citizen_current_haul(citizen_id, haul)
+			CityCitizenTaskRuntimeSystem.set_city_citizen_current_haul(citizen_id, haul)
 			return _advance_pending_destination(
 				city_world,
 				values
@@ -1265,7 +1265,7 @@ static func _attempt_pickup(
 			haul["phase"] = (
 				WorldData.CITY_CITIZEN_HAUL_PHASE_PENDING_DESTINATION
 			)
-			WorldData.set_city_citizen_current_haul(citizen_id, haul)
+			CityCitizenTaskRuntimeSystem.set_city_citizen_current_haul(citizen_id, haul)
 			return _advance_pending_destination(
 				city_world,
 				values
@@ -1288,7 +1288,7 @@ static func _attempt_pickup(
 			haul["phase"] = (
 				WorldData.CITY_CITIZEN_HAUL_PHASE_PENDING_DESTINATION
 			)
-			WorldData.set_city_citizen_current_haul(citizen_id, haul)
+			CityCitizenTaskRuntimeSystem.set_city_citizen_current_haul(citizen_id, haul)
 			return _advance_pending_destination(
 				city_world,
 				values
@@ -1399,8 +1399,8 @@ static func _continue_after_successful_pickup(
 			haul["phase"] = (
 				WorldData.CITY_CITIZEN_HAUL_PHASE_PENDING_DESTINATION
 			)
-			WorldData.set_city_citizen_current_haul(citizen_id, haul)
-			WorldData.set_city_citizen_task_phase(
+			CityCitizenTaskRuntimeSystem.set_city_citizen_current_haul(citizen_id, haul)
+			CityCitizenTaskRuntimeSystem.set_city_citizen_task_phase(
 				citizen_id,
 				WorldData.CITY_CITIZEN_TASK_PHASE_PENDING
 			)
@@ -1446,12 +1446,12 @@ static func _continue_after_successful_pickup(
 	haul["phase"] = (
 		WorldData.CITY_CITIZEN_HAUL_PHASE_PENDING_DESTINATION
 	)
-	WorldData.set_city_citizen_current_haul(citizen_id, haul)
-	WorldData.set_city_citizen_task_phase(
+	CityCitizenTaskRuntimeSystem.set_city_citizen_current_haul(citizen_id, haul)
+	CityCitizenTaskRuntimeSystem.set_city_citizen_task_phase(
 		citizen_id,
 		WorldData.CITY_CITIZEN_TASK_PHASE_PENDING
 	)
-	values["citizen"] = WorldData.get_city_citizen_by_id(citizen_id)
+	values["citizen"] = CityCitizenRegistrySystem.get_city_citizen_by_id(citizen_id)
 	values["haul"] = haul
 	values["path_requests_remaining"] = path_requests_remaining
 	return _advance_pending_destination(city_world, values)
@@ -1692,11 +1692,11 @@ static func _begin_next_ground_pile_pickup(
 		WorldData.CONTAINER_HAUL_PURPOSE_GROUND_PILE_CLEANUP
 	)
 	haul["source_tile"] = source_tile
-	WorldData.set_city_citizen_task_target_object_id(
+	CityCitizenTaskRuntimeSystem.set_city_citizen_task_target_object_id(
 		citizen_id,
 		int(source.get("id", -1))
 	)
-	WorldData.set_city_citizen_task_activity_state({
+	CityCitizenTaskRuntimeSystem.set_city_citizen_task_activity_state({
 		"citizen_id": citizen_id,
 		"target_tile": source_tile,
 	})
@@ -1705,8 +1705,8 @@ static func _begin_next_ground_pile_pickup(
 
 	if movement_path.size() <= 1:
 		haul["phase"] = WorldData.CITY_CITIZEN_HAUL_PHASE_PICKING_UP
-		WorldData.set_city_citizen_current_haul(citizen_id, haul)
-		WorldData.set_city_citizen_task_phase(
+		CityCitizenTaskRuntimeSystem.set_city_citizen_current_haul(citizen_id, haul)
+		CityCitizenTaskRuntimeSystem.set_city_citizen_task_phase(
 			citizen_id,
 			WorldData.CITY_CITIZEN_TASK_PHASE_PERFORMING
 		)
@@ -1714,9 +1714,9 @@ static func _begin_next_ground_pile_pickup(
 		haul["phase"] = (
 			WorldData.CITY_CITIZEN_HAUL_PHASE_TRAVELING_TO_SOURCE
 		)
-		WorldData.set_city_citizen_current_haul(citizen_id, haul)
+		CityCitizenTaskRuntimeSystem.set_city_citizen_current_haul(citizen_id, haul)
 
-		if not WorldData.assign_city_citizen_movement_order(
+		if not CityCitizenMovementRuntimeSystem.assign_city_citizen_movement_order(
 			citizen_id,
 			movement_path
 		):
@@ -1726,7 +1726,7 @@ static func _begin_next_ground_pile_pickup(
 				"path_requests_remaining": path_requests_remaining,
 			}
 
-		WorldData.set_city_citizen_task_phase(
+		CityCitizenTaskRuntimeSystem.set_city_citizen_task_phase(
 			citizen_id,
 			WorldData.CITY_CITIZEN_TASK_PHASE_TRAVELING
 		)
@@ -2292,7 +2292,7 @@ static func _advance_pending_destination(
 		"destination",
 		CityCitizens.make_city_citizen_haul_endpoint()
 	)
-	WorldData.set_city_citizen_current_haul(citizen_id, haul)
+	CityCitizenTaskRuntimeSystem.set_city_citizen_current_haul(citizen_id, haul)
 
 	values["haul"] = haul
 	values["destination_result"] = destination_result
@@ -2342,15 +2342,15 @@ static func _begin_destination_with_result(
 		)
 	)
 	haul["destination_tile"] = destination_tile
-	WorldData.set_city_citizen_task_activity_state({
+	CityCitizenTaskRuntimeSystem.set_city_citizen_task_activity_state({
 		"citizen_id": citizen_id,
 		"target_tile": destination_tile,
 	})
 
 	if movement_path.size() <= 1:
 		haul["phase"] = WorldData.CITY_CITIZEN_HAUL_PHASE_DEPOSITING
-		WorldData.set_city_citizen_current_haul(citizen_id, haul)
-		WorldData.set_city_citizen_task_phase(
+		CityCitizenTaskRuntimeSystem.set_city_citizen_current_haul(citizen_id, haul)
+		CityCitizenTaskRuntimeSystem.set_city_citizen_task_phase(
 			citizen_id,
 			WorldData.CITY_CITIZEN_TASK_PHASE_PERFORMING
 		)
@@ -2361,16 +2361,16 @@ static func _begin_destination_with_result(
 	haul["phase"] = (
 		WorldData.CITY_CITIZEN_HAUL_PHASE_TRAVELING_TO_DESTINATION
 	)
-	WorldData.set_city_citizen_current_haul(citizen_id, haul)
+	CityCitizenTaskRuntimeSystem.set_city_citizen_current_haul(citizen_id, haul)
 
-	if not WorldData.assign_city_citizen_movement_order(
+	if not CityCitizenMovementRuntimeSystem.assign_city_citizen_movement_order(
 		citizen_id,
 		movement_path
 	):
 		_set_haul_blocked(citizen_id, haul)
 		return path_requests_remaining
 
-	WorldData.set_city_citizen_task_phase(
+	CityCitizenTaskRuntimeSystem.set_city_citizen_task_phase(
 		citizen_id,
 		WorldData.CITY_CITIZEN_TASK_PHASE_TRAVELING
 	)
@@ -2400,7 +2400,7 @@ static func _advance_traveling_to_destination(
 		return path_requests_remaining
 
 	if movement_state == WorldData.CITY_CITIZEN_MOVEMENT_STATE_BLOCKED:
-		WorldData.cancel_city_citizen_movement(citizen_id)
+		CityCitizenMovementRuntimeSystem.cancel_city_citizen_movement(citizen_id)
 		WorldData.release_city_haul_destination_reservation(
 			int(
 				haul.get(
@@ -2415,8 +2415,8 @@ static func _advance_traveling_to_destination(
 			CityCitizens.make_city_citizen_haul_endpoint()
 		)
 		haul["destination_tile"] = WorldData.INVALID_CITY_TILE_POSITION
-		WorldData.set_city_citizen_current_haul(citizen_id, haul)
-		values["citizen"] = WorldData.get_city_citizen_by_id(citizen_id)
+		CityCitizenTaskRuntimeSystem.set_city_citizen_current_haul(citizen_id, haul)
+		values["citizen"] = CityCitizenRegistrySystem.get_city_citizen_by_id(citizen_id)
 		values["haul"] = haul
 		return _advance_pending_destination(city_world, values)
 
@@ -2436,8 +2436,8 @@ static func _advance_traveling_to_destination(
 	):
 		haul["phase"] = WorldData.CITY_CITIZEN_HAUL_PHASE_DEPOSITING
 		haul["destination_tile"] = raw_current_tile
-		WorldData.set_city_citizen_current_haul(citizen_id, haul)
-		WorldData.set_city_citizen_task_phase(
+		CityCitizenTaskRuntimeSystem.set_city_citizen_current_haul(citizen_id, haul)
+		CityCitizenTaskRuntimeSystem.set_city_citizen_task_phase(
 			citizen_id,
 			WorldData.CITY_CITIZEN_TASK_PHASE_PERFORMING
 		)
@@ -2456,7 +2456,7 @@ static func _advance_traveling_to_destination(
 		CityCitizens.make_city_citizen_haul_endpoint()
 	)
 	haul["destination_tile"] = WorldData.INVALID_CITY_TILE_POSITION
-	WorldData.set_city_citizen_current_haul(citizen_id, haul)
+	CityCitizenTaskRuntimeSystem.set_city_citizen_current_haul(citizen_id, haul)
 	return _advance_pending_destination(
 		city_world,
 		values
@@ -2474,7 +2474,7 @@ static func _deposit_and_retarget(
 		int(values.get("path_requests_remaining", 0)),
 		0
 	)
-	var citizen := WorldData.get_city_citizen_by_id(citizen_id)
+	var citizen := CityCitizenRegistrySystem.get_city_citizen_by_id(citizen_id)
 	var raw_current_tile = citizen.get(
 		"city_tile_position",
 		WorldData.INVALID_CITY_TILE_POSITION
@@ -2500,7 +2500,7 @@ static func _deposit_and_retarget(
 		return path_requests_remaining
 
 	if not destination_access_tiles.has(raw_current_tile):
-		WorldData.cancel_city_citizen_movement(citizen_id)
+		CityCitizenMovementRuntimeSystem.cancel_city_citizen_movement(citizen_id)
 		WorldData.release_city_haul_destination_reservation(
 			int(
 				haul.get(
@@ -2515,12 +2515,12 @@ static func _deposit_and_retarget(
 			CityCitizens.make_city_citizen_haul_endpoint()
 		)
 		haul["destination_tile"] = WorldData.INVALID_CITY_TILE_POSITION
-		WorldData.set_city_citizen_current_haul(citizen_id, haul)
-		WorldData.set_city_citizen_task_phase(
+		CityCitizenTaskRuntimeSystem.set_city_citizen_current_haul(citizen_id, haul)
+		CityCitizenTaskRuntimeSystem.set_city_citizen_task_phase(
 			citizen_id,
 			WorldData.CITY_CITIZEN_TASK_PHASE_PENDING
 		)
-		values["citizen"] = WorldData.get_city_citizen_by_id(citizen_id)
+		values["citizen"] = CityCitizenRegistrySystem.get_city_citizen_by_id(citizen_id)
 		values["haul"] = haul
 		return _advance_pending_destination(city_world, values)
 
@@ -2584,12 +2584,12 @@ static func _deposit_and_retarget(
 		CityCitizens.make_city_citizen_haul_endpoint()
 	)
 	haul["destination_tile"] = WorldData.INVALID_CITY_TILE_POSITION
-	WorldData.set_city_citizen_current_haul(citizen_id, haul)
-	WorldData.set_city_citizen_task_phase(
+	CityCitizenTaskRuntimeSystem.set_city_citizen_current_haul(citizen_id, haul)
+	CityCitizenTaskRuntimeSystem.set_city_citizen_task_phase(
 		citizen_id,
 		WorldData.CITY_CITIZEN_TASK_PHASE_PENDING
 	)
-	values["citizen"] = WorldData.get_city_citizen_by_id(citizen_id)
+	values["citizen"] = CityCitizenRegistrySystem.get_city_citizen_by_id(citizen_id)
 	values["haul"] = haul
 	return _advance_pending_destination(city_world, values)
 
@@ -2972,13 +2972,13 @@ static func _complete_haul(
 	if WorldData.get_city_citizen_haul_cargo_amount(citizen_id) > 0:
 		return
 
-	WorldData.cancel_city_citizen_movement(citizen_id)
+	CityCitizenMovementRuntimeSystem.cancel_city_citizen_movement(citizen_id)
 	CityLogisticsSystem.release_city_haul_reservation_for_citizen(citizen_id)
-	WorldData.set_city_citizen_current_haul(
+	CityCitizenTaskRuntimeSystem.set_city_citizen_current_haul(
 		citizen_id,
 		CityCitizens.make_city_citizen_haul()
 	)
-	WorldData.clear_city_citizen_task(
+	CityCitizenTaskRuntimeSystem.clear_city_citizen_task(
 		citizen_id,
 		str(
 			current_task.get(
@@ -3003,7 +3003,7 @@ static func _set_haul_blocked(
 	citizen_id: int,
 	haul: Dictionary
 ) -> void:
-	WorldData.cancel_city_citizen_movement(citizen_id)
+	CityCitizenMovementRuntimeSystem.cancel_city_citizen_movement(citizen_id)
 	CityLogisticsSystem.release_city_haul_reservation_for_citizen(citizen_id)
 	haul["reservation_id"] = (
 		WorldData.INVALID_CITY_CITIZEN_HAUL_RESERVATION_ID
@@ -3017,11 +3017,11 @@ static func _set_haul_blocked(
 	# claim lets a different citizen try immediately instead of locking goods
 	# and capacity for a blocked retry window.
 	if WorldData.get_city_citizen_haul_cargo_amount(citizen_id) <= 0:
-		var current_task := WorldData.get_city_citizen_current_task(
+		var current_task := CityCitizenTaskRuntimeSystem.get_city_citizen_current_task(
 			citizen_id
 		)
-		WorldData.set_city_citizen_current_haul(citizen_id, haul)
-		WorldData.clear_city_citizen_task(
+		CityCitizenTaskRuntimeSystem.set_city_citizen_current_haul(citizen_id, haul)
+		CityCitizenTaskRuntimeSystem.clear_city_citizen_task(
 			citizen_id,
 			str(
 				current_task.get(
@@ -3033,8 +3033,8 @@ static func _set_haul_blocked(
 		return
 
 	haul["phase"] = WorldData.CITY_CITIZEN_HAUL_PHASE_BLOCKED
-	WorldData.set_city_citizen_current_haul(citizen_id, haul)
-	WorldData.set_city_citizen_task_activity_state({
+	CityCitizenTaskRuntimeSystem.set_city_citizen_current_haul(citizen_id, haul)
+	CityCitizenTaskRuntimeSystem.set_city_citizen_task_activity_state({
 		"citizen_id": citizen_id,
 		"target_tile": WorldData.INVALID_CITY_TILE_POSITION,
 		"previous_target_tile": WorldData.INVALID_CITY_TILE_POSITION,
@@ -3044,7 +3044,7 @@ static func _set_haul_blocked(
 		),
 		"relocation_count": 0,
 	})
-	WorldData.set_city_citizen_task_phase(
+	CityCitizenTaskRuntimeSystem.set_city_citizen_task_phase(
 		citizen_id,
 		WorldData.CITY_CITIZEN_TASK_PHASE_BLOCKED
 	)
@@ -3068,15 +3068,15 @@ static func _prepare_blocked_haul_retry(
 	):
 		_set_haul_blocked(
 			citizen_id,
-			WorldData.get_city_citizen_current_haul(citizen_id)
+			CityCitizenTaskRuntimeSystem.get_city_citizen_current_haul(citizen_id)
 		)
 		return false
 
 	if SimulationClock.absolute_world_minutes < retry_world_minute:
 		return false
 
-	WorldData.cancel_city_citizen_movement(citizen_id)
-	var haul := WorldData.get_city_citizen_current_haul(
+	CityCitizenMovementRuntimeSystem.cancel_city_citizen_movement(citizen_id)
+	var haul := CityCitizenTaskRuntimeSystem.get_city_citizen_current_haul(
 		citizen_id
 	)
 
@@ -3087,8 +3087,8 @@ static func _prepare_blocked_haul_retry(
 		haul["phase"] = WorldData.CITY_CITIZEN_HAUL_PHASE_PENDING_SOURCE
 		haul["source_tile"] = WorldData.INVALID_CITY_TILE_POSITION
 
-	WorldData.set_city_citizen_current_haul(citizen_id, haul)
-	WorldData.set_city_citizen_task_activity_state({
+	CityCitizenTaskRuntimeSystem.set_city_citizen_current_haul(citizen_id, haul)
+	CityCitizenTaskRuntimeSystem.set_city_citizen_task_activity_state({
 		"citizen_id": citizen_id,
 		"target_tile": WorldData.INVALID_CITY_TILE_POSITION,
 		"previous_target_tile": WorldData.INVALID_CITY_TILE_POSITION,
@@ -3097,7 +3097,7 @@ static func _prepare_blocked_haul_retry(
 		),
 		"relocation_count": 0,
 	})
-	WorldData.set_city_citizen_task_phase(
+	CityCitizenTaskRuntimeSystem.set_city_citizen_task_phase(
 		citizen_id,
 		WorldData.CITY_CITIZEN_TASK_PHASE_PENDING
 	)

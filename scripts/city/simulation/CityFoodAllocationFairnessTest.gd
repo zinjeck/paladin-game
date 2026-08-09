@@ -157,8 +157,8 @@ func _test_hungry_citizens_reserve_before_household_stocking() -> void:
 
 	CitizenDecisionSystemScript._process_food_needs(false)
 
-	var task_a := WorldData.get_city_citizen_current_task(hungry_a_id)
-	var task_b := WorldData.get_city_citizen_current_task(hungry_b_id)
+	var task_a := CityCitizenTaskRuntimeSystem.get_city_citizen_current_task(hungry_a_id)
+	var task_b := CityCitizenTaskRuntimeSystem.get_city_citizen_current_task(hungry_b_id)
 	_expect(
 		str(task_a.get("kind", ""))
 		== WorldData.CITY_CITIZEN_TASK_KIND_ACQUIRE_FOOD
@@ -179,7 +179,7 @@ func _test_hungry_citizens_reserve_before_household_stocking() -> void:
 	var provisioner_request := (
 		CitizenDecisionSystemScript
 		._get_scheduled_home_food_delivery_task_request(
-			WorldData.get_city_citizen_by_id(provisioner_id)
+			CityCitizenRegistrySystem.get_city_citizen_by_id(provisioner_id)
 		)
 	)
 	_expect(

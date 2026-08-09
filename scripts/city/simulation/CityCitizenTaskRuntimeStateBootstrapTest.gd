@@ -53,7 +53,7 @@ func _test_pre_context_state_adoption() -> void:
 	var bootstrap_ids: Array[int] = [17]
 	var bootstrap_lookup: Dictionary = {17: true}
 	var bootstrap_state := (
-		WorldPoliticalState.get_current_city_citizen_task_runtime_state()
+		CityCitizenTaskRuntimeSystem.get_current_state()
 	)
 	bootstrap_state.active_task_ids = bootstrap_ids
 	bootstrap_state.active_task_id_lookup = bootstrap_lookup
@@ -84,15 +84,15 @@ func _test_pre_context_state_adoption() -> void:
 			context.get_city_citizen_task_runtime_state(),
 			bootstrap_state
 		)
-		and is_same(WorldData.city_active_task_ids, bootstrap_ids)
-		and is_same(WorldData.city_active_task_id_lookup, bootstrap_lookup)
-		and WorldData.city_citizen_task_version == 7,
+		and is_same(CityCitizenTaskRuntimeSystem.get_current_state().active_task_ids, bootstrap_ids)
+		and is_same(CityCitizenTaskRuntimeSystem.get_current_state().active_task_id_lookup, bootstrap_lookup)
+		and CityCitizenTaskRuntimeSystem.get_current_state().citizen_task_version == 7,
 		"Context and compatibility access must resolve one task owner."
 	)
 	_expect(
 		WorldPoliticalState.synchronize_foundation_with_world_data()
 		and is_same(
-			WorldPoliticalState.get_current_city_citizen_task_runtime_state(),
+			CityCitizenTaskRuntimeSystem.get_current_state(),
 			bootstrap_state
 		),
 		"Repeated synchronization must not replace the task owner."
@@ -141,7 +141,7 @@ func _test_real_founding_bootstrap() -> void:
 
 	_expect(
 		WorldData.has_player_city()
-		and WorldData.city_citizens.size()
+		and CityCitizenRegistrySystem.get_current_state().citizens.size()
 		== WorldData.STARTING_CITY_POPULATION
 		and _all_citizens_have_no_task()
 		and _state_has_clean_defaults(task_state),
@@ -149,7 +149,7 @@ func _test_real_founding_bootstrap() -> void:
 	)
 	var version_before_ensure := task_state.citizen_task_version
 	_expect(
-		WorldData.ensure_city_citizen_task_state() == 0
+		CityCitizenTaskRuntimeSystem.ensure_city_citizen_task_state() == 0
 		and task_state.citizen_task_version == version_before_ensure
 		and _state_has_clean_defaults(task_state),
 		"A clean founding ensure must neither replace nor invalidate runtime."
@@ -183,7 +183,7 @@ func _test_legacy_backend_conversion_adopts_state() -> void:
 	var legacy_ids: Array[int] = [31]
 	var legacy_lookup: Dictionary = {31: true}
 	var legacy_state := (
-		WorldPoliticalState.get_current_city_citizen_task_runtime_state()
+		CityCitizenTaskRuntimeSystem.get_current_state()
 	)
 	legacy_state.active_task_ids = legacy_ids
 	legacy_state.active_task_id_lookup = legacy_lookup
@@ -228,7 +228,7 @@ func _test_legacy_backend_conversion_adopts_state() -> void:
 		"A second legacy-backed City must use the rotated fallback."
 	)
 	var rotated_fallback := (
-		WorldPoliticalState.get_current_city_citizen_task_runtime_state()
+		CityCitizenTaskRuntimeSystem.get_current_state()
 	)
 	_expect(
 		not is_same(rotated_fallback, legacy_state)
@@ -238,10 +238,10 @@ func _test_legacy_backend_conversion_adopts_state() -> void:
 	_expect(
 		WorldPoliticalState.set_active_settlement(legacy_city_id)
 		and is_same(
-			WorldPoliticalState.get_current_city_citizen_task_runtime_state(),
+			CityCitizenTaskRuntimeSystem.get_current_state(),
 			legacy_state
 		)
-		and is_same(WorldData.city_active_task_ids, legacy_ids),
+		and is_same(CityCitizenTaskRuntimeSystem.get_current_state().active_task_ids, legacy_ids),
 		"The converted City must retain its owner after fallback use."
 	)
 
@@ -249,7 +249,7 @@ func _test_legacy_backend_conversion_adopts_state() -> void:
 func _test_city_and_session_reset() -> void:
 	WorldData.reset_runtime_session_state()
 	var state := (
-		WorldPoliticalState.get_current_city_citizen_task_runtime_state()
+		CityCitizenTaskRuntimeSystem.get_current_state()
 	)
 	var task_ids: Array[int] = [44]
 	var task_lookup: Dictionary = {44: true}
@@ -260,7 +260,7 @@ func _test_city_and_session_reset() -> void:
 	WorldData.reset_city_citizen_state()
 	_expect(
 		is_same(
-			WorldPoliticalState.get_current_city_citizen_task_runtime_state(),
+			CityCitizenTaskRuntimeSystem.get_current_state(),
 			state
 		)
 		and is_same(state.active_task_ids, task_ids)
@@ -274,7 +274,7 @@ func _test_city_and_session_reset() -> void:
 
 	WorldData.reset_runtime_session_state()
 	var fresh_state := (
-		WorldPoliticalState.get_current_city_citizen_task_runtime_state()
+		CityCitizenTaskRuntimeSystem.get_current_state()
 	)
 	_expect(
 		not is_same(fresh_state, state)
@@ -292,7 +292,7 @@ func _state_has_clean_defaults(state: CityCitizenTaskRuntimeState) -> bool:
 
 
 func _all_citizens_have_no_task() -> bool:
-	for raw_citizen in WorldData.city_citizens:
+	for raw_citizen in CityCitizenRegistrySystem.get_current_state().citizens:
 		if not raw_citizen is Dictionary:
 			return false
 		var raw_task = raw_citizen.get("current_task", {})

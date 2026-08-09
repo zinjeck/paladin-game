@@ -18,14 +18,14 @@ static func run_tick(
 		minutes_advanced <= 0
 		or WorldData.official_city_world == null
 		or not WorldData.player_city_founded
-		or WorldData.city_citizens.is_empty()
+		or CityCitizenRegistrySystem.get_current_state().citizens.is_empty()
 	):
 		return
 
 	WorldData.ensure_city_citizen_need_state()
 	var citizen_ids: Array[int] = []
 
-	for raw_citizen in WorldData.city_citizens:
+	for raw_citizen in CityCitizenRegistrySystem.get_current_state().citizens:
 		if not raw_citizen is Dictionary:
 			continue
 
@@ -62,7 +62,7 @@ static func get_single_food_allocation_nutrition_cap() -> int:
 
 
 static func get_citizen_food_need_nutrition(citizen_id: int) -> int:
-	var citizen := WorldData.get_city_citizen_by_id(citizen_id)
+	var citizen := CityCitizenRegistrySystem.get_city_citizen_by_id(citizen_id)
 
 	if citizen.is_empty() or not bool(citizen.get("alive", false)):
 		return 0
@@ -125,7 +125,7 @@ static func _advance_citizen_hunger(
 	citizen_id: int,
 	minutes_advanced: int
 ) -> void:
-	var citizen := WorldData.get_city_citizen_by_id(citizen_id)
+	var citizen := CityCitizenRegistrySystem.get_city_citizen_by_id(citizen_id)
 
 	if citizen.is_empty():
 		return
@@ -162,7 +162,7 @@ static func _advance_citizen_hunger(
 static func _take_personal_food_at_current_legal_source(
 	citizen_id: int
 ) -> void:
-	var citizen := WorldData.get_city_citizen_by_id(citizen_id)
+	var citizen := CityCitizenRegistrySystem.get_city_citizen_by_id(citizen_id)
 
 	if (
 		citizen.is_empty()
@@ -324,7 +324,7 @@ static func _eat_personal_food_if_hungry(citizen_id: int) -> void:
 			if removed_amount != 1:
 				break
 
-			var citizen := WorldData.get_city_citizen_by_id(citizen_id)
+			var citizen := CityCitizenRegistrySystem.get_city_citizen_by_id(citizen_id)
 			var hunger_remainder := int(
 				citizen.get("hunger_decay_remainder", 0)
 			)

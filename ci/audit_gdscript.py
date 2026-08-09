@@ -344,6 +344,170 @@ WORLD_DATA_CITIZEN_TASK_RUNTIME_PROPERTIES = {
     "city_citizen_task_version": ("int", "citizen_task_version"),
 }
 
+# Pass 8 makes the focused citizen systems the only public behavior gateways.
+# The state classes remain data-only owners, while WorldPoliticalState remains
+# the one low-level resolver behind each system's typed get_current_state API.
+CITIZEN_BEHAVIOR_SYSTEMS = {
+    "registry": {
+        "path": "scripts/citizens/simulation/systems/CityCitizenRegistrySystem.gd",
+        "class_name": "CityCitizenRegistrySystem",
+        "state_type": "CityCitizenRegistryState",
+        "resolver": "get_current_city_citizen_registry_state",
+        "properties": tuple(WORLD_DATA_CITIZEN_REGISTRY_PROPERTIES),
+        "functions": (
+            "get_city_citizens",
+            "get_city_citizen_version",
+            "get_next_city_citizen_id",
+            "reset_city_citizen_registry_state",
+            "mark_city_citizens_changed",
+            "rebuild_city_citizen_index",
+            "register_city_citizen_index",
+            "get_city_citizen_index_by_id",
+            "get_city_population_count",
+            "get_city_citizen_by_id",
+            "get_city_citizen_snapshot",
+            "get_city_citizen_display_name",
+        ),
+        "retired_world_data_names": (
+            "_mark_city_citizens_changed",
+            "_register_city_citizen_index",
+        ),
+    },
+    "spatial": {
+        "path": "scripts/citizens/simulation/systems/CityCitizenSpatialSystem.gd",
+        "class_name": "CityCitizenSpatialSystem",
+        "state_type": "CityCitizenSpatialState",
+        "resolver": "get_current_city_citizen_spatial_state",
+        "properties": tuple(WORLD_DATA_CITIZEN_SPATIAL_PROPERTIES),
+        "functions": (
+            "get_city_citizen_spatial_version",
+            "reset_city_citizen_spatial_state",
+            "mark_city_citizen_spatial_changed",
+            "add_city_citizen_to_spatial_index",
+            "remove_city_citizen_from_spatial_index",
+            "register_city_citizen_spatial_index_entry",
+            "rebuild_city_citizen_spatial_index",
+            "get_city_citizen_ids_at_tile",
+            "has_living_city_citizen_at_tile",
+            "ensure_city_citizen_spatial_state",
+            "get_city_citizen_tile_position",
+            "set_city_citizen_tile_position",
+            "get_living_city_citizen_ids_in_tiles",
+        ),
+        "retired_world_data_names": (
+            "_mark_city_citizen_spatial_changed",
+            "_add_city_citizen_to_spatial_index",
+            "_remove_city_citizen_from_spatial_index",
+            "_register_city_citizen_spatial_index_entry",
+        ),
+    },
+    "movement": {
+        "path": (
+            "scripts/citizens/simulation/systems/"
+            "CityCitizenMovementRuntimeSystem.gd"
+        ),
+        "class_name": "CityCitizenMovementRuntimeSystem",
+        "state_type": "CityCitizenMovementRuntimeState",
+        "resolver": "get_current_city_citizen_movement_runtime_state",
+        "properties": tuple(WORLD_DATA_CITIZEN_MOVEMENT_RUNTIME_PROPERTIES),
+        "functions": (
+            "get_city_citizen_movement_version",
+            "reset_city_citizen_movement_runtime_state",
+            "mark_city_citizen_movement_changed",
+            "_add_city_active_mover_id",
+            "_remove_city_active_mover_id",
+            "rebuild_city_active_mover_registry",
+            "get_city_active_mover_ids_snapshot",
+            "begin_city_citizen_movement_visual_tick",
+            "clear_city_citizen_movement_visual_events",
+            "take_city_citizen_movement_visual_events",
+            "ensure_city_citizen_movement_state",
+            "_get_clean_city_citizen_movement_path",
+            "cancel_city_citizen_movement",
+            "assign_city_citizen_movement_order",
+            "commit_city_citizen_movement_tick",
+            "_make_city_citizen_movement_rejection",
+            "_normalize_city_citizen_movement_updates",
+            "_normalize_next_active_mover_ids",
+            "_quarantine_rejected_city_citizen_movement_updates",
+            "_apply_city_citizen_movement_updates",
+            "_replace_city_active_mover_registry",
+            "_make_city_citizen_movement_visual_event",
+            "_make_city_citizen_movement_visual_snapshot",
+            "_get_clean_city_citizen_movement_visual_trace",
+        ),
+        "retired_world_data_names": ("_mark_city_citizen_movement_changed",),
+    },
+    "task": {
+        "path": (
+            "scripts/citizens/simulation/systems/"
+            "CityCitizenTaskRuntimeSystem.gd"
+        ),
+        "class_name": "CityCitizenTaskRuntimeSystem",
+        "state_type": "CityCitizenTaskRuntimeState",
+        "resolver": "get_current_city_citizen_task_runtime_state",
+        "properties": tuple(WORLD_DATA_CITIZEN_TASK_RUNTIME_PROPERTIES),
+        "functions": (
+            "get_city_citizen_task_version",
+            "reset_city_citizen_task_runtime_state",
+            "mark_city_citizen_task_changed",
+            "_add_city_active_task_id",
+            "_remove_city_active_task_id",
+            "_remove_all_city_active_task_array_entries",
+            "rebuild_city_active_task_registry",
+            "get_city_active_task_ids_snapshot",
+            "get_city_citizen_current_haul",
+            "set_city_citizen_current_haul",
+            "get_city_food_task_reserved_endpoint_amount",
+            "ensure_city_citizen_task_state",
+            "get_city_citizen_current_task",
+            "assign_city_citizen_task",
+            "_make_city_citizen_task_assignment_context",
+            "_prepare_city_citizen_task_assignment",
+            "_prepare_city_work_task_assignment",
+            "_prepare_city_food_task_assignment",
+            "_prepare_city_player_command_task_assignment",
+            "_prepare_city_haul_task_assignment",
+            "_prepare_city_return_home_task_assignment",
+            "_commit_city_citizen_task_assignment",
+            "set_city_citizen_task_phase",
+            "set_city_citizen_task_target_object_id",
+            "set_city_citizen_task_activity_state",
+            "clear_city_citizen_task",
+        ),
+        "retired_world_data_names": ("_mark_city_citizen_task_changed",),
+    },
+}
+
+CITIZEN_NAVIGATION_MOVED_FUNCTIONS = (
+    "city_citizen_can_access_object_interior",
+    "get_city_citizen_movement_step_cost",
+    "can_city_citizen_traverse_step",
+    "_city_citizen_can_cross_object_boundary",
+    "is_city_tile_walkable_for_citizen",
+)
+
+CITIZEN_SCHEMA_MOVED_FUNCTIONS = (
+    "normalize_city_citizen_sex",
+    "is_valid_city_citizen_sex",
+    "get_city_citizen_sex_types",
+    "get_city_citizen_sex_display_name",
+    "get_city_citizen_name_pool_for_sex",
+    "city_citizen_name_pools_are_ready",
+    "get_used_city_citizen_name_counts",
+    "is_valid_city_citizen_task_kind",
+    "is_valid_city_citizen_task_source",
+    "is_valid_city_citizen_task_phase",
+    "is_valid_city_citizen_movement_state",
+    "is_valid_city_citizen_movement_failure",
+)
+
+CITIZEN_SCHEMA_WORLD_DATA_RETIRED_PROPERTIES = (
+    "city_citizen_male_name_pool",
+    "city_citizen_female_name_pool",
+    "city_citizen_unassigned_name_pool",
+)
+
 DEFERRED_CITIZEN_ROOT_FIELDS = {
     "object_access_tile_cache": "city_object_access_tile_cache",
     "assignment_version": "city_assignment_version",
@@ -1577,47 +1741,16 @@ def main() -> int:
                 "missing citizen-registry context accessor"
             )
 
-        for property_name, (property_type, state_field) in (
-            WORLD_DATA_CITIZEN_REGISTRY_PROPERTIES.items()
-        ):
-            declaration_matches = re.findall(
+        for property_name in WORLD_DATA_CITIZEN_REGISTRY_PROPERTIES:
+            if re.search(
                 rf"^static\s+var\s+{re.escape(property_name)}\b",
                 world_data_text,
                 re.MULTILINE,
-            )
-            property_match = re.search(
-                rf"^static\s+var\s+{re.escape(property_name)}:\s*"
-                rf"{property_type}:\s*\n"
-                rf"(?P<body>.*?)"
-                rf"(?=^static\s+var\s+|^const\s+|^#region\b|\Z)",
-                world_data_text,
-                re.MULTILINE | re.DOTALL,
-            )
-            if len(declaration_matches) != 1 or property_match is None:
-                errors.append(
-                    "scripts/world/simulation/WorldData.gd: citizen registry "
-                    f"compatibility property must be accessor-only: {property_name}"
-                )
-                continue
-
-            property_body = property_match.group("body")
-            resolver_count = property_body.count(
-                "WorldPoliticalState.get_current_city_citizen_registry_state()"
-            )
-            if (
-                resolver_count != 2
-                or not re.search(
-                    rf"return\s+state\s*\.\s*{re.escape(state_field)}\b",
-                    property_body,
-                )
-                or not re.search(
-                    rf"state\s*\.\s*{re.escape(state_field)}\s*=\s*value\b",
-                    property_body,
-                )
             ):
                 errors.append(
-                    "scripts/world/simulation/WorldData.gd: citizen registry "
-                    f"property must route getter/setter through one owner: {property_name}"
+                    "scripts/world/simulation/WorldData.gd: retired citizen "
+                    "registry compatibility property must not return: "
+                    f"{property_name}"
                 )
 
         renderer_path = ROOT / "scripts/city/rendering/CityRenderer.gd"
@@ -1738,7 +1871,12 @@ def main() -> int:
 
         for compatibility_name in WORLD_DATA_CITIZEN_SPATIAL_PROPERTIES:
             for path in scripts:
-                if path == world_data_path:
+                if path in {
+                    world_data_path,
+                    ROOT
+                    / "scripts/citizens/simulation/systems/"
+                    "CityCitizenSpatialSystem.gd",
+                }:
                     continue
                 text = path.read_text(encoding="utf-8")
                 if re.search(
@@ -1838,47 +1976,16 @@ def main() -> int:
                 "missing citizen-spatial context accessor"
             )
 
-        for property_name, (property_type, state_field) in (
-            WORLD_DATA_CITIZEN_SPATIAL_PROPERTIES.items()
-        ):
-            declaration_matches = re.findall(
+        for property_name in WORLD_DATA_CITIZEN_SPATIAL_PROPERTIES:
+            if re.search(
                 rf"^static\s+var\s+{re.escape(property_name)}\b",
                 world_data_text,
                 re.MULTILINE,
-            )
-            property_match = re.search(
-                rf"^static\s+var\s+{re.escape(property_name)}:\s*"
-                rf"{property_type}:\s*\n"
-                rf"(?P<body>.*?)"
-                rf"(?=^static\s+var\s+|^const\s+|^#region\b|\Z)",
-                world_data_text,
-                re.MULTILINE | re.DOTALL,
-            )
-            if len(declaration_matches) != 1 or property_match is None:
-                errors.append(
-                    "scripts/world/simulation/WorldData.gd: citizen spatial "
-                    f"compatibility property must be accessor-only: {property_name}"
-                )
-                continue
-
-            property_body = property_match.group("body")
-            resolver_count = property_body.count(
-                "WorldPoliticalState.get_current_city_citizen_spatial_state()"
-            )
-            if (
-                resolver_count != 2
-                or not re.search(
-                    rf"return\s+state\s*\.\s*{re.escape(state_field)}\b",
-                    property_body,
-                )
-                or not re.search(
-                    rf"state\s*\.\s*{re.escape(state_field)}\s*=\s*value\b",
-                    property_body,
-                )
             ):
                 errors.append(
-                    "scripts/world/simulation/WorldData.gd: citizen spatial "
-                    f"property must route getter/setter through one owner: {property_name}"
+                    "scripts/world/simulation/WorldData.gd: retired citizen "
+                    "spatial compatibility property must not return: "
+                    f"{property_name}"
                 )
 
         renderer_path = ROOT / "scripts/city/rendering/CityRenderer.gd"
@@ -1889,7 +1996,8 @@ def main() -> int:
                 "var observed_city_citizen_spatial_state: "
                 "CityCitizenSpatialState" not in renderer_text
                 or "citizen_spatial_state_changed" not in renderer_text
-                or "get_current_city_citizen_spatial_state()" not in renderer_text
+                or "CityCitizenSpatialSystem.get_current_state()"
+                not in renderer_text
             ):
                 errors.append(
                     "scripts/city/rendering/CityRenderer.gd: citizen spatial "
@@ -2032,7 +2140,12 @@ def main() -> int:
             WORLD_DATA_CITIZEN_MOVEMENT_RUNTIME_PROPERTIES
         ):
             for path in scripts:
-                if path == world_data_path:
+                if path in {
+                    world_data_path,
+                    ROOT
+                    / "scripts/citizens/simulation/systems/"
+                    "CityCitizenMovementRuntimeSystem.gd",
+                }:
                     continue
                 text = path.read_text(encoding="utf-8")
                 if re.search(
@@ -2144,51 +2257,16 @@ def main() -> int:
                 "missing citizen movement-runtime context accessor"
             )
 
-        for property_name, (property_type, state_field) in (
-            WORLD_DATA_CITIZEN_MOVEMENT_RUNTIME_PROPERTIES.items()
-        ):
-            declaration_matches = re.findall(
+        for property_name in WORLD_DATA_CITIZEN_MOVEMENT_RUNTIME_PROPERTIES:
+            if re.search(
                 rf"^static\s+var\s+{re.escape(property_name)}\b",
                 world_data_text,
                 re.MULTILINE,
-            )
-            property_match = re.search(
-                rf"^static\s+var\s+{re.escape(property_name)}:\s*"
-                rf"{property_type}:\s*\n"
-                rf"(?P<body>.*?)"
-                rf"(?=^static\s+var\s+|^const\s+|^#region\b|\Z)",
-                world_data_text,
-                re.MULTILINE | re.DOTALL,
-            )
-            if len(declaration_matches) != 1 or property_match is None:
-                errors.append(
-                    "scripts/world/simulation/WorldData.gd: citizen "
-                    "movement-runtime compatibility property must be "
-                    f"accessor-only: {property_name}"
-                )
-                continue
-
-            property_body = property_match.group("body")
-            resolver_matches = re.findall(
-                r"WorldPoliticalState\s*\.\s*"
-                r"get_current_city_citizen_movement_runtime_state\s*\(\s*\)",
-                property_body,
-            )
-            if (
-                len(resolver_matches) != 2
-                or not re.search(
-                    rf"return\s+state\s*\.\s*{re.escape(state_field)}\b",
-                    property_body,
-                )
-                or not re.search(
-                    rf"state\s*\.\s*{re.escape(state_field)}\s*=\s*value\b",
-                    property_body,
-                )
             ):
                 errors.append(
-                    "scripts/world/simulation/WorldData.gd: citizen "
-                    "movement-runtime property must route getter/setter "
-                    f"through one owner: {property_name}"
+                    "scripts/world/simulation/WorldData.gd: retired citizen "
+                    "movement-runtime compatibility property must not return: "
+                    f"{property_name}"
                 )
 
         renderer_path = ROOT / "scripts/city/rendering/CityRenderer.gd"
@@ -2200,7 +2278,7 @@ def main() -> int:
                 "CityCitizenMovementRuntimeState" not in renderer_text
                 or "citizen_movement_runtime_state_changed"
                 not in renderer_text
-                or "get_current_city_citizen_movement_runtime_state()"
+                or "CityCitizenMovementRuntimeSystem.get_current_state()"
                 not in renderer_text
                 or 'change_flags["city_citizen_movement_runtime_changed"]'
                 not in renderer_text
@@ -2320,7 +2398,12 @@ def main() -> int:
 
         for compatibility_name in WORLD_DATA_CITIZEN_TASK_RUNTIME_PROPERTIES:
             for path in scripts:
-                if path == world_data_path:
+                if path in {
+                    world_data_path,
+                    ROOT
+                    / "scripts/citizens/simulation/systems/"
+                    "CityCitizenTaskRuntimeSystem.gd",
+                }:
                     continue
                 text = path.read_text(encoding="utf-8")
                 if re.search(
@@ -2421,50 +2504,15 @@ def main() -> int:
                 "missing citizen task-runtime context accessor"
             )
 
-        for property_name, (property_type, state_field) in (
-            WORLD_DATA_CITIZEN_TASK_RUNTIME_PROPERTIES.items()
-        ):
-            declaration_matches = re.findall(
+        for property_name in WORLD_DATA_CITIZEN_TASK_RUNTIME_PROPERTIES:
+            if re.search(
                 rf"^static\s+var\s+{re.escape(property_name)}\b",
                 world_data_text,
                 re.MULTILINE,
-            )
-            property_match = re.search(
-                rf"^static\s+var\s+{re.escape(property_name)}:\s*"
-                rf"{property_type}:\s*\n"
-                rf"(?P<body>.*?)"
-                rf"(?=^static\s+var\s+|^const\s+|^#region\b|\Z)",
-                world_data_text,
-                re.MULTILINE | re.DOTALL,
-            )
-            if len(declaration_matches) != 1 or property_match is None:
-                errors.append(
-                    "scripts/world/simulation/WorldData.gd: citizen "
-                    "task-runtime compatibility property must be accessor-only: "
-                    f"{property_name}"
-                )
-                continue
-
-            property_body = property_match.group("body")
-            resolver_matches = re.findall(
-                r"WorldPoliticalState\s*\.\s*"
-                r"get_current_city_citizen_task_runtime_state\s*\(\s*\)",
-                property_body,
-            )
-            if (
-                len(resolver_matches) != 2
-                or not re.search(
-                    rf"return\s+state\s*\.\s*{re.escape(state_field)}\b",
-                    property_body,
-                )
-                or not re.search(
-                    rf"state\s*\.\s*{re.escape(state_field)}\s*=\s*value\b",
-                    property_body,
-                )
             ):
                 errors.append(
-                    "scripts/world/simulation/WorldData.gd: citizen task-runtime "
-                    "property must route getter/setter through one owner: "
+                    "scripts/world/simulation/WorldData.gd: retired citizen "
+                    "task-runtime compatibility property must not return: "
                     f"{property_name}"
                 )
 
@@ -2493,7 +2541,7 @@ def main() -> int:
             if (
                 "var observed_city_citizen_task_runtime_state: "
                 "CityCitizenTaskRuntimeState" not in renderer_text
-                or "get_current_city_citizen_task_runtime_state()"
+                or "CityCitizenTaskRuntimeSystem.get_current_state()"
                 not in renderer_text
                 or renderer_identity_comparison is None
                 or renderer_identity_invalidation is None
@@ -2508,16 +2556,16 @@ def main() -> int:
                 r"if\s*\(\s*_cached_citizen_task_runtime_state\s*"
                 r"==\s*null\s*or\s*not\s+is_same\s*\(\s*"
                 r"_cached_citizen_task_runtime_state\s*,\s*"
-                r"WorldPoliticalState\s*\.\s*"
-                r"get_current_city_citizen_task_runtime_state\s*\(\s*\)"
+                r"CityCitizenTaskRuntimeSystem\s*\.\s*"
+                r"get_current_state\s*\(\s*\)"
                 r"\s*\)\s*\)\s*:\s*return\s+false",
                 validator_text,
                 re.DOTALL,
             )
             validator_cache_assignment = re.search(
                 r"_cached_citizen_task_runtime_state\s*=\s*\(\s*"
-                r"WorldPoliticalState\s*\.\s*"
-                r"get_current_city_citizen_task_runtime_state\s*\(\s*\)"
+                r"CityCitizenTaskRuntimeSystem\s*\.\s*"
+                r"get_current_state\s*\(\s*\)"
                 r"\s*\)",
                 validator_text,
                 re.DOTALL,
@@ -2534,6 +2582,294 @@ def main() -> int:
                     "scripts/city/simulation/CityStateValidator.gd: validation "
                     "cache must include citizen task-runtime identity"
                 )
+
+    # Pass 8: focused citizen behavior APIs must be permanent boundaries.
+    # Direct state resolution is intentionally private to WorldPoliticalState
+    # and each matching focused system. Add an explicit path here if a future,
+    # short-lived migration bridge is ever approved; the default is no bridge.
+    citizen_state_resolver_bridge_paths: set[Path] = set()
+    citizen_system_paths: dict[str, Path] = {}
+    moved_world_data_symbols: set[str] = set(CITIZEN_NAVIGATION_MOVED_FUNCTIONS)
+    moved_world_data_symbols.update(CITIZEN_SCHEMA_MOVED_FUNCTIONS)
+    compatibility_properties: set[str] = set(
+        CITIZEN_SCHEMA_WORLD_DATA_RETIRED_PROPERTIES
+    )
+
+    for domain_name, config in CITIZEN_BEHAVIOR_SYSTEMS.items():
+        system_path = ROOT / str(config["path"])
+        citizen_system_paths[domain_name] = system_path
+        required_functions = set(config["functions"])
+        moved_world_data_symbols.update(required_functions)
+        moved_world_data_symbols.update(config["retired_world_data_names"])
+        compatibility_properties.update(config["properties"])
+
+        if not system_path.exists():
+            errors.append(
+                f"{config['path']}: missing Pass 8 citizen {domain_name} "
+                "behavior gateway"
+            )
+            continue
+
+        system_text = system_path.read_text(encoding="utf-8")
+        if not re.search(
+            rf"^class_name\s+{re.escape(str(config['class_name']))}\s*$",
+            system_text,
+            re.MULTILINE,
+        ):
+            errors.append(
+                f"{config['path']}: missing {config['class_name']} class_name"
+            )
+
+        typed_accessor_pattern = (
+            r"^static\s+func\s+get_current_state\s*\(\s*\)\s*->\s*"
+            rf"{re.escape(str(config['state_type']))}\s*:"
+        )
+        if not re.search(typed_accessor_pattern, system_text, re.MULTILINE):
+            errors.append(
+                f"{config['path']}: missing typed get_current_state() -> "
+                f"{config['state_type']} gateway"
+            )
+
+        resolver = str(config["resolver"])
+        if not re.search(
+            rf"return\s+WorldPoliticalState\s*\.\s*"
+            rf"{re.escape(resolver)}\s*\(\s*\)",
+            system_text,
+        ):
+            errors.append(
+                f"{config['path']}: get_current_state must route through "
+                f"WorldPoliticalState.{resolver}()"
+            )
+
+        declared_functions = set(FUNC_RE.findall(system_text))
+        missing_functions = sorted(required_functions - declared_functions)
+        if missing_functions:
+            errors.append(
+                f"{config['path']}: missing focused citizen behavior: "
+                + ", ".join(missing_functions)
+            )
+
+        allowed_property_owner = system_path
+        for property_name in config["properties"]:
+            if not re.search(
+                rf"^static\s+var\s+{re.escape(str(property_name))}\b",
+                system_text,
+                re.MULTILINE,
+            ):
+                errors.append(
+                    f"{config['path']}: missing focused state property "
+                    f"{property_name}"
+                )
+            for path in scripts:
+                if path == allowed_property_owner:
+                    continue
+                text = path.read_text(encoding="utf-8")
+                if re.search(
+                    rf"^(?:static\s+)?var\s+"
+                    rf"{re.escape(str(property_name))}\b",
+                    text,
+                    re.MULTILINE,
+                ):
+                    errors.append(
+                        f"{path.relative_to(ROOT)}: citizen compatibility "
+                        f"property is private to {config['class_name']}: "
+                        f"{property_name}"
+                    )
+
+    navigation_path = (
+        ROOT / "scripts/city/simulation/systems/CityNavigationSystem.gd"
+    )
+    if not navigation_path.exists():
+        errors.append(
+            "scripts/city/simulation/systems/CityNavigationSystem.gd: "
+            "missing citizen navigation behavior owner"
+        )
+    else:
+        navigation_functions = set(
+            FUNC_RE.findall(navigation_path.read_text(encoding="utf-8"))
+        )
+        missing_navigation_functions = sorted(
+            set(CITIZEN_NAVIGATION_MOVED_FUNCTIONS) - navigation_functions
+        )
+        if missing_navigation_functions:
+            errors.append(
+                "scripts/city/simulation/systems/CityNavigationSystem.gd: "
+                "missing focused citizen navigation behavior: "
+                + ", ".join(missing_navigation_functions)
+            )
+
+    citizen_schema_path = (
+        ROOT / "scripts/citizens/simulation/CityCitizens.gd"
+    )
+    if not citizen_schema_path.exists():
+        errors.append(
+            "scripts/citizens/simulation/CityCitizens.gd: missing citizen "
+            "schema behavior owner"
+        )
+    else:
+        citizen_schema_text = citizen_schema_path.read_text(encoding="utf-8")
+        schema_functions = set(FUNC_RE.findall(citizen_schema_text))
+        missing_schema_functions = sorted(
+            set(CITIZEN_SCHEMA_MOVED_FUNCTIONS) - schema_functions
+        )
+        if missing_schema_functions:
+            errors.append(
+                "scripts/citizens/simulation/CityCitizens.gd: missing focused "
+                "citizen schema behavior: "
+                + ", ".join(missing_schema_functions)
+            )
+        for property_name in CITIZEN_SCHEMA_WORLD_DATA_RETIRED_PROPERTIES:
+            if not re.search(
+                rf"^static\s+var\s+{re.escape(property_name)}\b",
+                citizen_schema_text,
+                re.MULTILINE,
+            ):
+                errors.append(
+                    "scripts/citizens/simulation/CityCitizens.gd: missing "
+                    f"authoritative citizen schema property {property_name}"
+                )
+            for path in scripts:
+                if path == citizen_schema_path:
+                    continue
+                text = path.read_text(encoding="utf-8")
+                if re.search(
+                    rf"^static\s+var\s+{re.escape(property_name)}\b",
+                    text,
+                    re.MULTILINE,
+                ):
+                    errors.append(
+                        f"{path.relative_to(ROOT)}: citizen name-pool alias "
+                        "must not return outside CityCitizens: "
+                        f"{property_name}"
+                    )
+
+    citizen_api_symbols = moved_world_data_symbols | compatibility_properties
+    citizen_api_symbol_alternation = "|".join(
+        re.escape(symbol)
+        for symbol in sorted(citizen_api_symbols, key=len, reverse=True)
+    )
+
+    if world_data_path.exists():
+        world_data_text = world_data_path.read_text(encoding="utf-8")
+        for symbol in sorted(citizen_api_symbols):
+            declaration_patterns = (
+                rf"^\s*static\s+var\s+{re.escape(symbol)}\b",
+                rf"^\s*const\s+{re.escape(symbol)}\b",
+                rf"^\s*(?:static\s+)?func\s+{re.escape(symbol)}\s*\(",
+            )
+            if any(
+                re.search(pattern, world_data_text, re.MULTILINE)
+                for pattern in declaration_patterns
+            ):
+                errors.append(
+                    "scripts/world/simulation/WorldData.gd: moved citizen "
+                    f"behavior/property must not return: {symbol}"
+                )
+
+    for path in scripts:
+        text = path.read_text(encoding="utf-8")
+        relative = path.relative_to(ROOT).as_posix()
+
+        direct_symbols = set(
+            re.findall(
+                rf"\bWorldData\s*\.\s*"
+                rf"({citizen_api_symbol_alternation})\b",
+                text,
+            )
+        )
+        dynamic_symbols = set(
+            re.findall(
+                rf"\bWorldData\s*\[\s*[\"']"
+                rf"({citizen_api_symbol_alternation})[\"']\s*\]",
+                text,
+            )
+        )
+        dynamic_symbols.update(
+            re.findall(
+                rf"\bWorldData\s*\.\s*"
+                rf"(?:get|set|call|callv|call_deferred|has_method)\s*\(\s*"
+                rf"[\"']({citizen_api_symbol_alternation})[\"']",
+                text,
+            )
+        )
+        dynamic_symbols.update(
+            re.findall(
+                rf"\bCallable\s*\(\s*WorldData\s*,\s*"
+                rf"[\"']({citizen_api_symbol_alternation})[\"']\s*\)",
+                text,
+            )
+        )
+        for symbol in sorted(direct_symbols):
+            errors.append(
+                f"{relative}: legacy WorldData citizen API reference "
+                f"remains: WorldData.{symbol}"
+            )
+        for symbol in sorted(dynamic_symbols):
+            errors.append(
+                f"{relative}: dynamic legacy WorldData citizen API "
+                f"reference remains: {symbol}"
+            )
+
+        for domain_name, config in CITIZEN_BEHAVIOR_SYSTEMS.items():
+            resolver = str(config["resolver"])
+            allowed_resolver_paths = {
+                political_state_path,
+                citizen_system_paths[domain_name],
+                *citizen_state_resolver_bridge_paths,
+            }
+            if path in allowed_resolver_paths:
+                continue
+
+            direct_resolver = re.search(
+                rf"\bWorldPoliticalState\s*\.\s*{re.escape(resolver)}"
+                rf"\s*\(\s*\)",
+                text,
+            )
+            dynamic_resolver = re.search(
+                rf"\bWorldPoliticalState\s*\.\s*"
+                rf"(?:call|callv|call_deferred|get|has_method)\s*\(\s*"
+                rf"[\"']{re.escape(resolver)}[\"']",
+                text,
+            )
+            callable_resolver = re.search(
+                rf"\bCallable\s*\(\s*WorldPoliticalState\s*,\s*"
+                rf"[\"']{re.escape(resolver)}[\"']\s*\)",
+                text,
+            )
+            if direct_resolver or dynamic_resolver or callable_resolver:
+                errors.append(
+                    f"{relative}: {resolver} is private; use "
+                    f"{config['class_name']}.get_current_state()"
+                )
+
+    renderer_path = ROOT / "scripts/city/rendering/CityRenderer.gd"
+    validator_path = ROOT / "scripts/city/simulation/CityStateValidator.gd"
+    for consumer_path, consumer_name in (
+        (renderer_path, "renderer"),
+        (validator_path, "validator"),
+    ):
+        if not consumer_path.exists():
+            continue
+        consumer_text = consumer_path.read_text(encoding="utf-8")
+        for config in CITIZEN_BEHAVIOR_SYSTEMS.values():
+            focused_accessor = f"{config['class_name']}.get_current_state()"
+            if focused_accessor not in consumer_text:
+                errors.append(
+                    f"{consumer_path.relative_to(ROOT)}: citizen {consumer_name} "
+                    f"must resolve {config['state_type']} through "
+                    f"{focused_accessor}"
+                )
+
+    boundary_test_path = (
+        ROOT / "scripts/city/simulation/CityCitizenBehaviorApiBoundaryTest.gd"
+    )
+    boundary_scene_path = boundary_test_path.with_suffix(".tscn")
+    for required_path in (boundary_test_path, boundary_scene_path):
+        if not required_path.exists():
+            errors.append(
+                f"{required_path.relative_to(ROOT)}: missing permanent Pass 8 "
+                "citizen behavior API boundary coverage"
+            )
 
     report = {
         "script_count": len(scripts),

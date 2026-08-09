@@ -1599,11 +1599,11 @@ static func _validate_city_haul_reservation_entry(
 			+ " has invalid destination endpoint."
 		)
 
-	var citizen := WorldData.get_city_citizen_by_id(citizen_id)
-	var current_task := WorldData.get_city_citizen_current_task(
+	var citizen := CityCitizenRegistrySystem.get_city_citizen_by_id(citizen_id)
+	var current_task := CityCitizenTaskRuntimeSystem.get_city_citizen_current_task(
 		citizen_id
 	)
-	var current_haul := WorldData.get_city_citizen_current_haul(
+	var current_haul := CityCitizenTaskRuntimeSystem.get_city_citizen_current_haul(
 		citizen_id
 	)
 	var cargo_amount := WorldData.get_city_citizen_haul_cargo_amount(

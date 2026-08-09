@@ -6,12 +6,11 @@ class_name CityCitizenMovementRuntimeState
 # Citizen records retain authoritative movement paths, progress, destinations,
 # and positions. This owner holds only the active-mover index, transient visual
 # event buffer, visual tick identity, and the version that invalidates movement
-# observers. Movement/pathfinding behavior remains in its existing systems;
-# citizen task runtime lives in CityCitizenTaskRuntimeState, and object
-# access-tile caching remains separate.
-#
-# WorldData retains the historical compatibility behavior API during this
-# ownership-only pass. Keep this class strictly data-only.
+# observers. CityCitizenMovementRuntimeSystem owns movement orders, atomic
+# commits, and this runtime index; CitizenMovementSystem computes ticks and
+# CityNavigationSystem owns traversal policy. Citizen task runtime lives in
+# CityCitizenTaskRuntimeState, and object access-tile caching remains separate.
+# Keep this class strictly data-only.
 
 var active_mover_ids: Array[int] = []
 var active_mover_id_lookup: Dictionary = {}

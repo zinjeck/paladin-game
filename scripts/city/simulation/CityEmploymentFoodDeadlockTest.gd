@@ -148,7 +148,7 @@ func _test_starving_food_workers_keep_survival_schedule() -> void:
 	)
 
 	for citizen_id in citizen_ids:
-		var citizen := WorldData.get_city_citizen_by_id(citizen_id)
+		var citizen := CityCitizenRegistrySystem.get_city_citizen_by_id(citizen_id)
 		_expect(
 			int(citizen.get("job_object_id", -1)) == fishery_id,
 			"Every starvation fixture citizen must remain assigned to the Fishery."
@@ -162,7 +162,7 @@ func _test_starving_food_workers_keep_survival_schedule() -> void:
 			"A starving assigned food worker must still receive scheduled Work when no food exists."
 		)
 		_expect(
-			WorldData.assign_city_citizen_task(citizen_id, work_request),
+			CityCitizenTaskRuntimeSystem.assign_city_citizen_task(citizen_id, work_request),
 			"The starvation fixture must assign each generated Work request."
 		)
 
@@ -224,7 +224,7 @@ func _test_starving_residents_keep_return_home_schedule() -> void:
 		"The return-home fixture must assign the citizen to the House."
 	)
 
-	citizen = WorldData.get_city_citizen_by_id(citizen_id)
+	citizen = CityCitizenRegistrySystem.get_city_citizen_by_id(citizen_id)
 	var home_request := (
 		CitizenDecisionSystemScript._get_assigned_home_task_request(citizen)
 	)
@@ -234,7 +234,7 @@ func _test_starving_residents_keep_return_home_schedule() -> void:
 		"A starving resident without obtainable food must still receive Return Home."
 	)
 	_expect(
-		WorldData.assign_city_citizen_task(citizen_id, home_request),
+		CityCitizenTaskRuntimeSystem.assign_city_citizen_task(citizen_id, home_request),
 		"The return-home fixture must assign the generated Return Home request."
 	)
 
@@ -307,7 +307,7 @@ func _test_persistent_workplace_staffing_policy() -> void:
 	_expect(
 		WorldData.get_city_object_worker_count(fishery) == 3
 		and int(
-			WorldData.get_city_citizen_by_id(blocked_citizen_id).get(
+			CityCitizenRegistrySystem.get_city_citizen_by_id(blocked_citizen_id).get(
 				"job_object_id",
 				-1
 			)
@@ -321,7 +321,7 @@ func _test_persistent_workplace_staffing_policy() -> void:
 	_expect(
 		WorldData.get_city_object_worker_count(fishery) == 4
 		and int(
-			WorldData.get_city_citizen_by_id(blocked_citizen_id).get(
+			CityCitizenRegistrySystem.get_city_citizen_by_id(blocked_citizen_id).get(
 				"job_object_id",
 				-1
 			)
@@ -399,7 +399,7 @@ func _add_citizen(tile_position: Vector2i) -> Dictionary:
 
 func _task_kind(citizen_id: int) -> String:
 	return str(
-		WorldData.get_city_citizen_current_task(citizen_id).get(
+		CityCitizenTaskRuntimeSystem.get_city_citizen_current_task(citizen_id).get(
 			"kind",
 			WorldData.CITY_CITIZEN_TASK_KIND_NONE
 		)

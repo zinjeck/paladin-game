@@ -426,7 +426,7 @@ func _test_city_information_panel_live_data(
 	renderer: CityRenderer
 ) -> void:
 	var city_ui = renderer.city_information_ui
-	var citizen_count := WorldData.get_city_population_count()
+	var citizen_count := CityCitizenRegistrySystem.get_city_population_count()
 
 	_expect(
 		city_ui.population_button.text == "Pop\n" + str(citizen_count),
@@ -448,7 +448,7 @@ func _test_city_information_panel_live_data(
 	if citizen_count <= 0:
 		return
 
-	var first_citizen: Dictionary = WorldData.city_citizens[0]
+	var first_citizen: Dictionary = CityCitizenRegistrySystem.get_current_state().citizens[0]
 	var first_citizen_id := int(first_citizen.get("id", -1))
 	var original_hunger := int(first_citizen.get("hunger", 100))
 	var original_hunger_remainder := int(
@@ -458,7 +458,7 @@ func _test_city_information_panel_live_data(
 	var original_hunger_total := 0.0
 	var original_happiness_total := 0.0
 
-	for raw_citizen in WorldData.city_citizens:
+	for raw_citizen in CityCitizenRegistrySystem.get_current_state().citizens:
 		var citizen: Dictionary = raw_citizen
 		original_hunger_total += float(citizen.get("hunger", 100))
 		original_happiness_total += float(
@@ -466,7 +466,7 @@ func _test_city_information_panel_live_data(
 		)
 
 	first_citizen["happiness"] = 30
-	WorldData.city_citizens[0] = first_citizen
+	CityCitizenRegistrySystem.get_current_state().citizens[0] = first_citizen
 	_expect(
 		WorldData.set_city_citizen_hunger_state(
 			first_citizen_id,
@@ -492,9 +492,9 @@ func _test_city_information_panel_live_data(
 		"Citizen version changes must refresh both average need meters."
 	)
 
-	first_citizen = WorldData.city_citizens[0]
+	first_citizen = CityCitizenRegistrySystem.get_current_state().citizens[0]
 	first_citizen["happiness"] = original_happiness
-	WorldData.city_citizens[0] = first_citizen
+	CityCitizenRegistrySystem.get_current_state().citizens[0] = first_citizen
 	WorldData.set_city_citizen_hunger_state(
 		first_citizen_id,
 		original_hunger,
@@ -672,7 +672,7 @@ func _test_city_natural_features(
 
 	if first_tree_tile != Vector2i(-1, -1):
 		_expect(
-			WorldData.is_city_tile_walkable_for_citizen(
+			CityNavigationSystem.is_city_tile_walkable_for_citizen(
 				renderer.city_world,
 				first_tree_tile
 			),
@@ -732,7 +732,7 @@ func _test_city_natural_features(
 
 	if first_rock_tile != Vector2i(-1, -1):
 		_expect(
-			WorldData.is_city_tile_walkable_for_citizen(
+			CityNavigationSystem.is_city_tile_walkable_for_citizen(
 				renderer.city_world,
 				first_rock_tile
 			),
@@ -1226,14 +1226,14 @@ func _place_and_validate_city_fixture(
 	)
 
 	_expect(
-		WorldData.get_city_population_count()
+		CityCitizenRegistrySystem.get_city_population_count()
 		== WorldData.STARTING_CITY_POPULATION,
 		"Founding must still create the starting population."
 	)
 
 	var all_founders_share_primary_culture := true
 
-	for raw_citizen in WorldData.city_citizens:
+	for raw_citizen in CityCitizenRegistrySystem.get_current_state().citizens:
 		if (
 			not raw_citizen is Dictionary
 			or raw_citizen.get("culture_id") != primary_culture_id
@@ -1273,7 +1273,7 @@ func _place_and_validate_city_fixture(
 	)
 
 
-	var first_citizen: Dictionary = WorldData.city_citizens[0]
+	var first_citizen: Dictionary = CityCitizenRegistrySystem.get_current_state().citizens[0]
 	var first_citizen_id := int(first_citizen.get("id", -1))
 	var removed_fish := CityResourceContainerSystem.remove_resource_from_city_object_storage(
 		keep_id,
@@ -1395,14 +1395,14 @@ func _test_universal_construction_core(
 	renderer: CityRenderer
 ) -> void:
 	_expect(
-		not WorldData.city_citizens.is_empty(),
+		not CityCitizenRegistrySystem.get_current_state().citizens.is_empty(),
 		"Construction coverage requires a starting citizen."
 	)
 
-	if WorldData.city_citizens.is_empty():
+	if CityCitizenRegistrySystem.get_current_state().citizens.is_empty():
 		return
 
-	var citizen_id := int(WorldData.city_citizens[0].get("id", -1))
+	var citizen_id := int(CityCitizenRegistrySystem.get_current_state().citizens[0].get("id", -1))
 	var keep_access_tiles: Array = []
 
 	for raw_object in CityObjectSystem.get_city_objects():
@@ -1941,7 +1941,7 @@ func _test_universal_construction_core(
 		"A completed road tile must become one selectable one-tile object."
 	)
 	_expect(
-		WorldData.get_city_citizen_movement_step_cost(
+		CityNavigationSystem.get_city_citizen_movement_step_cost(
 			road_tiles[0] + Vector2i.LEFT,
 			road_tiles[0]
 		) == WorldData.CITY_CITIZEN_ROAD_CARDINAL_MOVEMENT_COST,
@@ -1977,7 +1977,7 @@ func _find_clear_road_construction_tiles(
 				and not CityLogisticsSystem.has_city_ground_pile_at_tile(
 					tile_position
 				)
-				and not WorldData.has_living_city_citizen_at_tile(
+				and not CityCitizenSpatialSystem.has_living_city_citizen_at_tile(
 					tile_position
 				)
 			):
@@ -1999,7 +1999,7 @@ func _find_reachable_construction_rectangle(
 	if city_world == null or citizen_id <= 0:
 		return WorldData.INVALID_CITY_TILE_POSITION
 
-	var citizen := WorldData.get_city_citizen_by_id(citizen_id)
+	var citizen := CityCitizenRegistrySystem.get_city_citizen_by_id(citizen_id)
 	var raw_citizen_tile = citizen.get(
 		"city_tile_position",
 		WorldData.INVALID_CITY_TILE_POSITION
@@ -2071,7 +2071,7 @@ func _find_reachable_construction_rectangle(
 							).is_empty()
 							or
 							CityLogisticsSystem.has_city_ground_pile_at_tile(raw_tile)
-							or WorldData.has_living_city_citizen_at_tile(
+							or CityCitizenSpatialSystem.has_living_city_citizen_at_tile(
 								raw_tile
 							)
 						)

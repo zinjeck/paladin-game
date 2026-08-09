@@ -30,7 +30,7 @@ func _test_index_mutations_rebuild_and_reset() -> void:
 	var city_world: WorldData = fixture["world"]
 	var culture_id: int = fixture["culture_id"]
 	var spatial_state := (
-		WorldPoliticalState.get_current_city_citizen_spatial_state()
+		CityCitizenSpatialSystem.get_current_state()
 	)
 	var spatial_index: Dictionary = spatial_state.citizen_ids_by_tile
 
@@ -54,14 +54,14 @@ func _test_index_mutations_rebuild_and_reset() -> void:
 	spatial_index[TILE_A] = [first_id, first_id, second_id]
 	var version_before_move := spatial_state.citizen_spatial_version
 	_expect(
-		WorldData.set_city_citizen_tile_position(
+		CityCitizenSpatialSystem.set_city_citizen_tile_position(
 			city_world,
 			first_id,
 			TILE_B
 		)
 		and spatial_index.get(TILE_A, []) == [2]
 		and spatial_index.get(TILE_B, []) == [1, 3]
-		and WorldData.get_city_citizen_tile_position(first_id) == TILE_B
+		and CityCitizenSpatialSystem.get_city_citizen_tile_position(first_id) == TILE_B
 		and spatial_state.citizen_spatial_version == version_before_move + 1,
 		"A direct move must atomically remove old and add new membership."
 	)
@@ -69,12 +69,12 @@ func _test_index_mutations_rebuild_and_reset() -> void:
 	var version_before_noop := spatial_state.citizen_spatial_version
 	var stable_index := spatial_index.duplicate(true)
 	_expect(
-		WorldData.set_city_citizen_tile_position(
+		CityCitizenSpatialSystem.set_city_citizen_tile_position(
 			city_world,
 			first_id,
 			TILE_B
 		)
-		and not WorldData.set_city_citizen_tile_position(
+		and not CityCitizenSpatialSystem.set_city_citizen_tile_position(
 			city_world,
 			first_id,
 			Vector2i(-1, -1)
@@ -86,7 +86,7 @@ func _test_index_mutations_rebuild_and_reset() -> void:
 	spatial_index[TILE_B] = [third_id]
 	var version_before_noop_repair := spatial_state.citizen_spatial_version
 	_expect(
-		WorldData.set_city_citizen_tile_position(
+		CityCitizenSpatialSystem.set_city_citizen_tile_position(
 			city_world,
 			first_id,
 			TILE_B
@@ -102,7 +102,7 @@ func _test_index_mutations_rebuild_and_reset() -> void:
 	spatial_index[TILE_C] = [second_id]
 	var version_before_rebuild := spatial_state.citizen_spatial_version
 	_expect(
-		WorldData.rebuild_city_citizen_spatial_index()
+		CityCitizenSpatialSystem.rebuild_city_citizen_spatial_index()
 		and spatial_index.get(TILE_A, []) == [second_id]
 		and spatial_index.get(TILE_B, []) == [first_id, third_id]
 		and not spatial_index.has(TILE_C)
@@ -112,33 +112,33 @@ func _test_index_mutations_rebuild_and_reset() -> void:
 	)
 	var version_before_clean_rebuild := spatial_state.citizen_spatial_version
 	_expect(
-		not WorldData.rebuild_city_citizen_spatial_index()
+		not CityCitizenSpatialSystem.rebuild_city_citizen_spatial_index()
 		and spatial_state.citizen_spatial_version
 		== version_before_clean_rebuild,
 		"A clean rebuild must not publish a false spatial change."
 	)
 
-	var registry_array: Array = WorldData.city_citizens
-	var third_index := WorldData.get_city_citizen_index_by_id(third_id)
+	var registry_array: Array = CityCitizenRegistrySystem.get_current_state().citizens
+	var third_index := CityCitizenRegistrySystem.get_city_citizen_index_by_id(third_id)
 	var dead_citizen: Dictionary = registry_array[third_index]
 	dead_citizen["alive"] = false
 	registry_array[third_index] = dead_citizen
-	WorldData.city_citizen_version += 1
+	CityCitizenRegistrySystem.mark_city_citizens_changed()
 	var version_before_death_rebuild := spatial_state.citizen_spatial_version
 	_expect(
-		WorldData.rebuild_city_citizen_spatial_index()
+		CityCitizenSpatialSystem.rebuild_city_citizen_spatial_index()
 		and spatial_index.get(TILE_B, []) == [first_id]
 		and spatial_state.citizen_spatial_version
 		== version_before_death_rebuild + 1,
 		"Rebuild must remove non-living citizens from spatial membership."
 	)
 
-	registry_array.remove_at(WorldData.get_city_citizen_index_by_id(second_id))
-	WorldData.rebuild_city_citizen_index()
-	WorldData.city_citizen_version += 1
+	registry_array.remove_at(CityCitizenRegistrySystem.get_city_citizen_index_by_id(second_id))
+	CityCitizenRegistrySystem.rebuild_city_citizen_index()
+	CityCitizenRegistrySystem.mark_city_citizens_changed()
 	var version_before_removal_rebuild := spatial_state.citizen_spatial_version
 	_expect(
-		WorldData.rebuild_city_citizen_spatial_index()
+		CityCitizenSpatialSystem.rebuild_city_citizen_spatial_index()
 		and not spatial_index.has(TILE_A)
 		and spatial_index.get(TILE_B, []) == [first_id]
 		and spatial_state.citizen_spatial_version
@@ -150,10 +150,10 @@ func _test_index_mutations_rebuild_and_reset() -> void:
 	WorldData.reset_city_citizen_state()
 	_expect(
 		is_same(
-			WorldPoliticalState.get_current_city_citizen_spatial_state(),
+			CityCitizenSpatialSystem.get_current_state(),
 			spatial_state
 		)
-		and is_same(WorldData.city_citizen_ids_by_tile, spatial_index)
+		and is_same(CityCitizenSpatialSystem.get_current_state().citizen_ids_by_tile, spatial_index)
 		and spatial_index.is_empty()
 		and spatial_state.citizen_spatial_version == version_before_reset + 1,
 		"Citizen reset must clear the spatial index in place and invalidate once."
@@ -161,7 +161,7 @@ func _test_index_mutations_rebuild_and_reset() -> void:
 
 	WorldData.reset_runtime_session_state()
 	var fresh_state := (
-		WorldPoliticalState.get_current_city_citizen_spatial_state()
+		CityCitizenSpatialSystem.get_current_state()
 	)
 	_expect(
 		not is_same(fresh_state, spatial_state)
@@ -182,12 +182,12 @@ func _test_real_movement_batch_atomicity() -> void:
 	var valid_update: Dictionary = valid_citizen.duplicate(true)
 	var rejected_update: Dictionary = rejected_citizen.duplicate(true)
 	var spatial_state := (
-		WorldPoliticalState.get_current_city_citizen_spatial_state()
+		CityCitizenSpatialSystem.get_current_state()
 	)
 	var spatial_index: Dictionary = spatial_state.citizen_ids_by_tile
 	var version_before_commit := spatial_state.citizen_spatial_version
 
-	var commit_result := WorldData.commit_city_citizen_movement_tick(
+	var commit_result := CityCitizenMovementRuntimeSystem.commit_city_citizen_movement_tick(
 		city_world,
 		[
 			{
@@ -210,8 +210,8 @@ func _test_real_movement_batch_atomicity() -> void:
 		and int(commit_result.get("updated_citizen_count", 0)) == 1
 		and int(commit_result.get("moved_citizen_count", 0)) == 1
 		and int(commit_result.get("rejected_update_count", 0)) == 1
-		and WorldData.get_city_citizen_tile_position(valid_id) == TILE_B
-		and WorldData.get_city_citizen_tile_position(rejected_id) == TILE_C
+		and CityCitizenSpatialSystem.get_city_citizen_tile_position(valid_id) == TILE_B
+		and CityCitizenSpatialSystem.get_city_citizen_tile_position(rejected_id) == TILE_C
 		and not spatial_index.has(TILE_A)
 		and spatial_index.get(TILE_B, []) == [valid_id]
 		and spatial_index.get(TILE_C, []) == [rejected_id]
@@ -220,13 +220,13 @@ func _test_real_movement_batch_atomicity() -> void:
 		"A movement batch must commit valid spatial change once and isolate rejection."
 	)
 
-	var rejected_index := WorldData.get_city_citizen_index_by_id(rejected_id)
-	var dead_update: Dictionary = WorldData.city_citizens[rejected_index]
+	var rejected_index := CityCitizenRegistrySystem.get_city_citizen_index_by_id(rejected_id)
+	var dead_update: Dictionary = CityCitizenRegistrySystem.get_current_state().citizens[rejected_index]
 	dead_update["alive"] = false
-	WorldData.city_citizens[rejected_index] = dead_update
-	WorldData.city_citizen_version += 1
+	CityCitizenRegistrySystem.get_current_state().citizens[rejected_index] = dead_update
+	CityCitizenRegistrySystem.mark_city_citizens_changed()
 	var version_before_death_commit := spatial_state.citizen_spatial_version
-	var death_result := WorldData.commit_city_citizen_movement_tick(
+	var death_result := CityCitizenMovementRuntimeSystem.commit_city_citizen_movement_tick(
 		city_world,
 		[{
 			"citizen_id": rejected_id,
@@ -248,9 +248,9 @@ func _test_real_movement_batch_atomicity() -> void:
 	# Simulate a damaged derived index while the authoritative citizen position
 	# remains correct. A same-tile movement update must repair and invalidate it.
 	spatial_index.erase(TILE_B)
-	var repair_update := WorldData.get_city_citizen_by_id(valid_id).duplicate(true)
+	var repair_update := CityCitizenRegistrySystem.get_city_citizen_by_id(valid_id).duplicate(true)
 	var version_before_repair := spatial_state.citizen_spatial_version
-	var repair_result := WorldData.commit_city_citizen_movement_tick(
+	var repair_result := CityCitizenMovementRuntimeSystem.commit_city_citizen_movement_tick(
 		city_world,
 		[{
 			"citizen_id": valid_id,
@@ -277,7 +277,7 @@ func _test_dead_active_mover_cleanup() -> void:
 	var citizen := _add_citizen(culture_id, TILE_A)
 	var citizen_id := int(citizen.get("id", -1))
 	_expect(
-		WorldData.assign_city_citizen_movement_order(
+		CityCitizenMovementRuntimeSystem.assign_city_citizen_movement_order(
 			citizen_id,
 			[TILE_A, TILE_B]
 		),
@@ -289,30 +289,30 @@ func _test_dead_active_mover_cleanup() -> void:
 	city_world.tiles[TILE_A.y][TILE_A.x] = occupied_tile
 	city_world.mark_tile_data_changed()
 	_expect(
-		not WorldData.is_city_tile_walkable_for_citizen(
+		not CityNavigationSystem.is_city_tile_walkable_for_citizen(
 			city_world,
 			TILE_A,
 			citizen_id
 		),
 		"The death-cleanup fixture must exercise a non-walkable current tile."
 	)
-	var citizen_index := WorldData.get_city_citizen_index_by_id(citizen_id)
-	var dead_citizen: Dictionary = WorldData.city_citizens[citizen_index]
+	var citizen_index := CityCitizenRegistrySystem.get_city_citizen_index_by_id(citizen_id)
+	var dead_citizen: Dictionary = CityCitizenRegistrySystem.get_current_state().citizens[citizen_index]
 	dead_citizen["alive"] = false
-	WorldData.city_citizens[citizen_index] = dead_citizen
-	WorldData.city_citizen_version += 1
+	CityCitizenRegistrySystem.get_current_state().citizens[citizen_index] = dead_citizen
+	CityCitizenRegistrySystem.mark_city_citizens_changed()
 	var spatial_state := (
-		WorldPoliticalState.get_current_city_citizen_spatial_state()
+		CityCitizenSpatialSystem.get_current_state()
 	)
 	var version_before_tick := spatial_state.citizen_spatial_version
 
 	CitizenMovementSystem.run_tick(701, 1)
-	var after := WorldData.get_city_citizen_by_id(citizen_id)
+	var after := CityCitizenRegistrySystem.get_city_citizen_by_id(citizen_id)
 	_expect(
 		str(after.get("movement_state", ""))
 		== WorldData.CITY_CITIZEN_MOVEMENT_STATE_IDLE
-		and WorldData.get_city_active_mover_ids_snapshot().is_empty()
-		and not WorldData.city_citizen_ids_by_tile.has(TILE_A)
+		and CityCitizenMovementRuntimeSystem.get_city_active_mover_ids_snapshot().is_empty()
+		and not CityCitizenSpatialSystem.get_current_state().citizen_ids_by_tile.has(TILE_A)
 		and spatial_state.citizen_spatial_version == version_before_tick + 1,
 		"The real movement tick must retire a dead mover and clear membership."
 	)
@@ -331,7 +331,7 @@ func _each_citizen_has_one_membership(spatial_index: Dictionary) -> bool:
 				membership_count_by_id.get(citizen_id, 0)
 			) + 1
 	var living_citizen_count := 0
-	for raw_citizen in WorldData.city_citizens:
+	for raw_citizen in CityCitizenRegistrySystem.get_current_state().citizens:
 		if not raw_citizen is Dictionary:
 			return false
 		var citizen: Dictionary = raw_citizen

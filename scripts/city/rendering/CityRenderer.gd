@@ -339,20 +339,20 @@ func _ready() -> void:
 	install_session_prepared_city_map_textures()
 	clear_invalid_old_city_foundation_state()
 	ensure_city_foundation_object_exists()
-	WorldData.ensure_city_citizen_spatial_state(
+	CityCitizenSpatialSystem.ensure_city_citizen_spatial_state(
 		city_world
 	)
 	WorldData.ensure_city_citizen_demographic_state()
 	WorldData.ensure_city_citizen_need_state()
-	WorldData.ensure_city_citizen_task_state()
-	WorldData.ensure_city_citizen_movement_state()
+	CityCitizenTaskRuntimeSystem.ensure_city_citizen_task_state()
+	CityCitizenMovementRuntimeSystem.ensure_city_citizen_movement_state()
 	city_citizen_movement_presentation.initialize()
 	synchronized_city_citizen_movement_version = (
-		WorldData.city_citizen_movement_version
+		CityCitizenMovementRuntimeSystem.get_current_state().citizen_movement_version
 	)
 	# The presentation initialized from current authority. Discard any movement
 	# trace left by simulation ticks that ran while this renderer was inactive.
-	WorldData.clear_city_citizen_movement_visual_events()
+	CityCitizenMovementRuntimeSystem.clear_city_citizen_movement_visual_events()
 	var natural_feature_start_usec := Time.get_ticks_usec()
 	setup_city_natural_feature_rendering()
 	city_natural_feature_setup_duration_usec = (
@@ -634,7 +634,7 @@ func _collect_world_data_change_flags(
 	)
 
 	var current_citizen_registry_state := (
-		WorldPoliticalState.get_current_city_citizen_registry_state()
+		CityCitizenRegistrySystem.get_current_state()
 	)
 	var citizen_registry_state_changed := (
 		observed_city_citizen_registry_state == null
@@ -661,7 +661,7 @@ func _collect_world_data_change_flags(
 		)
 
 	var current_citizen_spatial_state := (
-		WorldPoliticalState.get_current_city_citizen_spatial_state()
+		CityCitizenSpatialSystem.get_current_state()
 	)
 	var citizen_spatial_state_changed := (
 		observed_city_citizen_spatial_state == null
@@ -685,8 +685,7 @@ func _collect_world_data_change_flags(
 		change_flags["city_citizen_spatial_changed"] = true
 
 	var current_citizen_movement_runtime_state := (
-		WorldPoliticalState
-		.get_current_city_citizen_movement_runtime_state()
+		CityCitizenMovementRuntimeSystem.get_current_state()
 	)
 	var citizen_movement_runtime_state_changed := (
 		observed_city_citizen_movement_runtime_state == null
@@ -713,8 +712,7 @@ func _collect_world_data_change_flags(
 		)
 
 	var current_citizen_task_runtime_state := (
-		WorldPoliticalState
-		.get_current_city_citizen_task_runtime_state()
+		CityCitizenTaskRuntimeSystem.get_current_state()
 	)
 	var citizen_task_runtime_state_changed := (
 		observed_city_citizen_task_runtime_state == null
@@ -1180,14 +1178,14 @@ func on_simulation_time_changed(
 	if not session_view_active:
 		# Hidden persistent views should not run presentation work. Discard the
 		# transient movement trace; activation resynchronizes from authority.
-		WorldData.clear_city_citizen_movement_visual_events()
+		CityCitizenMovementRuntimeSystem.clear_city_citizen_movement_visual_events()
 		return
 
 	city_information_ui.refresh_time()
 
 	var movement_visual_changed := (
 		city_citizen_movement_presentation.synchronize_committed_tick(
-			WorldData.take_city_citizen_movement_visual_events(
+			CityCitizenMovementRuntimeSystem.take_city_citizen_movement_visual_events(
 				SimulationClock.tick_index
 			)
 		)
@@ -1199,7 +1197,7 @@ func on_simulation_time_changed(
 	city_citizen_movement_presentation.synchronize(true)
 	city_citizen_movement_presentation.refresh_mover_tracking()
 	synchronized_city_citizen_movement_version = (
-		WorldData.city_citizen_movement_version
+		CityCitizenMovementRuntimeSystem.get_current_state().citizen_movement_version
 	)
 
 	if movement_visual_changed:
@@ -2945,7 +2943,7 @@ func update_selected_city_citizen_panel() -> void:
 	hide_workplace_details_ui()
 
 	var citizen := (
-		WorldData.get_city_citizen_by_id(
+		CityCitizenRegistrySystem.get_city_citizen_by_id(
 			selected_city_citizen_id
 		)
 	)
@@ -3026,7 +3024,7 @@ func update_selected_city_citizen_panel() -> void:
 	var body_lines := [
 		"Citizen #" + str(citizen_id),
 		"Sex: "
-			+ WorldData.get_city_citizen_sex_display_name(
+			+ CityCitizens.get_city_citizen_sex_display_name(
 				str(citizen.get("sex", ""))
 			),
 		"Position: " + position_text,
@@ -3079,7 +3077,7 @@ func get_citizen_haul_status_lines(
 	if not WorldData.city_citizen_is_hauling(citizen_id):
 		return ["Hauling: No"]
 
-	var haul := WorldData.get_city_citizen_current_haul(citizen_id)
+	var haul := CityCitizenTaskRuntimeSystem.get_city_citizen_current_haul(citizen_id)
 	var cargo_resources := (
 		WorldData.get_city_citizen_haul_cargo_resources(citizen_id)
 	)
@@ -3570,7 +3568,7 @@ func _update_selected_city_object_panel(
 func _append_city_center_object_info(body_lines: Array) -> void:
 	body_lines.append(
 		"Population: "
-		+ str(WorldData.get_city_population_count())
+		+ str(CityCitizenRegistrySystem.get_city_population_count())
 	)
 	body_lines.append(
 		"Male: "
@@ -4612,7 +4610,7 @@ func get_selectable_city_citizen_ids_at_world_point(
 	var candidate_citizen_id_lookup: Dictionary = {}
 
 	for raw_citizen_id in (
-		WorldData.get_city_citizen_ids_at_tile(
+		CityCitizenSpatialSystem.get_city_citizen_ids_at_tile(
 			tile_position
 		)
 	):
@@ -4640,7 +4638,7 @@ func get_selectable_city_citizen_ids_at_world_point(
 	for raw_citizen_id in candidate_citizen_ids:
 		var citizen_id := int(raw_citizen_id)
 		var citizen := (
-			WorldData.get_city_citizen_by_id(
+			CityCitizenRegistrySystem.get_city_citizen_by_id(
 				citizen_id
 			)
 		)
@@ -4870,7 +4868,7 @@ func set_selected_city_entity(
 			return
 	elif selection_kind == CITY_SELECTION_KIND_CITIZEN:
 		var citizen := (
-			WorldData.get_city_citizen_by_id(
+			CityCitizenRegistrySystem.get_city_citizen_by_id(
 				entity_id
 			)
 		)
@@ -6226,7 +6224,7 @@ func draw_city_citizens(draw_target: CanvasItem) -> void:
 	city_citizen_draw_buffer.clear()
 	city_citizen_rect_draw_buffer.clear()
 
-	for raw_citizen in WorldData.city_citizens:
+	for raw_citizen in CityCitizenRegistrySystem.get_current_state().citizens:
 		if not raw_citizen is Dictionary:
 			continue
 
@@ -7013,7 +7011,7 @@ func draw_selected_city_citizen_highlight(
 		return
 
 	var citizen := (
-		WorldData.get_city_citizen_by_id(
+		CityCitizenRegistrySystem.get_city_citizen_by_id(
 			selected_city_citizen_id
 		)
 	)
@@ -7451,7 +7449,7 @@ func create_debug_panel() -> void:
 	})
 
 func get_first_living_debug_citizen() -> Dictionary:
-	for raw_citizen in WorldData.city_citizens:
+	for raw_citizen in CityCitizenRegistrySystem.get_current_state().citizens:
 		if not raw_citizen is Dictionary:
 			continue
 
@@ -7475,7 +7473,7 @@ func get_first_living_debug_citizen() -> Dictionary:
 func get_debug_navigation_source_citizen() -> Dictionary:
 	if selected_city_citizen_id >= 0:
 		var selected_citizen := (
-			WorldData.get_city_citizen_by_id(
+			CityCitizenRegistrySystem.get_city_citizen_by_id(
 				selected_city_citizen_id
 			)
 		)
@@ -7672,7 +7670,7 @@ func assign_debug_navigation_path_to_selected_citizen() -> void:
 		print("Movement rejected: press P to create a valid path.")
 		return
 
-	var citizen := WorldData.get_city_citizen_by_id(
+	var citizen := CityCitizenRegistrySystem.get_city_citizen_by_id(
 		selected_city_citizen_id
 	)
 
@@ -7700,7 +7698,7 @@ func assign_debug_navigation_path_to_selected_citizen() -> void:
 		print("Movement rejected: path is stale. Press P again.")
 		return
 
-	if not WorldData.assign_city_citizen_movement_order(
+	if not CityCitizenMovementRuntimeSystem.assign_city_citizen_movement_order(
 		selected_city_citizen_id,
 		debug_navigation_path
 	):
@@ -7724,7 +7722,7 @@ func assign_debug_navigation_path_to_selected_citizen() -> void:
 		" | Steps: ",
 		maxi(debug_navigation_path.size() - 1, 0),
 		" | Active movers: ",
-		WorldData.city_active_mover_ids
+		CityCitizenMovementRuntimeSystem.get_current_state().active_mover_ids
 	)
 
 func get_navigation_debug_text() -> String:

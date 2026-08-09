@@ -149,34 +149,30 @@ static func validate(
 			.get_current_state().get_instance_id()
 		),
 		"citizen_registry_state_instance_id": int(
-			WorldPoliticalState
-			.get_current_city_citizen_registry_state()
+			CityCitizenRegistrySystem.get_current_state()
 			.get_instance_id()
 		),
 		"citizen_spatial_state_instance_id": int(
-			WorldPoliticalState
-			.get_current_city_citizen_spatial_state()
+			CityCitizenSpatialSystem.get_current_state()
 			.get_instance_id()
 		),
 		"citizen_movement_runtime_state_instance_id": int(
-			WorldPoliticalState
-			.get_current_city_citizen_movement_runtime_state()
+			CityCitizenMovementRuntimeSystem.get_current_state()
 			.get_instance_id()
 		),
 		"citizen_task_runtime_state_instance_id": int(
-			WorldPoliticalState
-			.get_current_city_citizen_task_runtime_state()
+			CityCitizenTaskRuntimeSystem.get_current_state()
 			.get_instance_id()
 		),
-		"citizen_version": WorldData.city_citizen_version,
+		"citizen_version": CityCitizenRegistrySystem.get_current_state().citizen_version,
 		"citizen_spatial_version": (
-			WorldData.city_citizen_spatial_version
+			CityCitizenSpatialSystem.get_current_state().citizen_spatial_version
 		),
 		"citizen_movement_version": (
-			WorldData.city_citizen_movement_version
+			CityCitizenMovementRuntimeSystem.get_current_state().citizen_movement_version
 		),
 		"citizen_task_version": (
-			WorldData.city_citizen_task_version
+			CityCitizenTaskRuntimeSystem.get_current_state().citizen_task_version
 		),
 		"assignment_version": WorldData.city_assignment_version,
 		"workplace_version": WorldData.city_workplace_version,
@@ -195,17 +191,16 @@ static func validate(
 		CityResourceAccountingSystem.get_current_state()
 	)
 	_cached_citizen_registry_state = (
-		WorldPoliticalState.get_current_city_citizen_registry_state()
+		CityCitizenRegistrySystem.get_current_state()
 	)
 	_cached_citizen_spatial_state = (
-		WorldPoliticalState.get_current_city_citizen_spatial_state()
+		CityCitizenSpatialSystem.get_current_state()
 	)
 	_cached_citizen_movement_runtime_state = (
-		WorldPoliticalState
-		.get_current_city_citizen_movement_runtime_state()
+		CityCitizenMovementRuntimeSystem.get_current_state()
 	)
 	_cached_citizen_task_runtime_state = (
-		WorldPoliticalState.get_current_city_citizen_task_runtime_state()
+		CityCitizenTaskRuntimeSystem.get_current_state()
 	)
 
 	if report_problems:
@@ -289,7 +284,7 @@ static func _validation_cache_matches_current_state() -> bool:
 		_cached_citizen_registry_state == null
 		or not is_same(
 			_cached_citizen_registry_state,
-			WorldPoliticalState.get_current_city_citizen_registry_state()
+			CityCitizenRegistrySystem.get_current_state()
 		)
 	):
 		return false
@@ -297,7 +292,7 @@ static func _validation_cache_matches_current_state() -> bool:
 		_cached_citizen_spatial_state == null
 		or not is_same(
 			_cached_citizen_spatial_state,
-			WorldPoliticalState.get_current_city_citizen_spatial_state()
+			CityCitizenSpatialSystem.get_current_state()
 		)
 	):
 		return false
@@ -305,8 +300,7 @@ static func _validation_cache_matches_current_state() -> bool:
 		_cached_citizen_movement_runtime_state == null
 		or not is_same(
 			_cached_citizen_movement_runtime_state,
-			WorldPoliticalState
-			.get_current_city_citizen_movement_runtime_state()
+			CityCitizenMovementRuntimeSystem.get_current_state()
 		)
 	):
 		return false
@@ -314,8 +308,7 @@ static func _validation_cache_matches_current_state() -> bool:
 		_cached_citizen_task_runtime_state == null
 		or not is_same(
 			_cached_citizen_task_runtime_state,
-			WorldPoliticalState
-			.get_current_city_citizen_task_runtime_state()
+			CityCitizenTaskRuntimeSystem.get_current_state()
 		)
 	):
 		return false
@@ -326,7 +319,7 @@ static func _validation_cache_matches_current_state() -> bool:
 				-1
 			)
 		)
-		!= WorldData.city_citizen_task_version
+		!= CityCitizenTaskRuntimeSystem.get_current_state().citizen_task_version
 	):
 		return false
 	if (
@@ -343,7 +336,7 @@ static func _validation_cache_matches_current_state() -> bool:
 
 	if (
 		int(_cached_result.get("citizen_version", -1))
-		!= WorldData.city_citizen_version
+		!= CityCitizenRegistrySystem.get_current_state().citizen_version
 	):
 		return false
 
@@ -354,7 +347,7 @@ static func _validation_cache_matches_current_state() -> bool:
 				-1
 			)
 		)
-		!= WorldData.city_citizen_spatial_version
+		!= CityCitizenSpatialSystem.get_current_state().citizen_spatial_version
 	):
 		return false
 
@@ -365,7 +358,7 @@ static func _validation_cache_matches_current_state() -> bool:
 				-1
 			)
 		)
-		!= WorldData.city_citizen_movement_version
+		!= CityCitizenMovementRuntimeSystem.get_current_state().citizen_movement_version
 	):
 		return false
 
@@ -595,9 +588,9 @@ static func _validate_city_citizen_index(
 	var maximum_citizen_id := 0
 
 	for citizen_index in range(
-		WorldData.city_citizens.size()
+		CityCitizenRegistrySystem.get_current_state().citizens.size()
 	):
-		var raw_citizen = WorldData.city_citizens[
+		var raw_citizen = CityCitizenRegistrySystem.get_current_state().citizens[
 			citizen_index
 		]
 
@@ -645,7 +638,7 @@ static func _validate_city_citizen_index(
 			citizen_id
 		)
 
-		if not WorldData.city_citizen_index_by_id.has(
+		if not CityCitizenRegistrySystem.get_current_state().citizen_index_by_id.has(
 			citizen_id
 		):
 			errors.append(
@@ -655,7 +648,7 @@ static func _validate_city_citizen_index(
 			)
 		else:
 			var indexed_array_position := int(
-				WorldData.city_citizen_index_by_id[
+				CityCitizenRegistrySystem.get_current_state().citizen_index_by_id[
 					citizen_id
 				]
 			)
@@ -672,7 +665,7 @@ static func _validate_city_citizen_index(
 				)
 
 	for raw_citizen_id in (
-		WorldData.city_citizen_index_by_id.keys()
+		CityCitizenRegistrySystem.get_current_state().citizen_index_by_id.keys()
 	):
 		if typeof(raw_citizen_id) != TYPE_INT:
 			errors.append(
@@ -693,13 +686,13 @@ static func _validate_city_citizen_index(
 			)
 
 	if (
-		WorldData.city_citizen_index_by_id.size()
+		CityCitizenRegistrySystem.get_current_state().citizen_index_by_id.size()
 		!= citizen_lookup.size()
 	):
 		errors.append(
 			"Citizen index contains "
 				+ str(
-					WorldData.city_citizen_index_by_id.size()
+					CityCitizenRegistrySystem.get_current_state().citizen_index_by_id.size()
 				)
 				+ " entries, but "
 				+ str(citizen_lookup.size())
@@ -708,12 +701,12 @@ static func _validate_city_citizen_index(
 
 	if (
 		not citizen_lookup.is_empty()
-		and WorldData.next_city_citizen_id
+		and CityCitizenRegistrySystem.get_current_state().next_citizen_id
 		<= maximum_citizen_id
 	):
 		errors.append(
 			"next_city_citizen_id is "
-				+ str(WorldData.next_city_citizen_id)
+				+ str(CityCitizenRegistrySystem.get_current_state().next_citizen_id)
 				+ ", but existing citizen ID "
 				+ str(maximum_citizen_id)
 				+ " is equal or greater."

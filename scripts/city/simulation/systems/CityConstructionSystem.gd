@@ -188,7 +188,7 @@ static func can_place_city_construction_footprint(
 			if tile_lookup.has(candidate_tile):
 				continue
 
-			if WorldData.is_city_tile_walkable_for_citizen(
+			if CityNavigationSystem.is_city_tile_walkable_for_citizen(
 				city_world,
 				candidate_tile
 			):
@@ -798,7 +798,7 @@ static func get_city_construction_site_access_tiles(
 	for raw_tile in site.get("footprint_tiles", []):
 		if (
 			raw_tile is Vector2i
-			and WorldData.is_city_tile_walkable_for_citizen(
+			and CityNavigationSystem.is_city_tile_walkable_for_citizen(
 				city_world,
 				raw_tile,
 				citizen_id
@@ -1357,7 +1357,7 @@ static func _build_external_work_positions(
 			if (
 				footprint_lookup.has(candidate_tile)
 				or position_lookup.has(candidate_tile)
-				or not WorldData.is_city_tile_walkable_for_citizen(
+				or not CityNavigationSystem.is_city_tile_walkable_for_citizen(
 					city_world,
 					candidate_tile
 				)
@@ -1833,7 +1833,7 @@ static func _site_has_ordinary_ground_pile(
 static func get_best_assignable_player_work_for_citizen(
 	citizen_id: int
 ) -> Dictionary:
-	var citizen := WorldData.get_city_citizen_by_id(citizen_id)
+	var citizen := CityCitizenRegistrySystem.get_city_citizen_by_id(citizen_id)
 
 	if (
 		citizen.is_empty()
@@ -1866,7 +1866,7 @@ static func get_best_assignable_player_work_for_citizen_and_site(
 	citizen_id: int,
 	site_id: int
 ) -> Dictionary:
-	var citizen := WorldData.get_city_citizen_by_id(citizen_id)
+	var citizen := CityCitizenRegistrySystem.get_city_citizen_by_id(citizen_id)
 	var site := get_city_construction_site_by_id(site_id)
 	if (
 		citizen.is_empty()
@@ -1900,7 +1900,7 @@ static func get_best_assignable_batchable_road_work_for_citizen(
 	citizen_id: int,
 	raw_site_ids: Array
 ) -> Dictionary:
-	var citizen := WorldData.get_city_citizen_by_id(citizen_id)
+	var citizen := CityCitizenRegistrySystem.get_city_citizen_by_id(citizen_id)
 
 	if (
 		citizen.is_empty()
@@ -1978,7 +1978,7 @@ static func get_best_assignable_batchable_road_work_for_citizen(
 				):
 					if (
 						claimed_positions.has(position)
-						or not WorldData.is_city_tile_walkable_for_citizen(
+						or not CityNavigationSystem.is_city_tile_walkable_for_citizen(
 							WorldData.official_city_world,
 							position,
 							citizen_id
@@ -2543,7 +2543,7 @@ static func _get_labor_candidate(
 	):
 		if (
 			claimed_positions.has(position)
-			or not WorldData.is_city_tile_walkable_for_citizen(
+			or not CityNavigationSystem.is_city_tile_walkable_for_citizen(
 				WorldData.official_city_world,
 				position,
 				citizen_id
@@ -2599,7 +2599,7 @@ static func _get_labor_candidate(
 static func _get_active_laborer_count(site_id: int) -> int:
 	var count := 0
 
-	for raw_citizen in WorldData.city_citizens:
+	for raw_citizen in CityCitizenRegistrySystem.get_current_state().citizens:
 		if not raw_citizen is Dictionary:
 			continue
 
@@ -2623,7 +2623,7 @@ static func _get_claimed_labor_positions(
 ) -> Dictionary:
 	var claimed_positions: Dictionary = {}
 
-	for raw_citizen in WorldData.city_citizens:
+	for raw_citizen in CityCitizenRegistrySystem.get_current_state().citizens:
 		if not raw_citizen is Dictionary:
 			continue
 
@@ -2725,7 +2725,7 @@ static func assign_player_work_candidate(
 
 			return (
 				raw_task_request is Dictionary
-				and WorldData.assign_city_citizen_task(
+				and CityCitizenTaskRuntimeSystem.assign_city_citizen_task(
 					citizen_id,
 					raw_task_request
 				)
@@ -2740,7 +2740,7 @@ static func assign_player_work_candidate(
 			if not raw_target_tile is Vector2i:
 				return false
 
-			return WorldData.assign_city_citizen_task(
+			return CityCitizenTaskRuntimeSystem.assign_city_citizen_task(
 				citizen_id,
 				{
 					"kind": (
@@ -2858,7 +2858,7 @@ static func advance_labor_task(
 
 			if (
 				not bool(path_result.get("success", false))
-				or not WorldData.assign_city_citizen_movement_order(
+				or not CityCitizenMovementRuntimeSystem.assign_city_citizen_movement_order(
 					citizen_id,
 					path_result.get("path", [])
 				)
@@ -2866,7 +2866,7 @@ static func advance_labor_task(
 				_release_labor_task(citizen_id)
 				return path_requests_remaining
 
-			WorldData.set_city_citizen_task_phase(
+			CityCitizenTaskRuntimeSystem.set_city_citizen_task_phase(
 				citizen_id,
 				WorldData.CITY_CITIZEN_TASK_PHASE_TRAVELING
 			)
@@ -2875,14 +2875,14 @@ static func advance_labor_task(
 			if current_tile == target_tile:
 				_begin_labor(citizen_id, target_tile)
 			elif movement_state != WorldData.CITY_CITIZEN_MOVEMENT_STATE_MOVING:
-				WorldData.set_city_citizen_task_phase(
+				CityCitizenTaskRuntimeSystem.set_city_citizen_task_phase(
 					citizen_id,
 					WorldData.CITY_CITIZEN_TASK_PHASE_PENDING
 				)
 
 		WorldData.CITY_CITIZEN_TASK_PHASE_PERFORMING:
 			if current_tile != target_tile:
-				WorldData.set_city_citizen_task_phase(
+				CityCitizenTaskRuntimeSystem.set_city_citizen_task_phase(
 					citizen_id,
 					WorldData.CITY_CITIZEN_TASK_PHASE_PENDING
 				)
@@ -2921,9 +2921,9 @@ static func _begin_labor(
 	citizen_id: int,
 	target_tile: Vector2i
 ) -> bool:
-	WorldData.cancel_city_citizen_movement(citizen_id)
+	CityCitizenMovementRuntimeSystem.cancel_city_citizen_movement(citizen_id)
 
-	if not WorldData.set_city_citizen_task_activity_state({
+	if not CityCitizenTaskRuntimeSystem.set_city_citizen_task_activity_state({
 		"citizen_id": citizen_id,
 		"target_tile": target_tile,
 		"next_action_world_minute": (
@@ -2933,7 +2933,7 @@ static func _begin_labor(
 	}):
 		return false
 
-	return WorldData.set_city_citizen_task_phase(
+	return CityCitizenTaskRuntimeSystem.set_city_citizen_task_phase(
 		citizen_id,
 		WorldData.CITY_CITIZEN_TASK_PHASE_PERFORMING
 	)
@@ -2968,11 +2968,11 @@ static func _add_labor_progress(
 
 
 static func _release_labor_task(citizen_id: int) -> void:
-	WorldData.clear_city_citizen_task(
+	CityCitizenTaskRuntimeSystem.clear_city_citizen_task(
 		citizen_id,
 		WorldData.CITY_CITIZEN_TASK_SOURCE_PLAYER
 	)
-	WorldData.cancel_city_citizen_movement(citizen_id)
+	CityCitizenMovementRuntimeSystem.cancel_city_citizen_movement(citizen_id)
 
 
 #endregion
@@ -3129,7 +3129,7 @@ static func _evacuate_city_construction_footprint(
 		return
 
 	for citizen_id in citizen_ids:
-		var citizen := WorldData.get_city_citizen_by_id(citizen_id)
+		var citizen := CityCitizenRegistrySystem.get_city_citizen_by_id(citizen_id)
 		var raw_current_tile = citizen.get(
 			"city_tile_position",
 			WorldData.INVALID_CITY_TILE_POSITION
@@ -3179,9 +3179,9 @@ static func _evacuate_city_construction_footprint(
 			)
 			continue
 
-		WorldData.cancel_city_citizen_movement(citizen_id)
+		CityCitizenMovementRuntimeSystem.cancel_city_citizen_movement(citizen_id)
 
-		if not WorldData.assign_city_citizen_movement_order(
+		if not CityCitizenMovementRuntimeSystem.assign_city_citizen_movement_order(
 			citizen_id,
 			path_result.get("path", [])
 		):
@@ -3283,7 +3283,7 @@ static func cancel_city_construction_site(site_id: int) -> bool:
 
 
 static func _release_site_delivery_tasks(site_id: int) -> bool:
-	for raw_citizen in WorldData.city_citizens.duplicate():
+	for raw_citizen in CityCitizenRegistrySystem.get_current_state().citizens.duplicate():
 		if not raw_citizen is Dictionary:
 			continue
 
@@ -3304,7 +3304,7 @@ static func _release_site_delivery_tasks(site_id: int) -> bool:
 		)
 
 		if cargo_amount > 0:
-			var haul := WorldData.get_city_citizen_current_haul(citizen_id)
+			var haul := CityCitizenTaskRuntimeSystem.get_city_citizen_current_haul(citizen_id)
 			var raw_source = haul.get("source", {})
 
 			if not raw_source is Dictionary:
@@ -3318,7 +3318,7 @@ static func _release_site_delivery_tasks(site_id: int) -> bool:
 			haul["reason"] = (
 				WorldData.CITY_CITIZEN_HAUL_REASON_OUTSTANDING_CARGO
 			)
-			WorldData.set_city_citizen_current_haul(citizen_id, haul)
+			CityCitizenTaskRuntimeSystem.set_city_citizen_current_haul(citizen_id, haul)
 
 		var task_source := str(
 			current_task.get(
@@ -3327,9 +3327,9 @@ static func _release_site_delivery_tasks(site_id: int) -> bool:
 			)
 		)
 
-		WorldData.cancel_city_citizen_movement(citizen_id)
+		CityCitizenMovementRuntimeSystem.cancel_city_citizen_movement(citizen_id)
 
-		if not WorldData.clear_city_citizen_task(citizen_id, task_source):
+		if not CityCitizenTaskRuntimeSystem.clear_city_citizen_task(citizen_id, task_source):
 			return false
 
 	var site_endpoint := (
@@ -3372,7 +3372,7 @@ static func _release_site_clearing_commands(site_id: int) -> void:
 
 
 static func _clear_site_labor_tasks(site_id: int) -> void:
-	for raw_citizen in WorldData.city_citizens.duplicate():
+	for raw_citizen in CityCitizenRegistrySystem.get_current_state().citizens.duplicate():
 		if not raw_citizen is Dictionary:
 			continue
 
@@ -3393,7 +3393,7 @@ static func _haul_references_site(
 	citizen_id: int,
 	site_id: int
 ) -> bool:
-	var haul := WorldData.get_city_citizen_current_haul(citizen_id)
+	var haul := CityCitizenTaskRuntimeSystem.get_city_citizen_current_haul(citizen_id)
 	var site_endpoint := (
 		CityLogisticsSystem.make_city_construction_site_haul_endpoint(site_id)
 	)
@@ -3513,7 +3513,7 @@ static func rebalance_uncommitted_construction_workers_for_sites(
 	)
 	var citizen_ids: Array[int] = []
 
-	for raw_citizen in WorldData.city_citizens:
+	for raw_citizen in CityCitizenRegistrySystem.get_current_state().citizens:
 		if raw_citizen is Dictionary:
 			var citizen_id := int(raw_citizen.get("id", -1))
 
@@ -3524,7 +3524,7 @@ static func rebalance_uncommitted_construction_workers_for_sites(
 	var switched_count := 0
 
 	for citizen_id in citizen_ids:
-		var citizen := WorldData.get_city_citizen_by_id(citizen_id)
+		var citizen := CityCitizenRegistrySystem.get_city_citizen_by_id(citizen_id)
 
 		if (
 			citizen.is_empty()
@@ -3535,7 +3535,7 @@ static func rebalance_uncommitted_construction_workers_for_sites(
 		):
 			continue
 
-		var current_task := WorldData.get_city_citizen_current_task(
+		var current_task := CityCitizenTaskRuntimeSystem.get_city_citizen_current_task(
 			citizen_id
 		)
 		var task_kind := str(current_task.get("kind", ""))
@@ -3636,14 +3636,14 @@ static func rebalance_uncommitted_construction_workers_for_sites(
 
 		if (
 			restore_state.is_empty()
-			or not WorldData.clear_city_citizen_task(
+			or not CityCitizenTaskRuntimeSystem.clear_city_citizen_task(
 				citizen_id,
 				WorldData.CITY_CITIZEN_TASK_SOURCE_PLAYER
 			)
 		):
 			continue
 
-		WorldData.cancel_city_citizen_movement(citizen_id)
+		CityCitizenMovementRuntimeSystem.cancel_city_citizen_movement(citizen_id)
 
 		if (
 			CityWorkSystem.assign_player_job(citizen_id, candidate)
@@ -3659,11 +3659,11 @@ static func rebalance_uncommitted_construction_workers_for_sites(
 
 		# Release any partially installed replacement claim or reservation,
 		# then continue the previous trip from the citizen's current tile.
-		WorldData.clear_city_citizen_task(
+		CityCitizenTaskRuntimeSystem.clear_city_citizen_task(
 			citizen_id,
 			WorldData.CITY_CITIZEN_TASK_SOURCE_PLAYER
 		)
-		WorldData.cancel_city_citizen_movement(citizen_id)
+		CityCitizenMovementRuntimeSystem.cancel_city_citizen_movement(citizen_id)
 
 		if not _restore_construction_rebalance_assignment(
 			citizen_id,
@@ -3687,7 +3687,7 @@ static func _get_current_construction_path_cost(
 	citizen_id: int,
 	current_task: Dictionary
 ) -> int:
-	var citizen := WorldData.get_city_citizen_by_id(citizen_id)
+	var citizen := CityCitizenRegistrySystem.get_city_citizen_by_id(citizen_id)
 	var raw_current_tile = citizen.get(
 		"city_tile_position",
 		WorldData.INVALID_CITY_TILE_POSITION
@@ -3822,7 +3822,7 @@ static func _get_city_movement_path_cost(path: Array) -> int:
 		if not path[index - 1] is Vector2i or not path[index] is Vector2i:
 			return -1
 
-		var step_cost := WorldData.get_city_citizen_movement_step_cost(
+		var step_cost := CityNavigationSystem.get_city_citizen_movement_step_cost(
 			path[index - 1],
 			path[index]
 		)
@@ -3890,7 +3890,7 @@ static func _start_rebalanced_construction_assignment(
 	candidate: Dictionary
 ) -> bool:
 	var raw_assignment_path = candidate.get("assignment_path", [])
-	var citizen := WorldData.get_city_citizen_by_id(citizen_id)
+	var citizen := CityCitizenRegistrySystem.get_city_citizen_by_id(citizen_id)
 	var raw_current_tile = citizen.get(
 		"city_tile_position",
 		WorldData.INVALID_CITY_TILE_POSITION
@@ -3917,7 +3917,7 @@ static func _start_rebalanced_construction_assignment(
 	var haul: Dictionary = {}
 
 	if work_kind == PLAYER_WORK_KIND_DELIVERY:
-		haul = WorldData.get_city_citizen_current_haul(citizen_id)
+		haul = CityCitizenTaskRuntimeSystem.get_city_citizen_current_haul(citizen_id)
 		raw_target_tile = haul.get(
 			"source_tile",
 			WorldData.INVALID_CITY_TILE_POSITION
@@ -3926,7 +3926,7 @@ static func _start_rebalanced_construction_assignment(
 	if (
 		not raw_target_tile is Vector2i
 		or assignment_path.back() != raw_target_tile
-		or not WorldData.set_city_citizen_task_activity_state({
+		or not CityCitizenTaskRuntimeSystem.set_city_citizen_task_activity_state({
 			"citizen_id": citizen_id,
 			"target_tile": raw_target_tile,
 		})
@@ -3934,15 +3934,15 @@ static func _start_rebalanced_construction_assignment(
 		return false
 
 	if assignment_path.size() <= 1:
-		WorldData.cancel_city_citizen_movement(citizen_id)
+		CityCitizenMovementRuntimeSystem.cancel_city_citizen_movement(citizen_id)
 
 		if work_kind == PLAYER_WORK_KIND_DELIVERY:
 			haul["phase"] = WorldData.CITY_CITIZEN_HAUL_PHASE_PICKING_UP
 			haul["source_tile"] = raw_target_tile
 
 			return (
-				WorldData.set_city_citizen_current_haul(citizen_id, haul)
-				and WorldData.set_city_citizen_task_phase(
+				CityCitizenTaskRuntimeSystem.set_city_citizen_current_haul(citizen_id, haul)
+				and CityCitizenTaskRuntimeSystem.set_city_citizen_task_phase(
 					citizen_id,
 					WorldData.CITY_CITIZEN_TASK_PHASE_PERFORMING
 				)
@@ -3952,7 +3952,7 @@ static func _start_rebalanced_construction_assignment(
 		# state machine begins the bounded physical action on the next clock tick.
 		return true
 
-	if not WorldData.assign_city_citizen_movement_order(
+	if not CityCitizenMovementRuntimeSystem.assign_city_citizen_movement_order(
 		citizen_id,
 		assignment_path
 	):
@@ -3964,10 +3964,10 @@ static func _start_rebalanced_construction_assignment(
 		)
 		haul["source_tile"] = raw_target_tile
 
-		if not WorldData.set_city_citizen_current_haul(citizen_id, haul):
+		if not CityCitizenTaskRuntimeSystem.set_city_citizen_current_haul(citizen_id, haul):
 			return false
 
-	return WorldData.set_city_citizen_task_phase(
+	return CityCitizenTaskRuntimeSystem.set_city_citizen_task_phase(
 		citizen_id,
 		WorldData.CITY_CITIZEN_TASK_PHASE_TRAVELING
 	)
@@ -4023,7 +4023,7 @@ static func _restore_construction_rebalance_assignment(
 
 	if (
 		raw_target_tile is Vector2i
-		and not WorldData.set_city_citizen_task_activity_state({
+		and not CityCitizenTaskRuntimeSystem.set_city_citizen_task_activity_state({
 			"citizen_id": citizen_id,
 			"target_tile": raw_target_tile,
 			"previous_target_tile": task.get(
@@ -4050,12 +4050,12 @@ static func _restore_construction_rebalance_assignment(
 	if (
 		raw_remaining_path is Array
 		and raw_remaining_path.size() > 1
-		and not WorldData.assign_city_citizen_movement_order(
+		and not CityCitizenMovementRuntimeSystem.assign_city_citizen_movement_order(
 			citizen_id,
 			raw_remaining_path
 		)
 	):
-		WorldData.set_city_citizen_task_phase(
+		CityCitizenTaskRuntimeSystem.set_city_citizen_task_phase(
 			citizen_id,
 			WorldData.CITY_CITIZEN_TASK_PHASE_PENDING
 		)
@@ -4077,7 +4077,7 @@ static func _restore_construction_rebalance_assignment(
 	):
 		restored_phase = WorldData.CITY_CITIZEN_TASK_PHASE_PENDING
 
-	return WorldData.set_city_citizen_task_phase(
+	return CityCitizenTaskRuntimeSystem.set_city_citizen_task_phase(
 		citizen_id,
 		restored_phase
 	)
@@ -4133,7 +4133,7 @@ static func _make_construction_rebalance_restore_candidate(
 static func citizen_task_is_interruptible_construction(
 	citizen_id: int
 ) -> bool:
-	var current_task := WorldData.get_city_citizen_current_task(
+	var current_task := CityCitizenTaskRuntimeSystem.get_city_citizen_current_task(
 		citizen_id
 	)
 
@@ -4149,7 +4149,7 @@ static func citizen_task_is_interruptible_construction(
 			)
 
 		WorldData.CITY_CITIZEN_TASK_KIND_HAUL:
-			var haul := WorldData.get_city_citizen_current_haul(
+			var haul := CityCitizenTaskRuntimeSystem.get_city_citizen_current_haul(
 				citizen_id
 			)
 			var requester: Dictionary = haul.get("requester", {})
@@ -4182,7 +4182,7 @@ static func interrupt_citizen_construction_for_food(
 	if not citizen_task_is_interruptible_construction(citizen_id):
 		return false
 
-	var current_task := WorldData.get_city_citizen_current_task(
+	var current_task := CityCitizenTaskRuntimeSystem.get_city_citizen_current_task(
 		citizen_id
 	)
 

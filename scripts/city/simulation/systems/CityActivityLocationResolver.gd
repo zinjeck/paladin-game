@@ -121,7 +121,7 @@ static func get_object_interior_activity_tiles(
 
 		var tile_position: Vector2i = raw_tile
 
-		if not WorldData.is_city_tile_walkable_for_citizen(
+		if not CityNavigationSystem.is_city_tile_walkable_for_citizen(
 			city_world,
 			tile_position,
 			citizen_id
@@ -186,7 +186,7 @@ static func _filter_activity_tiles_by_policy(
 		if (
 			standing_tile_requirement
 			== WorldData.WORKPLACE_WORK_LOCATION_TILE_REQUIREMENT_WALKABLE
-			and not WorldData.is_city_tile_walkable_for_citizen(
+			and not CityNavigationSystem.is_city_tile_walkable_for_citizen(
 				city_world,
 				candidate_tile
 			)

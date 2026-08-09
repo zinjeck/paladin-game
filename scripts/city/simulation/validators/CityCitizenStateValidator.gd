@@ -15,8 +15,8 @@ static func _validate_city_citizen_spatial_state(
 ) -> void:
 	if citizen_lookup.is_empty():
 		if not (
-			WorldData
-			.city_citizen_ids_by_tile
+			CityCitizenSpatialSystem.get_current_state()
+			.citizen_ids_by_tile
 			.is_empty()
 		):
 			errors.append(
@@ -39,7 +39,7 @@ static func _validate_city_citizen_spatial_state(
 			citizen_lookup[citizen_id]
 		)
 		var citizen: Dictionary = (
-			WorldData.city_citizens[
+			CityCitizenRegistrySystem.get_current_state().citizens[
 				citizen_index
 			]
 		)
@@ -95,7 +95,7 @@ static func _validate_city_citizen_spatial_state(
 		elif (
 			bool(citizen.get("alive", true))
 			and not (
-				WorldData
+				CityNavigationSystem
 				.is_city_tile_walkable_for_citizen(
 					city_world,
 					tile_position,
@@ -112,7 +112,7 @@ static func _validate_city_citizen_spatial_state(
 			)
 
 		if not (
-			WorldData.city_citizen_ids_by_tile.has(
+			CityCitizenSpatialSystem.get_current_state().citizen_ids_by_tile.has(
 				tile_position
 			)
 		):
@@ -127,7 +127,7 @@ static func _validate_city_citizen_spatial_state(
 			continue
 
 		var raw_indexed_ids = (
-			WorldData.city_citizen_ids_by_tile[
+			CityCitizenSpatialSystem.get_current_state().citizen_ids_by_tile[
 				tile_position
 			]
 		)
@@ -150,7 +150,7 @@ static func _validate_city_citizen_spatial_state(
 			)
 
 	for raw_tile_position in (
-		WorldData.city_citizen_ids_by_tile.keys()
+		CityCitizenSpatialSystem.get_current_state().citizen_ids_by_tile.keys()
 	):
 		if not raw_tile_position is Vector2i:
 			errors.append(
@@ -163,7 +163,7 @@ static func _validate_city_citizen_spatial_state(
 			raw_tile_position
 		)
 		var raw_citizen_ids = (
-			WorldData.city_citizen_ids_by_tile[
+			CityCitizenSpatialSystem.get_current_state().citizen_ids_by_tile[
 				tile_position
 			]
 		)
@@ -224,7 +224,7 @@ static func _validate_city_citizen_spatial_state(
 				citizen_lookup[citizen_id]
 			)
 			var citizen: Dictionary = (
-				WorldData.city_citizens[
+				CityCitizenRegistrySystem.get_current_state().citizens[
 					citizen_index
 				]
 			)
@@ -345,7 +345,7 @@ static func _validate_city_citizen_demographics(
 		"errors": errors,
 		"pool_display_name": "Male",
 		"expected_sex": WorldData.CITY_CITIZEN_SEX_MALE,
-		"name_pool": WorldData.city_citizen_male_name_pool,
+		"name_pool": CityCitizens.city_citizen_male_name_pool,
 		"global_name_owners": global_name_owners,
 	})
 
@@ -353,19 +353,19 @@ static func _validate_city_citizen_demographics(
 		"errors": errors,
 		"pool_display_name": "Female",
 		"expected_sex": WorldData.CITY_CITIZEN_SEX_FEMALE,
-		"name_pool": WorldData.city_citizen_female_name_pool,
+		"name_pool": CityCitizens.city_citizen_female_name_pool,
 		"global_name_owners": global_name_owners,
 	})
 
 	if not (
-		WorldData
+		CityCitizens
 		.city_citizen_unassigned_name_pool
 		.is_empty()
 	):
 		errors.append(
 			"Citizen unassigned-name pool still contains "
 			+ str(
-				WorldData
+				CityCitizens
 				.city_citizen_unassigned_name_pool
 				.size()
 			)
@@ -380,7 +380,7 @@ static func _validate_city_citizen_demographics(
 			citizen_lookup[citizen_id]
 		)
 		var citizen: Dictionary = (
-			WorldData.city_citizens[
+			CityCitizenRegistrySystem.get_current_state().citizens[
 				citizen_index
 			]
 		)
@@ -404,12 +404,12 @@ static func _validate_city_citizen_demographics(
 			continue
 
 		var citizen_sex := (
-			WorldData.normalize_city_citizen_sex(
+			CityCitizens.normalize_city_citizen_sex(
 				raw_sex
 			)
 		)
 
-		if not WorldData.is_valid_city_citizen_sex(
+		if not CityCitizens.is_valid_city_citizen_sex(
 			citizen_sex
 		):
 			errors.append(
@@ -430,7 +430,7 @@ static func _validate_city_citizen_demographics(
 			citizen.get("name", "")
 		).strip_edges()
 		var expected_name_pool := (
-			WorldData.get_city_citizen_name_pool_for_sex(
+			CityCitizens.get_city_citizen_name_pool_for_sex(
 				citizen_sex
 			)
 		)
@@ -455,11 +455,11 @@ static func _validate_city_citizen_demographics(
 	if (
 		WorldData.player_city_founded
 		and (
-			WorldData.city_citizens.size()
+			CityCitizenRegistrySystem.get_current_state().citizens.size()
 			== WorldData.STARTING_CITY_POPULATION
 		)
 		and (
-			WorldData.next_city_citizen_id
+			CityCitizenRegistrySystem.get_current_state().next_citizen_id
 			== WorldData.STARTING_CITY_POPULATION + 1
 		)
 	):
@@ -494,7 +494,7 @@ static func _validate_city_citizen_culture_state(
 ) -> void:
 	for citizen_id in citizen_lookup.keys():
 		var citizen_index := int(citizen_lookup[citizen_id])
-		var citizen: Dictionary = WorldData.city_citizens[citizen_index]
+		var citizen: Dictionary = CityCitizenRegistrySystem.get_current_state().citizens[citizen_index]
 
 		if not citizen.has("culture_id"):
 			errors.append(
@@ -602,7 +602,7 @@ static func _validate_city_citizen_culture_state(
 
 	if not (
 		primary_culture_id > 0
-		and WorldData.next_city_citizen_id
+		and CityCitizenRegistrySystem.get_current_state().next_citizen_id
 		> WorldData.STARTING_CITY_POPULATION
 	):
 		return
@@ -617,7 +617,7 @@ static func _validate_city_citizen_culture_state(
 			continue
 
 		var citizen_index := int(citizen_lookup[citizen_id])
-		var citizen: Dictionary = WorldData.city_citizens[citizen_index]
+		var citizen: Dictionary = CityCitizenRegistrySystem.get_current_state().citizens[citizen_index]
 
 		if citizen.get("culture_id") == primary_culture_id:
 			continue
@@ -635,7 +635,7 @@ static func _validate_city_citizen_need_state(
 ) -> void:
 	for citizen_id in citizen_lookup.keys():
 		var citizen_index := int(citizen_lookup[citizen_id])
-		var citizen: Dictionary = WorldData.city_citizens[citizen_index]
+		var citizen: Dictionary = CityCitizenRegistrySystem.get_current_state().citizens[citizen_index]
 
 		if not CityCitizens.has_complete_city_citizen_need_state(citizen):
 			errors.append(
@@ -750,7 +750,7 @@ static func _validate_city_citizen_task_entry(
 	var raw_citizen_id = values.get("raw_citizen_id")
 	var citizen_id: int = raw_citizen_id
 	var citizen_index := int(citizen_lookup[citizen_id])
-	var citizen: Dictionary = WorldData.city_citizens[citizen_index]
+	var citizen: Dictionary = CityCitizenRegistrySystem.get_current_state().citizens[citizen_index]
 
 	if not citizen.has("current_task"):
 		errors.append(
@@ -1024,7 +1024,7 @@ static func _city_citizen_task_enums_are_valid(
 	var task_phase := str(values.get("task_phase", ""))
 	var task_values_are_valid := true
 
-	if not WorldData.is_valid_city_citizen_task_kind(task_kind):
+	if not CityCitizens.is_valid_city_citizen_task_kind(task_kind):
 		errors.append(
 			"Citizen "
 			+ str(citizen_id)
@@ -1034,7 +1034,7 @@ static func _city_citizen_task_enums_are_valid(
 		)
 		task_values_are_valid = false
 
-	if not WorldData.is_valid_city_citizen_task_source(task_source):
+	if not CityCitizens.is_valid_city_citizen_task_source(task_source):
 		errors.append(
 			"Citizen "
 			+ str(citizen_id)
@@ -1044,7 +1044,7 @@ static func _city_citizen_task_enums_are_valid(
 		)
 		task_values_are_valid = false
 
-	if not WorldData.is_valid_city_citizen_task_phase(task_phase):
+	if not CityCitizens.is_valid_city_citizen_task_phase(task_phase):
 		errors.append(
 			"Citizen "
 			+ str(citizen_id)
@@ -2037,7 +2037,7 @@ static func _validate_return_home_task_kind_state(values: Dictionary) -> void:
 			+ "."
 		)
 
-	if not WorldData.city_citizen_can_access_object_interior(
+	if not CityNavigationSystem.city_citizen_can_access_object_interior(
 		citizen_id,
 		target_home
 	):
@@ -2055,19 +2055,19 @@ static func _validate_city_active_task_registry(
 	citizen_lookup: Dictionary,
 	expected_active_task_ids: Array[int]
 ) -> void:
-	if WorldData.city_active_task_ids != expected_active_task_ids:
+	if CityCitizenTaskRuntimeSystem.get_current_state().active_task_ids != expected_active_task_ids:
 		errors.append(
 			"Active task registry does not match living citizens "
 				+ "with active tasks. Expected "
 				+ str(expected_active_task_ids)
 				+ ", found "
-				+ str(WorldData.city_active_task_ids)
+				+ str(CityCitizenTaskRuntimeSystem.get_current_state().active_task_ids)
 				+ "."
 		)
 
 	var seen_active_task_ids: Dictionary = {}
 
-	for raw_active_task_id in WorldData.city_active_task_ids:
+	for raw_active_task_id in CityCitizenTaskRuntimeSystem.get_current_state().active_task_ids:
 		if typeof(raw_active_task_id) != TYPE_INT:
 			errors.append(
 				"Active task registry contains a non-integer ID."
@@ -2093,7 +2093,7 @@ static func _validate_city_active_task_registry(
 					+ "."
 			)
 
-		if not WorldData.city_active_task_id_lookup.has(
+		if not CityCitizenTaskRuntimeSystem.get_current_state().active_task_id_lookup.has(
 			active_task_id
 		):
 			errors.append(
@@ -2102,7 +2102,7 @@ static func _validate_city_active_task_registry(
 					+ "."
 			)
 		elif not bool(
-			WorldData.city_active_task_id_lookup[active_task_id]
+			CityCitizenTaskRuntimeSystem.get_current_state().active_task_id_lookup[active_task_id]
 		):
 			errors.append(
 				"Active task lookup is false for citizen ID "
@@ -2110,7 +2110,7 @@ static func _validate_city_active_task_registry(
 					+ "."
 			)
 
-	for raw_lookup_id in WorldData.city_active_task_id_lookup.keys():
+	for raw_lookup_id in CityCitizenTaskRuntimeSystem.get_current_state().active_task_id_lookup.keys():
 		if typeof(raw_lookup_id) != TYPE_INT:
 			errors.append(
 				"Active task lookup contains a non-integer ID."
@@ -2127,8 +2127,8 @@ static func _validate_city_active_task_registry(
 			)
 
 	if (
-		WorldData.city_active_task_id_lookup.size()
-		!= WorldData.city_active_task_ids.size()
+		CityCitizenTaskRuntimeSystem.get_current_state().active_task_id_lookup.size()
+		!= CityCitizenTaskRuntimeSystem.get_current_state().active_task_ids.size()
 	):
 		errors.append(
 			"Active task registry array and lookup have different sizes."
@@ -2287,7 +2287,7 @@ static func _validate_city_citizen_movement_entry(
 		citizen_lookup[citizen_id]
 	)
 	var citizen: Dictionary = (
-		WorldData.city_citizens[citizen_index]
+		CityCitizenRegistrySystem.get_current_state().citizens[citizen_index]
 	)
 	var missing_field := false
 
@@ -2336,7 +2336,7 @@ static func _validate_city_citizen_movement_entry(
 
 	var movement_state: String = raw_state
 
-	if not WorldData.is_valid_city_citizen_movement_state(
+	if not CityCitizens.is_valid_city_citizen_movement_state(
 		movement_state
 	):
 		errors.append(
@@ -2404,7 +2404,7 @@ static func _validate_city_citizen_movement_entry(
 		)
 		return
 
-	if not WorldData.is_valid_city_citizen_movement_failure(
+	if not CityCitizens.is_valid_city_citizen_movement_failure(
 		str(raw_failure)
 	):
 		errors.append(
@@ -2501,7 +2501,7 @@ static func _validate_city_citizen_movement_path(
 
 		if previous_path_tile is Vector2i:
 			var step_cost := (
-				WorldData.get_city_citizen_movement_step_cost(
+				CityNavigationSystem.get_city_citizen_movement_step_cost(
 					previous_path_tile,
 					path_tile
 				)
@@ -2516,7 +2516,7 @@ static func _validate_city_citizen_movement_path(
 				path_entries_valid = false
 			elif (
 				city_world != null
-				and not WorldData.can_city_citizen_traverse_step(
+				and not CityNavigationSystem.can_city_citizen_traverse_step(
 					city_world,
 					previous_path_tile,
 					path_tile,
@@ -2562,7 +2562,7 @@ static func _validate_city_citizen_movement_state_details(
 	)
 	var path_entries_valid := bool(values.get("path_entries_valid", false))
 	var citizen_is_active := (
-		WorldData.city_active_mover_id_lookup.has(
+		CityCitizenMovementRuntimeSystem.get_current_state().active_mover_id_lookup.has(
 			int(citizen_id)
 		)
 	)
@@ -2656,7 +2656,7 @@ static func _validate_city_citizen_movement_state_details(
 				)
 			elif path_entries_valid:
 				var current_step_cost := (
-					WorldData.get_city_citizen_movement_step_cost(
+					CityNavigationSystem.get_city_citizen_movement_step_cost(
 						movement_path[movement_index - 1],
 						movement_path[movement_index]
 					)
@@ -2717,7 +2717,7 @@ static func _validate_city_active_mover_registry(
 	var active_array_lookup: Dictionary = {}
 	var previous_active_id := -1
 
-	for active_citizen_id in WorldData.city_active_mover_ids:
+	for active_citizen_id in CityCitizenMovementRuntimeSystem.get_current_state().active_mover_ids:
 		if active_array_lookup.has(active_citizen_id):
 			errors.append(
 				"Active-mover registry contains duplicate citizen ID "
@@ -2746,7 +2746,7 @@ static func _validate_city_active_mover_registry(
 			continue
 
 		var active_citizen: Dictionary = (
-			WorldData.city_citizens[
+			CityCitizenRegistrySystem.get_current_state().citizens[
 				int(citizen_lookup[active_citizen_id])
 			]
 		)
@@ -2760,7 +2760,7 @@ static func _validate_city_active_mover_registry(
 				"Active-mover registry contains an ineligible citizen."
 			)
 
-		if not WorldData.city_active_mover_id_lookup.has(
+		if not CityCitizenMovementRuntimeSystem.get_current_state().active_mover_id_lookup.has(
 			active_citizen_id
 		):
 			errors.append(
@@ -2769,7 +2769,7 @@ static func _validate_city_active_mover_registry(
 					+ "."
 			)
 
-	for lookup_id in WorldData.city_active_mover_id_lookup.keys():
+	for lookup_id in CityCitizenMovementRuntimeSystem.get_current_state().active_mover_id_lookup.keys():
 		if not active_array_lookup.has(lookup_id):
 			errors.append(
 				"Active-mover lookup contains citizen "

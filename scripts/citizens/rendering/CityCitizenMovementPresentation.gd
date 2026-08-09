@@ -33,7 +33,7 @@ func synchronize(animate_position_changes: bool) -> void:
 		if typeof(raw_citizen_id) == TYPE_INT:
 			candidate_citizen_id_lookup[raw_citizen_id] = true
 
-	for citizen_id in WorldData.get_city_active_mover_ids_snapshot():
+	for citizen_id in CityCitizenMovementRuntimeSystem.get_city_active_mover_ids_snapshot():
 		candidate_citizen_id_lookup[citizen_id] = true
 
 	var candidate_citizen_ids: Array = (
@@ -43,7 +43,7 @@ func synchronize(animate_position_changes: bool) -> void:
 
 	for raw_citizen_id in candidate_citizen_ids:
 		var citizen_id := int(raw_citizen_id)
-		var citizen := WorldData.get_city_citizen_by_id(citizen_id)
+		var citizen := CityCitizenRegistrySystem.get_city_citizen_by_id(citizen_id)
 
 		if (
 			citizen.is_empty()
@@ -227,7 +227,7 @@ func track_mover(citizen_id: int) -> void:
 	if citizen_id <= 0:
 		return
 
-	var citizen := WorldData.get_city_citizen_by_id(citizen_id)
+	var citizen := CityCitizenRegistrySystem.get_city_citizen_by_id(citizen_id)
 
 	if (
 		citizen.is_empty()
@@ -250,7 +250,7 @@ func track_mover(citizen_id: int) -> void:
 
 
 func refresh_mover_tracking() -> void:
-	for citizen_id in WorldData.get_city_active_mover_ids_snapshot():
+	for citizen_id in CityCitizenMovementRuntimeSystem.get_city_active_mover_ids_snapshot():
 		track_mover(citizen_id)
 
 	for raw_citizen_id in tracked_mover_id_lookup.keys():
@@ -453,7 +453,7 @@ func _get_segment_movement_cost_per_world_unit(
 		_get_segment_destination_coordinate(to_position.y, direction.y)
 	)
 	var source_tile := target_tile - direction
-	var step_cost := WorldData.get_city_citizen_movement_step_cost(
+	var step_cost := CityNavigationSystem.get_city_citizen_movement_step_cost(
 		source_tile,
 		target_tile
 	)
@@ -642,7 +642,7 @@ func _make_movement_snapshot(citizen: Dictionary) -> Dictionary:
 	):
 		var from_tile: Vector2i = movement_path[movement_path_index - 1]
 		var to_tile: Vector2i = movement_path[movement_path_index]
-		var step_cost := WorldData.get_city_citizen_movement_step_cost(
+		var step_cost := CityNavigationSystem.get_city_citizen_movement_step_cost(
 			from_tile,
 			to_tile
 		)
@@ -797,7 +797,7 @@ func erase_citizen(citizen_id: int) -> void:
 
 
 func _release_mover_if_inactive(citizen_id: int) -> void:
-	if WorldData.city_active_mover_id_lookup.has(citizen_id):
+	if CityCitizenMovementRuntimeSystem.get_current_state().active_mover_id_lookup.has(citizen_id):
 		return
 
 	if transition_by_citizen_id.has(citizen_id):

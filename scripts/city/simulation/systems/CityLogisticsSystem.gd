@@ -34,7 +34,7 @@ static func _mark_city_ground_piles_changed() -> void:
 
 static func _mark_city_haul_reservations_changed() -> void:
 	_state().haul_reservation_version += 1
-	WorldData.city_citizen_task_version += 1
+	CityCitizenTaskRuntimeSystem.mark_city_citizen_task_changed()
 
 static func make_city_construction_site_haul_endpoint(
 	site_id: int
@@ -930,8 +930,8 @@ static func release_soft_city_haul_reservation_for_reassignment(
 
 	var reservation := get_city_haul_reservation(reservation_id)
 	var citizen_id := int(reservation.get("citizen_id", -1))
-	var current_task := WorldData.get_city_citizen_current_task(citizen_id)
-	var current_haul := WorldData.get_city_citizen_current_haul(citizen_id)
+	var current_task := CityCitizenTaskRuntimeSystem.get_city_citizen_current_task(citizen_id)
+	var current_haul := CityCitizenTaskRuntimeSystem.get_city_citizen_current_haul(citizen_id)
 	var task_source := str(
 		current_task.get(
 			"source",
@@ -948,8 +948,8 @@ static func release_soft_city_haul_reservation_for_reassignment(
 		return false
 
 	if owns_task:
-		WorldData.cancel_city_citizen_movement(citizen_id)
-		WorldData.clear_city_citizen_task(citizen_id, task_source)
+		CityCitizenMovementRuntimeSystem.cancel_city_citizen_movement(citizen_id)
+		CityCitizenTaskRuntimeSystem.clear_city_citizen_task(citizen_id, task_source)
 
 	return true
 
@@ -1031,11 +1031,11 @@ static func reduce_soft_city_haul_reservation_for_reassignment(
 		-released_amount
 	)
 
-	var current_haul := WorldData.get_city_citizen_current_haul(citizen_id)
+	var current_haul := CityCitizenTaskRuntimeSystem.get_city_citizen_current_haul(citizen_id)
 
 	if int(current_haul.get("reservation_id", -1)) == reservation_id:
 		current_haul["requested_amount"] = remaining_source_amount
-		WorldData.set_city_citizen_current_haul(citizen_id, current_haul)
+		CityCitizenTaskRuntimeSystem.set_city_citizen_current_haul(citizen_id, current_haul)
 
 	_mark_city_haul_reservations_changed()
 	return released_amount
@@ -1239,7 +1239,7 @@ static func get_city_haul_endpoint_unreserved_resource_amount(
 	excluding_food_citizen_id: int = -1
 ) -> int:
 	var food_task_reserved_amount := (
-		WorldData.get_city_food_task_reserved_endpoint_amount(
+		CityCitizenTaskRuntimeSystem.get_city_food_task_reserved_endpoint_amount(
 			str(
 				endpoint.get(
 					"kind",
@@ -1627,7 +1627,7 @@ static func _make_city_haul_reservation_context(
 	values: Dictionary
 ) -> Dictionary:
 	var citizen_id := int(values.get("citizen_id", -1))
-	var citizen := WorldData.get_city_citizen_by_id(citizen_id)
+	var citizen := CityCitizenRegistrySystem.get_city_citizen_by_id(citizen_id)
 	var raw_source = values.get("source", {})
 	var raw_destination = values.get("destination", {})
 
@@ -1897,9 +1897,9 @@ static func expand_pending_city_haul_reservation(
 		return 0
 
 	var citizen_id := int(reservation.get("citizen_id", -1))
-	var citizen := WorldData.get_city_citizen_by_id(citizen_id)
-	var current_task := WorldData.get_city_citizen_current_task(citizen_id)
-	var current_haul := WorldData.get_city_citizen_current_haul(citizen_id)
+	var citizen := CityCitizenRegistrySystem.get_city_citizen_by_id(citizen_id)
+	var current_task := CityCitizenTaskRuntimeSystem.get_city_citizen_current_task(citizen_id)
+	var current_haul := CityCitizenTaskRuntimeSystem.get_city_citizen_current_haul(citizen_id)
 	var haul_phase := str(
 		current_haul.get(
 			"phase",
@@ -2003,7 +2003,7 @@ static func expand_pending_city_haul_reservation(
 	var expanded_haul := current_haul.duplicate(true)
 	expanded_haul["requested_amount"] = maximum_claim
 
-	if not WorldData.set_city_citizen_current_haul(citizen_id, expanded_haul):
+	if not CityCitizenTaskRuntimeSystem.set_city_citizen_current_haul(citizen_id, expanded_haul):
 		return 0
 
 	var destination_resources := (

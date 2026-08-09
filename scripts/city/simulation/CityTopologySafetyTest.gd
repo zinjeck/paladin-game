@@ -75,7 +75,7 @@ func _test_low_level_topology_gate_is_generic() -> void:
 	)
 	_expect(
 		not road.is_empty()
-		and WorldData.is_city_tile_walkable_for_citizen(
+		and CityNavigationSystem.is_city_tile_walkable_for_citizen(
 			road_world,
 			road_tile,
 			int(road_citizen.get("id", -1))
@@ -140,7 +140,7 @@ func _test_construction_waits_for_footprint_clearance() -> void:
 		Vector2i(7, 3),
 	]
 	_expect(
-		WorldData.assign_city_citizen_movement_order(
+		CityCitizenMovementRuntimeSystem.assign_city_citizen_movement_order(
 			unrelated_id,
 			unrelated_path
 		),
@@ -155,7 +155,7 @@ func _test_construction_waits_for_footprint_clearance() -> void:
 		CityConstructionSystemScript.complete_city_construction_site(site_id)
 	)
 	var pending_site := CityConstructionSystem.get_city_construction_site_by_id(site_id)
-	var trapped_after_request := WorldData.get_city_citizen_by_id(trapped_id)
+	var trapped_after_request := CityCitizenRegistrySystem.get_city_citizen_by_id(trapped_id)
 
 	_expect(
 		immediate_completion.is_empty()
@@ -194,8 +194,8 @@ func _test_construction_waits_for_footprint_clearance() -> void:
 			break
 
 	var completed_fishery := CityObjectSystem.get_city_object_at_tile(top_left)
-	var trapped_after_completion := WorldData.get_city_citizen_by_id(trapped_id)
-	var unrelated_after_completion := WorldData.get_city_citizen_by_id(
+	var trapped_after_completion := CityCitizenRegistrySystem.get_city_citizen_by_id(trapped_id)
+	var unrelated_after_completion := CityCitizenRegistrySystem.get_city_citizen_by_id(
 		unrelated_id
 	)
 	var footprint_tiles := CityObjectSystem.make_rectangle_city_object_footprint_tiles(
@@ -279,7 +279,7 @@ func _test_one_bad_mover_does_not_freeze_the_batch() -> void:
 	var invalid_id := int(invalid_citizen.get("id", -1))
 	var valid_update: Dictionary = valid_citizen.duplicate(true)
 	var invalid_update: Dictionary = invalid_citizen.duplicate(true)
-	var commit_result := WorldData.commit_city_citizen_movement_tick(
+	var commit_result := CityCitizenMovementRuntimeSystem.commit_city_citizen_movement_tick(
 		city_world,
 		[
 			{
@@ -305,13 +305,13 @@ func _test_one_bad_mover_does_not_freeze_the_batch() -> void:
 		"The movement transaction must commit valid citizens and quarantine only the bad update."
 	)
 	_expect(
-		WorldData.get_city_citizen_tile_position(valid_id) == Vector2i(5, 4)
-		and WorldData.get_city_citizen_tile_position(invalid_id) == Vector2i(8, 4),
+		CityCitizenSpatialSystem.get_city_citizen_tile_position(valid_id) == Vector2i(5, 4)
+		and CityCitizenSpatialSystem.get_city_citizen_tile_position(invalid_id) == Vector2i(8, 4),
 		"A rejected mover must not roll back a valid mover or move itself illegally."
 	)
 	_expect(
 		str(
-			WorldData.get_city_citizen_by_id(invalid_id).get(
+			CityCitizenRegistrySystem.get_city_citizen_by_id(invalid_id).get(
 				"movement_state",
 				""
 			)
@@ -338,11 +338,11 @@ func _test_legacy_occupant_can_escape_but_not_reenter() -> void:
 	var trapped_id := int(trapped.get("id", -1))
 	var trapped_tile := top_left + Vector2i.ONE
 	trapped["city_tile_position"] = trapped_tile
-	WorldData.rebuild_city_citizen_spatial_index()
+	CityCitizenSpatialSystem.rebuild_city_citizen_spatial_index()
 
 	_expect(
 		not fishery.is_empty()
-		and WorldData.is_city_tile_walkable_for_citizen(
+		and CityNavigationSystem.is_city_tile_walkable_for_citizen(
 			city_world,
 			trapped_tile,
 			trapped_id
@@ -350,7 +350,7 @@ func _test_legacy_occupant_can_escape_but_not_reenter() -> void:
 		"A citizen already inside corrupted legacy topology must be allowed to start escaping."
 	)
 	_expect(
-		not WorldData.is_city_tile_walkable_for_citizen(
+		not CityNavigationSystem.is_city_tile_walkable_for_citizen(
 			city_world,
 			trapped_tile,
 			int(outsider.get("id", -1))

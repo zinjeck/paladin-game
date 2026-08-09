@@ -59,7 +59,7 @@ func _test_pre_context_state_adoption() -> void:
 	}]
 	var bootstrap_index: Dictionary = {17: 0}
 	var bootstrap_state := (
-		WorldPoliticalState.get_current_city_citizen_registry_state()
+		CityCitizenRegistrySystem.get_current_state()
 	)
 	bootstrap_state.citizens = bootstrap_citizens
 	bootstrap_state.citizen_index_by_id = bootstrap_index
@@ -94,22 +94,22 @@ func _test_pre_context_state_adoption() -> void:
 			context.get_city_citizen_registry_state(),
 			bootstrap_state
 		)
-		and is_same(WorldData.city_citizens, bootstrap_citizens)
+		and is_same(CityCitizenRegistrySystem.get_current_state().citizens, bootstrap_citizens)
 		and is_same(
-			WorldData.city_citizen_index_by_id,
+			CityCitizenRegistrySystem.get_current_state().citizen_index_by_id,
 			bootstrap_index
 		)
-		and WorldData.next_city_citizen_id == 18
-		and WorldData.city_citizen_version == 5,
+		and CityCitizenRegistrySystem.get_current_state().next_citizen_id == 18
+		and CityCitizenRegistrySystem.get_current_state().citizen_version == 5,
 		"Context and compatibility access must resolve one adopted registry."
 	)
 	_expect(
 		WorldPoliticalState.synchronize_foundation_with_world_data()
 		and is_same(
-			WorldPoliticalState.get_current_city_citizen_registry_state(),
+			CityCitizenRegistrySystem.get_current_state(),
 			bootstrap_state
 		)
-		and WorldData.city_citizens.size() == 1,
+		and CityCitizenRegistrySystem.get_current_state().citizens.size() == 1,
 		"Repeated synchronization must not replace or duplicate the registry."
 	)
 
@@ -180,8 +180,8 @@ func _test_real_founding_population_bootstrap() -> void:
 		"Founding must create IDs 1-8, exact indexes, next ID 9, and version 8."
 	)
 	_expect(
-		is_same(WorldData.city_citizens, registry_array)
-		and is_same(WorldData.city_citizen_index_by_id, registry_index)
+		is_same(CityCitizenRegistrySystem.get_current_state().citizens, registry_array)
+		and is_same(CityCitizenRegistrySystem.get_current_state().citizen_index_by_id, registry_index)
 		and is_same(
 			WorldPoliticalState
 			.get_active_settlement_context()
@@ -245,7 +245,7 @@ func _test_legacy_backend_conversion_adopts_state() -> void:
 		culture_id
 	)
 	var legacy_state := (
-		WorldPoliticalState.get_current_city_citizen_registry_state()
+		CityCitizenRegistrySystem.get_current_state()
 	)
 	var legacy_array: Array = legacy_state.citizens
 	var legacy_index: Dictionary = legacy_state.citizen_index_by_id
@@ -289,7 +289,7 @@ func _test_legacy_backend_conversion_adopts_state() -> void:
 		"A second legacy-backed City must use the rotated fallback."
 	)
 	var rotated_fallback := (
-		WorldPoliticalState.get_current_city_citizen_registry_state()
+		CityCitizenRegistrySystem.get_current_state()
 	)
 	_expect(
 		not is_same(rotated_fallback, legacy_state)
@@ -302,17 +302,17 @@ func _test_legacy_backend_conversion_adopts_state() -> void:
 	_expect(
 		WorldPoliticalState.set_active_settlement(legacy_city_id)
 		and is_same(
-			WorldPoliticalState.get_current_city_citizen_registry_state(),
+			CityCitizenRegistrySystem.get_current_state(),
 			legacy_state
 		)
-		and is_same(WorldData.city_citizens, legacy_array)
-		and WorldData.get_city_population_count() == 2,
+		and is_same(CityCitizenRegistrySystem.get_current_state().citizens, legacy_array)
+		and CityCitizenRegistrySystem.get_city_population_count() == 2,
 		"The converted City must retain its exact registry after fallback use."
 	)
 
 	WorldData.reset_runtime_session_state()
 	var reset_state := (
-		WorldPoliticalState.get_current_city_citizen_registry_state()
+		CityCitizenRegistrySystem.get_current_state()
 	)
 	_expect(
 		WorldPoliticalState.settlement_city_state_by_id.is_empty()

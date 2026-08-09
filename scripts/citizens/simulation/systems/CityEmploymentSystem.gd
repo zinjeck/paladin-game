@@ -268,7 +268,7 @@ static func reconcile_automatic_workplaces() -> int:
 			var filled_one_slot := false
 
 			for citizen_id in candidate_ids:
-				var citizen := WorldData.get_city_citizen_by_id(citizen_id)
+				var citizen := CityCitizenRegistrySystem.get_city_citizen_by_id(citizen_id)
 
 				if (
 					citizen.is_empty()
@@ -299,7 +299,7 @@ static func reconcile_automatic_workplaces() -> int:
 static func _get_unemployed_candidate_ids() -> Array[int]:
 	var candidate_ids: Array[int] = []
 
-	for raw_citizen in WorldData.city_citizens:
+	for raw_citizen in CityCitizenRegistrySystem.get_current_state().citizens:
 		if not raw_citizen is Dictionary:
 			continue
 

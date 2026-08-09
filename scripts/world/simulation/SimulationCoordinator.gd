@@ -460,11 +460,11 @@ func _get_workload_debug_text() -> String:
 
 	return (
 		"Load: Citizens "
-		+ str(WorldData.city_citizens.size())
+		+ str(CityCitizenRegistrySystem.get_current_state().citizens.size())
 		+ " | Active Tasks "
-		+ str(WorldData.city_active_task_ids.size())
+		+ str(CityCitizenTaskRuntimeSystem.get_current_state().active_task_ids.size())
 		+ " | Movers "
-		+ str(WorldData.city_active_mover_ids.size())
+		+ str(CityCitizenMovementRuntimeSystem.get_current_state().active_mover_ids.size())
 		+ "\n"
 		+ "City: Objects "
 		+ str(CityObjectSystem.get_city_objects().size())

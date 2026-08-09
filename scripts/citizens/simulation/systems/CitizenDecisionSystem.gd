@@ -104,7 +104,7 @@ static func run_tick(
 	if (
 		WorldData.official_city_world == null
 		or not WorldData.player_city_founded
-		or WorldData.city_citizens.is_empty()
+		or CityCitizenRegistrySystem.get_current_state().citizens.is_empty()
 	):
 		reset_runtime_state()
 		return
@@ -198,7 +198,7 @@ static func run_tick(
 static func _process_player_commands() -> void:
 	var assigned_count := 0
 
-	for raw_citizen in WorldData.city_citizens:
+	for raw_citizen in CityCitizenRegistrySystem.get_current_state().citizens:
 		if assigned_count >= MAX_PLAYER_COMMAND_ASSIGNMENTS_PER_TICK:
 			return
 
@@ -255,7 +255,7 @@ static func _process_player_commands() -> void:
 static func _process_food_needs(critical_only: bool) -> void:
 	var candidates: Array = []
 
-	for raw_citizen in WorldData.city_citizens:
+	for raw_citizen in CityCitizenRegistrySystem.get_current_state().citizens:
 		if not raw_citizen is Dictionary:
 			continue
 
@@ -276,7 +276,7 @@ static func _process_food_needs(critical_only: bool) -> void:
 		if is_critical != critical_only:
 			continue
 
-		var current_task := WorldData.get_city_citizen_current_task(citizen_id)
+		var current_task := CityCitizenTaskRuntimeSystem.get_city_citizen_current_task(citizen_id)
 		var current_task_kind := str(
 			current_task.get("kind", WorldData.CITY_CITIZEN_TASK_KIND_NONE)
 		)
@@ -316,7 +316,7 @@ static func _process_food_needs(critical_only: bool) -> void:
 			continue
 
 		var citizen_id := int(raw_candidate.get("citizen_id", -1))
-		var citizen := WorldData.get_city_citizen_by_id(citizen_id)
+		var citizen := CityCitizenRegistrySystem.get_city_citizen_by_id(citizen_id)
 		var available_food_capacity := (
 			WorldData.get_city_citizen_personal_inventory_free_space(citizen_id)
 			if critical_only
@@ -332,7 +332,7 @@ static func _process_food_needs(critical_only: bool) -> void:
 		if food_result.is_empty() or int(food_result.get("object_id", -1)) <= 0:
 			continue
 
-		var current_task := WorldData.get_city_citizen_current_task(citizen_id)
+		var current_task := CityCitizenTaskRuntimeSystem.get_city_citizen_current_task(citizen_id)
 		var current_task_kind := str(
 			current_task.get(
 				"kind",
@@ -396,10 +396,10 @@ static func _process_food_needs(critical_only: bool) -> void:
 			"player_locked": false,
 		}
 
-		if not WorldData.assign_city_citizen_task(citizen_id, task_request):
+		if not CityCitizenTaskRuntimeSystem.assign_city_citizen_task(citizen_id, task_request):
 			continue
 
-		WorldData.cancel_city_citizen_movement(citizen_id)
+		CityCitizenMovementRuntimeSystem.cancel_city_citizen_movement(citizen_id)
 		_clear_idle_activity_runtime(citizen_id)
 		assigned_count += 1
 
@@ -442,13 +442,13 @@ static func _prepare_citizen_for_critical_food_interrupt(
 			)
 		)
 	else:
-		released = WorldData.clear_city_citizen_task(
+		released = CityCitizenTaskRuntimeSystem.clear_city_citizen_task(
 			citizen_id,
 			WorldData.CITY_CITIZEN_TASK_SOURCE_SCHEDULE
 		)
 
 	if released:
-		WorldData.cancel_city_citizen_movement(citizen_id)
+		CityCitizenMovementRuntimeSystem.cancel_city_citizen_movement(citizen_id)
 		_clear_idle_activity_runtime(citizen_id)
 
 	return released
@@ -564,7 +564,7 @@ static func _get_schedule_phase(
 static func _queue_all_eligible_scheduled_tasks(
 	schedule_phase: String
 ) -> void:
-	for raw_citizen in WorldData.city_citizens:
+	for raw_citizen in CityCitizenRegistrySystem.get_current_state().citizens:
 		if not raw_citizen is Dictionary:
 			continue
 
@@ -586,7 +586,7 @@ static func _queue_all_eligible_scheduled_tasks(
 static func _queue_bounded_recovery_candidates(
 	schedule_phase: String
 ) -> void:
-	var citizen_count := WorldData.city_citizens.size()
+	var citizen_count := CityCitizenRegistrySystem.get_current_state().citizens.size()
 
 	if citizen_count <= 0:
 		_recovery_scan_cursor = 0
@@ -605,7 +605,7 @@ static func _queue_bounded_recovery_candidates(
 			(_recovery_scan_cursor + 1) % citizen_count
 		)
 
-		var raw_citizen = WorldData.city_citizens[
+		var raw_citizen = CityCitizenRegistrySystem.get_current_state().citizens[
 			citizen_index
 		]
 
@@ -685,7 +685,7 @@ static func _citizen_needs_scheduled_return_home_task(
 		or not WorldData.get_city_object_resident_ids(
 			home
 		).has(citizen_id)
-		or not WorldData.city_citizen_can_access_object_interior(
+		or not CityNavigationSystem.city_citizen_can_access_object_interior(
 			citizen_id,
 			home
 		)
@@ -835,7 +835,7 @@ static func _get_outstanding_obligation_task_request(
 		int(cargo.get("amount", 0)),
 		0
 	)
-	var current_haul := WorldData.get_city_citizen_current_haul(
+	var current_haul := CityCitizenTaskRuntimeSystem.get_city_citizen_current_haul(
 		citizen_id
 	)
 
@@ -1174,7 +1174,7 @@ static func _process_decision_queue(
 		_pending_decision_id_lookup.erase(citizen_id)
 		processed_count += 1
 
-		var citizen := WorldData.get_city_citizen_by_id(
+		var citizen := CityCitizenRegistrySystem.get_city_citizen_by_id(
 			citizen_id
 		)
 
@@ -1205,7 +1205,7 @@ static func _process_decision_queue(
 			continue
 
 		var task_was_assigned := (
-			WorldData.assign_city_citizen_task(
+			CityCitizenTaskRuntimeSystem.assign_city_citizen_task(
 				citizen_id,
 				task_request
 			)
@@ -1220,7 +1220,7 @@ static func _process_decision_queue(
 			str(citizen.get("movement_state", ""))
 			!= WorldData.CITY_CITIZEN_MOVEMENT_STATE_IDLE
 		):
-			WorldData.cancel_city_citizen_movement(
+			CityCitizenMovementRuntimeSystem.cancel_city_citizen_movement(
 				citizen_id
 			)
 
@@ -1231,7 +1231,7 @@ static func _process_decision_queue(
 static func _clear_schedule_sourced_tasks() -> void:
 	_clear_decision_queue()
 
-	for raw_citizen in WorldData.city_citizens:
+	for raw_citizen in CityCitizenRegistrySystem.get_current_state().citizens:
 		if not raw_citizen is Dictionary:
 			continue
 
@@ -1262,11 +1262,11 @@ static func _clear_schedule_sourced_tasks() -> void:
 		if citizen_id <= 0:
 			continue
 
-		if WorldData.clear_city_citizen_task(
+		if CityCitizenTaskRuntimeSystem.clear_city_citizen_task(
 			citizen_id,
 			WorldData.CITY_CITIZEN_TASK_SOURCE_SCHEDULE
 		):
-			WorldData.cancel_city_citizen_movement(
+			CityCitizenMovementRuntimeSystem.cancel_city_citizen_movement(
 				citizen_id
 			)
 			_clear_idle_activity_runtime(citizen_id)
@@ -1324,7 +1324,7 @@ static func _get_bounded_autonomous_haul_candidates(
 	schedule_phase: String
 ) -> Array:
 	var candidates: Array = []
-	var citizen_count := WorldData.city_citizens.size()
+	var citizen_count := CityCitizenRegistrySystem.get_current_state().citizens.size()
 
 	if citizen_count <= 0:
 		_autonomous_haul_scan_cursor = 0
@@ -1345,7 +1345,7 @@ static func _get_bounded_autonomous_haul_candidates(
 		)
 		scanned_count += 1
 
-		var raw_citizen = WorldData.city_citizens[citizen_index]
+		var raw_citizen = CityCitizenRegistrySystem.get_current_state().citizens[citizen_index]
 
 		if not raw_citizen is Dictionary:
 			continue
@@ -1512,16 +1512,16 @@ static func _get_ground_pile_haul_opportunities() -> Array:
 static func _get_active_ground_pile_chain_capacity() -> int:
 	var open_carry_capacity := 0
 
-	for raw_citizen in WorldData.city_citizens:
+	for raw_citizen in CityCitizenRegistrySystem.get_current_state().citizens:
 		if not raw_citizen is Dictionary:
 			continue
 
 		var citizen: Dictionary = raw_citizen
 		var citizen_id := int(citizen.get("id", -1))
-		var current_task := WorldData.get_city_citizen_current_task(
+		var current_task := CityCitizenTaskRuntimeSystem.get_city_citizen_current_task(
 			citizen_id
 		)
-		var haul := WorldData.get_city_citizen_current_haul(citizen_id)
+		var haul := CityCitizenTaskRuntimeSystem.get_city_citizen_current_haul(citizen_id)
 
 		if (
 			citizen_id <= 0
@@ -1902,7 +1902,7 @@ static func _try_assign_autonomous_haul_match(
 		return {"attempted_build": false, "assigned": false}
 
 	var opportunity: Dictionary = raw_opportunity
-	var citizen := WorldData.get_city_citizen_by_id(citizen_id)
+	var citizen := CityCitizenRegistrySystem.get_city_citizen_by_id(citizen_id)
 	var source: Dictionary = opportunity.get("source", {})
 	var resource := str(
 		opportunity.get("resource_type", WorldData.RESOURCE_NONE)
@@ -2015,10 +2015,10 @@ static func _try_assign_autonomous_haul_match(
 	if task_request.is_empty():
 		return {"attempted_build": true, "assigned": false}
 
-	if not WorldData.assign_city_citizen_task(citizen_id, task_request):
+	if not CityCitizenTaskRuntimeSystem.assign_city_citizen_task(citizen_id, task_request):
 		return {"attempted_build": true, "assigned": false}
 
-	WorldData.cancel_city_citizen_movement(citizen_id)
+	CityCitizenMovementRuntimeSystem.cancel_city_citizen_movement(citizen_id)
 	_clear_idle_activity_runtime(citizen_id)
 	return {"attempted_build": true, "assigned": true}
 
@@ -2057,7 +2057,7 @@ static func _sort_autonomous_haul_matches(
 static func _process_bounded_idle_behaviors(
 	work_shift_is_active: bool
 ) -> void:
-	var citizen_count := WorldData.city_citizens.size()
+	var citizen_count := CityCitizenRegistrySystem.get_current_state().citizens.size()
 
 	if citizen_count <= 0:
 		_idle_scan_cursor = 0
@@ -2082,7 +2082,7 @@ static func _process_bounded_idle_behaviors(
 			(_idle_scan_cursor + 1) % citizen_count
 		)
 
-		var raw_citizen = WorldData.city_citizens[
+		var raw_citizen = CityCitizenRegistrySystem.get_current_state().citizens[
 			citizen_index
 		]
 
@@ -2113,7 +2113,7 @@ static func _process_bounded_idle_behaviors(
 
 		var current_tile: Vector2i = raw_current_tile
 
-		if not WorldData.is_city_tile_walkable_for_citizen(
+		if not CityNavigationSystem.is_city_tile_walkable_for_citizen(
 			city_world,
 			current_tile,
 			citizen_id
@@ -2138,7 +2138,7 @@ static func _process_bounded_idle_behaviors(
 			movement_state
 			== WorldData.CITY_CITIZEN_MOVEMENT_STATE_BLOCKED
 		):
-			WorldData.cancel_city_citizen_movement(citizen_id)
+			CityCitizenMovementRuntimeSystem.cancel_city_citizen_movement(citizen_id)
 			_idle_anchor_tile_by_citizen_id.erase(citizen_id)
 			_schedule_next_idle_decision(citizen_id)
 			continue
@@ -2470,7 +2470,7 @@ static func _try_assign_idle_wander(values: Dictionary) -> bool:
 	):
 		return false
 
-	return WorldData.assign_city_citizen_movement_order(
+	return CityCitizenMovementRuntimeSystem.assign_city_citizen_movement_order(
 		citizen_id,
 		movement_path
 	)
@@ -2524,14 +2524,14 @@ static func _get_idle_wander_candidate_tiles(
 			):
 				continue
 
-			if not WorldData.is_city_tile_walkable_for_citizen(
+			if not CityNavigationSystem.is_city_tile_walkable_for_citizen(
 				city_world,
 				candidate_tile,
 				citizen_id
 			):
 				continue
 
-			if WorldData.has_living_city_citizen_at_tile(
+			if CityCitizenSpatialSystem.has_living_city_citizen_at_tile(
 				candidate_tile
 			):
 				continue
