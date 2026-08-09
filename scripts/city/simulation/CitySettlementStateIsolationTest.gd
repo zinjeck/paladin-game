@@ -76,6 +76,10 @@ func _run_state_isolation_test() -> void:
 		"Every city state must own a dedicated object-state subsystem."
 	)
 	_expect(
+		player_state.resource_accounting_state is CityResourceAccountingState,
+		"Every city state must own dedicated resource-accounting state."
+	)
+	_expect(
 		player_state.logistics_state is CityLogisticsState,
 		"Every city state must own a dedicated logistics-state subsystem."
 	)
@@ -85,9 +89,6 @@ func _run_state_isolation_test() -> void:
 	var player_city_world := _make_world(5, 5, 91_101)
 	WorldData.official_city_world = player_city_world
 	WorldData.official_city_seed = 91_101
-	WorldData.city_resource_amounts = {
-		WorldData.RESOURCE_FISH: 7,
-	}
 	var shared_object_tile := Vector2i(2, 2)
 	CityObjectSystem.get_current_state().next_object_id = 16
 	CityObjectSystem.get_current_state().object_version = 3
@@ -216,6 +217,18 @@ func _run_state_isolation_test() -> void:
 		"Two cities must never share object-state collections."
 	)
 	_expect(
+		cpu_state.resource_accounting_state is CityResourceAccountingState
+		and not is_same(
+			cpu_state.resource_accounting_state,
+			player_state.resource_accounting_state
+		)
+		and not is_same(
+			cpu_state.resource_accounting_state.owned_resource_amount_cache,
+			player_state.resource_accounting_state.owned_resource_amount_cache
+		),
+		"Two cities must never share resource-accounting state or cache identity."
+	)
+	_expect(
 		cpu_state.work_state is CityWorkState
 		and cpu_state.work_state != player_state.work_state,
 		"Two cities must never share the same work-state object."
@@ -236,13 +249,16 @@ func _run_state_isolation_test() -> void:
 		"A fresh city must not inherit the previous city's generated local world."
 	)
 	_expect(
-		WorldData.city_resource_amounts.is_empty()
-		and CityObjectSystem.get_current_state().objects.is_empty(),
-		"A fresh city must begin with independent resources and objects."
+		CityObjectSystem.get_current_state().objects.is_empty()
+		and cpu_state.resource_accounting_state.owned_resource_amount_cache.is_empty()
+		and cpu_state.resource_accounting_state.owned_resource_amount_cache_container_version == -1,
+		"A fresh city must begin with independent objects and accounting cache."
 	)
 	_expect(
 		CityObjectSystem.get_current_state().next_object_id == 1
 		and CityObjectSystem.get_current_state().object_version == 0
+		and cpu_state.resource_accounting_state.container_version == 0
+		and cpu_state.resource_accounting_state.public_storage_version == 0
 		and WorldData.city_assignment_version == 0,
 		"A fresh city must begin with independent counters and change versions."
 	)
@@ -287,9 +303,6 @@ func _run_state_isolation_test() -> void:
 	var cpu_city_world := _make_world(6, 6, 91_202)
 	WorldData.official_city_world = cpu_city_world
 	WorldData.official_city_seed = 91_202
-	WorldData.city_resource_amounts = {
-		WorldData.RESOURCE_FISH: 31,
-	}
 	CityObjectSystem.get_current_state().next_object_id = 54
 	CityObjectSystem.get_current_state().object_version = 11
 	var cpu_road := CityObjectSystem.add_city_road_object(
@@ -367,11 +380,10 @@ func _run_state_isolation_test() -> void:
 		"Returning to the player city must restore its local generated world."
 	)
 	_expect(
-		int(WorldData.city_resource_amounts.get(WorldData.RESOURCE_FISH, 0)) == 7
-		and int(CityObjectSystem.get_current_state().objects[0].get("id", -1)) == 16
+		int(CityObjectSystem.get_current_state().objects[0].get("id", -1)) == 16
 		and int(CityObjectSystem.get_current_state().object_index_by_id.get(16, -1)) == 0
 		and int(CityObjectSystem.get_current_state().occupied_tiles.get(shared_object_tile, -1)) == 16,
-		"Returning to the player city must restore its resources and objects."
+		"Returning to the player city must restore its objects."
 	)
 	_expect(
 		is_same(CityObjectSystem.get_current_state().objects, player_objects)
@@ -414,11 +426,10 @@ func _run_state_isolation_test() -> void:
 		"Reactivating the CPU city must restore its own generated world."
 	)
 	_expect(
-		int(WorldData.city_resource_amounts.get(WorldData.RESOURCE_FISH, 0)) == 31
-		and int(CityObjectSystem.get_current_state().objects[0].get("id", -1)) == 54
+		int(CityObjectSystem.get_current_state().objects[0].get("id", -1)) == 54
 		and int(CityObjectSystem.get_current_state().object_index_by_id.get(54, -1)) == 0
 		and int(CityObjectSystem.get_current_state().occupied_tiles.get(shared_object_tile, -1)) == 54,
-		"Reactivating the CPU city must restore its own resources and objects."
+		"Reactivating the CPU city must restore its own objects."
 	)
 	_expect(
 		is_same(CityObjectSystem.get_current_state().objects, cpu_objects)

@@ -172,6 +172,19 @@ WORLD_DATA_FORBIDDEN_CITY_OBJECT_SYMBOLS = (
     "add_city_road_object",
 )
 
+WORLD_DATA_RETIRED_RESOURCE_LEDGER_SYMBOLS = (
+    "city_resource_amounts",
+    "ensure_city_resource_amounts",
+    "get_city_resource_amount",
+)
+
+RESOURCE_ACCOUNTING_STATE_FIELDS = {
+    "owned_resource_amount_cache": "Dictionary",
+    "owned_resource_amount_cache_container_version": "int",
+    "container_version": "int",
+    "public_storage_version": "int",
+}
+
 WORLD_DATA_FORBIDDEN_CITY_CONSTRUCTION_SYMBOLS = (
     "city_construction_sites",
     "city_construction_site_index_by_id",
@@ -785,6 +798,199 @@ def main() -> int:
                 "construction finalization must call the completed-object API "
                 f"exactly once in source; found {completion_call_count} calls"
             )
+
+    resource_accounting_state_path = (
+        ROOT / "scripts/city/simulation/CityResourceAccountingState.gd"
+    )
+    settlement_context_path = (
+        ROOT / "scripts/world/simulation/SettlementSimulationContext.gd"
+    )
+    if not resource_accounting_state_path.exists():
+        errors.append(
+            "scripts/city/simulation/CityResourceAccountingState.gd: missing "
+            "resource/container accounting state owner"
+        )
+    if (
+        world_data_path.exists()
+        and resource_accounting_state_path.exists()
+        and city_root_state_path.exists()
+        and political_state_path.exists()
+        and settlement_context_path.exists()
+    ):
+        world_data_text = world_data_path.read_text(encoding="utf-8")
+        resource_accounting_state_text = resource_accounting_state_path.read_text(
+            encoding="utf-8"
+        )
+        city_root_state_text = city_root_state_path.read_text(encoding="utf-8")
+        political_state_text = political_state_path.read_text(encoding="utf-8")
+        settlement_context_text = settlement_context_path.read_text(encoding="utf-8")
+
+        declared_accounting_fields = set(
+            re.findall(
+                r"^var\s+([A-Za-z_][A-Za-z0-9_]*)\b",
+                resource_accounting_state_text,
+                re.MULTILINE,
+            )
+        )
+        if declared_accounting_fields != set(RESOURCE_ACCOUNTING_STATE_FIELDS):
+            errors.append(
+                "scripts/city/simulation/CityResourceAccountingState.gd: must "
+                "own exactly owned_resource_amount_cache, "
+                "owned_resource_amount_cache_container_version, "
+                "container_version, and public_storage_version"
+            )
+        if FUNC_RE.search(resource_accounting_state_text):
+            errors.append(
+                "scripts/city/simulation/CityResourceAccountingState.gd: must "
+                "remain data-only during the ownership pass"
+            )
+
+        for state_name, state_type in RESOURCE_ACCOUNTING_STATE_FIELDS.items():
+            if not re.search(
+                rf"^var\s+{re.escape(state_name)}:\s*{state_type}\s*=",
+                resource_accounting_state_text,
+                re.MULTILINE,
+            ):
+                errors.append(
+                    "scripts/city/simulation/CityResourceAccountingState.gd: "
+                    f"missing typed accounting field {state_name}"
+                )
+            if re.search(
+                rf"^var\s+{re.escape(state_name)}\b",
+                city_root_state_text,
+                re.MULTILINE,
+            ):
+                errors.append(
+                    "scripts/city/simulation/CitySettlementSimulationState.gd: "
+                    f"accounting storage {state_name} must live in "
+                    "CityResourceAccountingState"
+                )
+
+            compatibility_name = f"city_{state_name}"
+            compatibility_match = re.search(
+                rf"^static\s+var\s+{re.escape(compatibility_name)}:\s*"
+                rf"{state_type}:\s*$"
+                rf"(?P<body>.*?)(?=^static\s+var\s+)",
+                world_data_text,
+                re.MULTILINE | re.DOTALL,
+            )
+            if compatibility_match is None:
+                errors.append(
+                    "scripts/world/simulation/WorldData.gd: accounting "
+                    f"compatibility property must be accessor-only: "
+                    f"{compatibility_name}"
+                )
+            else:
+                compatibility_body = compatibility_match.group("body")
+                resolver_call_count = compatibility_body.count(
+                    "get_current_city_resource_accounting_state()"
+                )
+                getter_routes_field = re.search(
+                    rf"^\s*return\s+state\.{re.escape(state_name)}\s*$",
+                    compatibility_body,
+                    re.MULTILINE,
+                )
+                setter_routes_field = re.search(
+                    rf"^\s*state\.{re.escape(state_name)}\s*=\s*value\s*$",
+                    compatibility_body,
+                    re.MULTILINE,
+                )
+                if (
+                    resolver_call_count != 2
+                    or getter_routes_field is None
+                    or setter_routes_field is None
+                ):
+                    errors.append(
+                        "scripts/world/simulation/WorldData.gd: accounting "
+                        f"compatibility property must route getter and setter "
+                        f"through the current state: {compatibility_name}"
+                    )
+
+            legacy_workspace_reference = f"WorldData.{compatibility_name}"
+            if legacy_workspace_reference in city_root_state_text:
+                errors.append(
+                    "scripts/city/simulation/CitySettlementSimulationState.gd: "
+                    "extracted resource accounting must not return to "
+                    f"capture/apply workspace copying: {legacy_workspace_reference}"
+                )
+
+        if (
+            "var resource_accounting_state: CityResourceAccountingState"
+            not in city_root_state_text
+        ):
+            errors.append(
+                "scripts/city/simulation/CitySettlementSimulationState.gd: "
+                "missing resource_accounting_state owner"
+            )
+        if re.search(
+            r"^var\s+resource_amounts\b",
+            city_root_state_text,
+            re.MULTILINE,
+        ):
+            errors.append(
+                "scripts/city/simulation/CitySettlementSimulationState.gd: "
+                "retired duplicate resource_amounts ledger must not return"
+            )
+        required_political_accounting_surfaces = (
+            "var _unbound_city_resource_accounting_state",
+            "func get_current_city_resource_accounting_state() -> "
+            "CityResourceAccountingState:",
+            "capital_state.resource_accounting_state =",
+            "city_state.resource_accounting_state =",
+        )
+        for required_surface in required_political_accounting_surfaces:
+            if required_surface not in political_state_text:
+                errors.append(
+                    "scripts/world/simulation/WorldPoliticalState.gd: missing "
+                    f"resource-accounting ownership surface: {required_surface}"
+                )
+        if "func get_city_resource_accounting_state():" not in settlement_context_text:
+            errors.append(
+                "scripts/world/simulation/SettlementSimulationContext.gd: missing "
+                "resource-accounting context accessor"
+            )
+
+        for retired_symbol in WORLD_DATA_RETIRED_RESOURCE_LEDGER_SYMBOLS:
+            declaration_patterns = (
+                rf"^\s*static\s+var\s+{re.escape(retired_symbol)}\b",
+                rf"^\s*(?:static\s+)?func\s+{re.escape(retired_symbol)}\s*\(",
+            )
+            if any(
+                re.search(pattern, world_data_text, re.MULTILINE)
+                for pattern in declaration_patterns
+            ):
+                errors.append(
+                    "scripts/world/simulation/WorldData.gd: retired duplicate "
+                    f"resource ledger must not return: {retired_symbol}"
+                )
+
+            for path in scripts:
+                text = path.read_text(encoding="utf-8")
+                relative = str(path.relative_to(ROOT))
+                direct_reference_pattern = (
+                    rf"\bWorldData\s*\.\s*{re.escape(retired_symbol)}\b"
+                )
+                dynamic_reference_pattern = (
+                    rf"\bWorldData\s*\.\s*(?:get|set|call|callv)\s*\(\s*"
+                    rf"[\"']{re.escape(retired_symbol)}[\"']"
+                )
+                callable_reference_pattern = (
+                    rf"\bCallable\s*\(\s*WorldData\s*,\s*"
+                    rf"[\"']{re.escape(retired_symbol)}[\"']\s*\)"
+                )
+                if re.search(direct_reference_pattern, text):
+                    errors.append(
+                        f"{relative}: retired WorldData resource-ledger reference "
+                        f"remains: WorldData.{retired_symbol}"
+                    )
+                if (
+                    re.search(dynamic_reference_pattern, text)
+                    or re.search(callable_reference_pattern, text)
+                ):
+                    errors.append(
+                        f"{relative}: dynamic retired WorldData resource-ledger "
+                        f"reference remains: {retired_symbol}"
+                    )
 
     report = {
         "script_count": len(scripts),

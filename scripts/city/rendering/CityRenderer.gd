@@ -184,6 +184,7 @@ var selected_city_construction_site_id: int:
 
 var observed_city_object_version: int = -1
 var observed_city_object_state: CityObjectState
+var observed_city_resource_accounting_state: CityResourceAccountingState
 var observed_city_container_version: int = -1
 var observed_city_public_storage_version: int = -1
 var observed_city_citizen_version: int = -1
@@ -592,18 +593,40 @@ func _collect_world_data_change_flags(
 		observed_city_object_version = current_object_state.object_version
 		change_flags["city_objects_changed"] = true
 
-	if observed_city_container_version != WorldData.city_container_version:
-		observed_city_container_version = WorldData.city_container_version
+	var current_resource_accounting_state := (
+		WorldPoliticalState.get_current_city_resource_accounting_state()
+	)
+	var resource_accounting_state_changed := (
+		observed_city_resource_accounting_state == null
+		or not is_same(
+			observed_city_resource_accounting_state,
+			current_resource_accounting_state
+		)
+	)
+
+	if (
+		resource_accounting_state_changed
+		or observed_city_container_version
+		!= current_resource_accounting_state.container_version
+	):
+		observed_city_container_version = (
+			current_resource_accounting_state.container_version
+		)
 		change_flags["city_containers_changed"] = true
 
 	if (
-		observed_city_public_storage_version
-		!= WorldData.city_public_storage_version
+		resource_accounting_state_changed
+		or observed_city_public_storage_version
+		!= current_resource_accounting_state.public_storage_version
 	):
 		observed_city_public_storage_version = (
-			WorldData.city_public_storage_version
+			current_resource_accounting_state.public_storage_version
 		)
 		change_flags["public_storage_changed"] = true
+
+	observed_city_resource_accounting_state = (
+		current_resource_accounting_state
+	)
 
 	if observed_city_citizen_version != WorldData.city_citizen_version:
 		observed_city_citizen_version = WorldData.city_citizen_version
