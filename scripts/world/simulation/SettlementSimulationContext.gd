@@ -107,3 +107,15 @@ func get_city_citizen_spatial_state():
 	if raw_citizen_spatial_state is CityCitizenSpatialState:
 		return raw_citizen_spatial_state
 	return null
+
+
+func get_city_citizen_movement_runtime_state():
+	if not has_instance_owned_city_state():
+		return null
+
+	var raw_movement_runtime_state = (
+		local_state.citizen_movement_runtime_state
+	)
+	if raw_movement_runtime_state is CityCitizenMovementRuntimeState:
+		return raw_movement_runtime_state
+	return null

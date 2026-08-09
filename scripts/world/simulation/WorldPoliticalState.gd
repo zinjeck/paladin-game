@@ -29,6 +29,9 @@ const CityCitizenRegistryStateScript = preload(
 const CityCitizenSpatialStateScript = preload(
 	"res://scripts/city/simulation/CityCitizenSpatialState.gd"
 )
+const CityCitizenMovementRuntimeStateScript = preload(
+	"res://scripts/city/simulation/CityCitizenMovementRuntimeState.gd"
+)
 const CityWorkStateScript = preload(
 	"res://scripts/city/simulation/CityWorkState.gd"
 )
@@ -60,6 +63,9 @@ var _unbound_city_citizen_registry_state = (
 var _unbound_city_citizen_spatial_state = (
 	CityCitizenSpatialStateScript.new()
 )
+var _unbound_city_citizen_movement_runtime_state = (
+	CityCitizenMovementRuntimeStateScript.new()
+)
 var _unbound_city_work_state = CityWorkStateScript.new()
 var _unbound_city_logistics_state = CityLogisticsStateScript.new()
 var _unbound_city_construction_state = CityConstructionStateScript.new()
@@ -84,6 +90,9 @@ func reset_state() -> void:
 	)
 	_unbound_city_citizen_spatial_state = (
 		CityCitizenSpatialStateScript.new()
+	)
+	_unbound_city_citizen_movement_runtime_state = (
+		CityCitizenMovementRuntimeStateScript.new()
 	)
 	_unbound_city_work_state = CityWorkStateScript.new()
 	_unbound_city_logistics_state = CityLogisticsStateScript.new()
@@ -114,6 +123,9 @@ func synchronize_foundation_with_world_data() -> bool:
 	)
 	var unbound_citizen_spatial_state_to_adopt = (
 		_unbound_city_citizen_spatial_state
+	)
+	var unbound_citizen_movement_runtime_state_to_adopt = (
+		_unbound_city_citizen_movement_runtime_state
 	)
 	var unbound_work_state_to_adopt = _unbound_city_work_state
 	var unbound_logistics_state_to_adopt = _unbound_city_logistics_state
@@ -179,6 +191,9 @@ func synchronize_foundation_with_world_data() -> bool:
 		)
 		capital_state.citizen_spatial_state = (
 			unbound_citizen_spatial_state_to_adopt
+		)
+		capital_state.citizen_movement_runtime_state = (
+			unbound_citizen_movement_runtime_state_to_adopt
 		)
 		capital_state.work_state = unbound_work_state_to_adopt
 		capital_state.logistics_state = unbound_logistics_state_to_adopt
@@ -407,6 +422,12 @@ func set_settlement_simulation_backend(
 			_unbound_city_citizen_spatial_state = (
 				CityCitizenSpatialStateScript.new()
 			)
+			city_state.citizen_movement_runtime_state = (
+				_unbound_city_citizen_movement_runtime_state
+			)
+			_unbound_city_citizen_movement_runtime_state = (
+				CityCitizenMovementRuntimeStateScript.new()
+			)
 			city_state.capture_from_world_data()
 
 		settlement_city_state_by_id[settlement_id] = city_state
@@ -491,6 +512,17 @@ func get_current_city_citizen_spatial_state() -> CityCitizenSpatialState:
 	):
 		return active_city_state.citizen_spatial_state
 	return _unbound_city_citizen_spatial_state
+
+
+func get_current_city_citizen_movement_runtime_state() -> CityCitizenMovementRuntimeState:
+	var active_city_state = get_active_city_simulation_state()
+	if (
+		active_city_state != null
+		and active_city_state.citizen_movement_runtime_state
+		is CityCitizenMovementRuntimeState
+	):
+		return active_city_state.citizen_movement_runtime_state
+	return _unbound_city_citizen_movement_runtime_state
 
 
 func get_current_city_work_state() -> CityWorkState:

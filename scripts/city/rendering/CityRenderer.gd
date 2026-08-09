@@ -191,6 +191,7 @@ var observed_city_citizen_registry_state: CityCitizenRegistryState
 var observed_city_citizen_version: int = -1
 var observed_city_citizen_spatial_state: CityCitizenSpatialState
 var observed_city_citizen_spatial_version: int = -1
+var observed_city_citizen_movement_runtime_state: CityCitizenMovementRuntimeState
 var observed_city_citizen_movement_version: int = -1
 var synchronized_city_citizen_movement_version: int = -1
 var observed_city_citizen_task_version: int = -1
@@ -682,14 +683,33 @@ func _collect_world_data_change_flags(
 		)
 		change_flags["city_citizen_spatial_changed"] = true
 
+	var current_citizen_movement_runtime_state := (
+		WorldPoliticalState
+		.get_current_city_citizen_movement_runtime_state()
+	)
+	var citizen_movement_runtime_state_changed := (
+		observed_city_citizen_movement_runtime_state == null
+		or not is_same(
+			observed_city_citizen_movement_runtime_state,
+			current_citizen_movement_runtime_state
+		)
+	)
+
 	if (
-		observed_city_citizen_movement_version
-		!= WorldData.city_citizen_movement_version
+		citizen_movement_runtime_state_changed
+		or observed_city_citizen_movement_version
+		!= current_citizen_movement_runtime_state.citizen_movement_version
 	):
+		observed_city_citizen_movement_runtime_state = (
+			current_citizen_movement_runtime_state
+		)
 		observed_city_citizen_movement_version = (
-			WorldData.city_citizen_movement_version
+			current_citizen_movement_runtime_state.citizen_movement_version
 		)
 		change_flags["city_citizen_movement_changed"] = true
+		change_flags["city_citizen_movement_runtime_changed"] = (
+			citizen_movement_runtime_state_changed
+		)
 
 	if (
 		observed_city_citizen_task_version
@@ -758,10 +778,18 @@ func _collect_world_data_change_flags(
 func _synchronize_city_citizen_movement(
 	change_flags: Dictionary
 ) -> void:
-	if bool(change_flags.get("city_citizen_registry_changed", false)):
+	if (
+		bool(change_flags.get("city_citizen_registry_changed", false))
+		or bool(
+			change_flags.get(
+				"city_citizen_movement_runtime_changed",
+				false
+			)
+		)
+	):
 		# Citizen IDs are settlement-local. Reinitialize cosmetic movement state
-		# before considering a new City's movement version so ID reuse cannot
-		# animate one settlement's citizen from another settlement's position.
+		# whenever registry or movement-runtime ownership changes so ID reuse and
+		# equal versions cannot animate from another owner's stale position.
 		city_citizen_movement_presentation.initialize()
 		synchronized_city_citizen_movement_version = (
 			observed_city_citizen_movement_version

@@ -156,15 +156,72 @@ static var city_citizen_ids_by_tile: Dictionary:
 
 # Physical ground-pile and haul-reservation ownership lives in
 # CityLogisticsState/CityLogisticsSystem for the active settlement. Citizen
-# movement and task runtime fields remain in the legacy workspace until their
-# separate extraction passes.
-static var city_active_mover_ids: Array[int] = []
-static var city_active_mover_id_lookup: Dictionary = {}
+# task runtime fields remain in the legacy workspace until their separate
+# extraction pass.
+#
+# Citizen movement-runtime ownership is settlement-local. These compatibility
+# properties preserve the historical behavior API while routing the active
+# mover registry and transient visual buffer to one
+# CityCitizenMovementRuntimeState.
+static var city_active_mover_ids: Array[int]:
+	get:
+		var state := (
+			WorldPoliticalState
+			.get_current_city_citizen_movement_runtime_state()
+		)
+		return state.active_mover_ids
+	set(value):
+		var state := (
+			WorldPoliticalState
+			.get_current_city_citizen_movement_runtime_state()
+		)
+		state.active_mover_ids = value
+
+static var city_active_mover_id_lookup: Dictionary:
+	get:
+		var state := (
+			WorldPoliticalState
+			.get_current_city_citizen_movement_runtime_state()
+		)
+		return state.active_mover_id_lookup
+	set(value):
+		var state := (
+			WorldPoliticalState
+			.get_current_city_citizen_movement_runtime_state()
+		)
+		state.active_mover_id_lookup = value
+
 # Transient, non-saved movement deltas consumed by the city presentation after
 # each simulation tick. This preserves exact traversed corners across batched
 # ticks and repaths without making cosmetic interpolation authoritative.
-static var city_citizen_movement_visual_events: Array = []
-static var city_citizen_movement_visual_tick_index: int = -1
+static var city_citizen_movement_visual_events: Array:
+	get:
+		var state := (
+			WorldPoliticalState
+			.get_current_city_citizen_movement_runtime_state()
+		)
+		return state.citizen_movement_visual_events
+	set(value):
+		var state := (
+			WorldPoliticalState
+			.get_current_city_citizen_movement_runtime_state()
+		)
+		state.citizen_movement_visual_events = value
+
+static var city_citizen_movement_visual_tick_index: int:
+	get:
+		var state := (
+			WorldPoliticalState
+			.get_current_city_citizen_movement_runtime_state()
+		)
+		return state.citizen_movement_visual_tick_index
+	set(value):
+		var state := (
+			WorldPoliticalState
+			.get_current_city_citizen_movement_runtime_state()
+		)
+		state.citizen_movement_visual_tick_index = value
+
 static var city_active_task_ids: Array[int] = []
 static var city_active_task_id_lookup: Dictionary = {}
 static var city_object_access_tile_cache: Dictionary = {}
@@ -180,7 +237,7 @@ static var next_city_citizen_id: int:
 		)
 		state.next_citizen_id = value
 
-# Related citizen/assignment versions still awaiting focused extraction.
+# Citizen task/assignment versions still awaiting focused extraction.
 #
 # These let observers refresh only the parts of the city that actually
 # changed instead of treating every mutation as a generic storage change.
@@ -206,7 +263,20 @@ static var city_citizen_spatial_version: int:
 			WorldPoliticalState.get_current_city_citizen_spatial_state()
 		)
 		state.citizen_spatial_version = value
-static var city_citizen_movement_version: int = 0
+static var city_citizen_movement_version: int:
+	get:
+		var state := (
+			WorldPoliticalState
+			.get_current_city_citizen_movement_runtime_state()
+		)
+		return state.citizen_movement_version
+	set(value):
+		var state := (
+			WorldPoliticalState
+			.get_current_city_citizen_movement_runtime_state()
+		)
+		state.citizen_movement_version = value
+
 static var city_citizen_task_version: int = 0
 static var city_assignment_version: int = 0
 static var city_workplace_version: int = 0
@@ -1672,30 +1742,66 @@ static func rebuild_city_citizen_index() -> void:
 
 static func _add_city_active_mover_id(
 	citizen_id: int
-) -> void:
+) -> bool:
 	if citizen_id <= 0:
-		return
+		return false
 
-	if city_active_mover_id_lookup.has(citizen_id):
-		return
+	var insertion_index := city_active_mover_ids.bsearch(citizen_id)
+	var array_has_id := (
+		insertion_index < city_active_mover_ids.size()
+		and city_active_mover_ids[insertion_index] == citizen_id
+	)
+	var lookup_is_valid := (
+		city_active_mover_id_lookup.has(citizen_id)
+		and bool(city_active_mover_id_lookup[citizen_id])
+	)
+	var array_has_duplicate := (
+		array_has_id
+		and insertion_index + 1 < city_active_mover_ids.size()
+		and city_active_mover_ids[insertion_index + 1] == citizen_id
+	)
+
+	if array_has_id and not array_has_duplicate:
+		if lookup_is_valid:
+			return false
+		city_active_mover_id_lookup[citizen_id] = true
+		return true
+
+	if not array_has_id:
+		city_active_mover_ids.insert(insertion_index, citizen_id)
+		city_active_mover_id_lookup[citizen_id] = true
+		return true
+
+	# Duplicate target IDs are corruption, not a healthy hot path. Repair every
+	# copy while preserving the exact owner collections.
+	while city_active_mover_ids.has(citizen_id):
+		city_active_mover_ids.erase(citizen_id)
 
 	city_active_mover_ids.insert(
 		city_active_mover_ids.bsearch(citizen_id),
 		citizen_id
 	)
 	city_active_mover_id_lookup[citizen_id] = true
+	return true
 
 
 static func _remove_city_active_mover_id(
 	citizen_id: int
-) -> void:
-	city_active_mover_id_lookup.erase(citizen_id)
-	city_active_mover_ids.erase(citizen_id)
+) -> bool:
+	var changed := city_active_mover_id_lookup.erase(citizen_id)
+
+	while city_active_mover_ids.has(citizen_id):
+		city_active_mover_ids.erase(citizen_id)
+		changed = true
+
+	return changed
 
 
-static func rebuild_city_active_mover_registry() -> void:
-	city_active_mover_ids.clear()
-	city_active_mover_id_lookup.clear()
+static func rebuild_city_active_mover_registry() -> bool:
+	var previous_active_ids := city_active_mover_ids.duplicate()
+	var previous_active_lookup := city_active_mover_id_lookup.duplicate()
+	var expected_active_ids: Array[int] = []
+	var expected_active_lookup: Dictionary = {}
 
 	for raw_citizen in city_citizens:
 		if not raw_citizen is Dictionary:
@@ -1717,7 +1823,26 @@ static func rebuild_city_active_mover_registry() -> void:
 		if citizen_id <= 0:
 			continue
 
-		_add_city_active_mover_id(citizen_id)
+		if expected_active_lookup.has(citizen_id):
+			continue
+
+		expected_active_ids.append(citizen_id)
+		expected_active_lookup[citizen_id] = true
+
+	expected_active_ids.sort()
+
+	var registry_changed := (
+		previous_active_ids != expected_active_ids
+		or previous_active_lookup != expected_active_lookup
+	)
+	city_active_mover_ids.clear()
+	city_active_mover_id_lookup.clear()
+	city_active_mover_ids.append_array(expected_active_ids)
+	city_active_mover_id_lookup.merge(expected_active_lookup)
+	if registry_changed:
+		_mark_city_citizen_movement_changed()
+
+	return registry_changed
 
 
 static func get_city_active_mover_ids_snapshot() -> Array[int]:
@@ -4627,8 +4752,7 @@ static func is_valid_city_citizen_movement_failure(
 
 static func ensure_city_citizen_movement_state() -> int:
 	if city_citizens.is_empty():
-		city_active_mover_ids.clear()
-		city_active_mover_id_lookup.clear()
+		rebuild_city_active_mover_registry()
 		return 0
 
 	var migrated_count := 0
@@ -4655,9 +4779,14 @@ static func ensure_city_citizen_movement_state() -> int:
 		city_citizens[citizen_index] = citizen
 		migrated_count += 1
 
+	var movement_version_before_rebuild := city_citizen_movement_version
 	rebuild_city_active_mover_registry()
 
-	if migrated_count > 0:
+	if (
+		migrated_count > 0
+		and city_citizen_movement_version
+		== movement_version_before_rebuild
+	):
 		_mark_city_citizen_movement_changed()
 
 	return migrated_count
@@ -5065,10 +5194,8 @@ static func commit_city_citizen_movement_tick(
 		)
 	)
 	var active_registry_changed := (
-		city_active_mover_ids != clean_next_active_ids
+		_replace_city_active_mover_registry(clean_next_active_ids)
 	)
-
-	_replace_city_active_mover_registry(clean_next_active_ids)
 
 	if (
 		not clean_updates.is_empty()
@@ -5477,13 +5604,23 @@ static func _apply_city_citizen_movement_updates(
 
 static func _replace_city_active_mover_registry(
 	clean_next_active_ids: Array[int]
-) -> void:
+) -> bool:
+	var expected_lookup: Dictionary = {}
+	for citizen_id in clean_next_active_ids:
+		expected_lookup[citizen_id] = true
+
+	var registry_changed := (
+		city_active_mover_ids != clean_next_active_ids
+		or city_active_mover_id_lookup != expected_lookup
+	)
 	city_active_mover_ids.clear()
 	city_active_mover_id_lookup.clear()
 
 	for citizen_id in clean_next_active_ids:
 		city_active_mover_ids.append(citizen_id)
 		city_active_mover_id_lookup[citizen_id] = true
+
+	return registry_changed
 
 
 static func _make_city_citizen_movement_visual_event(
