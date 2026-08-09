@@ -14,6 +14,7 @@ static var _cached_resource_accounting_state: CityResourceAccountingState
 static var _cached_citizen_registry_state: CityCitizenRegistryState
 static var _cached_citizen_spatial_state: CityCitizenSpatialState
 static var _cached_citizen_movement_runtime_state: CityCitizenMovementRuntimeState
+static var _cached_citizen_task_runtime_state: CityCitizenTaskRuntimeState
 
 
 #region Validation Entry Point and Cache
@@ -162,6 +163,11 @@ static func validate(
 			.get_current_city_citizen_movement_runtime_state()
 			.get_instance_id()
 		),
+		"citizen_task_runtime_state_instance_id": int(
+			WorldPoliticalState
+			.get_current_city_citizen_task_runtime_state()
+			.get_instance_id()
+		),
 		"citizen_version": WorldData.city_citizen_version,
 		"citizen_spatial_version": (
 			WorldData.city_citizen_spatial_version
@@ -197,6 +203,9 @@ static func validate(
 	_cached_citizen_movement_runtime_state = (
 		WorldPoliticalState
 		.get_current_city_citizen_movement_runtime_state()
+	)
+	_cached_citizen_task_runtime_state = (
+		WorldPoliticalState.get_current_city_citizen_task_runtime_state()
 	)
 
 	if report_problems:
@@ -298,6 +307,15 @@ static func _validation_cache_matches_current_state() -> bool:
 			_cached_citizen_movement_runtime_state,
 			WorldPoliticalState
 			.get_current_city_citizen_movement_runtime_state()
+		)
+	):
+		return false
+	if (
+		_cached_citizen_task_runtime_state == null
+		or not is_same(
+			_cached_citizen_task_runtime_state,
+			WorldPoliticalState
+			.get_current_city_citizen_task_runtime_state()
 		)
 	):
 		return false

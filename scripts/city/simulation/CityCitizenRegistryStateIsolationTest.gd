@@ -253,10 +253,15 @@ func _test_equal_version_city_isolation() -> void:
 			city_b_root.citizen_movement_runtime_state.active_mover_ids,
 			mover_ids_b
 		)
-		and is_same(city_a_root.active_task_ids, task_ids_a)
-		and is_same(city_b_root.active_task_ids, task_ids_b),
-		"Registry, spatial, and movement owners must be isolated while task "
-		+ "runtime remains a separate deferred root."
+		and is_same(
+			city_a_root.citizen_task_runtime_state.active_task_ids,
+			task_ids_a
+		)
+		and is_same(
+			city_b_root.citizen_task_runtime_state.active_task_ids,
+			task_ids_b
+		),
+		"Registry, spatial, movement, and task owners must remain isolated."
 	)
 
 

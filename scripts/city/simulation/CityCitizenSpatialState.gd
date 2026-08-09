@@ -5,9 +5,10 @@ class_name CityCitizenSpatialState
 #
 # Citizen records retain the authoritative city_tile_position. This owner holds
 # only the derived tile-to-citizen index and the version that invalidates its
-# observers. Movement runtime is isolated in
-# CityCitizenMovementRuntimeState. Pathfinding behavior, tasks, assignments,
-# and object access-tile caching remain outside this state.
+# observers. Movement runtime is isolated in CityCitizenMovementRuntimeState,
+# while task indexes are isolated in CityCitizenTaskRuntimeState. Pathfinding
+# behavior, assignments, and object access-tile caching remain outside this
+# state.
 #
 # WorldData retains the existing spatial behavior during this ownership-only
 # pass. Keep this class strictly data-only.

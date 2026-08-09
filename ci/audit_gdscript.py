@@ -332,11 +332,20 @@ WORLD_DATA_CITIZEN_MOVEMENT_RUNTIME_PROPERTIES = {
     "city_citizen_movement_version": ("int", "citizen_movement_version"),
 }
 
+CITIZEN_TASK_RUNTIME_STATE_FIELDS = {
+    "active_task_ids": ("Array\\[int\\]", "[]"),
+    "active_task_id_lookup": ("Dictionary", "{}"),
+    "citizen_task_version": ("int", "0"),
+}
+
+WORLD_DATA_CITIZEN_TASK_RUNTIME_PROPERTIES = {
+    "city_active_task_ids": ("Array\\[int\\]", "active_task_ids"),
+    "city_active_task_id_lookup": ("Dictionary", "active_task_id_lookup"),
+    "city_citizen_task_version": ("int", "citizen_task_version"),
+}
+
 DEFERRED_CITIZEN_ROOT_FIELDS = {
-    "active_task_ids": "city_active_task_ids",
-    "active_task_id_lookup": "city_active_task_id_lookup",
     "object_access_tile_cache": "city_object_access_tile_cache",
-    "citizen_task_version": "city_citizen_task_version",
     "assignment_version": "city_assignment_version",
     "workplace_version": "city_workplace_version",
 }
@@ -2212,6 +2221,318 @@ def main() -> int:
                     "scripts/city/simulation/CityStateValidator.gd: "
                     "validation cache must include citizen "
                     "movement-runtime identity"
+                )
+
+    citizen_task_runtime_state_path = (
+        ROOT / "scripts/city/simulation/CityCitizenTaskRuntimeState.gd"
+    )
+    citizen_task_runtime_required_paths = (
+        (citizen_task_runtime_state_path, "citizen task-runtime state owner"),
+        (city_root_state_path, "City settlement root state"),
+        (political_state_path, "settlement ownership registry"),
+        (settlement_context_path, "settlement simulation context"),
+        (world_data_path, "WorldData compatibility API"),
+    )
+    for required_path, owner_description in citizen_task_runtime_required_paths:
+        if not required_path.exists():
+            errors.append(
+                f"{required_path.relative_to(ROOT)}: missing {owner_description}"
+            )
+
+    if all(path.exists() for path, _ in citizen_task_runtime_required_paths):
+        task_runtime_state_text = citizen_task_runtime_state_path.read_text(
+            encoding="utf-8"
+        )
+        city_root_state_text = city_root_state_path.read_text(encoding="utf-8")
+        political_state_text = political_state_path.read_text(encoding="utf-8")
+        settlement_context_text = settlement_context_path.read_text(
+            encoding="utf-8"
+        )
+        world_data_text = world_data_path.read_text(encoding="utf-8")
+
+        if "extends RefCounted" not in task_runtime_state_text:
+            errors.append(
+                "scripts/city/simulation/CityCitizenTaskRuntimeState.gd: "
+                "must extend RefCounted"
+            )
+        if "class_name CityCitizenTaskRuntimeState" not in task_runtime_state_text:
+            errors.append(
+                "scripts/city/simulation/CityCitizenTaskRuntimeState.gd: "
+                "missing class_name"
+            )
+
+        declared_task_runtime_fields = set(
+            re.findall(
+                r"^(?:@[A-Za-z_][A-Za-z0-9_]*(?:\([^\n]*\))?\s+)*"
+                r"(?:static\s+)?var\s+([A-Za-z_][A-Za-z0-9_]*)\b",
+                task_runtime_state_text,
+                re.MULTILINE,
+            )
+        )
+        if declared_task_runtime_fields != set(CITIZEN_TASK_RUNTIME_STATE_FIELDS):
+            errors.append(
+                "scripts/city/simulation/CityCitizenTaskRuntimeState.gd: "
+                "must own exactly active_task_ids, active_task_id_lookup, and "
+                "citizen_task_version"
+            )
+        if re.search(
+            r"^(?:@[A-Za-z_][A-Za-z0-9_]*(?:\([^\n]*\))?\s+)*"
+            r"(?:static\s+)?func\s+[A-Za-z_][A-Za-z0-9_]*\s*\(",
+            task_runtime_state_text,
+            re.MULTILINE,
+        ):
+            errors.append(
+                "scripts/city/simulation/CityCitizenTaskRuntimeState.gd: "
+                "must remain data-only during the ownership pass"
+            )
+
+        for state_name, (state_type, default_value) in (
+            CITIZEN_TASK_RUNTIME_STATE_FIELDS.items()
+        ):
+            declaration_pattern = (
+                rf"^var\s+{re.escape(state_name)}:\s*{state_type}\s*=\s*"
+                rf"{re.escape(default_value)}\s*$"
+            )
+            if not re.search(
+                declaration_pattern,
+                task_runtime_state_text,
+                re.MULTILINE,
+            ):
+                errors.append(
+                    "scripts/city/simulation/CityCitizenTaskRuntimeState.gd: "
+                    f"missing typed default for {state_name}"
+                )
+
+            for path in scripts:
+                if path == citizen_task_runtime_state_path:
+                    continue
+                text = path.read_text(encoding="utf-8")
+                if re.search(
+                    rf"^(?:@[A-Za-z_][A-Za-z0-9_]*(?:\([^\n]*\))?\s+)*"
+                    rf"(?:static\s+)?var\s+{re.escape(state_name)}\b",
+                    text,
+                    re.MULTILINE,
+                ):
+                    errors.append(
+                        f"{path.relative_to(ROOT)}: duplicate top-level citizen "
+                        f"task-runtime storage must not return: {state_name}"
+                    )
+
+        for compatibility_name in WORLD_DATA_CITIZEN_TASK_RUNTIME_PROPERTIES:
+            for path in scripts:
+                if path == world_data_path:
+                    continue
+                text = path.read_text(encoding="utf-8")
+                if re.search(
+                    rf"^(?:@[A-Za-z_][A-Za-z0-9_]*(?:\([^\n]*\))?\s+)*"
+                    rf"(?:static\s+)?var\s+{re.escape(compatibility_name)}\b",
+                    text,
+                    re.MULTILINE,
+                ):
+                    errors.append(
+                        f"{path.relative_to(ROOT)}: duplicate WorldData citizen "
+                        "task-runtime storage must not return: "
+                        f"{compatibility_name}"
+                    )
+
+        if (
+            "var citizen_task_runtime_state: CityCitizenTaskRuntimeState"
+            not in city_root_state_text
+        ):
+            errors.append(
+                "scripts/city/simulation/CitySettlementSimulationState.gd: "
+                "missing citizen_task_runtime_state owner"
+            )
+
+        for world_data_symbol in WORLD_DATA_CITIZEN_TASK_RUNTIME_PROPERTIES:
+            if f"WorldData.{world_data_symbol}" in city_root_state_text:
+                errors.append(
+                    "scripts/city/simulation/CitySettlementSimulationState.gd: "
+                    "extracted citizen task runtime must not be captured/applied "
+                    f"through WorldData.{world_data_symbol}"
+                )
+
+            dynamic_root_reference = re.search(
+                rf"\bWorldData\s*\.\s*(?:get|set|call|callv)\s*\(\s*"
+                rf"[\"']{re.escape(world_data_symbol)}[\"']",
+                city_root_state_text,
+            )
+            callable_root_reference = re.search(
+                rf"\bCallable\s*\(\s*WorldData\s*,\s*"
+                rf"[\"']{re.escape(world_data_symbol)}[\"']\s*\)",
+                city_root_state_text,
+            )
+            if dynamic_root_reference or callable_root_reference:
+                errors.append(
+                    "scripts/city/simulation/CitySettlementSimulationState.gd: "
+                    "dynamic citizen task-runtime workspace copying is forbidden: "
+                    f"{world_data_symbol}"
+                )
+
+        required_political_task_runtime_surfaces = (
+            (
+                "state preload",
+                r"^const\s+CityCitizenTaskRuntimeStateScript\s*=\s*preload\(",
+            ),
+            (
+                "unbound owner",
+                r"^var\s+_unbound_city_citizen_task_runtime_state\b",
+            ),
+            (
+                "typed current-state resolver",
+                r"^func\s+get_current_city_citizen_task_runtime_state\s*"
+                r"\(\s*\)\s*->\s*CityCitizenTaskRuntimeState\s*:",
+            ),
+            (
+                "founding adoption",
+                r"^\s*capital_state\.citizen_task_runtime_state\s*=",
+            ),
+            (
+                "legacy adoption",
+                r"^\s*city_state\.citizen_task_runtime_state\s*=",
+            ),
+        )
+        for surface_description, required_pattern in (
+            required_political_task_runtime_surfaces
+        ):
+            if not re.search(
+                required_pattern,
+                political_state_text,
+                re.MULTILINE,
+            ):
+                errors.append(
+                    "scripts/world/simulation/WorldPoliticalState.gd: missing "
+                    "citizen task-runtime ownership surface: "
+                    f"{surface_description}"
+                )
+        if political_state_text.count("CityCitizenTaskRuntimeStateScript.new()") < 3:
+            errors.append(
+                "scripts/world/simulation/WorldPoliticalState.gd: citizen "
+                "task-runtime fallback must be created initially, on reset, and "
+                "after legacy adoption"
+            )
+        if not re.search(
+            r"^func\s+get_city_citizen_task_runtime_state\s*\(\s*\)\s*:",
+            settlement_context_text,
+            re.MULTILINE,
+        ):
+            errors.append(
+                "scripts/world/simulation/SettlementSimulationContext.gd: "
+                "missing citizen task-runtime context accessor"
+            )
+
+        for property_name, (property_type, state_field) in (
+            WORLD_DATA_CITIZEN_TASK_RUNTIME_PROPERTIES.items()
+        ):
+            declaration_matches = re.findall(
+                rf"^static\s+var\s+{re.escape(property_name)}\b",
+                world_data_text,
+                re.MULTILINE,
+            )
+            property_match = re.search(
+                rf"^static\s+var\s+{re.escape(property_name)}:\s*"
+                rf"{property_type}:\s*\n"
+                rf"(?P<body>.*?)"
+                rf"(?=^static\s+var\s+|^const\s+|^#region\b|\Z)",
+                world_data_text,
+                re.MULTILINE | re.DOTALL,
+            )
+            if len(declaration_matches) != 1 or property_match is None:
+                errors.append(
+                    "scripts/world/simulation/WorldData.gd: citizen "
+                    "task-runtime compatibility property must be accessor-only: "
+                    f"{property_name}"
+                )
+                continue
+
+            property_body = property_match.group("body")
+            resolver_matches = re.findall(
+                r"WorldPoliticalState\s*\.\s*"
+                r"get_current_city_citizen_task_runtime_state\s*\(\s*\)",
+                property_body,
+            )
+            if (
+                len(resolver_matches) != 2
+                or not re.search(
+                    rf"return\s+state\s*\.\s*{re.escape(state_field)}\b",
+                    property_body,
+                )
+                or not re.search(
+                    rf"state\s*\.\s*{re.escape(state_field)}\s*=\s*value\b",
+                    property_body,
+                )
+            ):
+                errors.append(
+                    "scripts/world/simulation/WorldData.gd: citizen task-runtime "
+                    "property must route getter/setter through one owner: "
+                    f"{property_name}"
+                )
+
+        renderer_path = ROOT / "scripts/city/rendering/CityRenderer.gd"
+        validator_path = ROOT / "scripts/city/simulation/CityStateValidator.gd"
+        if renderer_path.exists():
+            renderer_text = renderer_path.read_text(encoding="utf-8")
+            renderer_identity_comparison = re.search(
+                r"var\s+citizen_task_runtime_state_changed\s*:=\s*\(.*?"
+                r"not\s+is_same\s*\(\s*"
+                r"observed_city_citizen_task_runtime_state\s*,\s*"
+                r"current_citizen_task_runtime_state\s*\).*?\)",
+                renderer_text,
+                re.DOTALL,
+            )
+            renderer_identity_invalidation = re.search(
+                r"if\s*\(\s*citizen_task_runtime_state_changed\s*"
+                r"or\s*observed_city_citizen_task_version\s*!=\s*"
+                r"current_citizen_task_runtime_state\s*\.\s*"
+                r"citizen_task_version\s*\)\s*:.*?"
+                r"change_flags\s*\[\s*"
+                r"[\"']city_citizen_task_runtime_changed[\"']\s*\]",
+                renderer_text,
+                re.DOTALL,
+            )
+            if (
+                "var observed_city_citizen_task_runtime_state: "
+                "CityCitizenTaskRuntimeState" not in renderer_text
+                or "get_current_city_citizen_task_runtime_state()"
+                not in renderer_text
+                or renderer_identity_comparison is None
+                or renderer_identity_invalidation is None
+            ):
+                errors.append(
+                    "scripts/city/rendering/CityRenderer.gd: citizen task "
+                    "refresh must include runtime-owner identity"
+                )
+        if validator_path.exists():
+            validator_text = validator_path.read_text(encoding="utf-8")
+            validator_identity_comparison = re.search(
+                r"if\s*\(\s*_cached_citizen_task_runtime_state\s*"
+                r"==\s*null\s*or\s*not\s+is_same\s*\(\s*"
+                r"_cached_citizen_task_runtime_state\s*,\s*"
+                r"WorldPoliticalState\s*\.\s*"
+                r"get_current_city_citizen_task_runtime_state\s*\(\s*\)"
+                r"\s*\)\s*\)\s*:\s*return\s+false",
+                validator_text,
+                re.DOTALL,
+            )
+            validator_cache_assignment = re.search(
+                r"_cached_citizen_task_runtime_state\s*=\s*\(\s*"
+                r"WorldPoliticalState\s*\.\s*"
+                r"get_current_city_citizen_task_runtime_state\s*\(\s*\)"
+                r"\s*\)",
+                validator_text,
+                re.DOTALL,
+            )
+            if (
+                "static var _cached_citizen_task_runtime_state: "
+                "CityCitizenTaskRuntimeState" not in validator_text
+                or '"citizen_task_runtime_state_instance_id"'
+                not in validator_text
+                or validator_identity_comparison is None
+                or validator_cache_assignment is None
+            ):
+                errors.append(
+                    "scripts/city/simulation/CityStateValidator.gd: validation "
+                    "cache must include citizen task-runtime identity"
                 )
 
     report = {
