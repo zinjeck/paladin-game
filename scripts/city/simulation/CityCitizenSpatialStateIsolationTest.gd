@@ -201,13 +201,24 @@ func _test_equal_version_city_isolation() -> void:
 		and city_b_root is CitySettlementSimulationState
 		and is_same(city_a_root.citizen_spatial_state, spatial_state_a)
 		and is_same(city_b_root.citizen_spatial_state, spatial_state_b)
-		and is_same(city_a_root.active_mover_ids, mover_ids_a)
-		and is_same(city_b_root.active_mover_ids, mover_ids_b)
+		and not is_same(
+			city_a_root.citizen_movement_runtime_state,
+			city_b_root.citizen_movement_runtime_state
+		)
+		and is_same(
+			city_a_root.citizen_movement_runtime_state.active_mover_ids,
+			mover_ids_a
+		)
+		and is_same(
+			city_b_root.citizen_movement_runtime_state.active_mover_ids,
+			mover_ids_b
+		)
 		and is_same(city_a_root.active_task_ids, task_ids_a)
 		and is_same(city_b_root.active_task_ids, task_ids_b)
 		and is_same(city_a_root.object_access_tile_cache, access_cache_a)
 		and is_same(city_b_root.object_access_tile_cache, access_cache_b),
-		"Spatial ownership must not absorb movement, tasks, or access caching."
+		"Spatial and movement ownership must remain separate from task and "
+		+ "access-cache roots."
 	)
 
 
@@ -225,6 +236,10 @@ func _test_renderer_identity_invalidation(
 	)
 	renderer.observed_city_citizen_movement_version = (
 		WorldData.city_citizen_movement_version
+	)
+	renderer.observed_city_citizen_movement_runtime_state = (
+		WorldPoliticalState
+		.get_current_city_citizen_movement_runtime_state()
 	)
 	var replacement_state := _clone_spatial_state(original_spatial_state)
 	var city_root = WorldPoliticalState.get_city_simulation_state(city_id)

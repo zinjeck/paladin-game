@@ -241,12 +241,22 @@ func _test_equal_version_city_isolation() -> void:
 			city_b_root.citizen_spatial_state.citizen_ids_by_tile,
 			spatial_b
 		)
-		and is_same(city_a_root.active_mover_ids, mover_ids_a)
-		and is_same(city_b_root.active_mover_ids, mover_ids_b)
+		and not is_same(
+			city_a_root.citizen_movement_runtime_state,
+			city_b_root.citizen_movement_runtime_state
+		)
+		and is_same(
+			city_a_root.citizen_movement_runtime_state.active_mover_ids,
+			mover_ids_a
+		)
+		and is_same(
+			city_b_root.citizen_movement_runtime_state.active_mover_ids,
+			mover_ids_b
+		)
 		and is_same(city_a_root.active_task_ids, task_ids_a)
 		and is_same(city_b_root.active_task_ids, task_ids_b),
-		"Registry and spatial owners must be isolated while movement and task "
-		+ "runtime remain separate deferred roots."
+		"Registry, spatial, and movement owners must be isolated while task "
+		+ "runtime remains a separate deferred root."
 	)
 
 
@@ -259,6 +269,10 @@ func _test_renderer_identity_invalidation(
 	renderer.observed_city_citizen_version = original_state.citizen_version
 	renderer.observed_city_citizen_movement_version = (
 		WorldData.city_citizen_movement_version - 1
+	)
+	renderer.observed_city_citizen_movement_runtime_state = (
+		WorldPoliticalState
+		.get_current_city_citizen_movement_runtime_state()
 	)
 	renderer.city_citizen_movement_presentation.movement_snapshot_by_citizen_id = {
 		1: {"marker": "old-city"},
