@@ -65,3 +65,13 @@ func get_city_work_state():
 	if raw_work_state is CityWorkState:
 		return raw_work_state
 	return null
+
+
+func get_city_object_state():
+	if not has_instance_owned_city_state():
+		return null
+
+	var raw_object_state = local_state.object_state
+	if raw_object_state is CityObjectState:
+		return raw_object_state
+	return null

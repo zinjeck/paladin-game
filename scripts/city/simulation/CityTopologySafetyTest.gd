@@ -146,6 +146,10 @@ func _test_construction_waits_for_footprint_clearance() -> void:
 		),
 		"The fixture must start an unrelated mover."
 	)
+	var object_state := WorldPoliticalState.get_current_city_object_state()
+	var object_count_before := object_state.objects.size()
+	var next_object_id_before := object_state.next_object_id
+	var object_version_before := object_state.object_version
 
 	var immediate_completion := (
 		CityConstructionSystemScript.complete_city_construction_site(site_id)
@@ -198,12 +202,46 @@ func _test_construction_waits_for_footprint_clearance() -> void:
 		top_left,
 		fishery_size
 	)
+	var completed_object_id := int(completed_fishery.get("id", -1))
 
 	_expect(
 		CityConstructionSystem.get_city_construction_site_by_id(site_id).is_empty()
 		and str(completed_fishery.get("type", ""))
 		== WorldData.CITY_OBJECT_FISHING_GROUNDS,
 		"The Fishing Grounds must finalize once its footprint is physically clear."
+	)
+	_expect(
+		is_same(WorldData.city_objects, object_state.objects)
+		and is_same(
+			WorldData.city_object_index_by_id,
+			object_state.object_index_by_id
+		)
+		and is_same(
+			WorldData.city_occupied_tiles,
+			object_state.occupied_tiles
+		),
+		"Construction finalization must mutate the selected object state by identity."
+	)
+	_expect(
+		object_state.objects.size() == object_count_before + 1
+		and completed_object_id == next_object_id_before
+		and int(
+			object_state.object_index_by_id.get(completed_object_id, -1)
+		) == object_count_before
+		and object_state.next_object_id == next_object_id_before + 1
+		and object_state.object_version == object_version_before + 1,
+		"Construction finalization must register exactly one indexed object and advance its state once."
+	)
+	var footprint_is_registered := true
+	for tile_position in footprint_tiles:
+		if int(
+			object_state.occupied_tiles.get(tile_position, -1)
+		) != completed_object_id:
+			footprint_is_registered = false
+			break
+	_expect(
+		footprint_is_registered,
+		"Construction finalization must register every footprint tile in object occupancy."
 	)
 	_expect(
 		not footprint_tiles.has(

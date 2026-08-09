@@ -114,10 +114,32 @@ static var city_resource_amounts: Dictionary = {}
 static var city_owned_resource_amount_cache: Dictionary = {}
 static var city_owned_resource_amount_cache_container_version: int = -1
 
-static var city_objects: Array = []
-static var city_object_index_by_id: Dictionary = {}
-static var city_occupied_tiles: Dictionary = {}
-static var next_city_object_id: int = 1
+# Completed-object ownership is settlement-local. These accessor-only
+# compatibility properties preserve the historical WorldData surface while
+# routing every read and mutation to the currently selected CityObjectState.
+static var city_objects: Array:
+	get:
+		return WorldPoliticalState.get_current_city_object_state().objects
+	set(value):
+		WorldPoliticalState.get_current_city_object_state().objects = value
+
+static var city_object_index_by_id: Dictionary:
+	get:
+		return WorldPoliticalState.get_current_city_object_state().object_index_by_id
+	set(value):
+		WorldPoliticalState.get_current_city_object_state().object_index_by_id = value
+
+static var city_occupied_tiles: Dictionary:
+	get:
+		return WorldPoliticalState.get_current_city_object_state().occupied_tiles
+	set(value):
+		WorldPoliticalState.get_current_city_object_state().occupied_tiles = value
+
+static var next_city_object_id: int:
+	get:
+		return WorldPoliticalState.get_current_city_object_state().next_object_id
+	set(value):
+		WorldPoliticalState.get_current_city_object_state().next_object_id = value
 
 # Construction registry ownership is settlement-local. These compatibility
 # properties preserve the historical WorldData API during the ownership-only
@@ -143,7 +165,11 @@ static var next_city_citizen_id: int = 1
 #
 # These let observers refresh only the parts of the city that actually
 # changed instead of treating every mutation as a generic storage change.
-static var city_object_version: int = 0
+static var city_object_version: int:
+	get:
+		return WorldPoliticalState.get_current_city_object_state().object_version
+	set(value):
+		WorldPoliticalState.get_current_city_object_state().object_version = value
 static var city_container_version: int = 0
 static var city_public_storage_version: int = 0
 static var city_citizen_version: int = 0
@@ -8913,6 +8939,11 @@ static func reset_runtime_session_state(clear_debug: bool = false) -> void:
 
 	if clear_debug:
 		debug_mode_enabled = false
+
+	# This entry point starts a wholly new runtime session. Clear compatibility
+	# state first while the current settlement still resolves, then discard every
+	# active and inactive settlement-owned state together.
+	WorldPoliticalState.reset_state()
 
 static func reset_world_session_state() -> void:
 	save_locked = false

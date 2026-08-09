@@ -583,6 +583,111 @@ def main() -> int:
                 "scripts/city/simulation/systems/CityConstructionSystem.gd: missing typed construction-state accessor"
             )
 
+    object_state_path = ROOT / "scripts/city/simulation/CityObjectState.gd"
+    political_state_path = ROOT / "scripts/world/simulation/WorldPoliticalState.gd"
+    if not object_state_path.exists():
+        errors.append(
+            "scripts/city/simulation/CityObjectState.gd: missing completed-object "
+            "state owner"
+        )
+    if (
+        world_data_path.exists()
+        and object_state_path.exists()
+        and city_root_state_path.exists()
+        and political_state_path.exists()
+    ):
+        world_data_text = world_data_path.read_text(encoding="utf-8")
+        object_state_text = object_state_path.read_text(encoding="utf-8")
+        city_root_state_text = city_root_state_path.read_text(encoding="utf-8")
+        political_state_text = political_state_path.read_text(encoding="utf-8")
+        object_state_fields = {
+            "objects": "Array",
+            "object_index_by_id": "Dictionary",
+            "occupied_tiles": "Dictionary",
+            "next_object_id": "int",
+            "object_version": "int",
+        }
+        declared_object_state_fields = set(
+            re.findall(r"^var\s+([A-Za-z_][A-Za-z0-9_]*)\b", object_state_text, re.MULTILINE)
+        )
+        if declared_object_state_fields != set(object_state_fields):
+            errors.append(
+                "scripts/city/simulation/CityObjectState.gd: must own exactly "
+                "objects, object_index_by_id, occupied_tiles, next_object_id, "
+                "and object_version"
+            )
+
+        for state_name, state_type in object_state_fields.items():
+            declaration_pattern = (
+                rf"^var\s+{re.escape(state_name)}:\s*{state_type}\s*="
+            )
+            if not re.search(declaration_pattern, object_state_text, re.MULTILINE):
+                errors.append(
+                    "scripts/city/simulation/CityObjectState.gd: missing typed "
+                    f"object-state field {state_name}"
+                )
+            if re.search(
+                rf"^var\s+{re.escape(state_name)}\b",
+                city_root_state_text,
+                re.MULTILINE,
+            ):
+                errors.append(
+                    "scripts/city/simulation/CitySettlementSimulationState.gd: "
+                    f"object storage {state_name} must live in CityObjectState"
+                )
+
+        if "var object_state: CityObjectState" not in city_root_state_text:
+            errors.append(
+                "scripts/city/simulation/CitySettlementSimulationState.gd: "
+                "missing object_state owner"
+            )
+
+        compatibility_fields = {
+            "city_objects": "Array",
+            "city_object_index_by_id": "Dictionary",
+            "city_occupied_tiles": "Dictionary",
+            "next_city_object_id": "int",
+            "city_object_version": "int",
+        }
+        for field_name, field_type in compatibility_fields.items():
+            if f"WorldData.{field_name}" in city_root_state_text:
+                errors.append(
+                    "scripts/city/simulation/CitySettlementSimulationState.gd: "
+                    f"extracted object state must not be workspace-copied through {field_name}"
+                )
+            accessor_pattern = (
+                rf"^static\s+var\s+{re.escape(field_name)}:\s*"
+                rf"{field_type}\s*:\s*$"
+            )
+            if not re.search(accessor_pattern, world_data_text, re.MULTILINE):
+                errors.append(
+                    "scripts/world/simulation/WorldData.gd: missing accessor-only "
+                    f"compatibility property {field_name}"
+                )
+            if re.search(
+                rf"^static\s+var\s+{re.escape(field_name)}\b[^\n]*=",
+                world_data_text,
+                re.MULTILINE,
+            ):
+                errors.append(
+                    "scripts/world/simulation/WorldData.gd: completed-object "
+                    f"ownership must not return to initialized field {field_name}"
+                )
+
+        if "var _unbound_city_object_state" not in political_state_text:
+            errors.append(
+                "scripts/world/simulation/WorldPoliticalState.gd: missing "
+                "pre-context CityObjectState owner"
+            )
+        if (
+            "func get_current_city_object_state() -> CityObjectState:"
+            not in political_state_text
+        ):
+            errors.append(
+                "scripts/world/simulation/WorldPoliticalState.gd: missing typed "
+                "current CityObjectState resolver"
+            )
+
     report = {
         "script_count": len(scripts),
         "total_script_lines": total_lines,

@@ -3,6 +3,9 @@ extends Node
 const PLAYER_CITY_NAME := "Asterfall"
 const PLAYER_CULTURE_NAME := "Valen"
 const CPU_CULTURE_NAME := "Maren"
+const CityStateValidatorScript = preload(
+	"res://scripts/city/simulation/CityStateValidator.gd"
+)
 
 var failure_count: int = 0
 
@@ -68,6 +71,10 @@ func _run_state_isolation_test() -> void:
 		"Every city state must own a dedicated work-state subsystem."
 	)
 	_expect(
+		player_state.object_state is CityObjectState,
+		"Every city state must own a dedicated object-state subsystem."
+	)
+	_expect(
 		player_state.logistics_state is CityLogisticsState,
 		"Every city state must own a dedicated logistics-state subsystem."
 	)
@@ -80,11 +87,32 @@ func _run_state_isolation_test() -> void:
 	WorldData.city_resource_amounts = {
 		WorldData.RESOURCE_FISH: 7,
 	}
-	WorldData.city_objects = [
-		{"test_owner": "player"},
-	]
-	WorldData.next_city_object_id = 17
-	WorldData.city_object_version = 4
+	var shared_object_tile := Vector2i(2, 2)
+	WorldData.next_city_object_id = 16
+	WorldData.city_object_version = 3
+	var player_road := WorldData.add_city_road_object(
+		[shared_object_tile],
+		"player",
+		player_city_world
+	)
+	_expect(
+		int(player_road.get("id", -1)) == 16
+		and WorldData.next_city_object_id == 17
+		and WorldData.city_object_version == 4,
+		"Player object mutation must route through the compatibility API."
+	)
+	var player_objects: Array = player_state.object_state.objects
+	var player_object_index: Dictionary = (
+		player_state.object_state.object_index_by_id
+	)
+	var player_occupancy: Dictionary = player_state.object_state.occupied_tiles
+	var player_validation := CityStateValidatorScript.validate(true, false)
+	_expect(
+		bool(player_validation.get("valid", false))
+		and int(player_validation.get("checked_objects", 0)) == 1
+		and int(player_validation.get("checked_occupied_tiles", 0)) == 1,
+		"The player City's routed object registry must pass full validation."
+	)
 	WorldData.city_assignment_version = 9
 	CityWorkSystem.get_current_work_state().player_commands = [
 		{"id": 41, "test_owner": "player"},
@@ -170,6 +198,23 @@ func _run_state_isolation_test() -> void:
 		"Two cities must never share the same local state object."
 	)
 	_expect(
+		cpu_state.object_state is CityObjectState
+		and not is_same(cpu_state.object_state, player_state.object_state)
+		and not is_same(
+			cpu_state.object_state.objects,
+			player_state.object_state.objects
+		)
+		and not is_same(
+			cpu_state.object_state.object_index_by_id,
+			player_state.object_state.object_index_by_id
+		)
+		and not is_same(
+			cpu_state.object_state.occupied_tiles,
+			player_state.object_state.occupied_tiles
+		),
+		"Two cities must never share object-state collections."
+	)
+	_expect(
 		cpu_state.work_state is CityWorkState
 		and cpu_state.work_state != player_state.work_state,
 		"Two cities must never share the same work-state object."
@@ -199,6 +244,18 @@ func _run_state_isolation_test() -> void:
 		and WorldData.city_object_version == 0
 		and WorldData.city_assignment_version == 0,
 		"A fresh city must begin with independent counters and change versions."
+	)
+	_expect(
+		is_same(WorldData.city_objects, cpu_state.object_state.objects)
+		and is_same(
+			WorldData.city_object_index_by_id,
+			cpu_state.object_state.object_index_by_id
+		)
+		and is_same(
+			WorldData.city_occupied_tiles,
+			cpu_state.object_state.occupied_tiles
+		),
+		"WorldData must expose the active CPU City's exact object collections."
 	)
 	_expect(
 		CityWorkSystem.get_current_work_state().player_commands.is_empty()
@@ -232,11 +289,45 @@ func _run_state_isolation_test() -> void:
 	WorldData.city_resource_amounts = {
 		WorldData.RESOURCE_FISH: 31,
 	}
-	WorldData.city_objects = [
-		{"test_owner": "cpu"},
-	]
-	WorldData.next_city_object_id = 55
-	WorldData.city_object_version = 12
+	WorldData.next_city_object_id = 54
+	WorldData.city_object_version = 11
+	var cpu_road := WorldData.add_city_road_object(
+		[shared_object_tile],
+		"cpu",
+		cpu_city_world
+	)
+	_expect(
+		int(cpu_road.get("id", -1)) == 54
+		and WorldData.next_city_object_id == 55
+		and WorldData.city_object_version == 12,
+		"CPU object mutation must route through the compatibility API."
+	)
+	var cpu_objects: Array = cpu_state.object_state.objects
+	var cpu_object_index: Dictionary = cpu_state.object_state.object_index_by_id
+	var cpu_occupancy: Dictionary = cpu_state.object_state.occupied_tiles
+	var cpu_validation := CityStateValidatorScript.validate(true, false)
+	_expect(
+		bool(cpu_validation.get("valid", false))
+		and int(cpu_validation.get("checked_objects", 0)) == 1
+		and int(cpu_validation.get("checked_occupied_tiles", 0)) == 1,
+		"The CPU City's routed object registry must pass full validation."
+	)
+	_expect(
+		player_state.object_state.objects.size() == 1
+		and int(player_state.object_state.objects[0].get("id", -1)) == 16
+		and int(
+			player_state.object_state.object_index_by_id.get(16, -1)
+		) == 0
+		and int(
+			player_state.object_state.occupied_tiles.get(
+				shared_object_tile,
+				-1
+			)
+		) == 16
+		and player_state.object_state.next_object_id == 17
+		and player_state.object_state.object_version == 4,
+		"Mutating the CPU City must not alter the inactive player object state."
+	)
 	WorldData.city_assignment_version = 21
 	CityWorkSystem.get_current_work_state().player_commands = [
 		{"id": 11, "test_owner": "cpu"},
@@ -276,8 +367,16 @@ func _run_state_isolation_test() -> void:
 	)
 	_expect(
 		int(WorldData.city_resource_amounts.get(WorldData.RESOURCE_FISH, 0)) == 7
-		and str(WorldData.city_objects[0].get("test_owner", "")) == "player",
+		and int(WorldData.city_objects[0].get("id", -1)) == 16
+		and int(WorldData.city_object_index_by_id.get(16, -1)) == 0
+		and int(WorldData.city_occupied_tiles.get(shared_object_tile, -1)) == 16,
 		"Returning to the player city must restore its resources and objects."
+	)
+	_expect(
+		is_same(WorldData.city_objects, player_objects)
+		and is_same(WorldData.city_object_index_by_id, player_object_index)
+		and is_same(WorldData.city_occupied_tiles, player_occupancy),
+		"Returning to the player City must restore exact collection identity."
 	)
 	_expect(
 		WorldData.next_city_object_id == 17
@@ -315,8 +414,16 @@ func _run_state_isolation_test() -> void:
 	)
 	_expect(
 		int(WorldData.city_resource_amounts.get(WorldData.RESOURCE_FISH, 0)) == 31
-		and str(WorldData.city_objects[0].get("test_owner", "")) == "cpu",
+		and int(WorldData.city_objects[0].get("id", -1)) == 54
+		and int(WorldData.city_object_index_by_id.get(54, -1)) == 0
+		and int(WorldData.city_occupied_tiles.get(shared_object_tile, -1)) == 54,
 		"Reactivating the CPU city must restore its own resources and objects."
+	)
+	_expect(
+		is_same(WorldData.city_objects, cpu_objects)
+		and is_same(WorldData.city_object_index_by_id, cpu_object_index)
+		and is_same(WorldData.city_occupied_tiles, cpu_occupancy),
+		"Reactivating the CPU City must restore exact collection identity."
 	)
 	_expect(
 		WorldData.next_city_object_id == 55
