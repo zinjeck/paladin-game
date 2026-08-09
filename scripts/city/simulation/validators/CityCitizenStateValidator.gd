@@ -2101,6 +2101,14 @@ static func _validate_city_active_task_registry(
 					+ str(active_task_id)
 					+ "."
 			)
+		elif not bool(
+			WorldData.city_active_task_id_lookup[active_task_id]
+		):
+			errors.append(
+				"Active task lookup is false for citizen ID "
+					+ str(active_task_id)
+					+ "."
+			)
 
 	for raw_lookup_id in WorldData.city_active_task_id_lookup.keys():
 		if typeof(raw_lookup_id) != TYPE_INT:

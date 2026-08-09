@@ -119,3 +119,15 @@ func get_city_citizen_movement_runtime_state():
 	if raw_movement_runtime_state is CityCitizenMovementRuntimeState:
 		return raw_movement_runtime_state
 	return null
+
+
+func get_city_citizen_task_runtime_state():
+	if not has_instance_owned_city_state():
+		return null
+
+	var raw_task_runtime_state = (
+		local_state.citizen_task_runtime_state
+	)
+	if raw_task_runtime_state is CityCitizenTaskRuntimeState:
+		return raw_task_runtime_state
+	return null

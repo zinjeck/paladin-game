@@ -194,6 +194,7 @@ var observed_city_citizen_spatial_version: int = -1
 var observed_city_citizen_movement_runtime_state: CityCitizenMovementRuntimeState
 var observed_city_citizen_movement_version: int = -1
 var synchronized_city_citizen_movement_version: int = -1
+var observed_city_citizen_task_runtime_state: CityCitizenTaskRuntimeState
 var observed_city_citizen_task_version: int = -1
 var observed_city_ground_pile_version: int = -1
 var observed_city_player_command_version: int = -1
@@ -711,14 +712,33 @@ func _collect_world_data_change_flags(
 			citizen_movement_runtime_state_changed
 		)
 
+	var current_citizen_task_runtime_state := (
+		WorldPoliticalState
+		.get_current_city_citizen_task_runtime_state()
+	)
+	var citizen_task_runtime_state_changed := (
+		observed_city_citizen_task_runtime_state == null
+		or not is_same(
+			observed_city_citizen_task_runtime_state,
+			current_citizen_task_runtime_state
+		)
+	)
+
 	if (
-		observed_city_citizen_task_version
-		!= WorldData.city_citizen_task_version
+		citizen_task_runtime_state_changed
+		or observed_city_citizen_task_version
+		!= current_citizen_task_runtime_state.citizen_task_version
 	):
+		observed_city_citizen_task_runtime_state = (
+			current_citizen_task_runtime_state
+		)
 		observed_city_citizen_task_version = (
-			WorldData.city_citizen_task_version
+			current_citizen_task_runtime_state.citizen_task_version
 		)
 		change_flags["city_citizen_task_changed"] = true
+		change_flags["city_citizen_task_runtime_changed"] = (
+			citizen_task_runtime_state_changed
+		)
 
 	if (
 		observed_city_ground_pile_version

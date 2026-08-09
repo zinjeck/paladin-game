@@ -154,11 +154,6 @@ static var city_citizen_ids_by_tile: Dictionary:
 		)
 		state.citizen_ids_by_tile = value
 
-# Physical ground-pile and haul-reservation ownership lives in
-# CityLogisticsState/CityLogisticsSystem for the active settlement. Citizen
-# task runtime fields remain in the legacy workspace until their separate
-# extraction pass.
-#
 # Citizen movement-runtime ownership is settlement-local. These compatibility
 # properties preserve the historical behavior API while routing the active
 # mover registry and transient visual buffer to one
@@ -222,8 +217,38 @@ static var city_citizen_movement_visual_tick_index: int:
 		)
 		state.citizen_movement_visual_tick_index = value
 
-static var city_active_task_ids: Array[int] = []
-static var city_active_task_id_lookup: Dictionary = {}
+# Citizen task-runtime ownership is settlement-local. Citizen records remain
+# authoritative for current-task and haul payload data; these compatibility
+# properties route only the active processing index to the current City's
+# CityCitizenTaskRuntimeState.
+static var city_active_task_ids: Array[int]:
+	get:
+		var state := (
+			WorldPoliticalState
+			.get_current_city_citizen_task_runtime_state()
+		)
+		return state.active_task_ids
+	set(value):
+		var state := (
+			WorldPoliticalState
+			.get_current_city_citizen_task_runtime_state()
+		)
+		state.active_task_ids = value
+
+static var city_active_task_id_lookup: Dictionary:
+	get:
+		var state := (
+			WorldPoliticalState
+			.get_current_city_citizen_task_runtime_state()
+		)
+		return state.active_task_id_lookup
+	set(value):
+		var state := (
+			WorldPoliticalState
+			.get_current_city_citizen_task_runtime_state()
+		)
+		state.active_task_id_lookup = value
+
 static var city_object_access_tile_cache: Dictionary = {}
 static var next_city_citizen_id: int:
 	get:
@@ -237,8 +262,6 @@ static var next_city_citizen_id: int:
 		)
 		state.next_citizen_id = value
 
-# Citizen task/assignment versions still awaiting focused extraction.
-#
 # These let observers refresh only the parts of the city that actually
 # changed instead of treating every mutation as a generic storage change.
 static var city_citizen_version: int:
@@ -277,7 +300,20 @@ static var city_citizen_movement_version: int:
 		)
 		state.citizen_movement_version = value
 
-static var city_citizen_task_version: int = 0
+static var city_citizen_task_version: int:
+	get:
+		var state := (
+			WorldPoliticalState
+			.get_current_city_citizen_task_runtime_state()
+		)
+		return state.citizen_task_version
+	set(value):
+		var state := (
+			WorldPoliticalState
+			.get_current_city_citizen_task_runtime_state()
+		)
+		state.citizen_task_version = value
+
 static var city_assignment_version: int = 0
 static var city_workplace_version: int = 0
 static var city_citizen_male_name_pool: Array[String] = (
@@ -1772,8 +1808,8 @@ static func _add_city_active_mover_id(
 		city_active_mover_id_lookup[citizen_id] = true
 		return true
 
-	# Duplicate target IDs are corruption, not a healthy hot path. Repair every
-	# copy while preserving the exact owner collections.
+	# Repair duplicate mover entries in place; this branch is corruption
+	# handling, not part of the healthy movement hot path.
 	while city_active_mover_ids.has(citizen_id):
 		city_active_mover_ids.erase(citizen_id)
 
@@ -1877,30 +1913,85 @@ static func take_city_citizen_movement_visual_events(
 
 static func _add_city_active_task_id(
 	citizen_id: int
-) -> void:
+) -> bool:
 	if citizen_id <= 0:
-		return
+		return false
 
-	if city_active_task_id_lookup.has(citizen_id):
-		return
+	var insertion_index := city_active_task_ids.bsearch(citizen_id)
+	var array_has_id := (
+		insertion_index < city_active_task_ids.size()
+		and city_active_task_ids[insertion_index] == citizen_id
+	)
+	var lookup_is_valid := (
+		city_active_task_id_lookup.has(citizen_id)
+		and bool(city_active_task_id_lookup[citizen_id])
+	)
+	var array_has_duplicate := (
+		array_has_id
+		and insertion_index + 1 < city_active_task_ids.size()
+		and city_active_task_ids[insertion_index + 1] == citizen_id
+	)
 
+	if array_has_id and not array_has_duplicate:
+		if lookup_is_valid:
+			return false
+		city_active_task_id_lookup[citizen_id] = true
+		return true
+
+	if not array_has_id:
+		city_active_task_ids.insert(insertion_index, citizen_id)
+		city_active_task_id_lookup[citizen_id] = true
+		return true
+
+	# Duplicate targets are corruption, not a healthy assignment path.
+	_remove_all_city_active_task_array_entries(citizen_id)
 	city_active_task_ids.insert(
 		city_active_task_ids.bsearch(citizen_id),
 		citizen_id
 	)
 	city_active_task_id_lookup[citizen_id] = true
+	return true
 
 
 static func _remove_city_active_task_id(
 	citizen_id: int
-) -> void:
-	city_active_task_id_lookup.erase(citizen_id)
-	city_active_task_ids.erase(citizen_id)
+) -> bool:
+	var changed := city_active_task_id_lookup.erase(citizen_id)
+
+	if _remove_all_city_active_task_array_entries(citizen_id):
+		changed = true
+
+	return changed
 
 
-static func rebuild_city_active_task_registry() -> void:
-	city_active_task_ids.clear()
-	city_active_task_id_lookup.clear()
+static func _remove_all_city_active_task_array_entries(
+	citizen_id: int
+) -> bool:
+	var original_size := city_active_task_ids.size()
+	var write_index := 0
+
+	for read_index in range(original_size):
+		var active_task_id := city_active_task_ids[read_index]
+
+		if active_task_id == citizen_id:
+			continue
+
+		if write_index != read_index:
+			city_active_task_ids[write_index] = active_task_id
+
+		write_index += 1
+
+	while city_active_task_ids.size() > write_index:
+		city_active_task_ids.pop_back()
+
+	return write_index != original_size
+
+
+static func rebuild_city_active_task_registry() -> bool:
+	var previous_active_ids := city_active_task_ids.duplicate()
+	var previous_active_lookup := city_active_task_id_lookup.duplicate()
+	var expected_active_ids: Array[int] = []
+	var expected_active_lookup: Dictionary = {}
 
 	for raw_citizen in city_citizens:
 		if not raw_citizen is Dictionary:
@@ -1929,7 +2020,26 @@ static func rebuild_city_active_task_registry() -> void:
 		if citizen_id <= 0:
 			continue
 
-		_add_city_active_task_id(citizen_id)
+		if expected_active_lookup.has(citizen_id):
+			continue
+
+		expected_active_ids.append(citizen_id)
+		expected_active_lookup[citizen_id] = true
+
+	expected_active_ids.sort()
+
+	var registry_changed := (
+		previous_active_ids != expected_active_ids
+		or previous_active_lookup != expected_active_lookup
+	)
+	city_active_task_ids.clear()
+	city_active_task_id_lookup.clear()
+	city_active_task_ids.append_array(expected_active_ids)
+	city_active_task_id_lookup.merge(expected_active_lookup)
+	if registry_changed:
+		_mark_city_citizen_task_changed()
+
+	return registry_changed
 
 
 static func get_city_active_task_ids_snapshot() -> Array[int]:
@@ -3760,8 +3870,7 @@ static func is_valid_city_citizen_task_phase(
 
 static func ensure_city_citizen_task_state() -> int:
 	if city_citizens.is_empty():
-		city_active_task_ids.clear()
-		city_active_task_id_lookup.clear()
+		rebuild_city_active_task_registry()
 		return 0
 
 	var migrated_count := 0
@@ -3826,9 +3935,13 @@ static func ensure_city_citizen_task_state() -> int:
 		city_citizens[citizen_index] = citizen
 		migrated_count += 1
 
+	var task_version_before_rebuild := city_citizen_task_version
 	rebuild_city_active_task_registry()
 
-	if migrated_count > 0:
+	if (
+		migrated_count > 0
+		and city_citizen_task_version == task_version_before_rebuild
+	):
 		_mark_city_citizen_task_changed()
 
 	return migrated_count
@@ -4666,6 +4779,8 @@ static func clear_city_citizen_task(
 		raw_current_task is Dictionary
 		and raw_current_task == empty_task
 	):
+		if _remove_city_active_task_id(citizen_id):
+			_mark_city_citizen_task_changed()
 		return true
 
 	var current_task_kind := CITY_CITIZEN_TASK_KIND_NONE
