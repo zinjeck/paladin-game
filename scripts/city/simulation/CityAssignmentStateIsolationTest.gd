@@ -51,7 +51,6 @@ func _test_equal_version_assignment_and_workplace_isolation() -> void:
 		culture_id > 0 and not city_a.is_empty() and not city_b.is_empty(),
 		"The isolation fixture must create two instance-owned Cities."
 	)
-
 	if city_a.is_empty() or city_b.is_empty():
 		return
 
@@ -59,12 +58,11 @@ func _test_equal_version_assignment_and_workplace_isolation() -> void:
 	var city_b_id := int(city_b.get("id", -1))
 	var state_a := _exercise_city(city_a_id, culture_id, 99_111)
 	var state_b := _exercise_city(city_b_id, culture_id, 99_112)
-
 	if state_a.is_empty() or state_b.is_empty():
 		return
 
-	# Force equal numeric versions so ownership identity, rather than a lucky
-	# counter difference, is the only valid cache discriminator.
+	# Equalize numeric versions deliberately. State identity must still separate
+	# the Cities even when every local ID and invalidation counter can collide.
 	var assignment_state_a: CityAssignmentState = state_a.get(
 		"assignment_state"
 	)
@@ -89,7 +87,7 @@ func _test_equal_version_assignment_and_workplace_isolation() -> void:
 		and int(state_b.get("house_id", -1)) == 1
 		and int(state_a.get("fishery_id", -1)) == 2
 		and int(state_b.get("fishery_id", -1)) == 2,
-		"Both Cities must independently reuse the same settlement-local citizen and object IDs."
+		"Both Cities must independently reuse settlement-local citizen and object IDs."
 	)
 	_expect(
 		not is_same(
@@ -122,8 +120,6 @@ func _test_equal_version_assignment_and_workplace_isolation() -> void:
 		and CityAssignmentSystem.remove_city_citizen_job(citizen_id),
 		"City A must accept focused home and job removals."
 	)
-	# Equalize counters again after different mutations. City B's relationship
-	# records remain intact despite using the same local IDs.
 	CityAssignmentSystem.get_current_state().assignment_version = 7
 	CityEmploymentSystem.get_current_state().workplace_version = 11
 
@@ -137,13 +133,9 @@ func _test_equal_version_assignment_and_workplace_isolation() -> void:
 		int(validator_a.get("assignment_state_instance_id", 0))
 		!= int(validator_b.get("assignment_state_instance_id", 0))
 		and int(validator_b.get("assignment_state_instance_id", 0))
-		== int(
-			state_b.get("assignment_state").get_instance_id()
-		)
+		== int(state_b.get("assignment_state").get_instance_id())
 		and int(validator_b.get("workplace_state_instance_id", 0))
-		== int(
-			state_b.get("workplace_state").get_instance_id()
-		),
+		== int(state_b.get("workplace_state").get_instance_id()),
 		"Validator caches must reject equal-version results owned by another settlement."
 	)
 
@@ -168,7 +160,6 @@ func _exercise_city(
 		WorldPoliticalState.set_active_settlement(city_id),
 		"The City under test must become active."
 	)
-
 	if WorldPoliticalState.active_settlement_id != city_id:
 		return {}
 
@@ -194,7 +185,7 @@ func _exercise_city(
 		"city_world": city_world,
 	})
 	var citizen := WorldData.add_city_citizen(
-		"Assignment Isolation Citizen",
+		"",
 		SHARED_CITIZEN_TILE,
 		CityCitizens.CITY_CITIZEN_SEX_FEMALE,
 		culture_id
@@ -217,6 +208,8 @@ func _exercise_city(
 		),
 		"Each City must independently establish matching local relationships."
 	)
+	if citizen_id <= 0 or house_id <= 0 or fishery_id <= 0:
+		return {}
 
 	return {
 		"city_id": city_id,
@@ -293,7 +286,6 @@ func _create_city(
 func _make_world(width: int, height: int, seed_value: int) -> WorldData:
 	var world := WorldData.new()
 	world.setup(width, height, seed_value)
-
 	for y in range(height):
 		for x in range(width):
 			world.tiles[y][x] = {
@@ -306,7 +298,6 @@ func _make_world(width: int, height: int, seed_value: int) -> WorldData:
 				"resource": WorldData.RESOURCE_NONE,
 				"is_land": true,
 			}
-
 	world.mark_tile_data_changed()
 	return world
 
@@ -314,6 +305,5 @@ func _make_world(width: int, height: int, seed_value: int) -> WorldData:
 func _expect(condition: bool, message: String) -> void:
 	if condition:
 		return
-
 	failure_count += 1
 	push_error("City assignment state isolation test: " + message)
