@@ -1076,7 +1076,7 @@ func _test_workplace_fish_production_accounting() -> void:
 	}
 	_expect(
 		worker_id > 0
-		and WorldData.assign_city_citizen_job(worker_id, fishery_id)
+		and CityAssignmentSystem.assign_city_citizen_job(worker_id, fishery_id)
 		and CityCitizenTaskRuntimeSystem.assign_city_citizen_task(worker_id, work_task)
 		and CityCitizenTaskRuntimeSystem.set_city_citizen_task_phase(
 			worker_id,
@@ -1181,8 +1181,8 @@ func _test_household_and_public_food_reserve_targets() -> void:
 	})
 	var house_id := int(house.get("id", -1))
 	_expect(
-		WorldData.assign_city_citizen_home(int(first.get("id", -1)), house_id)
-		and WorldData.assign_city_citizen_home(
+		CityAssignmentSystem.assign_city_citizen_home(int(first.get("id", -1)), house_id)
+		and CityAssignmentSystem.assign_city_citizen_home(
 			int(second.get("id", -1)),
 			house_id
 		),
@@ -1585,14 +1585,14 @@ func _test_unified_food_search_avoids_budget_starvation() -> void:
 	})
 
 	_expect(
-		WorldData.assign_city_citizen_home(
+		CityAssignmentSystem.assign_city_citizen_home(
 			first_id,
 			int(house.get("id", -1))
 		),
 		"The first hungry citizen must own the isolated pantry source."
 	)
 	_expect(
-		WorldData.remove_city_citizen_home(second_id),
+		CityAssignmentSystem.remove_city_citizen_home(second_id),
 		"The later hungry citizen must have no private pantry source."
 	)
 
@@ -2274,7 +2274,7 @@ func _test_off_shift_homeless_idle_wander() -> void:
 	var fishery_id := int(fishery.get("id", -1))
 	_expect(
 		fishery_id > 0
-		and WorldData.assign_city_citizen_job(citizen_id, fishery_id),
+		and CityAssignmentSystem.assign_city_citizen_job(citizen_id, fishery_id),
 		"The off-shift wanderer must retain a distant Fishery job."
 	)
 	_expect(

@@ -1280,7 +1280,7 @@ static func _advance_performing_work_task(context: Dictionary) -> int:
 		context.get("maximum_relocations_per_task", 0)
 	)
 
-	if not WorldData.is_city_citizen_attending_workplace(
+	if not CityEmploymentSystem.is_city_citizen_attending_workplace(
 		citizen_id,
 		workplace_id,
 		city_world
@@ -1509,7 +1509,7 @@ static func _make_return_home_task_context(
 	)
 	var home_id := int(current_task.get("target_object_id", -1))
 	var home := CityObjectSystem.get_city_object_by_id(home_id)
-	var resident_ids := WorldData.get_city_object_resident_ids(home)
+	var resident_ids := CityAssignmentSystem.get_city_object_resident_ids(home)
 
 	if (
 		home_id <= 0

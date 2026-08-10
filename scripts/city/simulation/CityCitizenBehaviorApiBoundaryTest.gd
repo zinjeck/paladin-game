@@ -126,7 +126,7 @@ func _exercise_city_gateways(
 
 	var task_version_before := task_state.citizen_task_version
 	_expect(
-		WorldData.assign_city_citizen_home(citizen_id, house_id)
+		CityAssignmentSystem.assign_city_citizen_home(citizen_id, house_id)
 		and CityCitizenTaskRuntimeSystem.assign_city_citizen_task(citizen_id, {
 			"kind": WorldData.CITY_CITIZEN_TASK_KIND_RETURN_HOME,
 			"source": WorldData.CITY_CITIZEN_TASK_SOURCE_SCHEDULE,

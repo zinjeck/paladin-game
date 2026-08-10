@@ -55,7 +55,7 @@ func _test_current_source_allocates_one_immediate_meal() -> void:
 	_expect(house_id > 0, "The one-meal fixture must create a House.")
 	_expect(citizen_id > 0, "The one-meal fixture must create a citizen.")
 	_expect(
-		WorldData.assign_city_citizen_home(citizen_id, house_id),
+		CityAssignmentSystem.assign_city_citizen_home(citizen_id, house_id),
 		"The one-meal fixture citizen must own the pantry they are standing in."
 	)
 	_expect(
@@ -139,7 +139,7 @@ func _test_hungry_citizens_reserve_before_household_stocking() -> void:
 	_expect(stockpile_id > 0, "The fairness fixture must create public storage.")
 	_expect(house_id > 0, "The fairness fixture must create a household pantry.")
 	_expect(
-		WorldData.assign_city_citizen_home(provisioner_id, house_id),
+		CityAssignmentSystem.assign_city_citizen_home(provisioner_id, house_id),
 		"The provisioner must be assigned to the household pantry."
 	)
 	_expect(

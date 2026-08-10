@@ -63,7 +63,7 @@ func _test_scheduled_home_delivery_accounting() -> void:
 		and stockpile_id > 0
 		and citizen_id > 0
 		and source_tile != WorldData.INVALID_CITY_TILE_POSITION
-		and WorldData.assign_city_citizen_home(citizen_id, house_id),
+		and CityAssignmentSystem.assign_city_citizen_home(citizen_id, house_id),
 		"The home-delivery fixture must create one healthy resident, House, and Stockpile."
 	)
 	if house_id <= 0 or stockpile_id <= 0 or citizen_id <= 0:

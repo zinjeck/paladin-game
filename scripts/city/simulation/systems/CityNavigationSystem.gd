@@ -73,7 +73,7 @@ static func city_citizen_can_access_object_interior(
 			return (
 				int(citizen.get("home_object_id", -1))
 				== object_id
-				and WorldData.get_city_object_resident_ids(
+				and CityAssignmentSystem.get_city_object_resident_ids(
 					city_object
 				).has(citizen_id)
 			)
@@ -82,7 +82,7 @@ static func city_citizen_can_access_object_interior(
 			return (
 				int(citizen.get("job_object_id", -1))
 				== object_id
-				and WorldData.get_city_object_worker_ids(
+				and CityEmploymentSystem.get_city_object_worker_ids(
 					city_object
 				).has(citizen_id)
 			)

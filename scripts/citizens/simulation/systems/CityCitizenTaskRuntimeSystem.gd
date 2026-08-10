@@ -877,7 +877,7 @@ static func _prepare_city_return_home_task_assignment(
 	if int(citizen.get("home_object_id", -1)) != target_object_id:
 		return false
 
-	if not WorldData.get_city_object_resident_ids(home).has(citizen_id):
+	if not CityAssignmentSystem.get_city_object_resident_ids(home).has(citizen_id):
 		return false
 
 	return CityNavigationSystem.city_citizen_can_access_object_interior(citizen_id, home)

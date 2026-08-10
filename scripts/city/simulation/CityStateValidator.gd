@@ -12,6 +12,8 @@ static var _cached_result: Dictionary = {}
 static var _cached_object_state: CityObjectState
 static var _cached_resource_accounting_state: CityResourceAccountingState
 static var _cached_citizen_registry_state: CityCitizenRegistryState
+static var _cached_assignment_state: CityAssignmentState
+static var _cached_workplace_state: CityWorkplaceState
 static var _cached_citizen_spatial_state: CityCitizenSpatialState
 static var _cached_citizen_movement_runtime_state: CityCitizenMovementRuntimeState
 static var _cached_citizen_task_runtime_state: CityCitizenTaskRuntimeState
@@ -174,8 +176,14 @@ static func validate(
 		"citizen_task_version": (
 			CityCitizenTaskRuntimeSystem.get_current_state().citizen_task_version
 		),
-		"assignment_version": WorldData.city_assignment_version,
-		"workplace_version": WorldData.city_workplace_version,
+		"assignment_state_instance_id": int(
+			CityAssignmentSystem.get_current_state().get_instance_id()
+		),
+		"workplace_state_instance_id": int(
+			CityEmploymentSystem.get_current_state().get_instance_id()
+		),
+		"assignment_version": CityAssignmentSystem.get_city_assignment_version(),
+		"workplace_version": CityEmploymentSystem.get_city_workplace_version(),
 		"ground_pile_version": CityLogisticsSystem.get_current_state().ground_pile_version,
 		"player_command_version": CityWorkSystem.get_current_work_state().player_command_version,
 		"work_order_version": CityWorkSystem.get_current_work_state().work_order_version,
@@ -193,6 +201,8 @@ static func validate(
 	_cached_citizen_registry_state = (
 		CityCitizenRegistrySystem.get_current_state()
 	)
+	_cached_assignment_state = CityAssignmentSystem.get_current_state()
+	_cached_workplace_state = CityEmploymentSystem.get_current_state()
 	_cached_citizen_spatial_state = (
 		CityCitizenSpatialSystem.get_current_state()
 	)
@@ -289,6 +299,22 @@ static func _validation_cache_matches_current_state() -> bool:
 	):
 		return false
 	if (
+		_cached_assignment_state == null
+		or not is_same(
+			_cached_assignment_state,
+			CityAssignmentSystem.get_current_state()
+		)
+	):
+		return false
+	if (
+		_cached_workplace_state == null
+		or not is_same(
+			_cached_workplace_state,
+			CityEmploymentSystem.get_current_state()
+		)
+	):
+		return false
+	if (
 		_cached_citizen_spatial_state == null
 		or not is_same(
 			_cached_citizen_spatial_state,
@@ -364,13 +390,13 @@ static func _validation_cache_matches_current_state() -> bool:
 
 	if (
 		int(_cached_result.get("assignment_version", -1))
-		!= WorldData.city_assignment_version
+		!= CityAssignmentSystem.get_city_assignment_version()
 	):
 		return false
 
 	if (
 		int(_cached_result.get("workplace_version", -1))
-		!= WorldData.city_workplace_version
+		!= CityEmploymentSystem.get_city_workplace_version()
 	):
 		return false
 
