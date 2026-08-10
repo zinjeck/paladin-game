@@ -695,7 +695,7 @@ func _test_critical_hunger_interrupts_cargo_safely() -> void:
 			-1
 		)
 	) > 0:
-		WorldData.remove_city_citizen_job(citizen_id)
+		CityAssignmentSystem.remove_city_citizen_job(citizen_id)
 
 	var source_id := _add_ground_resource(
 		Vector2i(5, 5),

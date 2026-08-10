@@ -512,8 +512,6 @@ CITIZEN_SCHEMA_WORLD_DATA_RETIRED_PROPERTIES = (
 
 DEFERRED_CITIZEN_ROOT_FIELDS = {
     "object_access_tile_cache": "city_object_access_tile_cache",
-    "assignment_version": "city_assignment_version",
-    "workplace_version": "city_workplace_version",
 }
 
 # Pass 9 keeps physical inventory and scalar needs embedded in the authoritative
@@ -3932,6 +3930,448 @@ def main() -> int:
                 errors.append(
                     f"{test_scene_path.relative_to(ROOT)}: Pass 9 scene must bind "
                     f"{expected_resource_path} on its root node"
+                )
+
+
+    # Pass 10: housing and employment relationships remain physically embedded
+    # in citizen/object records, but all ordinary bidirectional mutation now
+    # crosses one atomic assignment boundary. The two focused data-only states
+    # own invalidation only, never a shadow resident/worker ledger.
+    pass10_assignment_state_path = (
+        ROOT / "scripts/city/simulation/CityAssignmentState.gd"
+    )
+    pass10_workplace_state_path = (
+        ROOT / "scripts/city/simulation/CityWorkplaceState.gd"
+    )
+    pass10_assignment_system_path = (
+        ROOT / "scripts/citizens/simulation/systems/CityAssignmentSystem.gd"
+    )
+    pass10_employment_system_path = (
+        ROOT / "scripts/citizens/simulation/systems/CityEmploymentSystem.gd"
+    )
+    pass10_political_state_path = (
+        ROOT / "scripts/world/simulation/WorldPoliticalState.gd"
+    )
+    pass10_root_state_path = (
+        ROOT / "scripts/city/simulation/CitySettlementSimulationState.gd"
+    )
+    pass10_required_paths = (
+        pass10_assignment_state_path,
+        pass10_workplace_state_path,
+        pass10_assignment_system_path,
+        pass10_employment_system_path,
+        pass10_political_state_path,
+        pass10_root_state_path,
+    )
+    for required_path in pass10_required_paths:
+        if not required_path.exists():
+            errors.append(
+                f"{required_path.relative_to(ROOT)}: missing permanent Pass 10 "
+                "assignment/housing/employment owner"
+            )
+
+    if all(path.exists() for path in pass10_required_paths):
+        assignment_state_text = pass10_assignment_state_path.read_text(
+            encoding="utf-8"
+        )
+        workplace_state_text = pass10_workplace_state_path.read_text(
+            encoding="utf-8"
+        )
+        assignment_system_text = pass10_assignment_system_path.read_text(
+            encoding="utf-8"
+        )
+        employment_system_text = pass10_employment_system_path.read_text(
+            encoding="utf-8"
+        )
+        political_state_text = pass10_political_state_path.read_text(
+            encoding="utf-8"
+        )
+        root_state_text = pass10_root_state_path.read_text(encoding="utf-8")
+
+        pass10_state_specs = (
+            (
+                pass10_assignment_state_path,
+                assignment_state_text,
+                "CityAssignmentState",
+                "assignment_version",
+            ),
+            (
+                pass10_workplace_state_path,
+                workplace_state_text,
+                "CityWorkplaceState",
+                "workplace_version",
+            ),
+        )
+        relationship_ledger_fields = (
+            "home_object_id",
+            "job_object_id",
+            "resident_ids",
+            "assigned_worker_ids",
+            "residents_by_object_id",
+            "workers_by_object_id",
+        )
+        for state_path, state_text, class_name, version_field in pass10_state_specs:
+            relative = str(state_path.relative_to(ROOT))
+            declared_fields = set(
+                re.findall(
+                    r"^var\s+([A-Za-z_][A-Za-z0-9_]*)\b",
+                    state_text,
+                    re.MULTILINE,
+                )
+            )
+            if declared_fields != {version_field}:
+                errors.append(
+                    f"{relative}: {class_name} must own only {version_field}; "
+                    "relationship records stay on citizens and city objects"
+                )
+            if not re.search(
+                rf"^var\s+{re.escape(version_field)}:\s*int\s*=\s*0\s*$",
+                state_text,
+                re.MULTILINE,
+            ):
+                errors.append(
+                    f"{relative}: missing typed zero default for {version_field}"
+                )
+            if FUNC_RE.search(state_text):
+                errors.append(
+                    f"{relative}: {class_name} must remain data-only"
+                )
+            for field_name in relationship_ledger_fields:
+                if re.search(
+                    rf"^var\s+{re.escape(field_name)}\b",
+                    state_text,
+                    re.MULTILINE,
+                ):
+                    errors.append(
+                        f"{relative}: duplicate relationship ledger is forbidden: "
+                        f"{field_name}"
+                    )
+
+        required_root_surfaces = (
+            "var assignment_state: CityAssignmentState = CityAssignmentState.new()",
+            "var workplace_state: CityWorkplaceState = CityWorkplaceState.new()",
+        )
+        for required_surface in required_root_surfaces:
+            if required_surface not in root_state_text:
+                errors.append(
+                    "scripts/city/simulation/CitySettlementSimulationState.gd: "
+                    f"missing Pass 10 owner surface: {required_surface}"
+                )
+        for retired_root_field in ("assignment_version", "workplace_version"):
+            if re.search(
+                rf"^var\s+{re.escape(retired_root_field)}\b",
+                root_state_text,
+                re.MULTILINE,
+            ):
+                errors.append(
+                    "scripts/city/simulation/CitySettlementSimulationState.gd: "
+                    f"{retired_root_field} must live in its focused state"
+                )
+            if f"WorldData.city_{retired_root_field}" in root_state_text:
+                errors.append(
+                    "scripts/city/simulation/CitySettlementSimulationState.gd: "
+                    f"{retired_root_field} must not use capture/apply workspace copying"
+                )
+
+        required_political_surfaces = (
+            "CityAssignmentStateScript = preload(",
+            "CityWorkplaceStateScript = preload(",
+            "_unbound_city_assignment_state",
+            "_unbound_city_workplace_state",
+            "capital_state.assignment_state = unbound_assignment_state_to_adopt",
+            "capital_state.workplace_state = unbound_workplace_state_to_adopt",
+            "func get_current_city_assignment_state() -> CityAssignmentState:",
+            "func get_current_city_workplace_state() -> CityWorkplaceState:",
+        )
+        for required_surface in required_political_surfaces:
+            if required_surface not in political_state_text:
+                errors.append(
+                    "scripts/world/simulation/WorldPoliticalState.gd: missing "
+                    f"Pass 10 settlement-local plumbing: {required_surface}"
+                )
+
+        required_assignment_functions = (
+            "get_current_state",
+            "get_city_assignment_version",
+            "mark_city_assignments_changed",
+            "ensure_city_citizen_assignment_state",
+            "get_city_housed_citizen_count",
+            "get_city_unemployed_citizen_count",
+            "get_city_object_resident_ids",
+            "get_city_object_worker_ids",
+            "assign_homeless_citizens_to_available_housing",
+            "assign_city_citizen_home",
+            "remove_city_citizen_home",
+            "assign_city_citizen_job",
+            "remove_city_citizen_job",
+        )
+        assignment_functions = {match.group(1) for match in FUNC_RE.finditer(assignment_system_text)}
+        missing_assignment_functions = sorted(
+            set(required_assignment_functions) - assignment_functions
+        )
+        if missing_assignment_functions:
+            errors.append(
+                "scripts/citizens/simulation/systems/CityAssignmentSystem.gd: "
+                "missing focused Pass 10 APIs: "
+                + ", ".join(missing_assignment_functions)
+            )
+        if (
+            "static func get_current_state() -> CityAssignmentState:"
+            not in assignment_system_text
+            or "WorldPoliticalState.get_current_city_assignment_state()"
+            not in assignment_system_text
+        ):
+            errors.append(
+                "scripts/citizens/simulation/systems/CityAssignmentSystem.gd: "
+                "missing typed settlement-local state resolver"
+            )
+
+        required_employment_functions = (
+            "get_current_state",
+            "get_city_workplace_version",
+            "mark_city_workplaces_changed",
+            "ensure_workplace_staffing_state",
+            "reconcile_automatic_workplaces",
+            "is_city_citizen_attending_workplace",
+            "get_city_object_attending_worker_ids",
+        )
+        employment_functions = {match.group(1) for match in FUNC_RE.finditer(employment_system_text)}
+        missing_employment_functions = sorted(
+            set(required_employment_functions) - employment_functions
+        )
+        if missing_employment_functions:
+            errors.append(
+                "scripts/citizens/simulation/systems/CityEmploymentSystem.gd: "
+                "missing focused Pass 10 employment APIs: "
+                + ", ".join(missing_employment_functions)
+            )
+        if (
+            "static func get_current_state() -> CityWorkplaceState:"
+            not in employment_system_text
+            or "WorldPoliticalState.get_current_city_workplace_state()"
+            not in employment_system_text
+        ):
+            errors.append(
+                "scripts/citizens/simulation/systems/CityEmploymentSystem.gd: "
+                "missing typed settlement-local workplace-state resolver"
+            )
+
+        pass10_retired_world_data_symbols = (
+            "city_assignment_version",
+            "city_workplace_version",
+            "_mark_city_assignments_changed",
+            "_mark_city_workplaces_changed",
+            "get_city_housed_citizen_count",
+            "get_city_unemployed_citizen_count",
+            "get_city_object_resident_count",
+            "get_city_object_resident_ids",
+            "get_city_object_resident_names",
+            "get_total_city_resident_capacity",
+            "get_city_object_worker_count",
+            "get_city_object_worker_ids",
+            "get_city_object_worker_names",
+            "is_city_citizen_attending_workplace",
+            "get_city_object_attending_worker_ids",
+            "get_city_object_attending_worker_count",
+            "assign_homeless_citizens_to_available_housing",
+            "assign_unemployed_citizens_to_available_workplaces",
+            "assign_city_citizen_home",
+            "remove_city_citizen_home",
+            "assign_city_citizen_job",
+            "remove_city_citizen_job",
+        )
+        if world_data_path.exists():
+            world_data_text = world_data_path.read_text(encoding="utf-8")
+            for symbol in pass10_retired_world_data_symbols:
+                declaration_patterns = (
+                    rf"^\s*static\s+var\s+{re.escape(symbol)}\b",
+                    rf"^\s*(?:static\s+)?func\s+{re.escape(symbol)}\s*\(",
+                )
+                if any(
+                    re.search(pattern, world_data_text, re.MULTILINE)
+                    for pattern in declaration_patterns
+                ):
+                    errors.append(
+                        "scripts/world/simulation/WorldData.gd: retired Pass 10 "
+                        f"assignment/employment declaration returned: {symbol}"
+                    )
+
+            for path in scripts:
+                text = path.read_text(encoding="utf-8")
+                relative = str(path.relative_to(ROOT))
+                for symbol in pass10_retired_world_data_symbols:
+                    direct_reference = re.search(
+                        rf"\bWorldData\s*\.\s*{re.escape(symbol)}\b",
+                        text,
+                    )
+                    dynamic_reference = re.search(
+                        rf"\bWorldData\s*\.\s*(?:get|set|call|callv|has_method)"
+                        rf"\s*\(\s*[\"']{re.escape(symbol)}[\"']",
+                        text,
+                    )
+                    callable_reference = re.search(
+                        rf"\bCallable\s*\(\s*WorldData\s*,\s*"
+                        rf"[\"']{re.escape(symbol)}[\"']\s*\)",
+                        text,
+                    )
+                    if direct_reference or dynamic_reference or callable_reference:
+                        errors.append(
+                            f"{relative}: legacy WorldData Pass 10 reference remains: "
+                            f"{symbol}"
+                        )
+
+        # Only the focused mutation owner, completed-object initialization, and
+        # the explicit corruption fixture may write relationship fields directly.
+        direct_relationship_write_allowlist = {
+            "scripts/citizens/simulation/systems/CityAssignmentSystem.gd",
+            "scripts/city/simulation/systems/CityObjectSystem.gd",
+            "scripts/city/simulation/CityAssignmentSystemTest.gd",
+        }
+        for path in scripts:
+            relative = str(path.relative_to(ROOT))
+            if relative in direct_relationship_write_allowlist:
+                continue
+            masked_text = gdscript_masked_code(path.read_text(encoding="utf-8"))
+            for field_name in (
+                "home_object_id",
+                "job_object_id",
+                "resident_ids",
+                "assigned_worker_ids",
+            ):
+                if re.search(
+                    rf"\[\s*[\"']{re.escape(field_name)}[\"']\s*\]\s*=",
+                    masked_text,
+                ):
+                    errors.append(
+                        f"{relative}: direct {field_name} mutation bypasses "
+                        "CityAssignmentSystem"
+                    )
+
+        private_resolvers = (
+            (
+                "get_current_city_assignment_state",
+                {
+                    "scripts/world/simulation/WorldPoliticalState.gd",
+                    "scripts/citizens/simulation/systems/CityAssignmentSystem.gd",
+                },
+            ),
+            (
+                "get_current_city_workplace_state",
+                {
+                    "scripts/world/simulation/WorldPoliticalState.gd",
+                    "scripts/citizens/simulation/systems/CityEmploymentSystem.gd",
+                },
+            ),
+        )
+        for resolver, allowed_paths in private_resolvers:
+            for path in scripts:
+                relative = str(path.relative_to(ROOT))
+                if relative in allowed_paths:
+                    continue
+                text = path.read_text(encoding="utf-8")
+                if re.search(
+                    rf"\bWorldPoliticalState\s*\.\s*{re.escape(resolver)}\s*\(",
+                    text,
+                ):
+                    errors.append(
+                        f"{relative}: {resolver} is private; use the focused "
+                        "system get_current_state() accessor"
+                    )
+
+        simulation_coordinator_path = (
+            ROOT / "scripts/world/simulation/SimulationCoordinator.gd"
+        )
+        if simulation_coordinator_path.exists():
+            coordinator_text = simulation_coordinator_path.read_text(
+                encoding="utf-8"
+            )
+            if (
+                "CityAssignmentSystem.ensure_city_citizen_assignment_state()"
+                not in coordinator_text
+            ):
+                errors.append(
+                    "scripts/world/simulation/SimulationCoordinator.gd: headless "
+                    "city simulation must normalize bidirectional assignments"
+                )
+
+        renderer_text = renderer_path.read_text(encoding="utf-8") if renderer_path.exists() else ""
+        validator_text = validator_path.read_text(encoding="utf-8") if validator_path.exists() else ""
+        for required_surface in (
+            "var observed_city_assignment_state: CityAssignmentState",
+            "var observed_city_workplace_state: CityWorkplaceState",
+            "CityAssignmentSystem.get_current_state()",
+            "CityEmploymentSystem.get_current_state()",
+            "not is_same(",
+        ):
+            if required_surface not in renderer_text:
+                errors.append(
+                    "scripts/city/rendering/CityRenderer.gd: missing identity-aware "
+                    f"Pass 10 invalidation surface: {required_surface}"
+                )
+        for required_surface in (
+            "static var _cached_assignment_state: CityAssignmentState",
+            "static var _cached_workplace_state: CityWorkplaceState",
+            '"assignment_state_instance_id"',
+            '"workplace_state_instance_id"',
+            "CityAssignmentSystem.get_current_state()",
+            "CityEmploymentSystem.get_current_state()",
+            "not is_same(",
+        ):
+            if required_surface not in validator_text:
+                errors.append(
+                    "scripts/city/simulation/CityStateValidator.gd: missing "
+                    f"identity-aware Pass 10 cache surface: {required_surface}"
+                )
+
+    pass10_test_contracts = {
+        "scripts/city/simulation/CityAssignmentSystemTest.gd": (
+            "_test_bidirectional_repair_capacity_and_idempotence",
+            "_test_atomic_mutation_and_removed_building_reassignment",
+        ),
+        "scripts/city/simulation/CityAssignmentStateIsolationTest.gd": (
+            "_test_equal_version_assignment_and_workplace_isolation",
+        ),
+    }
+    for test_relative, required_functions in pass10_test_contracts.items():
+        test_path = ROOT / test_relative
+        test_scene_path = test_path.with_suffix(".tscn")
+        for required_path in (test_path, test_scene_path):
+            if not required_path.exists():
+                errors.append(
+                    f"{required_path.relative_to(ROOT)}: missing permanent Pass 10 "
+                    "regression coverage"
+                )
+        if not test_path.exists():
+            continue
+
+        test_text = test_path.read_text(encoding="utf-8")
+        test_functions = {match.group(1) for match in FUNC_RE.finditer(test_text)}
+        missing_functions = sorted(set(required_functions) - test_functions)
+        if missing_functions:
+            errors.append(
+                f"{test_relative}: missing permanent Pass 10 regression: "
+                + ", ".join(missing_functions)
+            )
+        ready_body = gdscript_function_body(test_text, "_ready") or ""
+        masked_ready_body = gdscript_masked_code(ready_body)
+        for function_name in required_functions:
+            if not re.search(
+                rf"^\s*{re.escape(function_name)}\s*\(",
+                masked_ready_body,
+                re.MULTILINE,
+            ):
+                errors.append(
+                    f"{test_relative}: Pass 10 regression is not invoked by "
+                    f"_ready: {function_name}"
+                )
+
+        if test_scene_path.exists():
+            scene_text = test_scene_path.read_text(encoding="utf-8")
+            expected_resource_path = f"res://{test_relative}"
+            if expected_resource_path not in scene_text or "script = ExtResource" not in scene_text:
+                errors.append(
+                    f"{test_scene_path.relative_to(ROOT)}: Pass 10 scene must "
+                    f"bind {expected_resource_path} on its root node"
                 )
 
     report = {

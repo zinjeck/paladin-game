@@ -1422,7 +1422,7 @@ static func _validate_work_task_kind_state(values: Dictionary) -> void:
 	if (
 		task_phase
 		== WorldData.CITY_CITIZEN_TASK_PHASE_PERFORMING
-		and not WorldData.is_city_citizen_attending_workplace(
+		and not CityEmploymentSystem.is_city_citizen_attending_workplace(
 			citizen_id,
 			target_object_id
 		)
@@ -2038,7 +2038,7 @@ static func _validate_return_home_task_kind_state(values: Dictionary) -> void:
 			+ "."
 		)
 
-	if not WorldData.get_city_object_resident_ids(
+	if not CityAssignmentSystem.get_city_object_resident_ids(
 		target_home
 	).has(citizen_id):
 		errors.append(

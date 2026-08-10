@@ -88,8 +88,8 @@ func _test_equal_version_city_isolation() -> void:
 	WorldData.city_object_access_tile_cache = access_cache_a
 	CityCitizenMovementRuntimeSystem.get_current_state().citizen_movement_version = 11
 	CityCitizenTaskRuntimeSystem.get_current_state().citizen_task_version = 13
-	WorldData.city_assignment_version = 15
-	WorldData.city_workplace_version = 17
+	CityAssignmentSystem.get_current_state().assignment_version = 15
+	CityEmploymentSystem.get_current_state().workplace_version = 17
 
 	_expect(
 		int(citizen_a.get("id", -1)) == 1
@@ -160,8 +160,8 @@ func _test_equal_version_city_isolation() -> void:
 	WorldData.city_object_access_tile_cache = access_cache_b
 	CityCitizenMovementRuntimeSystem.get_current_state().citizen_movement_version = 12
 	CityCitizenTaskRuntimeSystem.get_current_state().citizen_task_version = 14
-	WorldData.city_assignment_version = 16
-	WorldData.city_workplace_version = 18
+	CityAssignmentSystem.get_current_state().assignment_version = 16
+	CityEmploymentSystem.get_current_state().workplace_version = 18
 
 	_expect(
 		WorldPoliticalState.set_active_settlement(city_a_id)
@@ -184,8 +184,8 @@ func _test_equal_version_city_isolation() -> void:
 		and is_same(WorldData.city_object_access_tile_cache, access_cache_a)
 		and CityCitizenMovementRuntimeSystem.get_current_state().citizen_movement_version == 11
 		and CityCitizenTaskRuntimeSystem.get_current_state().citizen_task_version == 13
-		and WorldData.city_assignment_version == 15
-		and WorldData.city_workplace_version == 17
+		and CityAssignmentSystem.get_current_state().assignment_version == 15
+		and CityEmploymentSystem.get_current_state().workplace_version == 17
 		and CityCitizenRegistrySystem.get_current_state().next_citizen_id == next_id_a
 		and CityCitizenRegistrySystem.get_current_state().citizen_version == version_a
 		and str(CityCitizenRegistrySystem.get_current_state().citizens[0].get("sex", ""))
@@ -213,8 +213,8 @@ func _test_equal_version_city_isolation() -> void:
 		and is_same(WorldData.city_object_access_tile_cache, access_cache_b)
 		and CityCitizenMovementRuntimeSystem.get_current_state().citizen_movement_version == 12
 		and CityCitizenTaskRuntimeSystem.get_current_state().citizen_task_version == 14
-		and WorldData.city_assignment_version == 16
-		and WorldData.city_workplace_version == 18
+		and CityAssignmentSystem.get_current_state().assignment_version == 16
+		and CityEmploymentSystem.get_current_state().workplace_version == 18
 		and CityCitizenRegistrySystem.get_current_state().next_citizen_id == 2
 		and CityCitizenRegistrySystem.get_current_state().citizen_version == 1
 		and str(CityCitizenRegistrySystem.get_current_state().citizens[0].get("sex", ""))

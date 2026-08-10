@@ -230,7 +230,9 @@ var city_tree_multimesh_index_by_tile: Dictionary = {}
 var city_tree_multimesh_tile_by_index: Array[Vector2i] = []
 var city_rock_multimesh_index_by_tile: Dictionary = {}
 var city_rock_multimesh_tile_by_index: Array[Vector2i] = []
+var observed_city_assignment_state: CityAssignmentState
 var observed_city_assignment_version: int = -1
+var observed_city_workplace_state: CityWorkplaceState
 var observed_city_workplace_version: int = -1
 var observed_city_tile_data_version: int = -1
 var observed_city_surface_feature_change_version: int = -1
@@ -775,21 +777,43 @@ func _collect_world_data_change_flags(
 		)
 		change_flags["city_construction_changed"] = true
 
+	var current_assignment_state := CityAssignmentSystem.get_current_state()
+	var assignment_state_changed := (
+		observed_city_assignment_state == null
+		or not is_same(
+			observed_city_assignment_state,
+			current_assignment_state
+		)
+	)
+
 	if (
-		observed_city_assignment_version
-		!= WorldData.city_assignment_version
+		assignment_state_changed
+		or observed_city_assignment_version
+		!= current_assignment_state.assignment_version
 	):
+		observed_city_assignment_state = current_assignment_state
 		observed_city_assignment_version = (
-			WorldData.city_assignment_version
+			current_assignment_state.assignment_version
 		)
 		change_flags["city_assignments_changed"] = true
 
+	var current_workplace_state := CityEmploymentSystem.get_current_state()
+	var workplace_state_changed := (
+		observed_city_workplace_state == null
+		or not is_same(
+			observed_city_workplace_state,
+			current_workplace_state
+		)
+	)
+
 	if (
-		observed_city_workplace_version
-		!= WorldData.city_workplace_version
+		workplace_state_changed
+		or observed_city_workplace_version
+		!= current_workplace_state.workplace_version
 	):
+		observed_city_workplace_state = current_workplace_state
 		observed_city_workplace_version = (
-			WorldData.city_workplace_version
+			current_workplace_state.workplace_version
 		)
 		change_flags["city_workplaces_changed"] = true
 
@@ -3586,13 +3610,13 @@ func _append_city_center_object_info(body_lines: Array) -> void:
 	)
 	body_lines.append(
 		"Housed: "
-		+ str(WorldData.get_city_housed_citizen_count())
+		+ str(CityAssignmentSystem.get_city_housed_citizen_count())
 		+ " / "
-		+ str(WorldData.get_total_city_resident_capacity())
+		+ str(CityAssignmentSystem.get_total_city_resident_capacity())
 	)
 	body_lines.append(
 		"Unemployed: "
-		+ str(WorldData.get_city_unemployed_citizen_count())
+		+ str(CityEmploymentSystem.get_city_unemployed_citizen_count())
 	)
 
 
@@ -3602,7 +3626,7 @@ func _append_house_object_info(values: Dictionary) -> void:
 
 	body_lines.append(
 		"Residents: "
-		+ str(WorldData.get_city_object_resident_count(city_object))
+		+ str(CityAssignmentSystem.get_city_object_resident_count(city_object))
 		+ " / "
 		+ str(WorldData.get_city_object_resident_capacity(city_object))
 	)
@@ -3623,7 +3647,7 @@ func _append_house_object_info(values: Dictionary) -> void:
 		+ str(int(food_supply.get("unfulfilled_nutrition", 0)))
 	)
 
-	var resident_names := WorldData.get_city_object_resident_names(
+	var resident_names := CityAssignmentSystem.get_city_object_resident_names(
 		city_object
 	)
 
@@ -3650,14 +3674,14 @@ func _append_workplace_object_info(values: Dictionary) -> void:
 	)
 	body_lines.append(
 		"Assigned: "
-		+ str(WorldData.get_city_object_worker_count(city_object))
+		+ str(CityEmploymentSystem.get_city_object_worker_count(city_object))
 		+ " / "
 		+ str(WorldData.get_city_object_worker_capacity(city_object))
 	)
 	body_lines.append(
 		"Present: "
 		+ str(
-			WorldData.get_city_object_attending_worker_count(
+			CityEmploymentSystem.get_city_object_attending_worker_count(
 				city_object
 			)
 		)
@@ -3671,7 +3695,7 @@ func _append_workplace_object_info(values: Dictionary) -> void:
 		)
 	)
 
-	var worker_names := WorldData.get_city_object_worker_names(
+	var worker_names := CityEmploymentSystem.get_city_object_worker_names(
 		city_object
 	)
 

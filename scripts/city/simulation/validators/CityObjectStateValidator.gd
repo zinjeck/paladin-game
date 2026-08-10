@@ -1688,7 +1688,7 @@ static func _get_expected_productive_worker_count(
 		if int(citizen.get("job_object_id", -1)) != workplace_id:
 			continue
 
-		if not WorldData.is_city_citizen_attending_workplace(
+		if not CityEmploymentSystem.is_city_citizen_attending_workplace(
 			worker_id,
 			workplace_id
 		):

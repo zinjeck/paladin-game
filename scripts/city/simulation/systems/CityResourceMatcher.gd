@@ -77,7 +77,7 @@ static func get_city_home_food_target_nutrition(
 
 	return ceili(
 		float(
-			WorldData.get_city_object_resident_count(home)
+			CityAssignmentSystem.get_city_object_resident_count(home)
 			* CityCitizens.CITIZEN_HUNGER_LOSS_PER_DAY
 			* HOUSEHOLD_FOOD_TARGET_DAY_NUMERATOR
 		)

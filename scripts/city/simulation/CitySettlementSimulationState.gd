@@ -23,6 +23,8 @@ var resource_accounting_state: CityResourceAccountingState = (
 var citizen_registry_state: CityCitizenRegistryState = (
 	CityCitizenRegistryState.new()
 )
+var assignment_state: CityAssignmentState = CityAssignmentState.new()
+var workplace_state: CityWorkplaceState = CityWorkplaceState.new()
 var citizen_spatial_state: CityCitizenSpatialState = (
 	CityCitizenSpatialState.new()
 )
@@ -38,9 +40,6 @@ var construction_state: CityConstructionState = CityConstructionState.new()
 
 var object_access_tile_cache: Dictionary = {}
 
-var assignment_version: int = 0
-var workplace_version: int = 0
-
 
 func capture_from_world_data() -> void:
 	city_world = WorldData.official_city_world
@@ -49,8 +48,6 @@ func capture_from_world_data() -> void:
 
 	object_access_tile_cache = WorldData.city_object_access_tile_cache
 
-	assignment_version = WorldData.city_assignment_version
-	workplace_version = WorldData.city_workplace_version
 
 
 func apply_to_world_data() -> void:
@@ -60,8 +57,6 @@ func apply_to_world_data() -> void:
 
 	WorldData.city_object_access_tile_cache = object_access_tile_cache
 
-	WorldData.city_assignment_version = assignment_version
-	WorldData.city_workplace_version = workplace_version
 
 
 func is_bound_to_world_data_workspace() -> bool:
