@@ -408,7 +408,7 @@ static func get_city_object_topology_blocking_citizen_ids(
 	if city_object_type_preserves_citizen_walkability(object_type):
 		return []
 
-	return WorldData.get_living_city_citizen_ids_in_tiles(footprint_tiles)
+	return CityCitizenSpatialSystem.get_living_city_citizen_ids_in_tiles(footprint_tiles)
 
 
 static func validate_city_object_topology_mutation(
@@ -556,7 +556,7 @@ static func can_place_city_object(
 			if CityLogisticsSystem.has_city_ground_pile_at_tile(tile_position):
 				return false
 
-			if WorldData.has_living_city_citizen_at_tile(tile_position):
+			if CityCitizenSpatialSystem.has_living_city_citizen_at_tile(tile_position):
 				return false
 
 			var tile: Dictionary = city_world.get_tile(x, y)
@@ -606,7 +606,7 @@ static func city_object_placement_has_walkable_access_tile(
 			if footprint_lookup.has(candidate_tile):
 				continue
 
-			if WorldData.is_city_tile_walkable_for_citizen(
+			if CityNavigationSystem.is_city_tile_walkable_for_citizen(
 				city_world,
 				candidate_tile
 			):

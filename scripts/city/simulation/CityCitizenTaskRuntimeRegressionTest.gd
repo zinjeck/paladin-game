@@ -35,7 +35,7 @@ func _test_assignment_registry_and_repairs() -> void:
 	var second_id := int(second.get("id", -1))
 	var third_id := int(third.get("id", -1))
 	var state := (
-		WorldPoliticalState.get_current_city_citizen_task_runtime_state()
+		CityCitizenTaskRuntimeSystem.get_current_state()
 	)
 
 	_expect(
@@ -54,7 +54,7 @@ func _test_assignment_registry_and_repairs() -> void:
 		+ "invalidation per clean assignment."
 	)
 
-	var task_snapshot := WorldData.get_city_active_task_ids_snapshot()
+	var task_snapshot := CityCitizenTaskRuntimeSystem.get_city_active_task_ids_snapshot()
 	task_snapshot.append(99)
 	_expect(
 		task_snapshot == [1, 3, 99]
@@ -65,11 +65,11 @@ func _test_assignment_registry_and_repairs() -> void:
 
 	var version_before_task_updates := state.citizen_task_version
 	_expect(
-		WorldData.set_city_citizen_task_phase(
+		CityCitizenTaskRuntimeSystem.set_city_citizen_task_phase(
 			first_id,
 			WorldData.CITY_CITIZEN_TASK_PHASE_TRAVELING
 		)
-		and WorldData.set_city_citizen_task_activity_state({
+		and CityCitizenTaskRuntimeSystem.set_city_citizen_task_activity_state({
 			"citizen_id": first_id,
 			"target_tile": Vector2i(8, 8),
 			"previous_target_tile": TILE_A,
@@ -86,7 +86,7 @@ func _test_assignment_registry_and_repairs() -> void:
 	var ids_before_rejection := state.active_task_ids.duplicate()
 	var lookup_before_rejection := state.active_task_id_lookup.duplicate(true)
 	_expect(
-		not WorldData.assign_city_citizen_task(second_id, {
+		not CityCitizenTaskRuntimeSystem.assign_city_citizen_task(second_id, {
 			"kind": WorldData.CITY_CITIZEN_TASK_KIND_RETURN_HOME,
 			"source": WorldData.CITY_CITIZEN_TASK_SOURCE_SCHEDULE,
 			"priority": 50,
@@ -120,7 +120,7 @@ func _test_assignment_registry_and_repairs() -> void:
 	state.active_task_id_lookup = duplicate_lookup
 	var version_before_duplicate_clear := state.citizen_task_version
 	_expect(
-		WorldData.clear_city_citizen_task(
+		CityCitizenTaskRuntimeSystem.clear_city_citizen_task(
 			second_id,
 			WorldData.CITY_CITIZEN_TASK_SOURCE_SCHEDULE
 		)
@@ -148,7 +148,7 @@ func _test_assignment_registry_and_repairs() -> void:
 		"Assignment must compact duplicate target entries in place."
 	)
 	_expect(
-		WorldData.clear_city_citizen_task(
+		CityCitizenTaskRuntimeSystem.clear_city_citizen_task(
 			second_id,
 			WorldData.CITY_CITIZEN_TASK_SOURCE_SCHEDULE
 		),
@@ -177,7 +177,7 @@ func _test_assignment_registry_and_repairs() -> void:
 	state.active_task_id_lookup = corrupt_lookup
 	var version_before_rebuild := state.citizen_task_version
 	_expect(
-		WorldData.rebuild_city_active_task_registry()
+		CityCitizenTaskRuntimeSystem.rebuild_city_active_task_registry()
 		and is_same(state.active_task_ids, corrupt_ids)
 		and is_same(state.active_task_id_lookup, corrupt_lookup)
 		and state.active_task_ids == [1, 2, 3]
@@ -188,7 +188,7 @@ func _test_assignment_registry_and_repairs() -> void:
 	)
 	var version_before_clean_rebuild := state.citizen_task_version
 	_expect(
-		not WorldData.rebuild_city_active_task_registry()
+		not CityCitizenTaskRuntimeSystem.rebuild_city_active_task_registry()
 		and state.citizen_task_version == version_before_clean_rebuild,
 		"A clean active-task rebuild must not publish a false change."
 	)
@@ -196,17 +196,17 @@ func _test_assignment_registry_and_repairs() -> void:
 	_set_citizen_alive(third_id, false)
 	var version_before_dead_cleanup := state.citizen_task_version
 	_expect(
-		WorldData.rebuild_city_active_task_registry()
+		CityCitizenTaskRuntimeSystem.rebuild_city_active_task_registry()
 		and state.active_task_ids == [1, 2]
 		and _lookup_matches_ids(state.active_task_id_lookup, [1, 2])
 		and state.citizen_task_version == version_before_dead_cleanup + 1,
 		"Rebuild must exclude a non-living citizen exactly once."
 	)
 	_set_citizen_alive(third_id, true)
-	WorldData.rebuild_city_active_task_registry()
+	CityCitizenTaskRuntimeSystem.rebuild_city_active_task_registry()
 
 	_expect(
-		WorldData.clear_city_citizen_task(
+		CityCitizenTaskRuntimeSystem.clear_city_citizen_task(
 			first_id,
 			WorldData.CITY_CITIZEN_TASK_SOURCE_SCHEDULE
 		),
@@ -218,7 +218,7 @@ func _test_assignment_registry_and_repairs() -> void:
 	state.active_task_id_lookup = stale_lookup
 	var version_before_idempotent_repair := state.citizen_task_version
 	_expect(
-		WorldData.clear_city_citizen_task(
+		CityCitizenTaskRuntimeSystem.clear_city_citizen_task(
 			first_id,
 			WorldData.CITY_CITIZEN_TASK_SOURCE_SCHEDULE
 		)
@@ -235,7 +235,7 @@ func _test_assignment_registry_and_repairs() -> void:
 func _test_empty_ensure_and_schema_migration() -> void:
 	WorldData.reset_runtime_session_state()
 	var empty_state := (
-		WorldPoliticalState.get_current_city_citizen_task_runtime_state()
+		CityCitizenTaskRuntimeSystem.get_current_state()
 	)
 	var stale_ids: Array[int] = [99]
 	var stale_lookup: Dictionary = {99: true}
@@ -243,7 +243,7 @@ func _test_empty_ensure_and_schema_migration() -> void:
 	empty_state.active_task_id_lookup = stale_lookup
 	empty_state.citizen_task_version = 10
 	_expect(
-		WorldData.ensure_city_citizen_task_state() == 0
+		CityCitizenTaskRuntimeSystem.ensure_city_citizen_task_state() == 0
 		and is_same(empty_state.active_task_ids, stale_ids)
 		and is_same(empty_state.active_task_id_lookup, stale_lookup)
 		and empty_state.active_task_ids.is_empty()
@@ -253,7 +253,7 @@ func _test_empty_ensure_and_schema_migration() -> void:
 	)
 	var version_before_clean_empty_ensure := empty_state.citizen_task_version
 	_expect(
-		WorldData.ensure_city_citizen_task_state() == 0
+		CityCitizenTaskRuntimeSystem.ensure_city_citizen_task_state() == 0
 		and empty_state.citizen_task_version
 		== version_before_clean_empty_ensure,
 		"A second clean empty ensure must not invalidate."
@@ -266,14 +266,14 @@ func _test_empty_ensure_and_schema_migration() -> void:
 		TILE_A
 	)
 	var citizen_id := int(citizen.get("id", -1))
-	var citizen_index := WorldData.get_city_citizen_index_by_id(citizen_id)
-	var stored_citizen: Dictionary = WorldData.city_citizens[citizen_index]
+	var citizen_index := CityCitizenRegistrySystem.get_city_citizen_index_by_id(citizen_id)
+	var stored_citizen: Dictionary = CityCitizenRegistrySystem.get_current_state().citizens[citizen_index]
 	stored_citizen["current_task"] = {
 		"kind": WorldData.CITY_CITIZEN_TASK_KIND_NONE,
 	}
-	WorldData.city_citizens[citizen_index] = stored_citizen
+	CityCitizenRegistrySystem.get_current_state().citizens[citizen_index] = stored_citizen
 	var task_state := (
-		WorldPoliticalState.get_current_city_citizen_task_runtime_state()
+		CityCitizenTaskRuntimeSystem.get_current_state()
 	)
 	var migration_ids: Array[int] = [citizen_id]
 	var migration_lookup: Dictionary = {}
@@ -281,7 +281,7 @@ func _test_empty_ensure_and_schema_migration() -> void:
 	task_state.active_task_id_lookup = migration_lookup
 	task_state.citizen_task_version = 40
 	_expect(
-		WorldData.ensure_city_citizen_task_state() == 1
+		CityCitizenTaskRuntimeSystem.ensure_city_citizen_task_state() == 1
 		and is_same(task_state.active_task_ids, migration_ids)
 		and is_same(task_state.active_task_id_lookup, migration_lookup)
 		and task_state.active_task_ids.is_empty()
@@ -291,7 +291,7 @@ func _test_empty_ensure_and_schema_migration() -> void:
 	)
 	var version_before_missing_clear := task_state.citizen_task_version
 	_expect(
-		not WorldData.clear_city_citizen_task(
+		not CityCitizenTaskRuntimeSystem.clear_city_citizen_task(
 			999,
 			WorldData.CITY_CITIZEN_TASK_SOURCE_SCHEDULE
 		)
@@ -301,7 +301,7 @@ func _test_empty_ensure_and_schema_migration() -> void:
 
 
 func _assign_return_home(citizen_id: int, house_id: int) -> bool:
-	return WorldData.assign_city_citizen_task(citizen_id, {
+	return CityCitizenTaskRuntimeSystem.assign_city_citizen_task(citizen_id, {
 		"kind": WorldData.CITY_CITIZEN_TASK_KIND_RETURN_HOME,
 		"source": WorldData.CITY_CITIZEN_TASK_SOURCE_SCHEDULE,
 		"priority": 50,
@@ -310,13 +310,13 @@ func _assign_return_home(citizen_id: int, house_id: int) -> bool:
 
 
 func _set_citizen_alive(citizen_id: int, alive: bool) -> void:
-	var citizen_index := WorldData.get_city_citizen_index_by_id(citizen_id)
+	var citizen_index := CityCitizenRegistrySystem.get_city_citizen_index_by_id(citizen_id)
 	if citizen_index < 0:
 		_expect(false, "The alive-state fixture requires an indexed citizen.")
 		return
-	var citizen: Dictionary = WorldData.city_citizens[citizen_index]
+	var citizen: Dictionary = CityCitizenRegistrySystem.get_current_state().citizens[citizen_index]
 	citizen["alive"] = alive
-	WorldData.city_citizens[citizen_index] = citizen
+	CityCitizenRegistrySystem.get_current_state().citizens[citizen_index] = citizen
 
 
 func _lookup_matches_ids(lookup: Dictionary, expected_ids: Array) -> bool:

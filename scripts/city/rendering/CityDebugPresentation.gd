@@ -230,7 +230,7 @@ static func get_panel_text(values: Dictionary) -> String:
 		+ "\n"
 		+ "Walkable: "
 		+ DebugPanel.bool_to_yes_no(
-			WorldData.is_city_tile_walkable_for_citizen(
+			CityNavigationSystem.is_city_tile_walkable_for_citizen(
 				city_world,
 				inspected_tile
 			)
@@ -412,7 +412,7 @@ static func get_tile_citizen_text(values: Dictionary) -> String:
 		"debug_selected_city_tile",
 		WorldData.INVALID_CITY_TILE_POSITION
 	)
-	var standing_ids := WorldData.get_city_citizen_ids_at_tile(
+	var standing_ids := CityCitizenSpatialSystem.get_city_citizen_ids_at_tile(
 		tile_position
 	)
 	var claiming_ids := []
@@ -422,8 +422,8 @@ static func get_tile_citizen_text(values: Dictionary) -> String:
 		bool(values.get("has_debug_selected_city_tile", false))
 		and tile_position == selected_debug_tile
 	):
-		for citizen_id in WorldData.get_city_active_task_ids_snapshot():
-			var current_task := WorldData.get_city_citizen_current_task(
+		for citizen_id in CityCitizenTaskRuntimeSystem.get_city_active_task_ids_snapshot():
+			var current_task := CityCitizenTaskRuntimeSystem.get_city_citizen_current_task(
 				citizen_id
 			)
 
@@ -460,14 +460,14 @@ static func get_selection_text(values: Dictionary) -> String:
 		return "Selected entity: none\n"
 
 	if selected_entity_kind == CITY_SELECTION_KIND_CITIZEN:
-		var citizen := WorldData.get_city_citizen_by_id(
+		var citizen := CityCitizenRegistrySystem.get_city_citizen_by_id(
 			selected_entity_id
 		)
 
 		if citizen.is_empty():
 			return "Selected citizen: missing\n"
 
-		var current_task := WorldData.get_city_citizen_current_task(
+		var current_task := CityCitizenTaskRuntimeSystem.get_city_citizen_current_task(
 			selected_entity_id
 		)
 		var task_target_text := "none"

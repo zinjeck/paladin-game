@@ -76,7 +76,7 @@ func _test_normal_order_preempts_before_pickup() -> void:
 		not stockpile.is_empty()
 		and source_id > 0
 		and not haul_request.is_empty()
-		and WorldData.assign_city_citizen_task(citizen_id, haul_request),
+		and CityCitizenTaskRuntimeSystem.assign_city_citizen_task(citizen_id, haul_request),
 		"The pre-pickup fixture must assign a real autonomous haul."
 	)
 
@@ -95,7 +95,7 @@ func _test_normal_order_preempts_before_pickup() -> void:
 		Vector2i(4, 5)
 	)
 	CitizenDecisionSystemScript.run_tick(1, 2)
-	var assigned_task := WorldData.get_city_citizen_current_task(citizen_id)
+	var assigned_task := CityCitizenTaskRuntimeSystem.get_city_citizen_current_task(citizen_id)
 
 	_expect(
 		str(assigned_task.get("kind", ""))
@@ -118,7 +118,7 @@ func _test_normal_order_preempts_before_pickup() -> void:
 
 	# Run the actual command executor through its visible performing boundary.
 	CitizenTaskSystemScript.run_tick(2, 2)
-	var performing_task := WorldData.get_city_citizen_current_task(citizen_id)
+	var performing_task := CityCitizenTaskRuntimeSystem.get_city_citizen_current_task(citizen_id)
 	_expect(
 		str(performing_task.get("phase", ""))
 		== WorldData.CITY_CITIZEN_TASK_PHASE_PERFORMING,
@@ -157,13 +157,13 @@ func _test_normal_order_waits_for_picked_up_cargo_delivery() -> void:
 
 	_expect(
 		not haul_request.is_empty()
-		and WorldData.assign_city_citizen_task(citizen_id, haul_request),
+		and CityCitizenTaskRuntimeSystem.assign_city_citizen_task(citizen_id, haul_request),
 		"The after-pickup fixture must assign a real autonomous haul."
 	)
 	CitizenTaskSystemScript.run_tick(1, 2)
 	CitizenTaskSystemScript.run_tick(2, 2)
 
-	var haul_after_pickup := WorldData.get_city_citizen_current_haul(citizen_id)
+	var haul_after_pickup := CityCitizenTaskRuntimeSystem.get_city_citizen_current_haul(citizen_id)
 	_expect(
 		WorldData.get_city_citizen_haul_cargo_resource_amount(
 			citizen_id,
@@ -188,7 +188,7 @@ func _test_normal_order_waits_for_picked_up_cargo_delivery() -> void:
 		)
 	)
 	CitizenDecisionSystemScript.run_tick(3, 2)
-	var task_after_order := WorldData.get_city_citizen_current_task(citizen_id)
+	var task_after_order := CityCitizenTaskRuntimeSystem.get_city_citizen_current_task(citizen_id)
 
 	_expect(
 		str(task_after_order.get("kind", ""))
@@ -217,7 +217,7 @@ func _test_normal_order_waits_for_picked_up_cargo_delivery() -> void:
 		CitizenMovementSystemScript.run_tick(tick_index, 2)
 		CitizenTaskSystemScript.run_tick(tick_index, 2)
 
-		var current_task := WorldData.get_city_citizen_current_task(citizen_id)
+		var current_task := CityCitizenTaskRuntimeSystem.get_city_citizen_current_task(citizen_id)
 
 		if (
 			str(current_task.get("kind", ""))
@@ -294,7 +294,7 @@ func _test_chained_pickup_respects_near_full_destination() -> void:
 		and first_source_id > 0
 		and second_source_id > 0
 		and not haul_request.is_empty()
-		and WorldData.assign_city_citizen_task(citizen_id, haul_request),
+		and CityCitizenTaskRuntimeSystem.assign_city_citizen_task(citizen_id, haul_request),
 		"The chained-pickup fixture must assign a near-full storage haul."
 	)
 
@@ -491,7 +491,7 @@ func _test_public_storage_keep_fallback() -> void:
 	)
 	var stockpile_probe_assigned := (
 		not stockpile_probe_request.is_empty()
-		and WorldData.assign_city_citizen_task(
+		and CityCitizenTaskRuntimeSystem.assign_city_citizen_task(
 			citizen_id,
 			stockpile_probe_request
 		)
@@ -519,7 +519,7 @@ func _test_public_storage_keep_fallback() -> void:
 		"Cleanup hauling must prefer a Stockpile while it has unreserved space."
 	)
 	_expect(
-		WorldData.clear_city_citizen_task(
+		CityCitizenTaskRuntimeSystem.clear_city_citizen_task(
 			citizen_id,
 			WorldData.CITY_CITIZEN_TASK_SOURCE_AUTONOMY
 		)
@@ -558,7 +558,7 @@ func _test_public_storage_keep_fallback() -> void:
 		)
 	)
 
-	citizen = WorldData.get_city_citizen_by_id(citizen_id)
+	citizen = CityCitizenRegistrySystem.get_city_citizen_by_id(citizen_id)
 	var keep_request := _make_cleanup_haul_request(
 		city_world,
 		citizen,
@@ -570,7 +570,7 @@ func _test_public_storage_keep_fallback() -> void:
 			CityObjectSystem.get_city_object_by_id(stockpile_id)
 		) == 0
 		and not keep_request.is_empty()
-		and WorldData.assign_city_citizen_task(citizen_id, keep_request)
+		and CityCitizenTaskRuntimeSystem.assign_city_citizen_task(citizen_id, keep_request)
 	)
 	var keep_reservation_id := (
 		CityLogisticsSystem.get_city_haul_reservation_id_for_citizen(
@@ -690,7 +690,7 @@ func _test_critical_hunger_interrupts_cargo_safely() -> void:
 	# boundary specifically begins from autonomous logistics, so release that
 	# assignment before creating the real haul task.
 	if int(
-		WorldData.get_city_citizen_by_id(citizen_id).get(
+		CityCitizenRegistrySystem.get_city_citizen_by_id(citizen_id).get(
 			"job_object_id",
 			-1
 		)
@@ -707,7 +707,7 @@ func _test_critical_hunger_interrupts_cargo_safely() -> void:
 		citizen,
 		source_id
 	)
-	var haul_assigned := WorldData.assign_city_citizen_task(
+	var haul_assigned := CityCitizenTaskRuntimeSystem.assign_city_citizen_task(
 		citizen_id,
 		haul_request
 	)
@@ -735,7 +735,7 @@ func _test_critical_hunger_interrupts_cargo_safely() -> void:
 	)
 	WorldData.set_city_citizen_hunger_state(citizen_id, 20, 0)
 	CitizenDecisionSystemScript.run_tick(3, 2)
-	var food_task := WorldData.get_city_citizen_current_task(citizen_id)
+	var food_task := CityCitizenTaskRuntimeSystem.get_city_citizen_current_task(citizen_id)
 
 	_expect(
 		str(food_task.get("kind", ""))
@@ -818,7 +818,7 @@ func _test_construction_labor_releases_at_atomic_boundary() -> void:
 		Vector2i(25, 18)
 	)
 	CitizenDecisionSystemScript.run_tick(1, 2)
-	var assigned_task := WorldData.get_city_citizen_current_task(citizen_id)
+	var assigned_task := CityCitizenTaskRuntimeSystem.get_city_citizen_current_task(citizen_id)
 	_expect(
 		str(assigned_task.get("kind", ""))
 		== WorldData.CITY_CITIZEN_TASK_KIND_CONSTRUCTION
@@ -827,7 +827,7 @@ func _test_construction_labor_releases_at_atomic_boundary() -> void:
 	)
 
 	CitizenTaskSystemScript.run_tick(2, 2)
-	var performing_task := WorldData.get_city_citizen_current_task(citizen_id)
+	var performing_task := CityCitizenTaskRuntimeSystem.get_city_citizen_current_task(citizen_id)
 	var boundary_minute := int(
 		performing_task.get(
 			"next_action_world_minute",
@@ -845,7 +845,7 @@ func _test_construction_labor_releases_at_atomic_boundary() -> void:
 
 	SimulationClock.absolute_world_minutes = boundary_minute - 1
 	CitizenTaskSystemScript.run_tick(3, 29)
-	var before_boundary_task := WorldData.get_city_citizen_current_task(
+	var before_boundary_task := CityCitizenTaskRuntimeSystem.get_city_citizen_current_task(
 		citizen_id
 	)
 	_expect(
@@ -863,7 +863,7 @@ func _test_construction_labor_releases_at_atomic_boundary() -> void:
 
 	SimulationClock.absolute_world_minutes = boundary_minute
 	CitizenTaskSystemScript.run_tick(4, 1)
-	var released_task := WorldData.get_city_citizen_current_task(citizen_id)
+	var released_task := CityCitizenTaskRuntimeSystem.get_city_citizen_current_task(citizen_id)
 	_expect(
 		str(released_task.get("kind", ""))
 		== WorldData.CITY_CITIZEN_TASK_KIND_NONE
@@ -886,7 +886,7 @@ func _test_construction_labor_releases_at_atomic_boundary() -> void:
 		"A released laborer must be immediately eligible to re-query the scheduler."
 	)
 	CitizenDecisionSystemScript.run_tick(5, 2)
-	var reassigned_task := WorldData.get_city_citizen_current_task(citizen_id)
+	var reassigned_task := CityCitizenTaskRuntimeSystem.get_city_citizen_current_task(citizen_id)
 	_expect(
 		str(reassigned_task.get("source", ""))
 		== WorldData.CITY_CITIZEN_TASK_SOURCE_PLAYER
@@ -935,7 +935,7 @@ func _test_culture_identity_validation() -> void:
 	var errors: Array[String] = []
 	CityCitizenStateValidatorScript._validate_city_citizen_culture_state(
 		errors,
-		WorldData.city_citizen_index_by_id
+		CityCitizenRegistrySystem.get_current_state().citizen_index_by_id
 	)
 	_expect(
 		errors.is_empty(),
@@ -946,7 +946,7 @@ func _test_culture_identity_validation() -> void:
 	errors.clear()
 	CityCitizenStateValidatorScript._validate_city_citizen_culture_state(
 		errors,
-		WorldData.city_citizen_index_by_id
+		CityCitizenRegistrySystem.get_current_state().citizen_index_by_id
 	)
 	_expect(
 		_culture_errors_contain(errors, "missing culture_id"),
@@ -957,7 +957,7 @@ func _test_culture_identity_validation() -> void:
 	errors.clear()
 	CityCitizenStateValidatorScript._validate_city_citizen_culture_state(
 		errors,
-		WorldData.city_citizen_index_by_id
+		CityCitizenRegistrySystem.get_current_state().citizen_index_by_id
 	)
 	_expect(
 		_culture_errors_contain(errors, "non-integer culture_id"),
@@ -968,7 +968,7 @@ func _test_culture_identity_validation() -> void:
 	errors.clear()
 	CityCitizenStateValidatorScript._validate_city_citizen_culture_state(
 		errors,
-		WorldData.city_citizen_index_by_id
+		CityCitizenRegistrySystem.get_current_state().citizen_index_by_id
 	)
 	_expect(
 		_culture_errors_contain(errors, "nonpositive culture_id"),
@@ -984,7 +984,7 @@ func _test_culture_identity_validation() -> void:
 	errors.clear()
 	CityCitizenStateValidatorScript._validate_city_citizen_culture_state(
 		errors,
-		WorldData.city_citizen_index_by_id
+		CityCitizenRegistrySystem.get_current_state().citizen_index_by_id
 	)
 	_expect(
 		_culture_errors_contain(errors, "references nonexistent culture"),
@@ -995,19 +995,19 @@ func _test_culture_identity_validation() -> void:
 	errors.clear()
 	CityCitizenStateValidatorScript._validate_city_citizen_culture_state(
 		errors,
-		WorldData.city_citizen_index_by_id
+		CityCitizenRegistrySystem.get_current_state().citizen_index_by_id
 	)
 	_expect(
 		errors.is_empty(),
 		"Restoring the alternate culture must restore valid culture state."
 	)
 
-	var founding_citizen := WorldData.get_city_citizen_by_id(1)
+	var founding_citizen := CityCitizenRegistrySystem.get_city_citizen_by_id(1)
 	founding_citizen["culture_id"] = alternate_culture_id
 	errors.clear()
 	CityCitizenStateValidatorScript._validate_city_citizen_culture_state(
 		errors,
-		WorldData.city_citizen_index_by_id
+		CityCitizenRegistrySystem.get_current_state().citizen_index_by_id
 	)
 	_expect(
 		_culture_errors_contain(

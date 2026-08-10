@@ -276,7 +276,7 @@ func _on_debug_panel_resized() -> void:
 
 
 static func get_debug_list_text() -> String:
-	var citizens := WorldData.get_city_citizen_snapshot()
+	var citizens := CityCitizenRegistrySystem.get_city_citizen_snapshot()
 
 	if citizens.is_empty():
 		return "No citizens."
@@ -311,7 +311,7 @@ static func get_debug_line(citizen: Dictionary) -> String:
 		position_text = str(raw_position)
 
 	var sex_text := (
-		WorldData.get_city_citizen_sex_display_name(
+		CityCitizens.get_city_citizen_sex_display_name(
 			str(citizen.get("sex", ""))
 		)
 	)
@@ -343,7 +343,7 @@ static func get_haul_text(citizen: Dictionary) -> String:
 	if not WorldData.city_citizen_is_hauling(citizen_id):
 		return "No"
 
-	var haul := WorldData.get_city_citizen_current_haul(citizen_id)
+	var haul := CityCitizenTaskRuntimeSystem.get_city_citizen_current_haul(citizen_id)
 	var cargo_resources := (
 		WorldData.get_city_citizen_haul_cargo_resources(citizen_id)
 	)

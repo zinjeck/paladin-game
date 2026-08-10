@@ -7,11 +7,10 @@ class_name CityCitizenSpatialState
 # only the derived tile-to-citizen index and the version that invalidates its
 # observers. Movement runtime is isolated in CityCitizenMovementRuntimeState,
 # while task indexes are isolated in CityCitizenTaskRuntimeState. Pathfinding
-# behavior, assignments, and object access-tile caching remain outside this
-# state.
-#
-# WorldData retains the existing spatial behavior during this ownership-only
-# pass. Keep this class strictly data-only.
+# behavior is owned by CityNavigationSystem, while assignments and object
+# access-tile caching remain outside this state. CityCitizenSpatialSystem owns
+# index maintenance and version invalidation. Keep this class strictly
+# data-only.
 
 var citizen_ids_by_tile: Dictionary = {}
 var citizen_spatial_version: int = 0

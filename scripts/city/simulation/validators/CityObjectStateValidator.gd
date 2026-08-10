@@ -25,7 +25,7 @@ static func _validate_city_foundation_state(
 			city_center_count += 1
 
 	if not WorldData.player_city_founded:
-		if not WorldData.city_citizens.is_empty():
+		if not CityCitizenRegistrySystem.get_current_state().citizens.is_empty():
 			errors.append(
 				"Citizens exist before the player city is founded."
 			)
@@ -44,7 +44,7 @@ static func _validate_city_foundation_state(
 				+ " exist."
 		)
 
-	if WorldData.city_citizens.is_empty():
+	if CityCitizenRegistrySystem.get_current_state().citizens.is_empty():
 		warnings.append(
 			"The city is founded but currently has no citizens."
 		)
@@ -440,7 +440,7 @@ static func _validate_city_assignments(
 		)
 
 		var citizen: Dictionary = (
-			WorldData.city_citizens[citizen_index]
+			CityCitizenRegistrySystem.get_current_state().citizens[citizen_index]
 		)
 
 		var is_alive := bool(
@@ -694,7 +694,7 @@ static func _validate_resident_list(
 		)
 
 		var citizen: Dictionary = (
-			WorldData.city_citizens[citizen_index]
+			CityCitizenRegistrySystem.get_current_state().citizens[citizen_index]
 		)
 
 		if not bool(citizen.get("alive", true)):
@@ -821,7 +821,7 @@ static func _validate_worker_list(
 		)
 
 		var citizen: Dictionary = (
-			WorldData.city_citizens[citizen_index]
+			CityCitizenRegistrySystem.get_current_state().citizens[citizen_index]
 		)
 
 		if not bool(citizen.get("alive", true)):
@@ -869,7 +869,7 @@ static func _validate_citizen_inventories(
 		)
 
 		var citizen: Dictionary = (
-			WorldData.city_citizens[citizen_index]
+			CityCitizenRegistrySystem.get_current_state().citizens[citizen_index]
 		)
 
 		var carry_capacity := int(
@@ -1673,7 +1673,7 @@ static func _get_expected_productive_worker_count(
 			continue
 
 		var citizen_index := int(citizen_lookup[worker_id])
-		var citizen: Dictionary = WorldData.city_citizens[citizen_index]
+		var citizen: Dictionary = CityCitizenRegistrySystem.get_current_state().citizens[citizen_index]
 
 		if not bool(citizen.get("alive", false)):
 			continue

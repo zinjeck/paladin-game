@@ -73,23 +73,23 @@ func _test_equal_version_city_isolation() -> void:
 	_expect(
 		WorldPoliticalState.set_active_settlement(city_a_id)
 		and is_same(
-			WorldPoliticalState.get_current_city_citizen_task_runtime_state(),
+			CityCitizenTaskRuntimeSystem.get_current_state(),
 			state_a
 		)
-		and is_same(WorldData.city_active_task_ids, task_ids_a)
-		and is_same(WorldData.city_active_task_id_lookup, task_lookup_a)
-		and WorldData.city_citizen_task_version == 1,
+		and is_same(CityCitizenTaskRuntimeSystem.get_current_state().active_task_ids, task_ids_a)
+		and is_same(CityCitizenTaskRuntimeSystem.get_current_state().active_task_id_lookup, task_lookup_a)
+		and CityCitizenTaskRuntimeSystem.get_current_state().citizen_task_version == 1,
 		"A -> B -> A must restore City A's exact task owner."
 	)
 	_expect(
 		WorldPoliticalState.set_active_settlement(city_b_id)
 		and is_same(
-			WorldPoliticalState.get_current_city_citizen_task_runtime_state(),
+			CityCitizenTaskRuntimeSystem.get_current_state(),
 			state_b
 		)
-		and is_same(WorldData.city_active_task_ids, task_ids_b)
-		and is_same(WorldData.city_active_task_id_lookup, task_lookup_b)
-		and WorldData.city_citizen_task_version == 1,
+		and is_same(CityCitizenTaskRuntimeSystem.get_current_state().active_task_ids, task_ids_b)
+		and is_same(CityCitizenTaskRuntimeSystem.get_current_state().active_task_id_lookup, task_lookup_b)
+		and CityCitizenTaskRuntimeSystem.get_current_state().citizen_task_version == 1,
 		"A -> B -> A -> B must leave City B unchanged."
 	)
 
@@ -140,13 +140,13 @@ func _test_renderer_identity_invalidation(
 ) -> void:
 	var renderer := CityRenderer.new()
 	var registry_state := (
-		WorldPoliticalState.get_current_city_citizen_registry_state()
+		CityCitizenRegistrySystem.get_current_state()
 	)
 	var spatial_state := (
-		WorldPoliticalState.get_current_city_citizen_spatial_state()
+		CityCitizenSpatialSystem.get_current_state()
 	)
 	var movement_state := (
-		WorldPoliticalState.get_current_city_citizen_movement_runtime_state()
+		CityCitizenMovementRuntimeSystem.get_current_state()
 	)
 	renderer.observed_city_citizen_registry_state = registry_state
 	renderer.observed_city_citizen_version = registry_state.citizen_version
@@ -238,9 +238,9 @@ func _test_reservation_invalidation_is_local(values: Dictionary) -> void:
 	)
 	_expect(
 		WorldPoliticalState.set_active_settlement(city_a_id)
-		and WorldData.city_citizen_task_version == version_a
+		and CityCitizenTaskRuntimeSystem.get_current_state().citizen_task_version == version_a
 		and WorldPoliticalState.set_active_settlement(city_b_id)
-		and WorldData.city_citizen_task_version == version_b + 1,
+		and CityCitizenTaskRuntimeSystem.get_current_state().citizen_task_version == version_b + 1,
 		"Switching must preserve the cross-domain invalidation in City B only."
 	)
 
@@ -278,7 +278,7 @@ func _prepare_active_city_task(
 		house_id > 0
 		and citizen_id == 1
 		and WorldData.assign_city_citizen_home(citizen_id, house_id)
-		and WorldData.assign_city_citizen_task(citizen_id, {
+		and CityCitizenTaskRuntimeSystem.assign_city_citizen_task(citizen_id, {
 			"kind": WorldData.CITY_CITIZEN_TASK_KIND_RETURN_HOME,
 			"source": WorldData.CITY_CITIZEN_TASK_SOURCE_SCHEDULE,
 			"priority": 50,
@@ -287,7 +287,7 @@ func _prepare_active_city_task(
 		"Each City must create one real active Return Home task."
 	)
 	var task_state := (
-		WorldPoliticalState.get_current_city_citizen_task_runtime_state()
+		CityCitizenTaskRuntimeSystem.get_current_state()
 	)
 	return {
 		"citizen_id": citizen_id,

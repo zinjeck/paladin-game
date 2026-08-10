@@ -83,7 +83,7 @@ func _test_scheduled_home_delivery_accounting() -> void:
 	var task_request := (
 		CitizenDecisionSystemScript
 		._get_scheduled_home_food_delivery_task_request(
-			WorldData.get_city_citizen_by_id(citizen_id)
+			CityCitizenRegistrySystem.get_city_citizen_by_id(citizen_id)
 		)
 	)
 	var requested_haul: Dictionary = task_request.get("haul", {})
@@ -104,7 +104,7 @@ func _test_scheduled_home_delivery_accounting() -> void:
 		return
 
 	_expect(
-		WorldData.assign_city_citizen_task(citizen_id, task_request),
+		CityCitizenTaskRuntimeSystem.assign_city_citizen_task(citizen_id, task_request),
 		"The generated home-delivery request must create a real haul assignment."
 	)
 	var reservation_id := (
@@ -498,7 +498,7 @@ func _test_reserved_stockpile_falls_back_to_keep() -> void:
 		blocker_pile_id > 0
 		and cleanup_pile_id > 0
 		and not blocker_request.is_empty()
-		and WorldData.assign_city_citizen_task(blocker_id, blocker_request),
+		and CityCitizenTaskRuntimeSystem.assign_city_citizen_task(blocker_id, blocker_request),
 		"A first cleanup haul must reserve the Stockpile's final shared slot."
 	)
 	var blocker_reservation_id := (
@@ -556,7 +556,7 @@ func _test_reserved_stockpile_falls_back_to_keep() -> void:
 	var container_before_cleanup := accounting_state.container_version
 	var public_before_cleanup := accounting_state.public_storage_version
 	_expect(
-		WorldData.assign_city_citizen_task(cleaner_id, cleanup_request),
+		CityCitizenTaskRuntimeSystem.assign_city_citizen_task(cleaner_id, cleanup_request),
 		"The Keep-fallback request must become a real cleanup assignment."
 	)
 	var cleaner_reservation_id := (
@@ -683,8 +683,8 @@ func _advance_single_haul_tick(
 ) -> void:
 	SimulationClock.absolute_world_minutes += 2
 	CitizenMovementSystemScript.run_tick(tick_index, 2)
-	var citizen := WorldData.get_city_citizen_by_id(citizen_id)
-	var current_task := WorldData.get_city_citizen_current_task(citizen_id)
+	var citizen := CityCitizenRegistrySystem.get_city_citizen_by_id(citizen_id)
+	var current_task := CityCitizenTaskRuntimeSystem.get_city_citizen_current_task(citizen_id)
 
 	if (
 		citizen.is_empty()
@@ -716,7 +716,7 @@ func _run_single_haul_to_completion(
 			citizen_id,
 			start_tick + tick_offset
 		)
-		var current_task := WorldData.get_city_citizen_current_task(citizen_id)
+		var current_task := CityCitizenTaskRuntimeSystem.get_city_citizen_current_task(citizen_id)
 		var reservation_id := (
 			CityLogisticsSystem.get_city_haul_reservation_id_for_citizen(
 				citizen_id

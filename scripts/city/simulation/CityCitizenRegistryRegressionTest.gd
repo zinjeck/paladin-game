@@ -24,7 +24,7 @@ func _test_add_rebuild_remove_and_reset_integrity() -> void:
 	var culture := WorldData.create_culture("Citizen Registry Integrity Culture")
 	var culture_id := int(culture.get("id", -1))
 	var state := (
-		WorldPoliticalState.get_current_city_citizen_registry_state()
+		CityCitizenRegistrySystem.get_current_state()
 	)
 	var registry_array: Array = state.citizens
 	var registry_index: Dictionary = state.citizen_index_by_id
@@ -47,8 +47,8 @@ func _test_add_rebuild_remove_and_reset_integrity() -> void:
 	if registry_array.size() < 3:
 		return
 	_expect(
-		is_same(WorldData.city_citizens, registry_array)
-		and is_same(WorldData.city_citizen_index_by_id, registry_index),
+		is_same(CityCitizenRegistrySystem.get_current_state().citizens, registry_array)
+		and is_same(CityCitizenRegistrySystem.get_current_state().citizen_index_by_id, registry_index),
 		"Compatibility access must expose the authoritative registry references."
 	)
 
@@ -56,7 +56,7 @@ func _test_add_rebuild_remove_and_reset_integrity() -> void:
 	# mutation proves that the existing index rebuild selects and repairs the
 	# active owner without introducing cross-domain cleanup behavior in Pass 4.
 	registry_array.remove_at(1)
-	WorldData.rebuild_city_citizen_index()
+	CityCitizenRegistrySystem.rebuild_city_citizen_index()
 	state.citizen_version += 1
 	_expect(
 		registry_array.size() == 2
@@ -65,8 +65,8 @@ func _test_add_rebuild_remove_and_reset_integrity() -> void:
 		and not registry_index.has(2)
 		and int(registry_index.get(1, -1)) == 0
 		and int(registry_index.get(3, -1)) == 1
-		and WorldData.get_city_citizen_index_by_id(2) == -1
-		and WorldData.get_city_citizen_by_id(2).is_empty()
+		and CityCitizenRegistrySystem.get_city_citizen_index_by_id(2) == -1
+		and CityCitizenRegistrySystem.get_city_citizen_by_id(2).is_empty()
 		and state.next_citizen_id == 4
 		and state.citizen_version == 4,
 		"Rebuild must remap survivors without reusing the removed local ID."
@@ -84,11 +84,11 @@ func _test_add_rebuild_remove_and_reset_integrity() -> void:
 	WorldData.reset_city_citizen_state()
 	_expect(
 		is_same(
-			WorldPoliticalState.get_current_city_citizen_registry_state(),
+			CityCitizenRegistrySystem.get_current_state(),
 			state
 		)
-		and is_same(WorldData.city_citizens, registry_array)
-		and is_same(WorldData.city_citizen_index_by_id, registry_index)
+		and is_same(CityCitizenRegistrySystem.get_current_state().citizens, registry_array)
+		and is_same(CityCitizenRegistrySystem.get_current_state().citizen_index_by_id, registry_index)
 		and registry_array.is_empty()
 		and registry_index.is_empty()
 		and state.next_citizen_id == 1
@@ -107,7 +107,7 @@ func _test_add_rebuild_remove_and_reset_integrity() -> void:
 
 	WorldData.reset_runtime_session_state()
 	var fresh_state := (
-		WorldPoliticalState.get_current_city_citizen_registry_state()
+		CityCitizenRegistrySystem.get_current_state()
 	)
 	_expect(
 		not is_same(fresh_state, state)

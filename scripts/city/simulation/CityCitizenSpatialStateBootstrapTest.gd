@@ -53,7 +53,7 @@ func _test_pre_context_state_adoption() -> void:
 		Vector2i(3, 3): [17, 18],
 	}
 	var bootstrap_state := (
-		WorldPoliticalState.get_current_city_citizen_spatial_state()
+		CityCitizenSpatialSystem.get_current_state()
 	)
 	bootstrap_state.citizen_ids_by_tile = bootstrap_index
 	bootstrap_state.citizen_spatial_version = 5
@@ -79,14 +79,14 @@ func _test_pre_context_state_adoption() -> void:
 			context.get_city_citizen_spatial_state(),
 			bootstrap_state
 		)
-		and is_same(WorldData.city_citizen_ids_by_tile, bootstrap_index)
-		and WorldData.city_citizen_spatial_version == 5,
+		and is_same(CityCitizenSpatialSystem.get_current_state().citizen_ids_by_tile, bootstrap_index)
+		and CityCitizenSpatialSystem.get_current_state().citizen_spatial_version == 5,
 		"Context and compatibility access must resolve one spatial owner."
 	)
 	_expect(
 		WorldPoliticalState.synchronize_foundation_with_world_data()
 		and is_same(
-			WorldPoliticalState.get_current_city_citizen_spatial_state(),
+			CityCitizenSpatialSystem.get_current_state(),
 			bootstrap_state
 		),
 		"Repeated synchronization must not replace the spatial owner."
@@ -136,14 +136,14 @@ func _test_real_founding_spatial_bootstrap() -> void:
 
 	_expect(
 		WorldData.has_player_city()
-		and WorldData.city_citizens.size() == WorldData.STARTING_CITY_POPULATION
+		and CityCitizenRegistrySystem.get_current_state().citizens.size() == WorldData.STARTING_CITY_POPULATION
 		and spatial_state.citizen_spatial_version
 		== WorldData.STARTING_CITY_POPULATION
 		and _spatial_index_matches_registry(spatial_index),
 		"Founding must index all eight citizens and publish eight spatial changes."
 	)
 	_expect(
-		is_same(WorldData.city_citizen_ids_by_tile, spatial_index)
+		is_same(CityCitizenSpatialSystem.get_current_state().citizen_ids_by_tile, spatial_index)
 		and is_same(
 			WorldPoliticalState
 			.get_active_settlement_context()
@@ -162,13 +162,13 @@ func _test_real_founding_spatial_bootstrap() -> void:
 		"Repeated founding initialization must not duplicate or invalidate space."
 	)
 
-	var legacy_citizen: Dictionary = WorldData.city_citizens[0]
+	var legacy_citizen: Dictionary = CityCitizenRegistrySystem.get_current_state().citizens[0]
 	legacy_citizen.erase("city_tile_position")
-	WorldData.city_citizens[0] = legacy_citizen
+	CityCitizenRegistrySystem.get_current_state().citizens[0] = legacy_citizen
 	var version_before_legacy_repair := spatial_state.citizen_spatial_version
 	_expect(
-		WorldData.ensure_city_citizen_spatial_state(city_world) == 1
-		and WorldData.city_citizens[0].get("city_tile_position") is Vector2i
+		CityCitizenSpatialSystem.ensure_city_citizen_spatial_state(city_world) == 1
+		and CityCitizenRegistrySystem.get_current_state().citizens[0].get("city_tile_position") is Vector2i
 		and spatial_state.citizen_spatial_version
 		== version_before_legacy_repair + 1
 		and _spatial_index_matches_registry(spatial_index),
@@ -176,7 +176,7 @@ func _test_real_founding_spatial_bootstrap() -> void:
 	)
 	var version_before_clean_ensure := spatial_state.citizen_spatial_version
 	_expect(
-		WorldData.ensure_city_citizen_spatial_state(city_world) == 0
+		CityCitizenSpatialSystem.ensure_city_citizen_spatial_state(city_world) == 0
 		and spatial_state.citizen_spatial_version
 		== version_before_clean_ensure,
 		"A clean spatial ensure must not publish a false change."
@@ -221,7 +221,7 @@ func _test_legacy_backend_conversion_adopts_state() -> void:
 		culture_id
 	)
 	var legacy_state := (
-		WorldPoliticalState.get_current_city_citizen_spatial_state()
+		CityCitizenSpatialSystem.get_current_state()
 	)
 	var legacy_index: Dictionary = legacy_state.citizen_ids_by_tile
 	var legacy_city_id := int(legacy_city["id"])
@@ -261,7 +261,7 @@ func _test_legacy_backend_conversion_adopts_state() -> void:
 		"A second legacy-backed City must use the rotated fallback."
 	)
 	var rotated_fallback := (
-		WorldPoliticalState.get_current_city_citizen_spatial_state()
+		CityCitizenSpatialSystem.get_current_state()
 	)
 	_expect(
 		not is_same(rotated_fallback, legacy_state)
@@ -272,16 +272,16 @@ func _test_legacy_backend_conversion_adopts_state() -> void:
 	_expect(
 		WorldPoliticalState.set_active_settlement(legacy_city_id)
 		and is_same(
-			WorldPoliticalState.get_current_city_citizen_spatial_state(),
+			CityCitizenSpatialSystem.get_current_state(),
 			legacy_state
 		)
-		and is_same(WorldData.city_citizen_ids_by_tile, legacy_index),
+		and is_same(CityCitizenSpatialSystem.get_current_state().citizen_ids_by_tile, legacy_index),
 		"The converted City must retain its exact spatial owner after switching."
 	)
 
 	WorldData.reset_runtime_session_state()
 	var reset_state := (
-		WorldPoliticalState.get_current_city_citizen_spatial_state()
+		CityCitizenSpatialSystem.get_current_state()
 	)
 	_expect(
 		WorldPoliticalState.settlement_city_state_by_id.is_empty()
@@ -294,7 +294,7 @@ func _test_legacy_backend_conversion_adopts_state() -> void:
 
 func _spatial_index_matches_registry(spatial_index: Dictionary) -> bool:
 	var expected_by_tile: Dictionary = {}
-	for raw_citizen in WorldData.city_citizens:
+	for raw_citizen in CityCitizenRegistrySystem.get_current_state().citizens:
 		if not raw_citizen is Dictionary:
 			return false
 		var citizen: Dictionary = raw_citizen

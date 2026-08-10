@@ -38,6 +38,330 @@ const NEIGHBOR_OFFSETS := [
 	Vector2i(1, 1)
 ]
 
+static func city_citizen_can_access_object_interior(
+	citizen_id: int,
+	city_object: Dictionary
+) -> bool:
+	if (
+		citizen_id <= 0
+		or city_object.is_empty()
+		or not CityObjectSystem.city_object_supports_citizen_interior(city_object)
+	):
+		return false
+
+	var citizen := CityCitizenRegistrySystem.get_city_citizen_by_id(citizen_id)
+
+	if (
+		citizen.is_empty()
+		or not bool(citizen.get("alive", false))
+	):
+		return false
+
+	var object_id := int(city_object.get("id", -1))
+
+	if object_id <= 0:
+		return false
+
+	var access_mode := (
+		CityObjectSystem.get_city_object_citizen_interior_access_mode(
+			city_object
+		)
+	)
+
+	match access_mode:
+		WorldData.CITY_OBJECT_INTERIOR_ACCESS_RESIDENTS:
+			return (
+				int(citizen.get("home_object_id", -1))
+				== object_id
+				and WorldData.get_city_object_resident_ids(
+					city_object
+				).has(citizen_id)
+			)
+
+		WorldData.CITY_OBJECT_INTERIOR_ACCESS_ASSIGNED_WORKERS:
+			return (
+				int(citizen.get("job_object_id", -1))
+				== object_id
+				and WorldData.get_city_object_worker_ids(
+					city_object
+				).has(citizen_id)
+			)
+
+		WorldData.CITY_OBJECT_INTERIOR_ACCESS_TASK_TARGET:
+			var raw_current_task = citizen.get("current_task", {})
+			var current_task: Dictionary = (
+				raw_current_task
+				if raw_current_task is Dictionary
+				else {}
+			)
+			var task_kind := str(
+				current_task.get(
+					"kind",
+					WorldData.CITY_CITIZEN_TASK_KIND_NONE
+				)
+			)
+
+			# A ground-pile ID lives in a separate namespace and can equal an
+			# unrelated city-object ID. For hauling, authorize only city-object
+			# endpoints instead of treating the legacy numeric task target as an
+			# object reference.
+			if task_kind == WorldData.CITY_CITIZEN_TASK_KIND_HAUL:
+				var raw_haul = citizen.get("current_haul", {})
+				var haul: Dictionary = (
+					raw_haul
+					if raw_haul is Dictionary
+					else {}
+				)
+
+				for endpoint_field in ["source", "destination"]:
+					var raw_endpoint = haul.get(endpoint_field, {})
+
+					if not raw_endpoint is Dictionary:
+						continue
+
+					var endpoint: Dictionary = raw_endpoint
+
+					if (
+						str(
+							endpoint.get(
+								"kind",
+								WorldData.CITY_CITIZEN_HAUL_ENDPOINT_KIND_NONE
+							)
+						)
+						== WorldData.CITY_CITIZEN_HAUL_ENDPOINT_KIND_CITY_OBJECT_CONTAINER
+						and int(endpoint.get("id", -1)) == object_id
+					):
+						return true
+
+				return false
+
+			return (
+				int(current_task.get("target_object_id", -1))
+				== object_id
+			)
+
+		WorldData.CITY_OBJECT_INTERIOR_ACCESS_PUBLIC:
+			return true
+
+	return false
+
+static func get_city_citizen_movement_step_cost(
+	from_tile: Vector2i,
+	to_tile: Vector2i
+) -> int:
+	var delta_x := absi(to_tile.x - from_tile.x)
+	var delta_y := absi(to_tile.y - from_tile.y)
+
+	if delta_x > 1 or delta_y > 1:
+		return 0
+
+	if delta_x == 0 and delta_y == 0:
+		return 0
+
+	var destination_is_road := CityObjectSystem.is_completed_city_road_tile(
+		to_tile
+	)
+
+	if delta_x == 1 and delta_y == 1:
+		if destination_is_road:
+			return WorldData.CITY_CITIZEN_ROAD_DIAGONAL_MOVEMENT_COST
+
+		return WorldData.CITY_CITIZEN_DIAGONAL_MOVEMENT_COST
+
+	if destination_is_road:
+		return WorldData.CITY_CITIZEN_ROAD_CARDINAL_MOVEMENT_COST
+
+	return WorldData.CITY_CITIZEN_CARDINAL_MOVEMENT_COST
+
+static func can_city_citizen_traverse_step(
+	city_world: WorldData,
+	from_tile: Vector2i,
+	to_tile: Vector2i,
+	citizen_id: int = -1
+) -> bool:
+	var step_cost := get_city_citizen_movement_step_cost(
+		from_tile,
+		to_tile
+	)
+
+	if step_cost <= 0:
+		return false
+
+	if not is_city_tile_walkable_for_citizen(
+		city_world,
+		to_tile,
+		citizen_id
+	):
+		return false
+
+	var delta_x := absi(to_tile.x - from_tile.x)
+	var delta_y := absi(to_tile.y - from_tile.y)
+
+	if delta_x == 1 and delta_y == 1:
+		var horizontal_side_tile := Vector2i(
+			to_tile.x,
+			from_tile.y
+		)
+		var vertical_side_tile := Vector2i(
+			from_tile.x,
+			to_tile.y
+		)
+
+		if not is_city_tile_walkable_for_citizen(
+			city_world,
+			horizontal_side_tile,
+			citizen_id
+		):
+			return false
+
+		if not _city_citizen_can_cross_object_boundary(
+			from_tile,
+			horizontal_side_tile,
+			citizen_id
+		):
+			return false
+
+		if not is_city_tile_walkable_for_citizen(
+			city_world,
+			vertical_side_tile,
+			citizen_id
+		):
+			return false
+
+		if not _city_citizen_can_cross_object_boundary(
+			from_tile,
+			vertical_side_tile,
+			citizen_id
+		):
+			return false
+
+	return _city_citizen_can_cross_object_boundary(
+		from_tile,
+		to_tile,
+		citizen_id
+	)
+
+static func _city_citizen_can_cross_object_boundary(
+	from_tile: Vector2i,
+	to_tile: Vector2i,
+	citizen_id: int
+) -> bool:
+	var from_object_id := int(
+		CityObjectSystem.get_city_object_id_at_tile(from_tile)
+	)
+	var to_object_id := int(
+		CityObjectSystem.get_city_object_id_at_tile(to_tile)
+	)
+
+	if from_object_id == to_object_id:
+		return true
+
+	if from_object_id > 0:
+		var from_object := CityObjectSystem.get_city_object_by_id(
+			from_object_id
+		)
+
+		if (
+			CityObjectSystem.city_object_supports_citizen_interior(from_object)
+			and not CityObjectSystem.city_object_boundary_tile_allows_entry(
+				from_object,
+				from_tile
+			)
+		):
+			return false
+
+	if to_object_id > 0:
+		var to_object := CityObjectSystem.get_city_object_by_id(to_object_id)
+
+		if CityObjectSystem.city_object_supports_citizen_interior(to_object):
+			if not city_citizen_can_access_object_interior(
+				citizen_id,
+				to_object
+			):
+				return false
+
+			if not CityObjectSystem.city_object_boundary_tile_allows_entry(
+				to_object,
+				to_tile
+			):
+				return false
+
+	return true
+
+static func is_city_tile_walkable_for_citizen(
+	city_world: WorldData,
+	tile_position: Vector2i,
+	citizen_id: int = -1
+) -> bool:
+	if city_world == null:
+		return false
+
+	if not city_world.is_in_bounds(
+		tile_position.x,
+		tile_position.y
+	):
+		return false
+
+	var tile: Dictionary = city_world.get_tile(
+		tile_position.x,
+		tile_position.y
+	)
+
+	if str(tile.get("terrain", "")) != WorldData.TERRAIN_LAND:
+		return false
+
+	if not CityObjectSystem.has_city_object_at_tile(tile_position):
+		return true
+
+	var object_id := int(
+		CityObjectSystem.get_city_object_id_at_tile(tile_position)
+	)
+	var occupying_object := CityObjectSystem.get_city_object_by_id(object_id)
+
+	if occupying_object.is_empty():
+		return false
+
+	if (
+		str(occupying_object.get("type", ""))
+		== WorldData.CITY_OBJECT_ROAD
+	):
+		return true
+
+	if citizen_id <= 0:
+		return false
+
+	var citizen := CityCitizenRegistrySystem.get_city_citizen_by_id(citizen_id)
+
+	if (
+		citizen.is_empty()
+		or not bool(citizen.get("alive", false))
+	):
+		return false
+
+	var current_position = citizen.get(
+		"city_tile_position",
+		WorldData.INVALID_CITY_TILE_POSITION
+	)
+
+	# Recovery invariant: a citizen already caught inside an occupied footprint
+	# may traverse that same footprint long enough to leave it. Normal topology
+	# mutations are prevented from creating this state; this path exists for old
+	# saves and defensive recovery only, and never authorizes re-entry.
+	if (
+		current_position is Vector2i
+		and CityObjectSystem.get_city_object_id_at_tile(current_position)
+		== object_id
+	):
+		return true
+
+	if not CityObjectSystem.city_object_supports_citizen_interior(occupying_object):
+		return false
+
+	return city_citizen_can_access_object_interior(
+		citizen_id,
+		occupying_object
+	)
+
 static func find_path_to_any_city_tile(values: Dictionary) -> Dictionary:
 	var city_world: WorldData = values.get("city_world")
 	var start_tile: Vector2i = values.get(
@@ -76,7 +400,7 @@ static func find_path_to_any_city_tile(values: Dictionary) -> Dictionary:
 			search_start_usec
 		)
 
-	if not WorldData.is_city_tile_walkable_for_citizen(
+	if not CityNavigationSystem.is_city_tile_walkable_for_citizen(
 		city_world,
 		start_tile,
 		citizen_id
@@ -250,7 +574,7 @@ static func find_path_to_any_city_tile(values: Dictionary) -> Dictionary:
 			if closed_tile_lookup.has(neighbor_tile):
 				continue
 
-			if not WorldData.can_city_citizen_traverse_step(
+			if not CityNavigationSystem.can_city_citizen_traverse_step(
 				city_world,
 				current_tile,
 				neighbor_tile,
@@ -259,7 +583,7 @@ static func find_path_to_any_city_tile(values: Dictionary) -> Dictionary:
 				continue
 
 			var step_cost := (
-				WorldData.get_city_citizen_movement_step_cost(
+				CityNavigationSystem.get_city_citizen_movement_step_cost(
 					current_tile,
 					neighbor_tile
 				)
@@ -334,7 +658,7 @@ static func _get_clean_destination_tiles(
 		if destination_lookup.has(destination_tile):
 			continue
 
-		if not WorldData.is_city_tile_walkable_for_citizen(
+		if not CityNavigationSystem.is_city_tile_walkable_for_citizen(
 			city_world,
 			destination_tile,
 			citizen_id

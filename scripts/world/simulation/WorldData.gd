@@ -111,220 +111,11 @@ static var official_region_size: int = 0
 static var official_world_scene_path: String = ""
 static var official_city_scene_path: String = ""
 
-# Citizen core-registry ownership is settlement-local. These compatibility
-# properties retain the historical WorldData behavior API during this
-# ownership-only pass while routing the four mutable registry fields to the
-# active City's CityCitizenRegistryState.
-static var city_citizens: Array:
-	get:
-		var state := (
-			WorldPoliticalState.get_current_city_citizen_registry_state()
-		)
-		return state.citizens
-	set(value):
-		var state := (
-			WorldPoliticalState.get_current_city_citizen_registry_state()
-		)
-		state.citizens = value
-
-static var city_citizen_index_by_id: Dictionary:
-	get:
-		var state := (
-			WorldPoliticalState.get_current_city_citizen_registry_state()
-		)
-		return state.citizen_index_by_id
-	set(value):
-		var state := (
-			WorldPoliticalState.get_current_city_citizen_registry_state()
-		)
-		state.citizen_index_by_id = value
-
-# Citizen spatial-index ownership is settlement-local. Citizen records retain
-# authoritative positions; this compatibility property exposes the active
-# City's derived CityCitizenSpatialState index.
-static var city_citizen_ids_by_tile: Dictionary:
-	get:
-		var state := (
-			WorldPoliticalState.get_current_city_citizen_spatial_state()
-		)
-		return state.citizen_ids_by_tile
-	set(value):
-		var state := (
-			WorldPoliticalState.get_current_city_citizen_spatial_state()
-		)
-		state.citizen_ids_by_tile = value
-
-# Citizen movement-runtime ownership is settlement-local. These compatibility
-# properties preserve the historical behavior API while routing the active
-# mover registry and transient visual buffer to one
-# CityCitizenMovementRuntimeState.
-static var city_active_mover_ids: Array[int]:
-	get:
-		var state := (
-			WorldPoliticalState
-			.get_current_city_citizen_movement_runtime_state()
-		)
-		return state.active_mover_ids
-	set(value):
-		var state := (
-			WorldPoliticalState
-			.get_current_city_citizen_movement_runtime_state()
-		)
-		state.active_mover_ids = value
-
-static var city_active_mover_id_lookup: Dictionary:
-	get:
-		var state := (
-			WorldPoliticalState
-			.get_current_city_citizen_movement_runtime_state()
-		)
-		return state.active_mover_id_lookup
-	set(value):
-		var state := (
-			WorldPoliticalState
-			.get_current_city_citizen_movement_runtime_state()
-		)
-		state.active_mover_id_lookup = value
-
-# Transient, non-saved movement deltas consumed by the city presentation after
-# each simulation tick. This preserves exact traversed corners across batched
-# ticks and repaths without making cosmetic interpolation authoritative.
-static var city_citizen_movement_visual_events: Array:
-	get:
-		var state := (
-			WorldPoliticalState
-			.get_current_city_citizen_movement_runtime_state()
-		)
-		return state.citizen_movement_visual_events
-	set(value):
-		var state := (
-			WorldPoliticalState
-			.get_current_city_citizen_movement_runtime_state()
-		)
-		state.citizen_movement_visual_events = value
-
-static var city_citizen_movement_visual_tick_index: int:
-	get:
-		var state := (
-			WorldPoliticalState
-			.get_current_city_citizen_movement_runtime_state()
-		)
-		return state.citizen_movement_visual_tick_index
-	set(value):
-		var state := (
-			WorldPoliticalState
-			.get_current_city_citizen_movement_runtime_state()
-		)
-		state.citizen_movement_visual_tick_index = value
-
-# Citizen task-runtime ownership is settlement-local. Citizen records remain
-# authoritative for current-task and haul payload data; these compatibility
-# properties route only the active processing index to the current City's
-# CityCitizenTaskRuntimeState.
-static var city_active_task_ids: Array[int]:
-	get:
-		var state := (
-			WorldPoliticalState
-			.get_current_city_citizen_task_runtime_state()
-		)
-		return state.active_task_ids
-	set(value):
-		var state := (
-			WorldPoliticalState
-			.get_current_city_citizen_task_runtime_state()
-		)
-		state.active_task_ids = value
-
-static var city_active_task_id_lookup: Dictionary:
-	get:
-		var state := (
-			WorldPoliticalState
-			.get_current_city_citizen_task_runtime_state()
-		)
-		return state.active_task_id_lookup
-	set(value):
-		var state := (
-			WorldPoliticalState
-			.get_current_city_citizen_task_runtime_state()
-		)
-		state.active_task_id_lookup = value
-
+# Deferred to Pass 9/10: navigation access-tile caching and citizen
+# assignment/workplace projections remain WorldData-owned for now.
 static var city_object_access_tile_cache: Dictionary = {}
-static var next_city_citizen_id: int:
-	get:
-		var state := (
-			WorldPoliticalState.get_current_city_citizen_registry_state()
-		)
-		return state.next_citizen_id
-	set(value):
-		var state := (
-			WorldPoliticalState.get_current_city_citizen_registry_state()
-		)
-		state.next_citizen_id = value
-
-# These let observers refresh only the parts of the city that actually
-# changed instead of treating every mutation as a generic storage change.
-static var city_citizen_version: int:
-	get:
-		var state := (
-			WorldPoliticalState.get_current_city_citizen_registry_state()
-		)
-		return state.citizen_version
-	set(value):
-		var state := (
-			WorldPoliticalState.get_current_city_citizen_registry_state()
-		)
-		state.citizen_version = value
-static var city_citizen_spatial_version: int:
-	get:
-		var state := (
-			WorldPoliticalState.get_current_city_citizen_spatial_state()
-		)
-		return state.citizen_spatial_version
-	set(value):
-		var state := (
-			WorldPoliticalState.get_current_city_citizen_spatial_state()
-		)
-		state.citizen_spatial_version = value
-static var city_citizen_movement_version: int:
-	get:
-		var state := (
-			WorldPoliticalState
-			.get_current_city_citizen_movement_runtime_state()
-		)
-		return state.citizen_movement_version
-	set(value):
-		var state := (
-			WorldPoliticalState
-			.get_current_city_citizen_movement_runtime_state()
-		)
-		state.citizen_movement_version = value
-
-static var city_citizen_task_version: int:
-	get:
-		var state := (
-			WorldPoliticalState
-			.get_current_city_citizen_task_runtime_state()
-		)
-		return state.citizen_task_version
-	set(value):
-		var state := (
-			WorldPoliticalState
-			.get_current_city_citizen_task_runtime_state()
-		)
-		state.citizen_task_version = value
-
 static var city_assignment_version: int = 0
 static var city_workplace_version: int = 0
-static var city_citizen_male_name_pool: Array[String] = (
-	CityCitizensScript.city_citizen_male_name_pool
-)
-static var city_citizen_female_name_pool: Array[String] = (
-	CityCitizensScript.city_citizen_female_name_pool
-)
-static var city_citizen_unassigned_name_pool: Array[String] = (
-	CityCitizensScript.city_citizen_unassigned_name_pool
-)
 
 const STARTING_CITY_POPULATION := 8
 const CITY_CITIZEN_SEX_MALE := (
@@ -1676,630 +1467,17 @@ static func clear_city_surface_features_at_tiles(
 static func get_city_food_hunger_restore(resource: String) -> int:
 	return CityResourceCatalogScript.get_city_food_hunger_restore(resource)
 
-static func get_city_food_task_reserved_endpoint_amount(
-	endpoint_kind: String,
-	endpoint_id: int,
-	resource: String,
-	excluding_citizen_id: int = -1
-) -> int:
-	if (
-		endpoint_id <= 0
-		or get_city_food_hunger_restore(resource) <= 0
-		or not [
-			CITY_CITIZEN_HAUL_ENDPOINT_KIND_CITY_OBJECT_CONTAINER,
-			CITY_CITIZEN_HAUL_ENDPOINT_KIND_GROUND_PILE,
-		].has(endpoint_kind)
-	):
-		return 0
-
-	var reserved_amount := 0
-
-	for raw_citizen in city_citizens:
-		if not raw_citizen is Dictionary:
-			continue
-
-		var citizen: Dictionary = raw_citizen
-		var citizen_id := int(citizen.get("id", -1))
-		var raw_task = citizen.get("current_task", {})
-
-		if citizen_id == excluding_citizen_id or not raw_task is Dictionary:
-			continue
-
-		var task: Dictionary = raw_task
-		var task_endpoint_kind := str(
-			task.get(
-				"food_source_endpoint_kind",
-				CITY_CITIZEN_HAUL_ENDPOINT_KIND_CITY_OBJECT_CONTAINER
-			)
-		)
-
-		if (
-			str(task.get("kind", CITY_CITIZEN_TASK_KIND_NONE))
-			!= CITY_CITIZEN_TASK_KIND_ACQUIRE_FOOD
-			or task_endpoint_kind != endpoint_kind
-			or int(task.get("target_object_id", -1)) != endpoint_id
-			or str(task.get("food_resource_type", RESOURCE_NONE)) != resource
-		):
-			continue
-
-		reserved_amount += maxi(
-			int(task.get("food_requested_amount", 0)),
-			0
-		)
-
-	return reserved_amount
 
 #endregion
 
-#region Change Versions and Runtime Indexes
+#region Assignment and Workplace Versions
 
-static func _mark_city_citizens_changed() -> void:
-	city_citizen_version += 1
-
-static func _mark_city_citizen_spatial_changed() -> void:
-	city_citizen_spatial_version += 1
-
-static func _mark_city_citizen_movement_changed() -> void:
-	city_citizen_movement_version += 1
-
-static func _mark_city_citizen_task_changed() -> void:
-	city_citizen_task_version += 1
-
+# Assignment and workplace ownership is intentionally deferred to Pass 10.
 static func _mark_city_assignments_changed() -> void:
 	city_assignment_version += 1
 
 static func _mark_city_workplaces_changed() -> void:
 	city_workplace_version += 1
-
-
-static func rebuild_city_citizen_index() -> void:
-	city_citizen_index_by_id.clear()
-
-	for citizen_index in range(city_citizens.size()):
-		var raw_citizen = city_citizens[citizen_index]
-
-		if not raw_citizen is Dictionary:
-			continue
-
-		var citizen: Dictionary = raw_citizen
-		var citizen_id := int(citizen.get("id", -1))
-
-		if citizen_id < 0:
-			continue
-
-		if city_citizen_index_by_id.has(citizen_id):
-			push_error(
-				"Duplicate city citizen ID while rebuilding index: "
-				+ str(citizen_id)
-			)
-			continue
-
-		city_citizen_index_by_id[citizen_id] = citizen_index
-
-static func _add_city_active_mover_id(
-	citizen_id: int
-) -> bool:
-	if citizen_id <= 0:
-		return false
-
-	var insertion_index := city_active_mover_ids.bsearch(citizen_id)
-	var array_has_id := (
-		insertion_index < city_active_mover_ids.size()
-		and city_active_mover_ids[insertion_index] == citizen_id
-	)
-	var lookup_is_valid := (
-		city_active_mover_id_lookup.has(citizen_id)
-		and bool(city_active_mover_id_lookup[citizen_id])
-	)
-	var array_has_duplicate := (
-		array_has_id
-		and insertion_index + 1 < city_active_mover_ids.size()
-		and city_active_mover_ids[insertion_index + 1] == citizen_id
-	)
-
-	if array_has_id and not array_has_duplicate:
-		if lookup_is_valid:
-			return false
-		city_active_mover_id_lookup[citizen_id] = true
-		return true
-
-	if not array_has_id:
-		city_active_mover_ids.insert(insertion_index, citizen_id)
-		city_active_mover_id_lookup[citizen_id] = true
-		return true
-
-	# Repair duplicate mover entries in place; this branch is corruption
-	# handling, not part of the healthy movement hot path.
-	while city_active_mover_ids.has(citizen_id):
-		city_active_mover_ids.erase(citizen_id)
-
-	city_active_mover_ids.insert(
-		city_active_mover_ids.bsearch(citizen_id),
-		citizen_id
-	)
-	city_active_mover_id_lookup[citizen_id] = true
-	return true
-
-
-static func _remove_city_active_mover_id(
-	citizen_id: int
-) -> bool:
-	var changed := city_active_mover_id_lookup.erase(citizen_id)
-
-	while city_active_mover_ids.has(citizen_id):
-		city_active_mover_ids.erase(citizen_id)
-		changed = true
-
-	return changed
-
-
-static func rebuild_city_active_mover_registry() -> bool:
-	var previous_active_ids := city_active_mover_ids.duplicate()
-	var previous_active_lookup := city_active_mover_id_lookup.duplicate()
-	var expected_active_ids: Array[int] = []
-	var expected_active_lookup: Dictionary = {}
-
-	for raw_citizen in city_citizens:
-		if not raw_citizen is Dictionary:
-			continue
-
-		var citizen: Dictionary = raw_citizen
-
-		if not bool(citizen.get("alive", false)):
-			continue
-
-		if (
-			str(citizen.get("movement_state", ""))
-			!= CITY_CITIZEN_MOVEMENT_STATE_MOVING
-		):
-			continue
-
-		var citizen_id := int(citizen.get("id", -1))
-
-		if citizen_id <= 0:
-			continue
-
-		if expected_active_lookup.has(citizen_id):
-			continue
-
-		expected_active_ids.append(citizen_id)
-		expected_active_lookup[citizen_id] = true
-
-	expected_active_ids.sort()
-
-	var registry_changed := (
-		previous_active_ids != expected_active_ids
-		or previous_active_lookup != expected_active_lookup
-	)
-	city_active_mover_ids.clear()
-	city_active_mover_id_lookup.clear()
-	city_active_mover_ids.append_array(expected_active_ids)
-	city_active_mover_id_lookup.merge(expected_active_lookup)
-	if registry_changed:
-		_mark_city_citizen_movement_changed()
-
-	return registry_changed
-
-
-static func get_city_active_mover_ids_snapshot() -> Array[int]:
-	return city_active_mover_ids.duplicate()
-
-
-static func begin_city_citizen_movement_visual_tick(
-	tick_index: int
-) -> void:
-	city_citizen_movement_visual_events.clear()
-	city_citizen_movement_visual_tick_index = tick_index
-
-
-static func clear_city_citizen_movement_visual_events() -> void:
-	city_citizen_movement_visual_events.clear()
-	city_citizen_movement_visual_tick_index = -1
-
-
-static func take_city_citizen_movement_visual_events(
-	expected_tick_index: int
-) -> Array:
-	if city_citizen_movement_visual_tick_index != expected_tick_index:
-		clear_city_citizen_movement_visual_events()
-		return []
-
-	# Transfer ownership instead of deep-copying every route and corner.
-	var events := city_citizen_movement_visual_events
-	city_citizen_movement_visual_events = []
-	city_citizen_movement_visual_tick_index = -1
-	return events
-
-
-static func _add_city_active_task_id(
-	citizen_id: int
-) -> bool:
-	if citizen_id <= 0:
-		return false
-
-	var insertion_index := city_active_task_ids.bsearch(citizen_id)
-	var array_has_id := (
-		insertion_index < city_active_task_ids.size()
-		and city_active_task_ids[insertion_index] == citizen_id
-	)
-	var lookup_is_valid := (
-		city_active_task_id_lookup.has(citizen_id)
-		and bool(city_active_task_id_lookup[citizen_id])
-	)
-	var array_has_duplicate := (
-		array_has_id
-		and insertion_index + 1 < city_active_task_ids.size()
-		and city_active_task_ids[insertion_index + 1] == citizen_id
-	)
-
-	if array_has_id and not array_has_duplicate:
-		if lookup_is_valid:
-			return false
-		city_active_task_id_lookup[citizen_id] = true
-		return true
-
-	if not array_has_id:
-		city_active_task_ids.insert(insertion_index, citizen_id)
-		city_active_task_id_lookup[citizen_id] = true
-		return true
-
-	# Duplicate targets are corruption, not a healthy assignment path.
-	_remove_all_city_active_task_array_entries(citizen_id)
-	city_active_task_ids.insert(
-		city_active_task_ids.bsearch(citizen_id),
-		citizen_id
-	)
-	city_active_task_id_lookup[citizen_id] = true
-	return true
-
-
-static func _remove_city_active_task_id(
-	citizen_id: int
-) -> bool:
-	var changed := city_active_task_id_lookup.erase(citizen_id)
-
-	if _remove_all_city_active_task_array_entries(citizen_id):
-		changed = true
-
-	return changed
-
-
-static func _remove_all_city_active_task_array_entries(
-	citizen_id: int
-) -> bool:
-	var original_size := city_active_task_ids.size()
-	var write_index := 0
-
-	for read_index in range(original_size):
-		var active_task_id := city_active_task_ids[read_index]
-
-		if active_task_id == citizen_id:
-			continue
-
-		if write_index != read_index:
-			city_active_task_ids[write_index] = active_task_id
-
-		write_index += 1
-
-	while city_active_task_ids.size() > write_index:
-		city_active_task_ids.pop_back()
-
-	return write_index != original_size
-
-
-static func rebuild_city_active_task_registry() -> bool:
-	var previous_active_ids := city_active_task_ids.duplicate()
-	var previous_active_lookup := city_active_task_id_lookup.duplicate()
-	var expected_active_ids: Array[int] = []
-	var expected_active_lookup: Dictionary = {}
-
-	for raw_citizen in city_citizens:
-		if not raw_citizen is Dictionary:
-			continue
-
-		var citizen: Dictionary = raw_citizen
-
-		if not bool(citizen.get("alive", false)):
-			continue
-
-		var raw_current_task = citizen.get("current_task", {})
-
-		if not raw_current_task is Dictionary:
-			continue
-
-		var current_task: Dictionary = raw_current_task
-
-		if (
-			str(current_task.get("kind", ""))
-			== CITY_CITIZEN_TASK_KIND_NONE
-		):
-			continue
-
-		var citizen_id := int(citizen.get("id", -1))
-
-		if citizen_id <= 0:
-			continue
-
-		if expected_active_lookup.has(citizen_id):
-			continue
-
-		expected_active_ids.append(citizen_id)
-		expected_active_lookup[citizen_id] = true
-
-	expected_active_ids.sort()
-
-	var registry_changed := (
-		previous_active_ids != expected_active_ids
-		or previous_active_lookup != expected_active_lookup
-	)
-	city_active_task_ids.clear()
-	city_active_task_id_lookup.clear()
-	city_active_task_ids.append_array(expected_active_ids)
-	city_active_task_id_lookup.merge(expected_active_lookup)
-	if registry_changed:
-		_mark_city_citizen_task_changed()
-
-	return registry_changed
-
-
-static func get_city_active_task_ids_snapshot() -> Array[int]:
-	return city_active_task_ids.duplicate()
-
-static func _add_city_citizen_to_spatial_index(
-	citizen_id: int,
-	tile_position: Vector2i
-) -> bool:
-	if citizen_id <= 0:
-		return false
-
-	if tile_position == INVALID_CITY_TILE_POSITION:
-		return false
-
-	var citizen_ids: Array = []
-	var raw_citizen_ids = city_citizen_ids_by_tile.get(
-		tile_position,
-		[]
-	)
-
-	if raw_citizen_ids is Array:
-		citizen_ids = raw_citizen_ids
-
-	if citizen_ids.has(citizen_id):
-		return false
-
-	citizen_ids.insert(
-		citizen_ids.bsearch(citizen_id),
-		citizen_id
-	)
-
-	city_citizen_ids_by_tile[tile_position] = (
-		citizen_ids
-	)
-	return true
-
-
-static func _remove_city_citizen_from_spatial_index(
-	citizen_id: int,
-	tile_position: Vector2i
-) -> bool:
-	if not city_citizen_ids_by_tile.has(
-		tile_position
-	):
-		return false
-
-	var raw_citizen_ids = city_citizen_ids_by_tile[
-		tile_position
-	]
-
-	if not raw_citizen_ids is Array:
-		city_citizen_ids_by_tile.erase(
-			tile_position
-		)
-		return true
-
-	var citizen_ids: Array = raw_citizen_ids
-	var contained_citizen := false
-
-	while citizen_ids.has(citizen_id):
-		contained_citizen = true
-		citizen_ids.erase(citizen_id)
-
-	if citizen_ids.is_empty():
-		city_citizen_ids_by_tile.erase(
-			tile_position
-		)
-		return true
-
-	if not contained_citizen:
-		return false
-
-	city_citizen_ids_by_tile[tile_position] = (
-		citizen_ids
-	)
-	return true
-
-
-static func _register_city_citizen_spatial_index_entry(
-	citizen: Dictionary
-) -> bool:
-	if citizen.is_empty():
-		return false
-	if not bool(citizen.get("alive", false)):
-		return false
-
-	var citizen_id := int(
-		citizen.get("id", -1)
-	)
-	var raw_position = citizen.get(
-		"city_tile_position",
-		INVALID_CITY_TILE_POSITION
-	)
-
-	if not raw_position is Vector2i:
-		return false
-
-	return _add_city_citizen_to_spatial_index(
-		citizen_id,
-		raw_position
-	)
-
-
-static func rebuild_city_citizen_spatial_index() -> bool:
-	var previous_index := city_citizen_ids_by_tile.duplicate(true)
-	city_citizen_ids_by_tile.clear()
-
-	for raw_citizen in city_citizens:
-		if not raw_citizen is Dictionary:
-			continue
-
-		_register_city_citizen_spatial_index_entry(
-			raw_citizen
-		)
-
-	if previous_index == city_citizen_ids_by_tile:
-		return false
-
-	_mark_city_citizen_spatial_changed()
-	return true
-
-
-static func get_city_citizen_ids_at_tile(
-	tile_position: Vector2i
-) -> Array:
-	var raw_citizen_ids = city_citizen_ids_by_tile.get(
-		tile_position,
-		[]
-	)
-
-	if not raw_citizen_ids is Array:
-		return []
-
-	return raw_citizen_ids.duplicate()
-
-
-static func has_living_city_citizen_at_tile(
-	tile_position: Vector2i
-) -> bool:
-	var raw_citizen_ids = city_citizen_ids_by_tile.get(
-		tile_position,
-		[]
-	)
-
-	if not raw_citizen_ids is Array:
-		return false
-
-	for raw_citizen_id in raw_citizen_ids:
-		if typeof(raw_citizen_id) != TYPE_INT:
-			continue
-
-		var citizen_id: int = raw_citizen_id
-		var citizen := get_city_citizen_by_id(
-			citizen_id
-		)
-
-		if citizen.is_empty():
-			continue
-
-		if not bool(citizen.get("alive", false)):
-			continue
-
-		if (
-			citizen.get(
-				"city_tile_position",
-				INVALID_CITY_TILE_POSITION
-			)
-			!= tile_position
-		):
-			continue
-
-		return true
-
-	return false
-
-static func rebuild_city_entity_indexes() -> void:
-	CityObjectSystem.rebuild_city_object_index()
-	rebuild_city_citizen_index()
-	rebuild_city_citizen_spatial_index()
-	rebuild_city_active_mover_registry()
-
-static func _register_city_citizen_index(
-	citizen: Dictionary,
-	citizen_index: int
-) -> void:
-	if citizen.is_empty():
-		return
-
-	if citizen_index < 0 or citizen_index >= city_citizens.size():
-		push_error(
-			"Cannot register city citizen index outside the citizen array: "
-			+ str(citizen_index)
-		)
-		return
-
-	var citizen_id := int(citizen.get("id", -1))
-
-	if citizen_id < 0:
-		push_error("Cannot register city citizen without a valid ID.")
-		return
-
-	if city_citizen_index_by_id.has(citizen_id):
-		var existing_index := int(city_citizen_index_by_id[citizen_id])
-
-		if existing_index != citizen_index:
-			push_error(
-				"Duplicate city citizen ID detected: "
-				+ str(citizen_id)
-			)
-			return
-
-	city_citizen_index_by_id[citizen_id] = citizen_index
-
-
-static func get_city_citizen_index_by_id(citizen_id: int) -> int:
-	if citizen_id < 0:
-		return -1
-
-	if not city_citizen_index_by_id.has(citizen_id):
-		return -1
-
-	var citizen_index := int(city_citizen_index_by_id[citizen_id])
-
-	if citizen_index < 0 or citizen_index >= city_citizens.size():
-		push_error(
-			"Stale city citizen index for citizen ID "
-			+ str(citizen_id)
-		)
-
-		city_citizen_index_by_id.erase(citizen_id)
-		return -1
-
-	var raw_citizen = city_citizens[citizen_index]
-
-	if not raw_citizen is Dictionary:
-		push_error(
-			"City citizen index points to non-Dictionary data for citizen ID "
-			+ str(citizen_id)
-		)
-
-		city_citizen_index_by_id.erase(citizen_id)
-		return -1
-
-	var citizen: Dictionary = raw_citizen
-	var indexed_citizen_id := int(citizen.get("id", -1))
-
-	if indexed_citizen_id != citizen_id:
-		push_error(
-			"City citizen index mismatch for requested ID "
-			+ str(citizen_id)
-			+ ". Indexed citizen contains ID "
-			+ str(indexed_citizen_id)
-		)
-
-		city_citizen_index_by_id.erase(citizen_id)
-		return -1
-
-	return citizen_index
-
 
 #endregion
 
@@ -2308,22 +1486,11 @@ static func get_city_citizen_index_by_id(citizen_id: int) -> int:
 
 static func reset_city_citizen_state() -> void:
 	CityLogisticsSystem.reset_city_haul_reservation_state()
-	city_citizens.clear()
-	city_citizen_index_by_id.clear()
-	city_citizen_ids_by_tile.clear()
-	city_active_mover_ids.clear()
-	city_active_mover_id_lookup.clear()
-	city_citizen_movement_visual_events.clear()
-	city_citizen_movement_visual_tick_index = -1
-	city_active_task_ids.clear()
-	city_active_task_id_lookup.clear()
-	next_city_citizen_id = 1
+	CityCitizenRegistrySystem.reset_city_citizen_registry_state()
+	CityCitizenSpatialSystem.reset_city_citizen_spatial_state()
+	CityCitizenMovementRuntimeSystem.reset_city_citizen_movement_runtime_state()
+	CityCitizenTaskRuntimeSystem.reset_city_citizen_task_runtime_state()
 	CitizenDecisionSystem.reset_runtime_state()
-
-	_mark_city_citizens_changed()
-	_mark_city_citizen_spatial_changed()
-	_mark_city_citizen_movement_changed()
-	_mark_city_citizen_task_changed()
 	_mark_city_assignments_changed()
 
 static func make_empty_citizen_inventory() -> Dictionary:
@@ -2355,7 +1522,7 @@ static func get_total_physical_city_resource_amount(
 
 	# Citizen inventory and in-transit haul cargo are physical resources, but
 	# neither counts as secured city property while a citizen carries it.
-	for raw_citizen in city_citizens:
+	for raw_citizen in CityCitizenRegistrySystem.get_current_state().citizens:
 		if not raw_citizen is Dictionary:
 			continue
 
@@ -2793,82 +1960,14 @@ static func commit_city_haul_destination_reservation(
 
 #region Citizen Haul Cargo
 
-static func get_city_citizen_current_haul(
-	citizen_id: int
-) -> Dictionary:
-	var citizen := get_city_citizen_by_id(citizen_id)
-
-	if citizen.is_empty():
-		return CityCitizensScript.make_city_citizen_haul()
-
-	var raw_haul = citizen.get("current_haul", {})
-
-	if not raw_haul is Dictionary:
-		return CityCitizensScript.make_city_citizen_haul()
-
-	return CityCitizensScript.make_city_citizen_haul(
-		raw_haul
-	)
 
 
-static func set_city_citizen_current_haul(
-	citizen_id: int,
-	haul_values: Dictionary
-) -> bool:
-	var citizen_index := get_city_citizen_index_by_id(
-		citizen_id
-	)
-
-	if citizen_index < 0:
-		return false
-
-	var raw_citizen = city_citizens[citizen_index]
-
-	if not raw_citizen is Dictionary:
-		return false
-
-	var normalized_haul := (
-		CityCitizensScript.make_city_citizen_haul(
-			haul_values
-		)
-	)
-	var haul_phase := str(
-		normalized_haul.get(
-			"phase",
-			CITY_CITIZEN_HAUL_PHASE_NONE
-		)
-	)
-
-	if not CityCitizensScript.is_valid_city_citizen_haul_phase(
-		haul_phase
-	):
-		return false
-
-	if not normalized_haul.get("source_tile") is Vector2i:
-		return false
-
-	if not normalized_haul.get("destination_tile") is Vector2i:
-		return false
-
-	var citizen: Dictionary = raw_citizen
-	var raw_existing_haul = citizen.get("current_haul", {})
-
-	if (
-		raw_existing_haul is Dictionary
-		and raw_existing_haul == normalized_haul
-	):
-		return true
-
-	citizen["current_haul"] = normalized_haul
-	city_citizens[citizen_index] = citizen
-	_mark_city_citizen_task_changed()
-	return true
 
 
 static func get_city_citizen_haul_cargo(
 	citizen_id: int
 ) -> Dictionary:
-	var citizen := get_city_citizen_by_id(citizen_id)
+	var citizen := CityCitizenRegistrySystem.get_city_citizen_by_id(citizen_id)
 
 	if citizen.is_empty():
 		return CityCitizensScript.make_city_citizen_haul_cargo()
@@ -2950,7 +2049,7 @@ static func get_city_citizen_total_carried_amount(
 static func get_city_citizen_available_haul_capacity(
 	citizen_id: int
 ) -> int:
-	var citizen := get_city_citizen_by_id(citizen_id)
+	var citizen := CityCitizenRegistrySystem.get_city_citizen_by_id(citizen_id)
 
 	if citizen.is_empty():
 		return 0
@@ -2971,12 +2070,12 @@ static func set_city_citizen_haul_cargo_resources(
 	citizen_id: int,
 	requested_resources: Dictionary
 ) -> int:
-	var citizen_index := get_city_citizen_index_by_id(citizen_id)
+	var citizen_index := CityCitizenRegistrySystem.get_city_citizen_index_by_id(citizen_id)
 
 	if citizen_index < 0:
 		return 0
 
-	var raw_citizen = city_citizens[citizen_index]
+	var raw_citizen = CityCitizenRegistrySystem.get_current_state().citizens[citizen_index]
 
 	if not raw_citizen is Dictionary:
 		return 0
@@ -3030,8 +2129,8 @@ static func set_city_citizen_haul_cargo_resources(
 		return requested_total
 
 	citizen["haul_cargo"] = final_cargo
-	city_citizens[citizen_index] = citizen
-	_mark_city_citizens_changed()
+	CityCitizenRegistrySystem.get_current_state().citizens[citizen_index] = citizen
+	CityCitizenRegistrySystem.mark_city_citizens_changed()
 	return requested_total
 
 
@@ -3106,7 +2205,7 @@ static func city_citizen_is_hauling(
 
 	return (
 		str(
-			get_city_citizen_current_haul(citizen_id).get(
+			CityCitizenTaskRuntimeSystem.get_city_citizen_current_haul(citizen_id).get(
 				"phase",
 				CITY_CITIZEN_HAUL_PHASE_NONE
 			)
@@ -3122,7 +2221,7 @@ static func city_citizen_is_hauling(
 static func get_city_citizen_inventory(
 	citizen_id: int
 ) -> Dictionary:
-	var citizen := get_city_citizen_by_id(citizen_id)
+	var citizen := CityCitizenRegistrySystem.get_city_citizen_by_id(citizen_id)
 
 	if citizen.is_empty():
 		return {}
@@ -3156,7 +2255,7 @@ static func get_city_citizen_inventory_used_capacity(
 static func get_city_citizen_personal_inventory_free_space(
 	citizen_id: int
 ) -> int:
-	var citizen := get_city_citizen_by_id(citizen_id)
+	var citizen := CityCitizenRegistrySystem.get_city_citizen_by_id(citizen_id)
 
 	if citizen.is_empty():
 		return 0
@@ -3171,7 +2270,7 @@ static func get_city_citizen_personal_inventory_free_space(
 static func get_city_citizen_inventory_free_space(
 	citizen_id: int
 ) -> int:
-	var citizen := get_city_citizen_by_id(citizen_id)
+	var citizen := CityCitizenRegistrySystem.get_city_citizen_by_id(citizen_id)
 
 	if citizen.is_empty():
 		return 0
@@ -3197,14 +2296,14 @@ static func set_city_citizen_inventory_resource_amount(
 	if not is_city_resource_type(resource):
 		return 0
 
-	var citizen_index := get_city_citizen_index_by_id(
+	var citizen_index := CityCitizenRegistrySystem.get_city_citizen_index_by_id(
 		citizen_id
 	)
 
 	if citizen_index < 0:
 		return 0
 
-	var raw_citizen = city_citizens[citizen_index]
+	var raw_citizen = CityCitizenRegistrySystem.get_current_state().citizens[citizen_index]
 
 	if not raw_citizen is Dictionary:
 		return 0
@@ -3252,8 +2351,8 @@ static func set_city_citizen_inventory_resource_amount(
 		return safe_amount
 
 	citizen["inventory"] = inventory
-	city_citizens[citizen_index] = citizen
-	_mark_city_citizens_changed()
+	CityCitizenRegistrySystem.get_current_state().citizens[citizen_index] = citizen
+	CityCitizenRegistrySystem.mark_city_citizens_changed()
 
 	return safe_amount
 
@@ -3330,69 +2429,41 @@ static func get_city_citizen_name_seed() -> int:
 
 	return name_seed
 
-static func normalize_city_citizen_sex(
-	citizen_sex: String
-) -> String:
-	return CityCitizensScript.normalize_city_citizen_sex(
-		citizen_sex
-	)
 
 
-static func is_valid_city_citizen_sex(
-	citizen_sex: String
-) -> bool:
-	return CityCitizensScript.is_valid_city_citizen_sex(
-		citizen_sex
-	)
 
 
-static func get_city_citizen_sex_types() -> Array[String]:
-	return CityCitizensScript.get_city_citizen_sex_types()
 
 
-static func get_city_citizen_sex_display_name(
-	citizen_sex: String
-) -> String:
-	return CityCitizensScript.get_city_citizen_sex_display_name(
-		citizen_sex
-	)
 
 
-static func get_city_citizen_name_pool_for_sex(
-	citizen_sex: String
-) -> Array[String]:
-	return CityCitizensScript.get_city_citizen_name_pool_for_sex(
-		citizen_sex
-	)
 
 
-static func city_citizen_name_pools_are_ready() -> bool:
-	return CityCitizensScript.city_citizen_name_pools_are_ready()
 
 static func get_city_citizen_count_by_sex(
 	citizen_sex: String
 ) -> int:
 	var normalized_sex := (
-		normalize_city_citizen_sex(
+		CityCitizensScript.normalize_city_citizen_sex(
 			citizen_sex
 		)
 	)
 
-	if not is_valid_city_citizen_sex(
+	if not CityCitizensScript.is_valid_city_citizen_sex(
 		normalized_sex
 	):
 		return 0
 
 	var citizen_count := 0
 
-	for raw_citizen in city_citizens:
+	for raw_citizen in CityCitizenRegistrySystem.get_current_state().citizens:
 		if not raw_citizen is Dictionary:
 			continue
 
 		var citizen: Dictionary = raw_citizen
 
 		if (
-			normalize_city_citizen_sex(
+			CityCitizensScript.normalize_city_citizen_sex(
 				str(citizen.get("sex", ""))
 			)
 			!= normalized_sex
@@ -3403,10 +2474,6 @@ static func get_city_citizen_count_by_sex(
 
 	return citizen_count
 
-static func get_used_city_citizen_name_counts() -> Dictionary:
-	return CityCitizensScript.get_used_city_citizen_name_counts(
-		city_citizens
-	)
 
 
 static func make_random_city_citizen_first_name(
@@ -3416,13 +2483,13 @@ static func make_random_city_citizen_first_name(
 	var resolved_citizen_number := citizen_number
 
 	if resolved_citizen_number <= 0:
-		resolved_citizen_number = next_city_citizen_id
+		resolved_citizen_number = CityCitizenRegistrySystem.get_current_state().next_citizen_id
 
 	return CityCitizensScript.make_random_city_citizen_first_name(
 		citizen_sex,
 		resolved_citizen_number,
 		get_city_citizen_name_seed(),
-		city_citizens
+		CityCitizenRegistrySystem.get_current_state().citizens
 	)
 
 
@@ -3471,20 +2538,20 @@ static func make_city_citizen(
 		return {}
 
 	var citizen := CityCitizensScript.make_city_citizen({
-		"id": next_city_citizen_id,
+		"id": CityCitizenRegistrySystem.get_current_state().next_citizen_id,
 		"display_name": display_name,
 		"sex": citizen_sex,
 		"culture_id": resolved_culture_id,
 		"city_tile_position": initial_city_tile_position,
 		"inventory": make_empty_citizen_inventory(),
 		"name_seed": get_city_citizen_name_seed(),
-		"existing_citizens": city_citizens
+		"existing_citizens": CityCitizenRegistrySystem.get_current_state().citizens
 	})
 
 	if citizen.is_empty():
 		return {}
 
-	next_city_citizen_id += 1
+	CityCitizenRegistrySystem.get_current_state().next_citizen_id += 1
 	return citizen
 
 static func add_city_citizen(
@@ -3505,21 +2572,21 @@ static func add_city_citizen(
 	if citizen.is_empty():
 		return {}
 
-	city_citizens.append(citizen)
+	CityCitizenRegistrySystem.get_current_state().citizens.append(citizen)
 
-	var citizen_index := city_citizens.size() - 1
+	var citizen_index := CityCitizenRegistrySystem.get_current_state().citizens.size() - 1
 
-	_register_city_citizen_index(
+	CityCitizenRegistrySystem.register_city_citizen_index(
 		citizen,
 		citizen_index
 	)
 
-	_register_city_citizen_spatial_index_entry(
+	CityCitizenSpatialSystem.register_city_citizen_spatial_index_entry(
 		citizen
 	)
 
-	_mark_city_citizens_changed()
-	_mark_city_citizen_spatial_changed()
+	CityCitizenRegistrySystem.mark_city_citizens_changed()
+	CityCitizenSpatialSystem.mark_city_citizen_spatial_changed()
 
 	return citizen
 
@@ -3531,7 +2598,7 @@ static func initialize_starting_city_population() -> int:
 		)
 		return 0
 
-	if not city_citizens.is_empty():
+	if not CityCitizenRegistrySystem.get_current_state().citizens.is_empty():
 		return 0
 
 	if (
@@ -3545,7 +2612,7 @@ static func initialize_starting_city_population() -> int:
 		)
 		return 0
 
-	if not city_citizen_name_pools_are_ready():
+	if not CityCitizensScript.city_citizen_name_pools_are_ready():
 		push_error(
 			"Cannot initialize citizens because the "
 			+ "male/female name pools are incomplete, "
@@ -3656,10 +2723,10 @@ static func initialize_starting_city_population() -> int:
 	return created_count
 
 static func ensure_city_citizen_demographic_state() -> int:
-	if city_citizens.is_empty():
+	if CityCitizenRegistrySystem.get_current_state().citizens.is_empty():
 		return 0
 
-	if not city_citizen_name_pools_are_ready():
+	if not CityCitizensScript.city_citizen_name_pools_are_ready():
 		push_error(
 			"Cannot migrate citizen demographics "
 			+ "until the name pools are valid."
@@ -3675,9 +2742,9 @@ static func ensure_city_citizen_demographic_state() -> int:
 	var migrated_count := 0
 
 	for citizen_index in range(
-		city_citizens.size()
+		CityCitizenRegistrySystem.get_current_state().citizens.size()
 	):
-		var raw_citizen = city_citizens[
+		var raw_citizen = CityCitizenRegistrySystem.get_current_state().citizens[
 			citizen_index
 		]
 
@@ -3686,12 +2753,12 @@ static func ensure_city_citizen_demographic_state() -> int:
 
 		var citizen: Dictionary = raw_citizen
 		var existing_sex := (
-			normalize_city_citizen_sex(
+			CityCitizensScript.normalize_city_citizen_sex(
 				str(citizen.get("sex", ""))
 			)
 		)
 
-		if is_valid_city_citizen_sex(
+		if CityCitizensScript.is_valid_city_citizen_sex(
 			existing_sex
 		):
 			continue
@@ -3709,7 +2776,7 @@ static func ensure_city_citizen_demographic_state() -> int:
 			citizen.get("name", "")
 		).strip_edges()
 		var assigned_name_pool := (
-			get_city_citizen_name_pool_for_sex(
+			CityCitizensScript.get_city_citizen_name_pool_for_sex(
 				assigned_sex
 			)
 		)
@@ -3735,7 +2802,7 @@ static func ensure_city_citizen_demographic_state() -> int:
 
 		citizen["sex"] = assigned_sex
 		citizen["name"] = existing_name
-		city_citizens[citizen_index] = citizen
+		CityCitizenRegistrySystem.get_current_state().citizens[citizen_index] = citizen
 
 		if assigned_sex == CITY_CITIZEN_SEX_MALE:
 			male_count += 1
@@ -3745,7 +2812,7 @@ static func ensure_city_citizen_demographic_state() -> int:
 		migrated_count += 1
 
 	if migrated_count > 0:
-		_mark_city_citizens_changed()
+		CityCitizenRegistrySystem.mark_city_citizens_changed()
 
 	return migrated_count
 
@@ -3757,8 +2824,8 @@ static func ensure_city_citizen_demographic_state() -> int:
 static func ensure_city_citizen_need_state() -> int:
 	var migrated_count := 0
 
-	for citizen_index in range(city_citizens.size()):
-		var raw_citizen = city_citizens[citizen_index]
+	for citizen_index in range(CityCitizenRegistrySystem.get_current_state().citizens.size()):
+		var raw_citizen = CityCitizenRegistrySystem.get_current_state().citizens[citizen_index]
 
 		if not raw_citizen is Dictionary:
 			continue
@@ -3782,17 +2849,17 @@ static func ensure_city_citizen_need_state() -> int:
 		CityCitizensScript.normalize_city_citizen_need_state(
 			normalized_citizen
 		)
-		city_citizens[citizen_index] = normalized_citizen
+		CityCitizenRegistrySystem.get_current_state().citizens[citizen_index] = normalized_citizen
 		migrated_count += 1
 
 	if migrated_count > 0:
-		_mark_city_citizens_changed()
+		CityCitizenRegistrySystem.mark_city_citizens_changed()
 
 	return migrated_count
 
 
 static func get_city_citizen_hunger(citizen_id: int) -> int:
-	var citizen := get_city_citizen_by_id(citizen_id)
+	var citizen := CityCitizenRegistrySystem.get_city_citizen_by_id(citizen_id)
 	if citizen.is_empty():
 		return 0
 
@@ -3808,12 +2875,12 @@ static func set_city_citizen_hunger_state(
 	hunger: int,
 	hunger_decay_remainder: int
 ) -> bool:
-	var citizen_index := get_city_citizen_index_by_id(citizen_id)
+	var citizen_index := CityCitizenRegistrySystem.get_city_citizen_index_by_id(citizen_id)
 
 	if citizen_index < 0:
 		return false
 
-	var raw_citizen = city_citizens[citizen_index]
+	var raw_citizen = CityCitizenRegistrySystem.get_current_state().citizens[citizen_index]
 
 	if not raw_citizen is Dictionary:
 		return false
@@ -3836,2059 +2903,22 @@ static func set_city_citizen_hunger_state(
 
 	citizen["hunger"] = safe_hunger
 	citizen["hunger_decay_remainder"] = safe_remainder
-	city_citizens[citizen_index] = citizen
-	_mark_city_citizens_changed()
+	CityCitizenRegistrySystem.get_current_state().citizens[citizen_index] = citizen
+	CityCitizenRegistrySystem.mark_city_citizens_changed()
 	return true
 
 #endregion
 
-#region Citizen Task State
 
-static func is_valid_city_citizen_task_kind(
-	task_kind: String
-) -> bool:
-	return CityCitizensScript.is_valid_city_citizen_task_kind(
-		task_kind
-	)
-
-
-static func is_valid_city_citizen_task_source(
-	task_source: String
-) -> bool:
-	return CityCitizensScript.is_valid_city_citizen_task_source(
-		task_source
-	)
-
-
-static func is_valid_city_citizen_task_phase(
-	task_phase: String
-) -> bool:
-	return CityCitizensScript.is_valid_city_citizen_task_phase(
-		task_phase
-	)
-
-
-static func ensure_city_citizen_task_state() -> int:
-	if city_citizens.is_empty():
-		rebuild_city_active_task_registry()
-		return 0
-
-	var migrated_count := 0
-
-	for citizen_index in range(city_citizens.size()):
-		var raw_citizen = city_citizens[citizen_index]
-
-		if not raw_citizen is Dictionary:
-			continue
-
-		var citizen: Dictionary = raw_citizen
-		var citizen_was_migrated := false
-
-		if (
-			not CityCitizensScript
-			.has_complete_city_citizen_task_state(citizen)
-		):
-			var raw_current_task = citizen.get("current_task", {})
-
-			if raw_current_task is Dictionary:
-				citizen["current_task"] = (
-					CityCitizensScript.make_city_citizen_task(
-						raw_current_task
-					)
-				)
-			else:
-				CityCitizensScript.reset_city_citizen_task_state(citizen)
-
-			citizen_was_migrated = true
-
-		if (
-			not CityCitizensScript
-			.has_complete_city_citizen_haul_state(citizen)
-		):
-			var raw_current_haul = citizen.get("current_haul", {})
-			var raw_haul_cargo = citizen.get("haul_cargo", {})
-
-			if (
-				raw_current_haul is Dictionary
-				and raw_haul_cargo is Dictionary
-			):
-				citizen["current_haul"] = (
-					CityCitizensScript.make_city_citizen_haul(
-						raw_current_haul
-					)
-				)
-				citizen["haul_cargo"] = (
-					CityCitizensScript.make_city_citizen_haul_cargo(
-						raw_haul_cargo
-					)
-				)
-			else:
-				CityCitizensScript.reset_city_citizen_haul_state(
-					citizen,
-					true
-				)
-			citizen_was_migrated = true
-
-		if not citizen_was_migrated:
-			continue
-
-		city_citizens[citizen_index] = citizen
-		migrated_count += 1
-
-	var task_version_before_rebuild := city_citizen_task_version
-	rebuild_city_active_task_registry()
-
-	if (
-		migrated_count > 0
-		and city_citizen_task_version == task_version_before_rebuild
-	):
-		_mark_city_citizen_task_changed()
-
-	return migrated_count
-
-static func get_city_citizen_current_task(
-	citizen_id: int
-) -> Dictionary:
-	var citizen := get_city_citizen_by_id(citizen_id)
-	if citizen.is_empty():
-		return {}
-
-	var raw_current_task = citizen.get("current_task", {})
-
-	if not raw_current_task is Dictionary:
-		return {}
-
-	return raw_current_task.duplicate(true)
-
-
-static func assign_city_citizen_task(
-	citizen_id: int,
-	task_values: Dictionary
-) -> bool:
-	var assignment := _make_city_citizen_task_assignment_context(
-		citizen_id,
-		task_values
-	)
-
-	if assignment.is_empty():
-		return false
-
-	if not _prepare_city_citizen_task_assignment(assignment):
-		return false
-
-	return _commit_city_citizen_task_assignment(assignment)
-
-
-static func _make_city_citizen_task_assignment_context(
-	citizen_id: int,
-	task_values: Dictionary
-) -> Dictionary:
-	var citizen_index := get_city_citizen_index_by_id(citizen_id)
-
-	if citizen_index < 0:
-		return {}
-
-	var raw_citizen = city_citizens[citizen_index]
-
-	if not raw_citizen is Dictionary:
-		return {}
-
-	var citizen: Dictionary = raw_citizen
-
-	if not bool(citizen.get("alive", false)):
-		return {}
-
-	var raw_task_kind = task_values.get("kind")
-	var raw_task_source = task_values.get("source")
-	var raw_task_priority = task_values.get("priority")
-	var raw_target_object_id = task_values.get("target_object_id")
-	var raw_work_order_id = task_values.get("work_order_id", -1)
-	var raw_job_id = task_values.get("job_id", "")
-	var raw_player_locked = task_values.get("player_locked", false)
-
-	if typeof(raw_task_kind) != TYPE_STRING:
-		return {}
-
-	if typeof(raw_task_source) != TYPE_STRING:
-		return {}
-
-	if typeof(raw_task_priority) != TYPE_INT:
-		return {}
-
-	if typeof(raw_target_object_id) != TYPE_INT:
-		return {}
-
-	if typeof(raw_work_order_id) != TYPE_INT:
-		return {}
-
-	if typeof(raw_job_id) != TYPE_STRING:
-		return {}
-
-	if typeof(raw_player_locked) != TYPE_BOOL:
-		return {}
-
-	var task_kind: String = raw_task_kind
-	var task_source: String = raw_task_source
-	var task_priority: int = raw_task_priority
-	var target_object_id: int = raw_target_object_id
-	var work_order_id: int = raw_work_order_id
-	var job_id: String = raw_job_id
-	var player_locked: bool = raw_player_locked
-
-	if (
-		not is_valid_city_citizen_task_kind(task_kind)
-		or task_kind == CITY_CITIZEN_TASK_KIND_NONE
-	):
-		return {}
-
-	if (
-		not is_valid_city_citizen_task_source(task_source)
-		or task_source == CITY_CITIZEN_TASK_SOURCE_NONE
-	):
-		return {}
-
-	if task_priority <= CITY_CITIZEN_TASK_PRIORITY_NONE:
-		return {}
-
-	if target_object_id <= 0:
-		return {}
-
-	if (
-		player_locked
-		and task_source != CITY_CITIZEN_TASK_SOURCE_PLAYER
-	):
-		return {}
-
-	# Employment is already a standing player directive. Direct commands and
-	# autonomous logistics require unemployment, but biological food seeking is
-	# allowed to interrupt employed citizens at critical hunger.
-	if (
-		(
-			task_source == CITY_CITIZEN_TASK_SOURCE_PLAYER
-			or task_source == CITY_CITIZEN_TASK_SOURCE_AUTONOMY
-		)
-		and int(citizen.get("job_object_id", -1)) > 0
-		and task_kind != CITY_CITIZEN_TASK_KIND_ACQUIRE_FOOD
-	):
-		return {}
-
-	var raw_existing_task = citizen.get("current_task", {})
-
-	if raw_existing_task is Dictionary:
-		var existing_task: Dictionary = raw_existing_task
-
-		if (
-			bool(existing_task.get("player_locked", false))
-			and task_source != CITY_CITIZEN_TASK_SOURCE_PLAYER
-		):
-			return {}
-
-		# Replacements must pass through the appropriate cancellation or player-
-		# interruption gateway first. That path owns reservation release and cargo
-		# preservation, so assigning over an active task can never leak a claim.
-		if (
-			str(existing_task.get("kind", CITY_CITIZEN_TASK_KIND_NONE))
-			!= CITY_CITIZEN_TASK_KIND_NONE
-		):
-			return {}
-
-	var haul_cargo_amount := maxi(
-		int(get_city_citizen_haul_cargo(citizen_id).get("amount", 0)),
-		0
-	)
-
-	if (
-		haul_cargo_amount > 0
-		and task_kind != CITY_CITIZEN_TASK_KIND_HAUL
-	):
-		return {}
-
-	return {
-		"citizen_id": citizen_id,
-		"citizen_index": citizen_index,
-		"citizen": citizen,
-		"task_values": task_values,
-		"task_kind": task_kind,
-		"task_source": task_source,
-		"task_priority": task_priority,
-		"target_object_id": target_object_id,
-		"work_order_id": work_order_id,
-		"job_id": job_id,
-		"player_locked": player_locked,
-		"haul_cargo_amount": haul_cargo_amount,
-		"assigned_haul": CityCitizensScript.make_city_citizen_haul(),
-		"assigned_target_tile": INVALID_CITY_TILE_POSITION,
-		"assigned_food_resource": RESOURCE_NONE,
-		"assigned_food_requested_amount": 0,
-		"assigned_food_endpoint_kind": CITY_CITIZEN_HAUL_ENDPOINT_KIND_NONE,
-		"assigned_food_access_purpose": CONTAINER_DIRECT_WITHDRAWAL_PURPOSE_NONE,
-	}
-
-
-static func _prepare_city_citizen_task_assignment(
-	assignment: Dictionary
-) -> bool:
-	match str(assignment.get("task_kind", CITY_CITIZEN_TASK_KIND_NONE)):
-		CITY_CITIZEN_TASK_KIND_WORK:
-			return _prepare_city_work_task_assignment(assignment)
-
-		CITY_CITIZEN_TASK_KIND_ACQUIRE_FOOD:
-			return _prepare_city_food_task_assignment(assignment)
-
-		CITY_CITIZEN_TASK_KIND_PLAYER_COMMAND:
-			return _prepare_city_player_command_task_assignment(assignment)
-
-		CITY_CITIZEN_TASK_KIND_CONSTRUCTION:
-			return CityConstructionSystem.prepare_city_construction_task_assignment(assignment)
-
-		CITY_CITIZEN_TASK_KIND_HAUL:
-			return _prepare_city_haul_task_assignment(assignment)
-
-		CITY_CITIZEN_TASK_KIND_RETURN_HOME:
-			return _prepare_city_return_home_task_assignment(assignment)
-
-		_:
-			return false
-
-
-static func _prepare_city_work_task_assignment(
-	assignment: Dictionary
-) -> bool:
-	var citizen: Dictionary = assignment.get("citizen", {})
-	var target_object_id := int(assignment.get("target_object_id", -1))
-	var workplace := CityObjectSystem.get_city_object_by_id(target_object_id)
-
-	if workplace.is_empty() or not city_object_is_workplace(workplace):
-		return false
-
-	return int(citizen.get("job_object_id", -1)) == target_object_id
-
-
-static func _prepare_city_food_task_assignment(
-	assignment: Dictionary
-) -> bool:
-	var citizen_id := int(assignment.get("citizen_id", -1))
-	var target_object_id := int(assignment.get("target_object_id", -1))
-	var task_values: Dictionary = assignment.get("task_values", {})
-	var food_resource := str(
-		task_values.get("food_resource_type", RESOURCE_NONE)
-	)
-	var food_endpoint_kind := str(
-		task_values.get(
-			"food_source_endpoint_kind",
-			CITY_CITIZEN_HAUL_ENDPOINT_KIND_CITY_OBJECT_CONTAINER
-		)
-	)
-	var food_endpoint := {
-		"kind": food_endpoint_kind,
-		"id": target_object_id,
-	}
-	var food_requested_amount := maxi(
-		int(task_values.get("food_requested_amount", 0)),
-		0
-	)
-	var food_access_purpose := str(
-		task_values.get(
-			"food_source_access_purpose",
-			CONTAINER_DIRECT_WITHDRAWAL_PURPOSE_NONE
-		)
-	)
-	var raw_food_target_tile = task_values.get(
-		"target_tile",
-		INVALID_CITY_TILE_POSITION
-	)
-	var hunger_restore := get_city_food_hunger_restore(food_resource)
-	var personal_food_nutrition := (
-		CityResourceContainerSystem.get_food_nutrition_in_resource_container(
-			get_city_citizen_inventory(citizen_id)
-		)
-	)
-	var desired_nutrition := maxi(
-		CITIZEN_EAT_TARGET_HUNGER
-		- get_city_citizen_hunger(citizen_id)
-		- personal_food_nutrition,
-		0
-	)
-
-	if (
-		hunger_restore <= 0
-		or food_requested_amount <= 0
-		or desired_nutrition <= 0
-		or food_access_purpose
-		!= CONTAINER_DIRECT_WITHDRAWAL_PURPOSE_PERSONAL_FOOD
-		or not raw_food_target_tile is Vector2i
-		or not CityCitizensScript.is_valid_city_citizen_haul_endpoint(
-			food_endpoint
-		)
-		or not get_city_citizen_food_endpoint_target_tiles(
-			citizen_id,
-			food_endpoint
-		).has(raw_food_target_tile)
-		or not city_citizen_can_withdraw_food_from_endpoint(
-			citizen_id,
-			food_endpoint,
-			food_resource
-		)
-	):
-		return false
-
-	var assigned_amount := mini(
-		food_requested_amount,
-		mini(
-			get_city_food_endpoint_unreserved_amount(
-				citizen_id,
-				food_endpoint,
-				food_resource,
-				citizen_id
-			),
-			mini(
-				get_city_citizen_inventory_free_space(citizen_id),
-				ceili(float(desired_nutrition) / float(hunger_restore))
-			)
-		)
-	)
-
-	if assigned_amount <= 0:
-		return false
-
-	assignment["assigned_target_tile"] = raw_food_target_tile
-	assignment["assigned_food_resource"] = food_resource
-	assignment["assigned_food_requested_amount"] = assigned_amount
-	assignment["assigned_food_endpoint_kind"] = food_endpoint_kind
-	assignment["assigned_food_access_purpose"] = food_access_purpose
-	return true
-
-
-static func _prepare_city_player_command_task_assignment(
-	assignment: Dictionary
-) -> bool:
-	var citizen_id := int(assignment.get("citizen_id", -1))
-	var target_object_id := int(assignment.get("target_object_id", -1))
-	var task_source := str(assignment.get("task_source", ""))
-	var command := WorldPoliticalState.get_current_city_work_state().get_player_command_by_id(target_object_id)
-
-	if (
-		task_source != CITY_CITIZEN_TASK_SOURCE_PLAYER
-		or command.is_empty()
-		or int(command.get("claimed_citizen_id", -1)) != citizen_id
-		or not WorldPoliticalState.get_current_city_work_state().is_player_command_target_valid(
-			command,
-			official_city_world,
-			INVALID_CITY_TILE_POSITION
-		)
-	):
-		return false
-
-	var raw_command_tile = command.get(
-		"tile_position",
-		INVALID_CITY_TILE_POSITION
-	)
-
-	if not raw_command_tile is Vector2i:
-		return false
-
-	assignment["assigned_target_tile"] = raw_command_tile
-	return true
-
-
-static func _prepare_city_haul_task_assignment(
-	assignment: Dictionary
-) -> bool:
-	var citizen_id := int(assignment.get("citizen_id", -1))
-	var target_object_id := int(assignment.get("target_object_id", -1))
-	var task_values: Dictionary = assignment.get("task_values", {})
-	var haul_cargo_amount := maxi(
-		int(assignment.get("haul_cargo_amount", 0)),
-		0
-	)
-	var raw_haul = task_values.get("haul", {})
-
-	if not raw_haul is Dictionary:
-		return false
-
-	var assigned_haul := CityCitizensScript.make_city_citizen_haul(raw_haul)
-	var haul_phase := str(
-		assigned_haul.get("phase", CITY_CITIZEN_HAUL_PHASE_NONE)
-	)
-	var haul_resource := str(
-		assigned_haul.get("resource_type", RESOURCE_NONE)
-	)
-	var haul_source: Dictionary = assigned_haul.get("source", {})
-	var haul_destination: Dictionary = assigned_haul.get("destination", {})
-	var haul_requester: Dictionary = assigned_haul.get("requester", {})
-	var source_endpoint_id := int(haul_source.get("id", -1))
-
-	if (
-		not CityCitizensScript.is_valid_city_citizen_haul_phase(haul_phase)
-		or haul_phase == CITY_CITIZEN_HAUL_PHASE_NONE
-		or not is_city_resource_type(haul_resource)
-		or int(assigned_haul.get("requested_amount", 0)) <= 0
-		or str(
-			assigned_haul.get("reason", CITY_CITIZEN_HAUL_REASON_NONE)
-		) == CITY_CITIZEN_HAUL_REASON_NONE
-		or str(
-			assigned_haul.get(
-				"source_access_purpose",
-				CONTAINER_HAUL_PURPOSE_NONE
-			)
-		) == CONTAINER_HAUL_PURPOSE_NONE
-		or str(
-			assigned_haul.get(
-				"destination_access_purpose",
-				CONTAINER_HAUL_PURPOSE_NONE
-			)
-		) == CONTAINER_HAUL_PURPOSE_NONE
-		or not assigned_haul.get("source_tile") is Vector2i
-		or not assigned_haul.get("destination_tile") is Vector2i
-	):
-		return false
-
-	if not CityCitizensScript.is_valid_city_citizen_haul_endpoint(haul_source):
-		return false
-
-	if not CityCitizensScript.is_valid_city_citizen_haul_endpoint(haul_requester):
-		return false
-
-	if source_endpoint_id != target_object_id:
-		return false
-
-	if haul_cargo_amount <= 0:
-		if not CityCitizensScript.is_valid_city_citizen_haul_endpoint(
-			haul_destination
-		):
-			return false
-
-		var source_access_purpose := str(
-			assigned_haul.get(
-				"source_access_purpose",
-				CONTAINER_HAUL_PURPOSE_NONE
-			)
-		)
-
-		if not CityLogisticsSystem.city_haul_endpoint_can_provide_resource({
-			"endpoint": haul_source,
-			"resource": haul_resource,
-			"withdrawal_purpose": source_access_purpose,
-			"require_unreserved_amount": true,
-		}):
-			return false
-	else:
-		var cargo_resources := get_city_citizen_haul_cargo_resources(citizen_id)
-
-		if cargo_resources.is_empty():
-			return false
-
-	if not CityCitizensScript.is_valid_city_citizen_haul_endpoint(
-		haul_destination,
-		haul_cargo_amount > 0
-	):
-		return false
-
-	if (
-		str(
-			haul_destination.get(
-				"kind",
-				CITY_CITIZEN_HAUL_ENDPOINT_KIND_NONE
-			)
-		)
-		!= CITY_CITIZEN_HAUL_ENDPOINT_KIND_NONE
-	):
-		var destination_access_purpose := str(
-			assigned_haul.get(
-				"destination_access_purpose",
-				CONTAINER_HAUL_PURPOSE_NONE
-			)
-		)
-		var destination_resources: Dictionary = {
-			haul_resource: int(assigned_haul.get("requested_amount", 0))
-		}
-
-		if haul_cargo_amount > 0:
-			destination_resources = get_city_citizen_haul_cargo_resources(
-				citizen_id
-			)
-
-		for destination_resource in destination_resources.keys():
-			if not CityLogisticsSystem.city_haul_endpoint_can_accept_resource({
-				"endpoint": haul_destination,
-				"resource": str(destination_resource),
-				"deposit_purpose": destination_access_purpose,
-				"require_unreserved_space": true,
-			}):
-				return false
-
-		var reservation := CityLogisticsSystem.create_city_haul_reservation({
-			"citizen_id": citizen_id,
-			"source": haul_source,
-			"destination": haul_destination,
-			"resource_type": haul_resource,
-			"requested_amount": int(
-				assigned_haul.get("requested_amount", 0)
-			),
-			"source_access_purpose": str(
-				assigned_haul.get(
-					"source_access_purpose",
-					CONTAINER_HAUL_PURPOSE_NONE
-				)
-			),
-			"destination_access_purpose": destination_access_purpose,
-		})
-
-		if reservation.is_empty():
-			return false
-
-		assigned_haul["reservation_id"] = int(reservation.get("id", -1))
-
-		if haul_cargo_amount <= 0:
-			assigned_haul["requested_amount"] = int(
-				reservation.get("source_reserved_amount", 0)
-			)
-		else:
-			assigned_haul["requested_amount"] = haul_cargo_amount
-
-	assignment["assigned_haul"] = assigned_haul
-	return true
-
-
-static func _prepare_city_return_home_task_assignment(
-	assignment: Dictionary
-) -> bool:
-	var citizen_id := int(assignment.get("citizen_id", -1))
-	var citizen: Dictionary = assignment.get("citizen", {})
-	var target_object_id := int(assignment.get("target_object_id", -1))
-	var home := CityObjectSystem.get_city_object_by_id(target_object_id)
-
-	if (
-		home.is_empty()
-		or get_city_object_resident_capacity(home) <= 0
-		or not CityObjectSystem.city_object_supports_citizen_interior(home)
-	):
-		return false
-
-	if int(citizen.get("home_object_id", -1)) != target_object_id:
-		return false
-
-	if not get_city_object_resident_ids(home).has(citizen_id):
-		return false
-
-	return city_citizen_can_access_object_interior(citizen_id, home)
-
-
-static func _commit_city_citizen_task_assignment(
-	assignment: Dictionary
-) -> bool:
-	var citizen_id := int(assignment.get("citizen_id", -1))
-	var citizen_index := int(assignment.get("citizen_index", -1))
-	var citizen: Dictionary = assignment.get("citizen", {})
-	var task_kind := str(assignment.get("task_kind", ""))
-	var current_task := CityCitizensScript.make_city_citizen_task({
-		"kind": task_kind,
-		"source": str(assignment.get("task_source", "")),
-		"phase": CITY_CITIZEN_TASK_PHASE_PENDING,
-		"priority": int(assignment.get("task_priority", 0)),
-		"target_object_id": int(assignment.get("target_object_id", -1)),
-		"work_order_id": int(assignment.get("work_order_id", -1)),
-		"job_id": str(assignment.get("job_id", "")),
-		"start_world_minute": SimulationClock.absolute_world_minutes,
-		"target_tile": assignment.get(
-			"assigned_target_tile",
-			INVALID_CITY_TILE_POSITION
-		),
-		"player_locked": bool(assignment.get("player_locked", false)),
-		"food_resource_type": str(
-			assignment.get("assigned_food_resource", RESOURCE_NONE)
-		),
-		"food_requested_amount": int(
-			assignment.get("assigned_food_requested_amount", 0)
-		),
-		"food_source_endpoint_kind": str(
-			assignment.get(
-				"assigned_food_endpoint_kind",
-				CITY_CITIZEN_HAUL_ENDPOINT_KIND_NONE
-			)
-		),
-		"food_source_access_purpose": str(
-			assignment.get(
-				"assigned_food_access_purpose",
-				CONTAINER_DIRECT_WITHDRAWAL_PURPOSE_NONE
-			)
-		),
-	})
-
-	citizen["current_task"] = current_task
-
-	if task_kind == CITY_CITIZEN_TASK_KIND_HAUL:
-		citizen["current_haul"] = assignment.get(
-			"assigned_haul",
-			CityCitizensScript.make_city_citizen_haul()
-		)
-	else:
-		CityCitizensScript.reset_city_citizen_haul_state(citizen)
-
-	city_citizens[citizen_index] = citizen
-	_add_city_active_task_id(citizen_id)
-	_mark_city_citizen_task_changed()
-	return true
-
-
-static func set_city_citizen_task_phase(
-	citizen_id: int,
-	task_phase: String
-) -> bool:
-	if (
-		not is_valid_city_citizen_task_phase(task_phase)
-		or task_phase == CITY_CITIZEN_TASK_PHASE_NONE
-	):
-		return false
-
-	var citizen_index := get_city_citizen_index_by_id(
-		citizen_id
-	)
-
-	if citizen_index < 0:
-		return false
-
-	var raw_citizen = city_citizens[citizen_index]
-
-	if not raw_citizen is Dictionary:
-		return false
-
-	var citizen: Dictionary = raw_citizen
-	var raw_current_task = citizen.get("current_task", {})
-
-	if not raw_current_task is Dictionary:
-		return false
-
-	var current_task: Dictionary = (
-		raw_current_task.duplicate(true)
-	)
-
-	if (
-		str(current_task.get("kind", ""))
-		== CITY_CITIZEN_TASK_KIND_NONE
-	):
-		return false
-
-	if str(current_task.get("phase", "")) == task_phase:
-		return true
-
-	current_task["phase"] = task_phase
-	citizen["current_task"] = current_task
-	city_citizens[citizen_index] = citizen
-	_mark_city_citizen_task_changed()
-
-	return true
-
-static func set_city_citizen_task_target_object_id(
-	citizen_id: int,
-	target_object_id: int
-) -> bool:
-	if target_object_id <= 0:
-		return false
-
-	var citizen_index := get_city_citizen_index_by_id(citizen_id)
-
-	if citizen_index < 0:
-		return false
-
-	var raw_citizen = city_citizens[citizen_index]
-
-	if not raw_citizen is Dictionary:
-		return false
-
-	var citizen: Dictionary = raw_citizen
-	var raw_current_task = citizen.get("current_task", {})
-
-	if not raw_current_task is Dictionary:
-		return false
-
-	var current_task: Dictionary = raw_current_task.duplicate(true)
-
-	if (
-		str(current_task.get("kind", ""))
-		!= CITY_CITIZEN_TASK_KIND_HAUL
-	):
-		return false
-
-	if int(current_task.get("target_object_id", -1)) == target_object_id:
-		return true
-
-	current_task["target_object_id"] = target_object_id
-	citizen["current_task"] = current_task
-	city_citizens[citizen_index] = citizen
-	_mark_city_citizen_task_changed()
-	return true
-
-
-static func set_city_citizen_task_activity_state(
-	values: Dictionary
-) -> bool:
-	if not values.has("citizen_id") or not values.has("target_tile"):
-		push_error(
-			"Citizen task activity state requires citizen_id and target_tile."
-		)
-		return false
-
-	var raw_target_tile = values["target_tile"]
-	var raw_previous_target_tile = values.get(
-		"previous_target_tile",
-		INVALID_CITY_TILE_POSITION
-	)
-
-	if not raw_target_tile is Vector2i:
-		push_error(
-			"Citizen task activity target_tile must be Vector2i."
-		)
-		return false
-
-	if not raw_previous_target_tile is Vector2i:
-		push_error(
-			"Citizen task activity previous_target_tile must be Vector2i."
-		)
-		return false
-
-	var citizen_id := int(values["citizen_id"])
-	var target_tile: Vector2i = raw_target_tile
-	var previous_target_tile: Vector2i = raw_previous_target_tile
-	var next_action_world_minute := int(
-		values.get(
-			"next_action_world_minute",
-			INVALID_CITY_CITIZEN_TASK_ACTION_WORLD_MINUTE
-		)
-	)
-	var relocation_count := int(
-		values.get("relocation_count", -1)
-	)
-	var citizen_index := get_city_citizen_index_by_id(
-		citizen_id
-	)
-
-	if citizen_index < 0:
-		return false
-
-	var raw_citizen = city_citizens[citizen_index]
-
-	if not raw_citizen is Dictionary:
-		return false
-
-	var citizen: Dictionary = raw_citizen
-	var raw_current_task = citizen.get(
-		"current_task",
-		{}
-	)
-
-	if not raw_current_task is Dictionary:
-		return false
-
-	var current_task: Dictionary = (
-		raw_current_task.duplicate(true)
-	)
-
-	if (
-		str(current_task.get("kind", ""))
-		== CITY_CITIZEN_TASK_KIND_NONE
-	):
-		return false
-	var stored_relocation_count := maxi(
-		int(current_task.get("relocation_count", 0)),
-		0
-	)
-	var resolved_relocation_count := relocation_count
-
-	if resolved_relocation_count < 0:
-		resolved_relocation_count = stored_relocation_count
-	if (
-		current_task.get(
-			"target_tile",
-			INVALID_CITY_TILE_POSITION
-		) == target_tile
-		and current_task.get(
-			"previous_target_tile",
-			INVALID_CITY_TILE_POSITION
-		) == previous_target_tile
-		and int(
-			current_task.get(
-				"next_action_world_minute",
-				INVALID_CITY_CITIZEN_TASK_ACTION_WORLD_MINUTE
-			)
-		) == next_action_world_minute
-		and stored_relocation_count == resolved_relocation_count
-	):
-		return true
-
-	current_task["target_tile"] = target_tile
-	current_task["previous_target_tile"] = (
-		previous_target_tile
-	)
-	current_task["next_action_world_minute"] = (
-		next_action_world_minute
-	)
-	current_task["relocation_count"] = (
-		resolved_relocation_count
-	)
-
-	citizen["current_task"] = current_task
-	city_citizens[citizen_index] = citizen
-	_mark_city_citizen_task_changed()
-
-	return true
-
-static func clear_city_citizen_task(
-	citizen_id: int,
-	requesting_source: String = CITY_CITIZEN_TASK_SOURCE_NONE
-) -> bool:
-	if not is_valid_city_citizen_task_source(
-		requesting_source
-	):
-		return false
-
-	var citizen_index := get_city_citizen_index_by_id(
-		citizen_id
-	)
-
-	if citizen_index < 0:
-		return false
-
-	var raw_citizen = city_citizens[citizen_index]
-
-	if not raw_citizen is Dictionary:
-		return false
-
-	var citizen: Dictionary = raw_citizen
-	var raw_current_task = citizen.get("current_task", {})
-
-	if raw_current_task is Dictionary:
-		var current_task: Dictionary = raw_current_task
-
-		if (
-			bool(current_task.get("player_locked", false))
-			and requesting_source
-			!= CITY_CITIZEN_TASK_SOURCE_PLAYER
-		):
-			return false
-
-	var empty_task := CityCitizensScript.make_city_citizen_task()
-	var active_reservation_id := (
-		CityLogisticsSystem.get_city_haul_reservation_id_for_citizen(citizen_id)
-	)
-
-	if active_reservation_id > 0:
-		CityLogisticsSystem.release_city_haul_reservation(active_reservation_id)
-
-	if (
-		raw_current_task is Dictionary
-		and raw_current_task == empty_task
-	):
-		if _remove_city_active_task_id(citizen_id):
-			_mark_city_citizen_task_changed()
-		return true
-
-	var current_task_kind := CITY_CITIZEN_TASK_KIND_NONE
-
-	if raw_current_task is Dictionary:
-		current_task_kind = str(
-			raw_current_task.get(
-				"kind",
-				CITY_CITIZEN_TASK_KIND_NONE
-			)
-		)
-
-	if current_task_kind == CITY_CITIZEN_TASK_KIND_PLAYER_COMMAND:
-		WorldPoliticalState.get_current_city_work_state().release_player_command_claim(
-			int(raw_current_task.get("target_object_id", -1)),
-			citizen_id
-		)
-
-	if current_task_kind == CITY_CITIZEN_TASK_KIND_HAUL:
-		var raw_cargo = citizen.get("haul_cargo", {})
-		var cargo := CityCitizensScript.make_city_citizen_haul_cargo()
-
-		if raw_cargo is Dictionary:
-			cargo = (
-				CityCitizensScript.make_city_citizen_haul_cargo(
-					raw_cargo
-				)
-			)
-
-		if int(cargo.get("amount", 0)) > 0:
-			var raw_haul = citizen.get("current_haul", {})
-			var current_haul := (
-				CityCitizensScript.make_city_citizen_haul()
-			)
-
-			if raw_haul is Dictionary:
-				current_haul = (
-					CityCitizensScript.make_city_citizen_haul(
-						raw_haul
-					)
-				)
-
-			current_haul["phase"] = (
-				CITY_CITIZEN_HAUL_PHASE_RETARGETING
-			)
-			current_haul["reservation_id"] = (
-				INVALID_CITY_CITIZEN_HAUL_RESERVATION_ID
-			)
-			current_haul["destination_tile"] = (
-				INVALID_CITY_TILE_POSITION
-			)
-			citizen["current_haul"] = current_haul
-		else:
-			CityCitizensScript.reset_city_citizen_haul_state(
-				citizen
-			)
-
-	citizen["current_task"] = empty_task
-	city_citizens[citizen_index] = citizen
-	_remove_city_active_task_id(citizen_id)
-	_mark_city_citizen_task_changed()
-
-	return true
-
-#endregion
-
-#region Citizen Movement and Spatial State
-
-static func is_valid_city_citizen_movement_state(
-	movement_state: String
-) -> bool:
-	return CityCitizensScript.is_valid_city_citizen_movement_state(
-		movement_state
-	)
-
-
-static func is_valid_city_citizen_movement_failure(
-	failure_reason: String
-) -> bool:
-	return CityCitizensScript.is_valid_city_citizen_movement_failure(
-		failure_reason
-	)
-
-
-static func ensure_city_citizen_movement_state() -> int:
-	if city_citizens.is_empty():
-		rebuild_city_active_mover_registry()
-		return 0
-
-	var migrated_count := 0
-
-	for citizen_index in range(city_citizens.size()):
-		var raw_citizen = city_citizens[citizen_index]
-
-		if not raw_citizen is Dictionary:
-			continue
-
-		var citizen: Dictionary = raw_citizen
-
-		if (
-			CityCitizensScript
-			.has_complete_city_citizen_movement_state(
-				citizen
-			)
-		):
-			continue
-
-		CityCitizensScript.reset_city_citizen_movement_state(
-			citizen
-		)
-		city_citizens[citizen_index] = citizen
-		migrated_count += 1
-
-	var movement_version_before_rebuild := city_citizen_movement_version
-	rebuild_city_active_mover_registry()
-
-	if (
-		migrated_count > 0
-		and city_citizen_movement_version
-		== movement_version_before_rebuild
-	):
-		_mark_city_citizen_movement_changed()
-
-	return migrated_count
-
-static func ensure_city_citizen_spatial_state(
-	city_world: WorldData
-) -> int:
-	if city_world == null:
-		return 0
-
-	if city_citizens.is_empty():
-		if not city_citizen_ids_by_tile.is_empty():
-			city_citizen_ids_by_tile.clear()
-			_mark_city_citizen_spatial_changed()
-		return 0
-
-	var citizens_missing_position := []
-
-	for citizen_index in range(
-		city_citizens.size()
-	):
-		var raw_citizen = city_citizens[
-			citizen_index
-		]
-
-		if not raw_citizen is Dictionary:
-			continue
-
-		var citizen: Dictionary = raw_citizen
-
-		if not bool(citizen.get("alive", false)):
-			continue
-
-		if citizen.has("city_tile_position"):
-			continue
-
-		citizens_missing_position.append(
-			citizen_index
-		)
-
-	var initialized_count := 0
-
-	if not citizens_missing_position.is_empty():
-		var spawn_tiles := (
-			get_starting_city_citizen_spawn_tiles(
-				city_world
-			)
-		)
-
-		if spawn_tiles.is_empty():
-			rebuild_city_citizen_spatial_index()
-
-			push_error(
-				"Cannot initialize legacy citizen positions: "
-				+ "the City Keep has no walkable access tiles."
-			)
-
-			return 0
-
-		for raw_citizen_index in (
-			citizens_missing_position
-		):
-			var citizen_index: int = (
-				raw_citizen_index
-			)
-			var raw_citizen = city_citizens[
-				citizen_index
-			]
-
-			if not raw_citizen is Dictionary:
-				continue
-
-			var citizen: Dictionary = raw_citizen
-			var spawn_tile: Vector2i = spawn_tiles[
-				citizen_index % spawn_tiles.size()
-			]
-
-			citizen["city_tile_position"] = (
-				spawn_tile
-			)
-			city_citizens[citizen_index] = (
-				citizen
-			)
-			initialized_count += 1
-
-	var spatial_version_before_rebuild := city_citizen_spatial_version
-	rebuild_city_citizen_spatial_index()
-
-	if (
-		initialized_count > 0
-		and city_citizen_spatial_version == spatial_version_before_rebuild
-	):
-		_mark_city_citizen_spatial_changed()
-
-	return initialized_count
-
-static func get_city_citizen_tile_position(
-	citizen_id: int
-) -> Vector2i:
-	var citizen := get_city_citizen_by_id(
-		citizen_id
-	)
-
-	if citizen.is_empty():
-		return INVALID_CITY_TILE_POSITION
-
-	var raw_position = citizen.get(
-		"city_tile_position",
-		INVALID_CITY_TILE_POSITION
-	)
-
-	if not raw_position is Vector2i:
-		return INVALID_CITY_TILE_POSITION
-
-	return raw_position
-
-
-static func set_city_citizen_tile_position(
-	city_world: WorldData,
-	citizen_id: int,
-	tile_position: Vector2i
-) -> bool:
-	if not is_city_tile_walkable_for_citizen(
-		city_world,
-		tile_position,
-		citizen_id
-	):
-		return false
-
-	var citizen_index := (
-		get_city_citizen_index_by_id(
-			citizen_id
-		)
-	)
-
-	if citizen_index < 0:
-		return false
-
-	var raw_citizen = city_citizens[
-		citizen_index
-	]
-
-	if not raw_citizen is Dictionary:
-		return false
-
-	var citizen: Dictionary = raw_citizen
-	if not bool(citizen.get("alive", false)):
-		return false
-	var current_position = citizen.get(
-		"city_tile_position",
-		INVALID_CITY_TILE_POSITION
-	)
-
-	if current_position == tile_position:
-		if _add_city_citizen_to_spatial_index(citizen_id, tile_position):
-			_mark_city_citizen_spatial_changed()
-		return true
-
-	if current_position is Vector2i:
-		_remove_city_citizen_from_spatial_index(
-			citizen_id,
-			current_position
-		)
-
-	citizen["city_tile_position"] = tile_position
-	city_citizens[citizen_index] = citizen
-
-	_add_city_citizen_to_spatial_index(
-		citizen_id,
-		tile_position
-	)
-
-	_mark_city_citizen_spatial_changed()
-
-	return true
-
-static func _get_clean_city_citizen_movement_path(
-	city_world: WorldData,
-	raw_path: Array,
-	citizen_id: int = -1
-) -> Array:
-	var movement_path := []
-
-	if city_world == null:
-		return movement_path
-
-	if raw_path.is_empty():
-		return movement_path
-
-	var previous_tile := INVALID_CITY_TILE_POSITION
-
-	for raw_path_tile in raw_path:
-		if not raw_path_tile is Vector2i:
-			return []
-
-		var path_tile: Vector2i = raw_path_tile
-
-		if not is_city_tile_walkable_for_citizen(
-			city_world,
-			path_tile,
-			citizen_id
-		):
-			return []
-
-		if previous_tile != INVALID_CITY_TILE_POSITION:
-			if get_city_citizen_movement_step_cost(
-				previous_tile,
-				path_tile
-			) <= 0:
-				return []
-
-			if not can_city_citizen_traverse_step(
-				city_world,
-				previous_tile,
-				path_tile,
-				citizen_id
-			):
-				return []
-
-		movement_path.append(path_tile)
-		previous_tile = path_tile
-
-	return movement_path
-
-static func cancel_city_citizen_movement(
-	citizen_id: int
-) -> bool:
-	var citizen_index := get_city_citizen_index_by_id(
-		citizen_id
-	)
-
-	if citizen_index < 0:
-		return false
-
-	var raw_citizen = city_citizens[citizen_index]
-
-	if not raw_citizen is Dictionary:
-		return false
-
-	var citizen: Dictionary = raw_citizen
-
-	CityCitizensScript.reset_city_citizen_movement_state(
-		citizen,
-		true
-	)
-	city_citizens[citizen_index] = citizen
-
-	_remove_city_active_mover_id(citizen_id)
-	_mark_city_citizen_movement_changed()
-
-	return true
-
-
-static func assign_city_citizen_movement_order(
-	citizen_id: int,
-	raw_path: Array
-) -> bool:
-	var city_world: WorldData = official_city_world
-
-	if city_world == null:
-		return false
-
-	var citizen_index := get_city_citizen_index_by_id(
-		citizen_id
-	)
-
-	if citizen_index < 0:
-		return false
-
-	var raw_citizen = city_citizens[citizen_index]
-
-	if not raw_citizen is Dictionary:
-		return false
-
-	var citizen: Dictionary = raw_citizen
-
-	if not bool(citizen.get("alive", false)):
-		return false
-
-	var current_position = citizen.get(
-		"city_tile_position",
-		INVALID_CITY_TILE_POSITION
-	)
-
-	if not current_position is Vector2i:
-		return false
-
-	var movement_path := _get_clean_city_citizen_movement_path(
-		city_world,
-		raw_path,
-		citizen_id
-	)
-
-	if movement_path.is_empty():
-		return false
-
-	if movement_path[0] != current_position:
-		return false
-
-	if movement_path.size() == 1:
-		cancel_city_citizen_movement(citizen_id)
-		return true
-
-	var movement_speed := int(
-		citizen.get(
-			"movement_speed_basis_points_per_minute",
-			DEFAULT_CITIZEN_MOVEMENT_SPEED_PER_MINUTE
-		)
-	)
-
-	if movement_speed <= 0:
-		movement_speed = (
-			DEFAULT_CITIZEN_MOVEMENT_SPEED_PER_MINUTE
-		)
-
-	citizen["movement_state"] = (
-		CITY_CITIZEN_MOVEMENT_STATE_MOVING
-	)
-	citizen["movement_path"] = movement_path.duplicate()
-	citizen["movement_path_index"] = 1
-	citizen["movement_progress_basis_points"] = 0
-	citizen["movement_destination_tile"] = (
-		movement_path.back()
-	)
-	citizen["movement_speed_basis_points_per_minute"] = (
-		movement_speed
-	)
-	citizen["movement_repath_attempt_count"] = 0
-	citizen["movement_failure_reason"] = (
-		CITY_CITIZEN_MOVEMENT_FAILURE_NONE
-	)
-
-	city_citizens[citizen_index] = citizen
-
-	_add_city_active_mover_id(citizen_id)
-	_mark_city_citizen_movement_changed()
-
-	return true
-
-static func commit_city_citizen_movement_tick(
-	city_world: WorldData,
-	raw_citizen_updates: Array,
-	raw_next_active_mover_ids: Array[int]
-) -> Dictionary:
-	var result := {
-		"success": false,
-		"updated_citizen_count": 0,
-		"moved_citizen_count": 0,
-		"rejected_update_count": 0,
-		"rejected_updates": [],
-	}
-
-	if city_world == null:
-		return result
-
-	var update_normalization := _normalize_city_citizen_movement_updates(
-		city_world,
-		raw_citizen_updates
-	)
-	var clean_updates: Array = update_normalization.get("updates", [])
-	var clean_update_by_id: Dictionary = update_normalization.get(
-		"update_by_id",
-		{}
-	)
-	var rejected_updates: Array = update_normalization.get(
-		"rejected_updates",
-		[]
-	)
-	var rejected_id_lookup: Dictionary = {}
-
-	for raw_rejection in rejected_updates:
-		if not raw_rejection is Dictionary:
-			continue
-
-		var rejected_id := int(raw_rejection.get("citizen_id", -1))
-
-		if rejected_id > 0:
-			rejected_id_lookup[rejected_id] = true
-
-	var active_normalization := _normalize_next_active_mover_ids(
-		raw_next_active_mover_ids,
-		clean_update_by_id,
-		rejected_id_lookup
-	)
-	var clean_next_active_ids: Array[int] = active_normalization.get(
-		"active_ids",
-		[]
-	)
-	rejected_updates.append_array(
-		active_normalization.get("rejected_updates", [])
-	)
-
-	var application_result := _apply_city_citizen_movement_updates(
-		clean_updates
-	)
-	var moved_citizen_count := int(
-		application_result.get("moved_citizen_count", 0)
-	)
-	var spatial_index_changed := bool(
-		application_result.get("spatial_index_changed", false)
-	)
-	var quarantined_count := (
-		_quarantine_rejected_city_citizen_movement_updates(
-			rejected_updates
-		)
-	)
-	var active_registry_changed := (
-		_replace_city_active_mover_registry(clean_next_active_ids)
-	)
-
-	if (
-		not clean_updates.is_empty()
-		or quarantined_count > 0
-		or active_registry_changed
-	):
-		_mark_city_citizen_movement_changed()
-
-	if spatial_index_changed:
-		_mark_city_citizen_spatial_changed()
-
-	city_citizen_movement_visual_events = application_result.get(
-		"movement_visual_events",
-		[]
-	)
-	result["success"] = true
-	result["updated_citizen_count"] = clean_updates.size()
-	result["moved_citizen_count"] = moved_citizen_count
-	result["rejected_update_count"] = rejected_updates.size()
-	result["rejected_updates"] = rejected_updates
-	return result
-
-
-static func _make_city_citizen_movement_rejection(
-	citizen_id: int,
-	reason: String,
-	final_tile = INVALID_CITY_TILE_POSITION,
-	quarantine: bool = true
-) -> Dictionary:
-	var rejection := {
-		"citizen_id": citizen_id,
-		"reason": reason,
-		"quarantine": quarantine,
-	}
-
-	if final_tile is Vector2i:
-		rejection["final_tile"] = final_tile
-		rejection["occupying_object_id"] = int(
-			CityObjectSystem.get_city_object_id_at_tile(final_tile)
-		)
-
-	return rejection
-
-
-static func _normalize_city_citizen_movement_updates(
-	city_world: WorldData,
-	raw_citizen_updates: Array
-) -> Dictionary:
-	var clean_updates: Array = []
-	var clean_update_by_id: Dictionary = {}
-	var rejected_updates: Array = []
-
-	for raw_update in raw_citizen_updates:
-		if not raw_update is Dictionary:
-			rejected_updates.append(
-				_make_city_citizen_movement_rejection(
-					-1,
-					"update_is_not_dictionary",
-					INVALID_CITY_TILE_POSITION,
-					false
-				)
-			)
-			continue
-
-		var update: Dictionary = raw_update
-		var citizen_id := int(update.get("citizen_id", -1))
-		var raw_updated_citizen = update.get("citizen", {})
-		var raw_final_tile = update.get(
-			"final_tile",
-			INVALID_CITY_TILE_POSITION
-		)
-		var raw_traversed_tiles = update.get("traversed_tiles", [])
-
-		if citizen_id <= 0:
-			rejected_updates.append(
-				_make_city_citizen_movement_rejection(
-					citizen_id,
-					"invalid_citizen_id",
-					raw_final_tile,
-					false
-				)
-			)
-			continue
-
-		if clean_update_by_id.has(citizen_id):
-			rejected_updates.append(
-				_make_city_citizen_movement_rejection(
-					citizen_id,
-					"duplicate_update",
-					raw_final_tile,
-					false
-				)
-			)
-			continue
-
-		if not raw_updated_citizen is Dictionary:
-			rejected_updates.append(
-				_make_city_citizen_movement_rejection(
-					citizen_id,
-					"updated_citizen_is_not_dictionary",
-					raw_final_tile
-				)
-			)
-			continue
-
-		if not raw_final_tile is Vector2i:
-			rejected_updates.append(
-				_make_city_citizen_movement_rejection(
-					citizen_id,
-					"final_tile_is_not_vector"
-				)
-			)
-			continue
-
-		if not raw_traversed_tiles is Array:
-			rejected_updates.append(
-				_make_city_citizen_movement_rejection(
-					citizen_id,
-					"traversed_tiles_is_not_array",
-					raw_final_tile
-				)
-			)
-			continue
-
-		var citizen_index := get_city_citizen_index_by_id(citizen_id)
-
-		if citizen_index < 0:
-			rejected_updates.append(
-				_make_city_citizen_movement_rejection(
-					citizen_id,
-					"citizen_not_found",
-					raw_final_tile,
-					false
-				)
-			)
-			continue
-
-		var updated_citizen: Dictionary = raw_updated_citizen
-
-		if int(updated_citizen.get("id", -1)) != citizen_id:
-			rejected_updates.append(
-				_make_city_citizen_movement_rejection(
-					citizen_id,
-					"updated_citizen_id_mismatch",
-					raw_final_tile
-				)
-			)
-			continue
-
-		var existing_citizen = city_citizens[citizen_index]
-
-		if not existing_citizen is Dictionary:
-			rejected_updates.append(
-				_make_city_citizen_movement_rejection(
-					citizen_id,
-					"authoritative_citizen_is_not_dictionary",
-					raw_final_tile,
-					false
-				)
-			)
-			continue
-
-		var authoritative_position = existing_citizen.get(
-			"city_tile_position",
-			INVALID_CITY_TILE_POSITION
-		)
-
-		if not authoritative_position is Vector2i:
-			rejected_updates.append(
-				_make_city_citizen_movement_rejection(
-					citizen_id,
-					"authoritative_position_invalid",
-					raw_final_tile
-				)
-			)
-			continue
-
-		# A dead active mover still emits one same-tile update so its movement
-		# state and spatial membership can be retired. The tile may have become
-		# non-walkable since the citizen was placed, so that cleanup must not be
-		# blocked by the normal destination gate.
-		var is_non_living_same_tile_cleanup: bool = (
-			not bool(existing_citizen.get("alive", false))
-			and not bool(updated_citizen.get("alive", false))
-			and raw_final_tile == authoritative_position
-		)
-		var includes_non_living_citizen: bool = (
-			not bool(existing_citizen.get("alive", false))
-			or not bool(updated_citizen.get("alive", false))
-		)
-
-		if includes_non_living_citizen and not is_non_living_same_tile_cleanup:
-			rejected_updates.append(
-				_make_city_citizen_movement_rejection(
-					citizen_id,
-					"non_living_movement_relocation",
-					raw_final_tile
-				)
-			)
-			continue
-
-		if (
-			not is_non_living_same_tile_cleanup
-			and not is_city_tile_walkable_for_citizen(
-				city_world,
-				raw_final_tile,
-				citizen_id
-			)
-		):
-			rejected_updates.append(
-				_make_city_citizen_movement_rejection(
-					citizen_id,
-					"final_tile_not_walkable",
-					raw_final_tile
-				)
-			)
-			continue
-
-		var clean_update := {
-			"citizen_id": citizen_id,
-			"citizen_index": citizen_index,
-			"citizen": updated_citizen,
-			"final_tile": raw_final_tile,
-			"traversed_tiles": raw_traversed_tiles,
-		}
-		clean_updates.append(clean_update)
-		clean_update_by_id[citizen_id] = clean_update
-
-	return {
-		"updates": clean_updates,
-		"update_by_id": clean_update_by_id,
-		"rejected_updates": rejected_updates,
-	}
-
-
-static func _normalize_next_active_mover_ids(
-	raw_next_active_mover_ids: Array[int],
-	clean_update_by_id: Dictionary,
-	rejected_id_lookup: Dictionary
-) -> Dictionary:
-	var clean_next_active_ids: Array[int] = []
-	var clean_next_active_lookup: Dictionary = {}
-	var rejected_updates: Array = []
-
-	for citizen_id in raw_next_active_mover_ids:
-		if rejected_id_lookup.has(citizen_id):
-			continue
-
-		if citizen_id <= 0 or clean_next_active_lookup.has(citizen_id):
-			rejected_updates.append(
-				_make_city_citizen_movement_rejection(
-					citizen_id,
-					"invalid_or_duplicate_active_mover",
-					INVALID_CITY_TILE_POSITION,
-					false
-				)
-			)
-			continue
-
-		var proposed_citizen := get_city_citizen_by_id(citizen_id)
-
-		if clean_update_by_id.has(citizen_id):
-			var proposed_update: Dictionary = clean_update_by_id[citizen_id]
-			proposed_citizen = proposed_update.get("citizen", {})
-
-		if proposed_citizen.is_empty():
-			rejected_updates.append(
-				_make_city_citizen_movement_rejection(
-					citizen_id,
-					"active_mover_citizen_missing",
-					INVALID_CITY_TILE_POSITION,
-					false
-				)
-			)
-			continue
-
-		if not bool(proposed_citizen.get("alive", false)):
-			rejected_updates.append(
-				_make_city_citizen_movement_rejection(
-					citizen_id,
-					"active_mover_not_alive",
-					INVALID_CITY_TILE_POSITION,
-					false
-				)
-			)
-			continue
-
-		if (
-			str(proposed_citizen.get("movement_state", ""))
-			!= CITY_CITIZEN_MOVEMENT_STATE_MOVING
-		):
-			rejected_updates.append(
-				_make_city_citizen_movement_rejection(
-					citizen_id,
-					"active_registry_entry_not_moving",
-					INVALID_CITY_TILE_POSITION,
-					false
-				)
-			)
-			continue
-
-		clean_next_active_ids.append(citizen_id)
-		clean_next_active_lookup[citizen_id] = true
-
-	clean_next_active_ids.sort()
-	return {
-		"active_ids": clean_next_active_ids,
-		"rejected_updates": rejected_updates,
-	}
-
-
-static func _quarantine_rejected_city_citizen_movement_updates(
-	rejected_updates: Array
-) -> int:
-	var quarantined_ids: Dictionary = {}
-
-	for raw_rejection in rejected_updates:
-		if not raw_rejection is Dictionary:
-			continue
-
-		var rejection: Dictionary = raw_rejection
-		var citizen_id := int(rejection.get("citizen_id", -1))
-
-		if (
-			citizen_id <= 0
-			or not bool(rejection.get("quarantine", true))
-			or quarantined_ids.has(citizen_id)
-		):
-			continue
-
-		var citizen_index := get_city_citizen_index_by_id(citizen_id)
-
-		if citizen_index < 0:
-			continue
-
-		var raw_citizen = city_citizens[citizen_index]
-
-		if not raw_citizen is Dictionary:
-			continue
-
-		var citizen: Dictionary = raw_citizen
-		CityCitizensScript.reset_city_citizen_movement_state(citizen, true)
-		citizen["movement_state"] = CITY_CITIZEN_MOVEMENT_STATE_BLOCKED
-		citizen["movement_failure_reason"] = (
-			CITY_CITIZEN_MOVEMENT_FAILURE_INVALID_PATH
-		)
-		city_citizens[citizen_index] = citizen
-		quarantined_ids[citizen_id] = true
-
-	return quarantined_ids.size()
-
-
-static func _apply_city_citizen_movement_updates(
-	clean_updates: Array
-) -> Dictionary:
-	var moved_citizen_count := 0
-	var spatial_index_changed := false
-	var movement_visual_events: Array = []
-
-	for clean_update in clean_updates:
-		var citizen_id := int(clean_update.get("citizen_id", -1))
-		var citizen_index := int(clean_update.get("citizen_index", -1))
-		var updated_citizen: Dictionary = clean_update.get("citizen", {})
-		var final_tile: Vector2i = clean_update.get(
-			"final_tile",
-			INVALID_CITY_TILE_POSITION
-		)
-		var existing_citizen: Dictionary = city_citizens[citizen_index]
-		var old_tile: Vector2i = existing_citizen.get(
-			"city_tile_position",
-			INVALID_CITY_TILE_POSITION
-		)
-		var movement_visual_event := _make_city_citizen_movement_visual_event({
-			"before_citizen": existing_citizen,
-			"after_citizen": updated_citizen,
-			"before_tile": old_tile,
-			"after_tile": final_tile,
-			"traversed_tiles": clean_update.get("traversed_tiles", []),
-		})
-
-		if not movement_visual_event.is_empty():
-			movement_visual_events.append(movement_visual_event)
-
-		if old_tile != final_tile:
-			if _remove_city_citizen_from_spatial_index(citizen_id, old_tile):
-				spatial_index_changed = true
-			moved_citizen_count += 1
-		elif not bool(updated_citizen.get("alive", false)):
-			if _remove_city_citizen_from_spatial_index(citizen_id, old_tile):
-				spatial_index_changed = true
-
-		updated_citizen["city_tile_position"] = final_tile
-		city_citizens[citizen_index] = updated_citizen
-		if (
-			bool(updated_citizen.get("alive", false))
-			and _add_city_citizen_to_spatial_index(citizen_id, final_tile)
-		):
-			spatial_index_changed = true
-
-	return {
-		"moved_citizen_count": moved_citizen_count,
-		"spatial_index_changed": spatial_index_changed,
-		"movement_visual_events": movement_visual_events,
-	}
-
-
-static func _replace_city_active_mover_registry(
-	clean_next_active_ids: Array[int]
-) -> bool:
-	var expected_lookup: Dictionary = {}
-	for citizen_id in clean_next_active_ids:
-		expected_lookup[citizen_id] = true
-
-	var registry_changed := (
-		city_active_mover_ids != clean_next_active_ids
-		or city_active_mover_id_lookup != expected_lookup
-	)
-	city_active_mover_ids.clear()
-	city_active_mover_id_lookup.clear()
-
-	for citizen_id in clean_next_active_ids:
-		city_active_mover_ids.append(citizen_id)
-		city_active_mover_id_lookup[citizen_id] = true
-
-	return registry_changed
-
-
-static func _make_city_citizen_movement_visual_event(
-	values: Dictionary
-) -> Dictionary:
-	var before_citizen: Dictionary = values.get("before_citizen", {})
-	var after_citizen: Dictionary = values.get("after_citizen", {})
-	var before_tile: Vector2i = values.get(
-		"before_tile",
-		INVALID_CITY_TILE_POSITION
-	)
-	var after_tile: Vector2i = values.get(
-		"after_tile",
-		INVALID_CITY_TILE_POSITION
-	)
-	var raw_traversed_tiles = values.get("traversed_tiles", [])
-	var citizen_id := int(before_citizen.get("id", -1))
-
-	if citizen_id <= 0:
-		return {}
-
-	if int(after_citizen.get("id", -1)) != citizen_id:
-		return {}
-
-	return {
-		"citizen_id": citizen_id,
-		"before": _make_city_citizen_movement_visual_snapshot(
-			before_citizen,
-			before_tile
-		),
-		"after": _make_city_citizen_movement_visual_snapshot(
-			after_citizen,
-			after_tile
-		),
-		"traversed_tiles": (
-			_get_clean_city_citizen_movement_visual_trace(
-				before_tile,
-				after_tile,
-				raw_traversed_tiles
-			)
-		)
-	}
-
-
-static func _make_city_citizen_movement_visual_snapshot(
-	citizen: Dictionary,
-	tile_position: Vector2i
-) -> Dictionary:
-	var raw_path = citizen.get("movement_path", [])
-	var movement_path_index := int(citizen.get(
-		"movement_path_index",
-		0
-	))
-	var movement_progress := int(citizen.get(
-		"movement_progress_basis_points",
-		0
-	))
-	var movement_state := str(citizen.get("movement_state", ""))
-	var visual_position := Vector2(tile_position)
-	var visual_step_target_tile := INVALID_CITY_TILE_POSITION
-
-	if (
-		movement_state == CITY_CITIZEN_MOVEMENT_STATE_MOVING
-		and raw_path is Array
-		and movement_path_index >= 1
-		and movement_path_index < raw_path.size()
-		and raw_path[movement_path_index - 1] is Vector2i
-		and raw_path[movement_path_index] is Vector2i
-	):
-		var from_tile: Vector2i = raw_path[movement_path_index - 1]
-		var to_tile: Vector2i = raw_path[movement_path_index]
-		var step_cost := get_city_citizen_movement_step_cost(
-			from_tile,
-			to_tile
-		)
-
-		if step_cost > 0:
-			visual_step_target_tile = to_tile
-			visual_position = Vector2(from_tile).lerp(
-				Vector2(to_tile),
-				clampf(
-					float(movement_progress) / float(step_cost),
-					0.0,
-					1.0
-				)
-			)
-
-	return {
-		"id": int(citizen.get("id", -1)),
-		"alive": bool(citizen.get("alive", false)),
-		"city_tile_position": tile_position,
-		"movement_state": movement_state,
-		"movement_visual_position": visual_position,
-		"movement_visual_step_target_tile": visual_step_target_tile,
-		"movement_speed_basis_points_per_minute": int(citizen.get(
-			"movement_speed_basis_points_per_minute",
-			DEFAULT_CITIZEN_MOVEMENT_SPEED_PER_MINUTE
-		))
-	}
-
-
-static func _get_clean_city_citizen_movement_visual_trace(
-	before_tile: Vector2i,
-	after_tile: Vector2i,
-	raw_traversed_tiles
-) -> Array[Vector2i]:
-	var clean_tiles: Array[Vector2i] = [before_tile]
-
-	if raw_traversed_tiles is Array:
-		for raw_tile in raw_traversed_tiles:
-			if not raw_tile is Vector2i:
-				continue
-
-			var tile: Vector2i = raw_tile
-
-			if tile == clean_tiles.back():
-				continue
-
-			if (
-				get_city_citizen_movement_step_cost(
-					clean_tiles.back(),
-					tile
-				)
-				<= 0
-			):
-				break
-
-			clean_tiles.append(tile)
-
-	if (
-		clean_tiles.back() != after_tile
-		and get_city_citizen_movement_step_cost(
-			clean_tiles.back(),
-			after_tile
-		) > 0
-	):
-		clean_tiles.append(after_tile)
-
-	return clean_tiles
-
-
-#endregion
 
 #region Population, Housing, and Workplace Queries
 
-static func get_city_population_count() -> int:
-	return city_citizens.size()
 
 static func get_city_housed_citizen_count() -> int:
 
 	var housed_count := 0
 
-	for citizen in city_citizens:
+	for citizen in CityCitizenRegistrySystem.get_current_state().citizens:
 		if not citizen is Dictionary:
 			continue
 
@@ -5902,7 +2932,7 @@ static func get_city_unemployed_citizen_count() -> int:
 
 	var unemployed_count := 0
 
-	for citizen in city_citizens:
+	for citizen in CityCitizenRegistrySystem.get_current_state().citizens:
 		if not citizen is Dictionary:
 			continue
 
@@ -5914,23 +2944,10 @@ static func get_city_unemployed_citizen_count() -> int:
 
 	return unemployed_count
 
-static func get_city_citizen_by_id(citizen_id: int) -> Dictionary:
-
-	var citizen_index := get_city_citizen_index_by_id(citizen_id)
-
-	if citizen_index < 0:
-		return {}
-
-	var raw_citizen = city_citizens[citizen_index]
-
-	if not raw_citizen is Dictionary:
-		return {}
-
-	return raw_citizen
 
 
 static func get_city_citizen_culture_id(citizen_id: int) -> int:
-	var citizen := get_city_citizen_by_id(citizen_id)
+	var citizen := CityCitizenRegistrySystem.get_city_citizen_by_id(citizen_id)
 
 	if citizen.is_empty():
 		return INVALID_CULTURE_ID
@@ -5961,26 +2978,8 @@ static func get_city_citizen_culture_name(citizen_id: int) -> String:
 	)
 
 
-static func get_city_citizen_display_name(citizen_id: int) -> String:
-	var citizen := get_city_citizen_by_id(citizen_id)
-
-	if citizen.is_empty():
-		return "Citizen " + str(citizen_id)
-
-	return str(citizen.get("name", "Citizen " + str(citizen_id)))
 
 
-static func get_city_citizen_snapshot() -> Array:
-
-	var citizen_snapshot := []
-
-	for citizen in city_citizens:
-		if not citizen is Dictionary:
-			continue
-
-		citizen_snapshot.append(citizen.duplicate(true))
-
-	return citizen_snapshot
 
 static func get_city_object_resident_capacity(city_object: Dictionary) -> int:
 	if city_object.is_empty():
@@ -6010,7 +3009,7 @@ static func get_city_object_resident_count(city_object: Dictionary) -> int:
 
 	var resident_count := 0
 
-	for citizen in city_citizens:
+	for citizen in CityCitizenRegistrySystem.get_current_state().citizens:
 		if not citizen is Dictionary:
 			continue
 
@@ -6039,7 +3038,7 @@ static func get_city_object_resident_ids(city_object: Dictionary) -> Array:
 	if object_id < 0:
 		return resident_ids
 
-	for citizen in city_citizens:
+	for citizen in CityCitizenRegistrySystem.get_current_state().citizens:
 		if not citizen is Dictionary:
 			continue
 
@@ -6060,7 +3059,7 @@ static func get_city_object_resident_names(city_object: Dictionary) -> Array:
 	var resident_ids := get_city_object_resident_ids(city_object)
 
 	for resident_id in resident_ids:
-		resident_names.append(get_city_citizen_display_name(int(resident_id)))
+		resident_names.append(CityCitizenRegistrySystem.get_city_citizen_display_name(int(resident_id)))
 
 	return resident_names
 
@@ -6147,7 +3146,7 @@ static func get_city_object_worker_ids(city_object: Dictionary) -> Array:
 	if object_id < 0:
 		return worker_ids
 
-	for citizen in city_citizens:
+	for citizen in CityCitizenRegistrySystem.get_current_state().citizens:
 		if not citizen is Dictionary:
 			continue
 
@@ -6260,7 +3259,7 @@ static func is_city_citizen_attending_workplace(
 	)
 
 	return _city_citizen_matches_workplace_attendance(
-		get_city_citizen_by_id(citizen_id),
+		CityCitizenRegistrySystem.get_city_citizen_by_id(citizen_id),
 		workplace_id,
 		access_tiles
 	)
@@ -6317,7 +3316,7 @@ static func get_city_object_attending_worker_ids(
 		counted_worker_ids[worker_id] = true
 
 		if not _city_citizen_matches_workplace_attendance(
-			get_city_citizen_by_id(worker_id),
+			CityCitizenRegistrySystem.get_city_citizen_by_id(worker_id),
 			workplace_id,
 			access_tiles
 		):
@@ -6381,7 +3380,7 @@ static func get_city_object_attending_worker_count(
 		counted_worker_ids[worker_id] = true
 
 		if not _city_citizen_matches_workplace_attendance(
-			get_city_citizen_by_id(worker_id),
+			CityCitizenRegistrySystem.get_city_citizen_by_id(worker_id),
 			workplace_id,
 			access_tiles
 		):
@@ -6413,7 +3412,7 @@ static func get_city_object_worker_count(city_object: Dictionary) -> int:
 	if object_id < 0:
 		return worker_count
 
-	for raw_citizen in city_citizens:
+	for raw_citizen in CityCitizenRegistrySystem.get_current_state().citizens:
 		if not raw_citizen is Dictionary:
 			continue
 
@@ -6430,8 +3429,8 @@ static func get_city_object_worker_count(city_object: Dictionary) -> int:
 
 static func get_first_unemployed_city_citizen_index() -> int:
 
-	for citizen_index in range(city_citizens.size()):
-		var raw_citizen = city_citizens[citizen_index]
+	for citizen_index in range(CityCitizenRegistrySystem.get_current_state().citizens.size()):
+		var raw_citizen = CityCitizenRegistrySystem.get_current_state().citizens[citizen_index]
 
 		if not raw_citizen is Dictionary:
 			continue
@@ -6498,7 +3497,7 @@ static func assign_unemployed_citizens_to_available_workplaces() -> int:
 			if unemployed_citizen_index < 0:
 				break
 
-			var raw_citizen = city_citizens[
+			var raw_citizen = CityCitizenRegistrySystem.get_current_state().citizens[
 				unemployed_citizen_index
 			]
 
@@ -6532,8 +3531,8 @@ static func assign_unemployed_citizens_to_available_workplaces() -> int:
 
 static func get_first_homeless_city_citizen_index() -> int:
 
-	for citizen_index in range(city_citizens.size()):
-		var raw_citizen = city_citizens[citizen_index]
+	for citizen_index in range(CityCitizenRegistrySystem.get_current_state().citizens.size()):
+		var raw_citizen = CityCitizenRegistrySystem.get_current_state().citizens[citizen_index]
 
 		if not raw_citizen is Dictionary:
 			continue
@@ -6594,7 +3593,7 @@ static func assign_homeless_citizens_to_available_housing() -> int:
 			if homeless_citizen_index < 0:
 				break
 
-			var raw_citizen = city_citizens[
+			var raw_citizen = CityCitizenRegistrySystem.get_current_state().citizens[
 				homeless_citizen_index
 			]
 
@@ -6654,361 +3653,15 @@ static func reset_player_city_state() -> void:
 
 #region City Object Placement and Traversal
 
-static func get_living_city_citizen_ids_in_tiles(
-	raw_tiles: Array
-) -> Array[int]:
-	var tile_lookup: Dictionary = {}
 
-	for raw_tile in raw_tiles:
-		if raw_tile is Vector2i:
-			tile_lookup[raw_tile] = true
 
-	var citizen_ids: Array[int] = []
 
-	for raw_citizen in city_citizens:
-		if not raw_citizen is Dictionary:
-			continue
 
-		var citizen: Dictionary = raw_citizen
 
-		if not bool(citizen.get("alive", false)):
-			continue
 
-		var raw_tile = citizen.get(
-			"city_tile_position",
-			INVALID_CITY_TILE_POSITION
-		)
 
-		if not raw_tile is Vector2i or not tile_lookup.has(raw_tile):
-			continue
 
-		var citizen_id := int(citizen.get("id", -1))
 
-		if citizen_id > 0:
-			citizen_ids.append(citizen_id)
-
-	citizen_ids.sort()
-	return citizen_ids
-
-
-static func city_citizen_can_access_object_interior(
-	citizen_id: int,
-	city_object: Dictionary
-) -> bool:
-	if (
-		citizen_id <= 0
-		or city_object.is_empty()
-		or not CityObjectSystem.city_object_supports_citizen_interior(city_object)
-	):
-		return false
-
-	var citizen := get_city_citizen_by_id(citizen_id)
-
-	if (
-		citizen.is_empty()
-		or not bool(citizen.get("alive", false))
-	):
-		return false
-
-	var object_id := int(city_object.get("id", -1))
-
-	if object_id <= 0:
-		return false
-
-	var access_mode := (
-		CityObjectSystem.get_city_object_citizen_interior_access_mode(
-			city_object
-		)
-	)
-
-	match access_mode:
-		CITY_OBJECT_INTERIOR_ACCESS_RESIDENTS:
-			return (
-				int(citizen.get("home_object_id", -1))
-				== object_id
-				and get_city_object_resident_ids(
-					city_object
-				).has(citizen_id)
-			)
-
-		CITY_OBJECT_INTERIOR_ACCESS_ASSIGNED_WORKERS:
-			return (
-				int(citizen.get("job_object_id", -1))
-				== object_id
-				and get_city_object_worker_ids(
-					city_object
-				).has(citizen_id)
-			)
-
-		CITY_OBJECT_INTERIOR_ACCESS_TASK_TARGET:
-			var current_task := get_city_citizen_current_task(
-				citizen_id
-			)
-			var task_kind := str(
-				current_task.get(
-					"kind",
-					CITY_CITIZEN_TASK_KIND_NONE
-				)
-			)
-
-			# A ground-pile ID lives in a separate namespace and can equal an
-			# unrelated city-object ID. For hauling, authorize only city-object
-			# endpoints instead of treating the legacy numeric task target as an
-			# object reference.
-			if task_kind == CITY_CITIZEN_TASK_KIND_HAUL:
-				var haul := get_city_citizen_current_haul(citizen_id)
-
-				for endpoint_field in ["source", "destination"]:
-					var raw_endpoint = haul.get(endpoint_field, {})
-
-					if not raw_endpoint is Dictionary:
-						continue
-
-					var endpoint: Dictionary = raw_endpoint
-
-					if (
-						str(
-							endpoint.get(
-								"kind",
-								CITY_CITIZEN_HAUL_ENDPOINT_KIND_NONE
-							)
-						)
-						== CITY_CITIZEN_HAUL_ENDPOINT_KIND_CITY_OBJECT_CONTAINER
-						and int(endpoint.get("id", -1)) == object_id
-					):
-						return true
-
-				return false
-
-			return (
-				int(current_task.get("target_object_id", -1))
-				== object_id
-			)
-
-		CITY_OBJECT_INTERIOR_ACCESS_PUBLIC:
-			return true
-
-	return false
-
-
-static func get_city_citizen_movement_step_cost(
-	from_tile: Vector2i,
-	to_tile: Vector2i
-) -> int:
-	var delta_x := absi(to_tile.x - from_tile.x)
-	var delta_y := absi(to_tile.y - from_tile.y)
-
-	if delta_x > 1 or delta_y > 1:
-		return 0
-
-	if delta_x == 0 and delta_y == 0:
-		return 0
-
-	var destination_is_road := CityObjectSystem.is_completed_city_road_tile(
-		to_tile
-	)
-
-	if delta_x == 1 and delta_y == 1:
-		if destination_is_road:
-			return CITY_CITIZEN_ROAD_DIAGONAL_MOVEMENT_COST
-
-		return CITY_CITIZEN_DIAGONAL_MOVEMENT_COST
-
-	if destination_is_road:
-		return CITY_CITIZEN_ROAD_CARDINAL_MOVEMENT_COST
-
-	return CITY_CITIZEN_CARDINAL_MOVEMENT_COST
-
-
-static func can_city_citizen_traverse_step(
-	city_world: WorldData,
-	from_tile: Vector2i,
-	to_tile: Vector2i,
-	citizen_id: int = -1
-) -> bool:
-	var step_cost := get_city_citizen_movement_step_cost(
-		from_tile,
-		to_tile
-	)
-
-	if step_cost <= 0:
-		return false
-
-	if not is_city_tile_walkable_for_citizen(
-		city_world,
-		to_tile,
-		citizen_id
-	):
-		return false
-
-	var delta_x := absi(to_tile.x - from_tile.x)
-	var delta_y := absi(to_tile.y - from_tile.y)
-
-	if delta_x == 1 and delta_y == 1:
-		var horizontal_side_tile := Vector2i(
-			to_tile.x,
-			from_tile.y
-		)
-		var vertical_side_tile := Vector2i(
-			from_tile.x,
-			to_tile.y
-		)
-
-		if not is_city_tile_walkable_for_citizen(
-			city_world,
-			horizontal_side_tile,
-			citizen_id
-		):
-			return false
-
-		if not _city_citizen_can_cross_object_boundary(
-			from_tile,
-			horizontal_side_tile,
-			citizen_id
-		):
-			return false
-
-		if not is_city_tile_walkable_for_citizen(
-			city_world,
-			vertical_side_tile,
-			citizen_id
-		):
-			return false
-
-		if not _city_citizen_can_cross_object_boundary(
-			from_tile,
-			vertical_side_tile,
-			citizen_id
-		):
-			return false
-
-	return _city_citizen_can_cross_object_boundary(
-		from_tile,
-		to_tile,
-		citizen_id
-	)
-
-
-static func _city_citizen_can_cross_object_boundary(
-	from_tile: Vector2i,
-	to_tile: Vector2i,
-	citizen_id: int
-) -> bool:
-	var from_object_id := int(
-		CityObjectSystem.get_city_object_id_at_tile(from_tile)
-	)
-	var to_object_id := int(
-		CityObjectSystem.get_city_object_id_at_tile(to_tile)
-	)
-
-	if from_object_id == to_object_id:
-		return true
-
-	if from_object_id > 0:
-		var from_object := CityObjectSystem.get_city_object_by_id(
-			from_object_id
-		)
-
-		if (
-			CityObjectSystem.city_object_supports_citizen_interior(from_object)
-			and not CityObjectSystem.city_object_boundary_tile_allows_entry(
-				from_object,
-				from_tile
-			)
-		):
-			return false
-
-	if to_object_id > 0:
-		var to_object := CityObjectSystem.get_city_object_by_id(to_object_id)
-
-		if CityObjectSystem.city_object_supports_citizen_interior(to_object):
-			if not city_citizen_can_access_object_interior(
-				citizen_id,
-				to_object
-			):
-				return false
-
-			if not CityObjectSystem.city_object_boundary_tile_allows_entry(
-				to_object,
-				to_tile
-			):
-				return false
-
-	return true
-
-static func is_city_tile_walkable_for_citizen(
-	city_world: WorldData,
-	tile_position: Vector2i,
-	citizen_id: int = -1
-) -> bool:
-	if city_world == null:
-		return false
-
-	if not city_world.is_in_bounds(
-		tile_position.x,
-		tile_position.y
-	):
-		return false
-
-	var tile: Dictionary = city_world.get_tile(
-		tile_position.x,
-		tile_position.y
-	)
-
-	if str(tile.get("terrain", "")) != TERRAIN_LAND:
-		return false
-
-	if not CityObjectSystem.has_city_object_at_tile(tile_position):
-		return true
-
-	var object_id := int(
-		CityObjectSystem.get_city_object_id_at_tile(tile_position)
-	)
-	var occupying_object := CityObjectSystem.get_city_object_by_id(object_id)
-
-	if occupying_object.is_empty():
-		return false
-
-	if (
-		str(occupying_object.get("type", ""))
-		== CITY_OBJECT_ROAD
-	):
-		return true
-
-	if citizen_id <= 0:
-		return false
-
-	var citizen := get_city_citizen_by_id(citizen_id)
-
-	if (
-		citizen.is_empty()
-		or not bool(citizen.get("alive", false))
-	):
-		return false
-
-	var current_position = citizen.get(
-		"city_tile_position",
-		INVALID_CITY_TILE_POSITION
-	)
-
-	# Recovery invariant: a citizen already caught inside an occupied footprint
-	# may traverse that same footprint long enough to leave it. Normal topology
-	# mutations are prevented from creating this state; this path exists for old
-	# saves and defensive recovery only, and never authorizes re-entry.
-	if (
-		current_position is Vector2i
-		and CityObjectSystem.get_city_object_id_at_tile(current_position)
-		== object_id
-	):
-		return true
-
-	if not CityObjectSystem.city_object_supports_citizen_interior(occupying_object):
-		return false
-
-	return city_citizen_can_access_object_interior(
-		citizen_id,
-		occupying_object
-	)
 
 static func _sort_city_tiles_y_then_x(
 	tile_a: Vector2i,
@@ -7098,7 +3751,7 @@ static func get_city_object_access_tiles(
 			if access_tile_lookup.has(candidate_tile):
 				continue
 
-			if not is_city_tile_walkable_for_citizen(
+			if not CityNavigationSystem.is_city_tile_walkable_for_citizen(
 				city_world,
 				candidate_tile
 			):
@@ -7166,7 +3819,7 @@ static func city_citizen_can_directly_withdraw_resource(
 	resource: String,
 	withdrawal_purpose: String
 ) -> bool:
-	var citizen := get_city_citizen_by_id(citizen_id)
+	var citizen := CityCitizenRegistrySystem.get_city_citizen_by_id(citizen_id)
 
 	if (
 		citizen.is_empty()
@@ -7215,7 +3868,7 @@ static func get_city_citizen_direct_withdrawal_target_tiles(
 	withdrawal_purpose: String
 ) -> Array:
 	var target_tiles: Array = []
-	var citizen := get_city_citizen_by_id(citizen_id)
+	var citizen := CityCitizenRegistrySystem.get_city_citizen_by_id(citizen_id)
 
 	if (
 		citizen.is_empty()
@@ -7281,7 +3934,7 @@ static func city_citizen_can_withdraw_food_from_endpoint(
 			)
 
 		CITY_CITIZEN_HAUL_ENDPOINT_KIND_GROUND_PILE:
-			var citizen := get_city_citizen_by_id(citizen_id)
+			var citizen := CityCitizenRegistrySystem.get_city_citizen_by_id(citizen_id)
 			var ground_pile := CityLogisticsSystem.get_city_ground_pile_by_id(endpoint_id)
 			return (
 				not citizen.is_empty()
@@ -7323,7 +3976,7 @@ static func get_city_citizen_food_endpoint_target_tiles(
 			if (
 				not CityLogisticsSystem.city_ground_pile_is_construction_reserved(ground_pile)
 				and raw_tile is Vector2i
-				and is_city_tile_walkable_for_citizen(
+				and CityNavigationSystem.is_city_tile_walkable_for_citizen(
 					official_city_world,
 					raw_tile,
 					citizen_id
@@ -7622,7 +4275,7 @@ static func get_city_object_worker_names(city_object: Dictionary) -> Array:
 	var worker_ids := get_city_object_worker_ids(city_object)
 
 	for worker_id in worker_ids:
-		worker_names.append(get_city_citizen_display_name(int(worker_id)))
+		worker_names.append(CityCitizenRegistrySystem.get_city_citizen_display_name(int(worker_id)))
 
 	return worker_names
 
@@ -7654,14 +4307,14 @@ static func _get_clean_city_object_assignment_ids(
 		if clean_assignment_ids.has(citizen_id):
 			continue
 
-		var citizen_index := get_city_citizen_index_by_id(
+		var citizen_index := CityCitizenRegistrySystem.get_city_citizen_index_by_id(
 			citizen_id
 		)
 
 		if citizen_index < 0:
 			continue
 
-		var raw_citizen = city_citizens[citizen_index]
+		var raw_citizen = CityCitizenRegistrySystem.get_current_state().citizens[citizen_index]
 
 		if not raw_citizen is Dictionary:
 			continue
@@ -7759,12 +4412,12 @@ static func assign_city_citizen_home(
 	house_id: int
 ) -> bool:
 
-	var citizen_index := get_city_citizen_index_by_id(citizen_id)
+	var citizen_index := CityCitizenRegistrySystem.get_city_citizen_index_by_id(citizen_id)
 
 	if citizen_index < 0:
 		return false
 
-	var raw_citizen = city_citizens[citizen_index]
+	var raw_citizen = CityCitizenRegistrySystem.get_current_state().citizens[citizen_index]
 
 	if not raw_citizen is Dictionary:
 		return false
@@ -7848,7 +4501,7 @@ static func assign_city_citizen_home(
 			assignment_changed = true
 
 	citizen["home_object_id"] = house_id
-	city_citizens[citizen_index] = citizen
+	CityCitizenRegistrySystem.get_current_state().citizens[citizen_index] = citizen
 	assignment_changed = true
 	_clear_city_citizen_return_home_task_after_home_change(
 		citizen_id
@@ -7870,12 +4523,12 @@ static func assign_city_citizen_home(
 
 
 static func remove_city_citizen_home(citizen_id: int) -> bool:
-	var citizen_index := get_city_citizen_index_by_id(citizen_id)
+	var citizen_index := CityCitizenRegistrySystem.get_city_citizen_index_by_id(citizen_id)
 
 	if citizen_index < 0:
 		return false
 
-	var raw_citizen = city_citizens[citizen_index]
+	var raw_citizen = CityCitizenRegistrySystem.get_current_state().citizens[citizen_index]
 
 	if not raw_citizen is Dictionary:
 		return false
@@ -7896,7 +4549,7 @@ static func remove_city_citizen_home(citizen_id: int) -> bool:
 	)
 
 	citizen["home_object_id"] = -1
-	city_citizens[citizen_index] = citizen
+	CityCitizenRegistrySystem.get_current_state().citizens[citizen_index] = citizen
 	_clear_city_citizen_return_home_task_after_home_change(
 		citizen_id
 	)
@@ -7909,7 +4562,7 @@ static func remove_city_citizen_home(citizen_id: int) -> bool:
 static func _clear_city_citizen_return_home_task_after_home_change(
 	citizen_id: int
 ) -> void:
-	var current_task := get_city_citizen_current_task(
+	var current_task := CityCitizenTaskRuntimeSystem.get_city_citizen_current_task(
 		citizen_id
 	)
 
@@ -7919,17 +4572,17 @@ static func _clear_city_citizen_return_home_task_after_home_change(
 	):
 		return
 
-	clear_city_citizen_task(
+	CityCitizenTaskRuntimeSystem.clear_city_citizen_task(
 		citizen_id,
 		CITY_CITIZEN_TASK_SOURCE_PLAYER
 	)
-	cancel_city_citizen_movement(citizen_id)
+	CityCitizenMovementRuntimeSystem.cancel_city_citizen_movement(citizen_id)
 
 
 static func _clear_city_citizen_work_task_after_job_change(
 	citizen_id: int
 ) -> void:
-	var current_task := get_city_citizen_current_task(
+	var current_task := CityCitizenTaskRuntimeSystem.get_city_citizen_current_task(
 		citizen_id
 	)
 
@@ -7939,23 +4592,23 @@ static func _clear_city_citizen_work_task_after_job_change(
 	):
 		return
 
-	clear_city_citizen_task(
+	CityCitizenTaskRuntimeSystem.clear_city_citizen_task(
 		citizen_id,
 		CITY_CITIZEN_TASK_SOURCE_PLAYER
 	)
-	cancel_city_citizen_movement(citizen_id)
+	CityCitizenMovementRuntimeSystem.cancel_city_citizen_movement(citizen_id)
 
 static func assign_city_citizen_job(
 	citizen_id: int,
 	workplace_id: int
 ) -> bool:
 
-	var citizen_index := get_city_citizen_index_by_id(citizen_id)
+	var citizen_index := CityCitizenRegistrySystem.get_city_citizen_index_by_id(citizen_id)
 
 	if citizen_index < 0:
 		return false
 
-	var raw_citizen = city_citizens[citizen_index]
+	var raw_citizen = CityCitizenRegistrySystem.get_current_state().citizens[citizen_index]
 
 	if not raw_citizen is Dictionary:
 		return false
@@ -8049,7 +4702,7 @@ static func assign_city_citizen_job(
 		return false
 
 	if current_job_id < 0:
-		citizen = get_city_citizen_by_id(citizen_id)
+		citizen = CityCitizenRegistrySystem.get_city_citizen_by_id(citizen_id)
 
 		if citizen.is_empty():
 			return false
@@ -8066,7 +4719,7 @@ static func assign_city_citizen_job(
 			assignment_changed = true
 
 	citizen["job_object_id"] = workplace_id
-	city_citizens[citizen_index] = citizen
+	CityCitizenRegistrySystem.get_current_state().citizens[citizen_index] = citizen
 	assignment_changed = true
 
 	worker_ids.append(citizen_id)
@@ -8085,12 +4738,12 @@ static func assign_city_citizen_job(
 
 
 static func remove_city_citizen_job(citizen_id: int) -> bool:
-	var citizen_index := get_city_citizen_index_by_id(citizen_id)
+	var citizen_index := CityCitizenRegistrySystem.get_city_citizen_index_by_id(citizen_id)
 
 	if citizen_index < 0:
 		return false
 
-	var raw_citizen = city_citizens[citizen_index]
+	var raw_citizen = CityCitizenRegistrySystem.get_current_state().citizens[citizen_index]
 
 	if not raw_citizen is Dictionary:
 		return false
@@ -8111,7 +4764,7 @@ static func remove_city_citizen_job(citizen_id: int) -> bool:
 	)
 
 	citizen["job_object_id"] = -1
-	city_citizens[citizen_index] = citizen
+	CityCitizenRegistrySystem.get_current_state().citizens[citizen_index] = citizen
 
 	_mark_city_assignments_changed()
 	_clear_city_citizen_work_task_after_job_change(

@@ -66,25 +66,25 @@ func _test_equal_version_city_isolation() -> void:
 		culture_id
 	)
 	var registry_a := (
-		WorldPoliticalState.get_current_city_citizen_registry_state()
+		CityCitizenRegistrySystem.get_current_state()
 	)
 	var spatial_state_a := (
-		WorldPoliticalState.get_current_city_citizen_spatial_state()
+		CityCitizenSpatialSystem.get_current_state()
 	)
 	var spatial_index_a: Dictionary = spatial_state_a.citizen_ids_by_tile
 	var mover_ids_a: Array[int] = [101]
 	var movement_events_a: Array = [{"marker": "A"}]
 	var task_ids_a: Array[int] = [101]
 	var access_cache_a: Dictionary = {101: {"marker": "A"}}
-	WorldData.city_active_mover_ids = mover_ids_a
-	WorldData.city_active_mover_id_lookup = {101: true}
-	WorldData.city_citizen_movement_visual_events = movement_events_a
-	WorldData.city_citizen_movement_visual_tick_index = 101
-	WorldData.city_active_task_ids = task_ids_a
-	WorldData.city_active_task_id_lookup = {101: true}
+	CityCitizenMovementRuntimeSystem.get_current_state().active_mover_ids = mover_ids_a
+	CityCitizenMovementRuntimeSystem.get_current_state().active_mover_id_lookup = {101: true}
+	CityCitizenMovementRuntimeSystem.get_current_state().citizen_movement_visual_events = movement_events_a
+	CityCitizenMovementRuntimeSystem.get_current_state().citizen_movement_visual_tick_index = 101
+	CityCitizenTaskRuntimeSystem.get_current_state().active_task_ids = task_ids_a
+	CityCitizenTaskRuntimeSystem.get_current_state().active_task_id_lookup = {101: true}
 	WorldData.city_object_access_tile_cache = access_cache_a
-	WorldData.city_citizen_movement_version = 11
-	WorldData.city_citizen_task_version = 13
+	CityCitizenMovementRuntimeSystem.get_current_state().citizen_movement_version = 11
+	CityCitizenTaskRuntimeSystem.get_current_state().citizen_task_version = 13
 	WorldData.city_assignment_version = 15
 	WorldData.city_workplace_version = 17
 
@@ -108,10 +108,10 @@ func _test_equal_version_city_isolation() -> void:
 		culture_id
 	)
 	var registry_b := (
-		WorldPoliticalState.get_current_city_citizen_registry_state()
+		CityCitizenRegistrySystem.get_current_state()
 	)
 	var spatial_state_b := (
-		WorldPoliticalState.get_current_city_citizen_spatial_state()
+		CityCitizenSpatialSystem.get_current_state()
 	)
 	var spatial_index_b: Dictionary = spatial_state_b.citizen_ids_by_tile
 	_expect(
@@ -135,39 +135,39 @@ func _test_equal_version_city_isolation() -> void:
 	var movement_events_b: Array = [{"marker": "B"}]
 	var task_ids_b: Array[int] = [202]
 	var access_cache_b: Dictionary = {202: {"marker": "B"}}
-	WorldData.city_active_mover_ids = mover_ids_b
-	WorldData.city_active_mover_id_lookup = {202: true}
-	WorldData.city_citizen_movement_visual_events = movement_events_b
-	WorldData.city_citizen_movement_visual_tick_index = 202
-	WorldData.city_active_task_ids = task_ids_b
-	WorldData.city_active_task_id_lookup = {202: true}
+	CityCitizenMovementRuntimeSystem.get_current_state().active_mover_ids = mover_ids_b
+	CityCitizenMovementRuntimeSystem.get_current_state().active_mover_id_lookup = {202: true}
+	CityCitizenMovementRuntimeSystem.get_current_state().citizen_movement_visual_events = movement_events_b
+	CityCitizenMovementRuntimeSystem.get_current_state().citizen_movement_visual_tick_index = 202
+	CityCitizenTaskRuntimeSystem.get_current_state().active_task_ids = task_ids_b
+	CityCitizenTaskRuntimeSystem.get_current_state().active_task_id_lookup = {202: true}
 	WorldData.city_object_access_tile_cache = access_cache_b
-	WorldData.city_citizen_movement_version = 12
-	WorldData.city_citizen_task_version = 14
+	CityCitizenMovementRuntimeSystem.get_current_state().citizen_movement_version = 12
+	CityCitizenTaskRuntimeSystem.get_current_state().citizen_task_version = 14
 	WorldData.city_assignment_version = 16
 	WorldData.city_workplace_version = 18
 
 	_expect(
 		WorldPoliticalState.set_active_settlement(city_a_id)
 		and is_same(
-			WorldPoliticalState.get_current_city_citizen_registry_state(),
+			CityCitizenRegistrySystem.get_current_state(),
 			registry_a
 		)
 		and is_same(
-			WorldPoliticalState.get_current_city_citizen_spatial_state(),
+			CityCitizenSpatialSystem.get_current_state(),
 			spatial_state_a
 		)
-		and is_same(WorldData.city_citizen_ids_by_tile, spatial_index_a)
-		and WorldData.city_citizen_spatial_version == 1
-		and is_same(WorldData.city_active_mover_ids, mover_ids_a)
+		and is_same(CityCitizenSpatialSystem.get_current_state().citizen_ids_by_tile, spatial_index_a)
+		and CityCitizenSpatialSystem.get_current_state().citizen_spatial_version == 1
+		and is_same(CityCitizenMovementRuntimeSystem.get_current_state().active_mover_ids, mover_ids_a)
 		and is_same(
-			WorldData.city_citizen_movement_visual_events,
+			CityCitizenMovementRuntimeSystem.get_current_state().citizen_movement_visual_events,
 			movement_events_a
 		)
-		and is_same(WorldData.city_active_task_ids, task_ids_a)
+		and is_same(CityCitizenTaskRuntimeSystem.get_current_state().active_task_ids, task_ids_a)
 		and is_same(WorldData.city_object_access_tile_cache, access_cache_a)
-		and WorldData.city_citizen_movement_version == 11
-		and WorldData.city_citizen_task_version == 13
+		and CityCitizenMovementRuntimeSystem.get_current_state().citizen_movement_version == 11
+		and CityCitizenTaskRuntimeSystem.get_current_state().citizen_task_version == 13
 		and WorldData.city_assignment_version == 15
 		and WorldData.city_workplace_version == 17,
 		"A -> B -> A must restore City A's exact owners and deferred runtime."
@@ -175,20 +175,20 @@ func _test_equal_version_city_isolation() -> void:
 	_expect(
 		WorldPoliticalState.set_active_settlement(city_b_id)
 		and is_same(
-			WorldPoliticalState.get_current_city_citizen_spatial_state(),
+			CityCitizenSpatialSystem.get_current_state(),
 			spatial_state_b
 		)
-		and is_same(WorldData.city_citizen_ids_by_tile, spatial_index_b)
-		and WorldData.city_citizen_spatial_version == 1
-		and is_same(WorldData.city_active_mover_ids, mover_ids_b)
+		and is_same(CityCitizenSpatialSystem.get_current_state().citizen_ids_by_tile, spatial_index_b)
+		and CityCitizenSpatialSystem.get_current_state().citizen_spatial_version == 1
+		and is_same(CityCitizenMovementRuntimeSystem.get_current_state().active_mover_ids, mover_ids_b)
 		and is_same(
-			WorldData.city_citizen_movement_visual_events,
+			CityCitizenMovementRuntimeSystem.get_current_state().citizen_movement_visual_events,
 			movement_events_b
 		)
-		and is_same(WorldData.city_active_task_ids, task_ids_b)
+		and is_same(CityCitizenTaskRuntimeSystem.get_current_state().active_task_ids, task_ids_b)
 		and is_same(WorldData.city_object_access_tile_cache, access_cache_b)
-		and WorldData.city_citizen_movement_version == 12
-		and WorldData.city_citizen_task_version == 14
+		and CityCitizenMovementRuntimeSystem.get_current_state().citizen_movement_version == 12
+		and CityCitizenTaskRuntimeSystem.get_current_state().citizen_task_version == 14
 		and WorldData.city_assignment_version == 16
 		and WorldData.city_workplace_version == 18,
 		"A -> B -> A -> B must leave City B unchanged."
@@ -241,11 +241,10 @@ func _test_renderer_identity_invalidation(
 		original_spatial_state.citizen_spatial_version
 	)
 	renderer.observed_city_citizen_movement_version = (
-		WorldData.city_citizen_movement_version
+		CityCitizenMovementRuntimeSystem.get_current_state().citizen_movement_version
 	)
 	renderer.observed_city_citizen_movement_runtime_state = (
-		WorldPoliticalState
-		.get_current_city_citizen_movement_runtime_state()
+		CityCitizenMovementRuntimeSystem.get_current_state()
 	)
 	var replacement_state := _clone_spatial_state(original_spatial_state)
 	var city_root = WorldPoliticalState.get_city_simulation_state(city_id)

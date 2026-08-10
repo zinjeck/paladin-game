@@ -246,7 +246,7 @@ func refresh_citizen_data() -> void:
 
 	if population_button != null:
 		population_button.text = (
-			"Pop\n" + str(WorldData.get_city_population_count())
+			"Pop\n" + str(CityCitizenRegistrySystem.get_city_population_count())
 		)
 
 	if hunger_label != null:
@@ -261,7 +261,7 @@ func refresh_citizen_data() -> void:
 	if happiness_bar != null:
 		happiness_bar.visible = city_is_founded
 
-	var citizen_snapshot := WorldData.get_city_citizen_snapshot()
+	var citizen_snapshot := CityCitizenRegistrySystem.get_city_citizen_snapshot()
 	var citizen_count := citizen_snapshot.size()
 	var average_hunger := 0.0
 	var average_happiness := 0.0

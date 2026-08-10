@@ -195,16 +195,16 @@ func _create_mixed_work_fixture(renderer: CityRenderer) -> Dictionary:
 	renderer.after_city_center_placed(keep)
 
 	_expect(
-		WorldData.get_city_population_count()
+		CityCitizenRegistrySystem.get_city_population_count()
 		== WorldData.STARTING_CITY_POPULATION,
 		"Founding must create the complete starting population."
 	)
 
-	if WorldData.city_citizens.is_empty():
+	if CityCitizenRegistrySystem.get_current_state().citizens.is_empty():
 		return {}
 
-	var citizen_id := int(WorldData.city_citizens[0].get("id", -1))
-	var citizen := WorldData.get_city_citizen_by_id(citizen_id)
+	var citizen_id := int(CityCitizenRegistrySystem.get_current_state().citizens[0].get("id", -1))
+	var citizen := CityCitizenRegistrySystem.get_city_citizen_by_id(citizen_id)
 	var citizen_tile: Vector2i = citizen.get(
 		"city_tile_position",
 		WorldData.INVALID_CITY_TILE_POSITION
@@ -280,7 +280,7 @@ func _create_mixed_work_fixture(renderer: CityRenderer) -> Dictionary:
 		"The public Keep must be completely full for relocation fallback."
 	)
 
-	for raw_citizen in WorldData.city_citizens:
+	for raw_citizen in CityCitizenRegistrySystem.get_current_state().citizens:
 		if not raw_citizen is Dictionary:
 			continue
 
@@ -480,7 +480,7 @@ func _update_food_liveness(fixture: Dictionary) -> void:
 		[]
 	)
 
-	for raw_citizen in WorldData.city_citizens:
+	for raw_citizen in CityCitizenRegistrySystem.get_current_state().citizens:
 		if not raw_citizen is Dictionary:
 			continue
 
@@ -560,7 +560,7 @@ func _check_nonnegative_state(elapsed_minutes: int) -> void:
 			+ str(elapsed_minutes) + " minutes."
 		)
 
-	for raw_citizen in WorldData.city_citizens:
+	for raw_citizen in CityCitizenRegistrySystem.get_current_state().citizens:
 		if not raw_citizen is Dictionary:
 			continue
 
@@ -640,7 +640,7 @@ func _assert_long_run_outcomes(fixture: Dictionary) -> void:
 		+ "consumption."
 	)
 
-	for raw_citizen in WorldData.city_citizens:
+	for raw_citizen in CityCitizenRegistrySystem.get_current_state().citizens:
 		if not raw_citizen is Dictionary:
 			continue
 
@@ -736,7 +736,7 @@ func _ordinary_resource_exists_inside_footprint(
 
 
 func _all_citizens_can_reach_tiles(destination_tiles: Array) -> bool:
-	for raw_citizen in WorldData.city_citizens:
+	for raw_citizen in CityCitizenRegistrySystem.get_current_state().citizens:
 		if not raw_citizen is Dictionary:
 			continue
 
@@ -753,7 +753,7 @@ func _citizen_can_reach_tiles(
 	citizen_id: int,
 	destination_tiles: Array
 ) -> bool:
-	var citizen := WorldData.get_city_citizen_by_id(citizen_id)
+	var citizen := CityCitizenRegistrySystem.get_city_citizen_by_id(citizen_id)
 	var raw_tile = citizen.get(
 		"city_tile_position",
 		WorldData.INVALID_CITY_TILE_POSITION
@@ -778,7 +778,7 @@ func _prepare_fixture_access_for_all_citizens(
 	city_world: WorldData,
 	footprint_tiles: Array
 ) -> void:
-	for raw_citizen in WorldData.city_citizens:
+	for raw_citizen in CityCitizenRegistrySystem.get_current_state().citizens:
 		if not raw_citizen is Dictionary:
 			continue
 
@@ -851,7 +851,7 @@ func _prepare_deterministic_natural_targets(
 						tile_position
 					).is_empty()
 					or CityLogisticsSystem.has_city_ground_pile_at_tile(tile_position)
-					or WorldData.has_living_city_citizen_at_tile(tile_position)
+					or CityCitizenSpatialSystem.has_living_city_citizen_at_tile(tile_position)
 				):
 					continue
 
@@ -937,7 +937,7 @@ func _find_and_prepare_reachable_rectangle(
 	citizen_id: int,
 	for_construction: bool
 ) -> Vector2i:
-	var citizen := WorldData.get_city_citizen_by_id(citizen_id)
+	var citizen := CityCitizenRegistrySystem.get_city_citizen_by_id(citizen_id)
 	var raw_citizen_tile = citizen.get(
 		"city_tile_position",
 		WorldData.INVALID_CITY_TILE_POSITION
@@ -1290,7 +1290,7 @@ func _make_external_boundary_tiles(
 			if (
 				footprint_lookup.has(candidate)
 				or boundary_tiles.has(candidate)
-				or not WorldData.is_city_tile_walkable_for_citizen(
+				or not CityNavigationSystem.is_city_tile_walkable_for_citizen(
 					city_world,
 					candidate
 				)
@@ -1313,7 +1313,7 @@ func _footprint_is_unoccupied(footprint_tiles: Array) -> bool:
 				raw_tile
 			).is_empty()
 			or CityLogisticsSystem.has_city_ground_pile_at_tile(raw_tile)
-			or WorldData.has_living_city_citizen_at_tile(raw_tile)
+			or CityCitizenSpatialSystem.has_living_city_citizen_at_tile(raw_tile)
 		):
 			return false
 
