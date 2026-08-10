@@ -1,5 +1,8 @@
 extends Node
 
+const CityStateValidator := preload(
+	"res://scripts/city/simulation/CityStateValidator.gd"
+)
 const TEST_WORLD_SIZE := Vector2i(32, 32)
 
 var failure_count: int = 0
