@@ -115,7 +115,7 @@ func _run_state_isolation_test() -> void:
 		and int(player_validation.get("checked_occupied_tiles", 0)) == 1,
 		"The player City's routed object registry must pass full validation."
 	)
-	WorldData.city_assignment_version = 9
+	CityAssignmentSystem.get_current_state().assignment_version = 9
 	CityWorkSystem.get_current_work_state().player_commands = [
 		{"id": 41, "test_owner": "player"},
 	]
@@ -259,7 +259,7 @@ func _run_state_isolation_test() -> void:
 		and CityObjectSystem.get_current_state().object_version == 0
 		and cpu_state.resource_accounting_state.container_version == 0
 		and cpu_state.resource_accounting_state.public_storage_version == 0
-		and WorldData.city_assignment_version == 0,
+		and CityAssignmentSystem.get_current_state().assignment_version == 0,
 		"A fresh city must begin with independent counters and change versions."
 	)
 	_expect(
@@ -342,7 +342,7 @@ func _run_state_isolation_test() -> void:
 		and player_state.object_state.object_version == 4,
 		"Mutating the CPU City must not alter the inactive player object state."
 	)
-	WorldData.city_assignment_version = 21
+	CityAssignmentSystem.get_current_state().assignment_version = 21
 	CityWorkSystem.get_current_work_state().player_commands = [
 		{"id": 11, "test_owner": "cpu"},
 	]
@@ -394,7 +394,7 @@ func _run_state_isolation_test() -> void:
 	_expect(
 		CityObjectSystem.get_current_state().next_object_id == 17
 		and CityObjectSystem.get_current_state().object_version == 4
-		and WorldData.city_assignment_version == 9,
+		and CityAssignmentSystem.get_current_state().assignment_version == 9,
 		"Returning to the player city must restore its counters and versions."
 	)
 	_expect(
@@ -440,7 +440,7 @@ func _run_state_isolation_test() -> void:
 	_expect(
 		CityObjectSystem.get_current_state().next_object_id == 55
 		and CityObjectSystem.get_current_state().object_version == 12
-		and WorldData.city_assignment_version == 21,
+		and CityAssignmentSystem.get_current_state().assignment_version == 21,
 		"Reactivating the CPU city must restore its own counters and versions."
 	)
 	_expect(

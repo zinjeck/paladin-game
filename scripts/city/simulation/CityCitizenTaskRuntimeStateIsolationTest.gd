@@ -277,7 +277,7 @@ func _prepare_active_city_task(
 	_expect(
 		house_id > 0
 		and citizen_id == 1
-		and WorldData.assign_city_citizen_home(citizen_id, house_id)
+		and CityAssignmentSystem.assign_city_citizen_home(citizen_id, house_id)
 		and CityCitizenTaskRuntimeSystem.assign_city_citizen_task(citizen_id, {
 			"kind": WorldData.CITY_CITIZEN_TASK_KIND_RETURN_HOME,
 			"source": WorldData.CITY_CITIZEN_TASK_SOURCE_SCHEDULE,

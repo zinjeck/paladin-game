@@ -131,7 +131,7 @@ static func run_tick(
 		_runtime_initialized = true
 		_work_shift_was_active = work_shift_is_active
 		_observed_assignment_version = (
-			WorldData.city_assignment_version
+			CityAssignmentSystem.get_city_assignment_version()
 		)
 
 		_clear_schedule_sourced_tasks()
@@ -147,10 +147,10 @@ static func run_tick(
 
 	if (
 		_observed_assignment_version
-		!= WorldData.city_assignment_version
+		!= CityAssignmentSystem.get_city_assignment_version()
 	):
 		_observed_assignment_version = (
-			WorldData.city_assignment_version
+			CityAssignmentSystem.get_city_assignment_version()
 		)
 		_idle_anchor_tile_by_citizen_id.clear()
 		_next_idle_decision_minute_by_citizen_id.clear()
@@ -682,7 +682,7 @@ static func _citizen_needs_scheduled_return_home_task(
 		home.is_empty()
 		or WorldData.get_city_object_resident_capacity(home) <= 0
 		or not CityObjectSystem.city_object_supports_citizen_interior(home)
-		or not WorldData.get_city_object_resident_ids(
+		or not CityAssignmentSystem.get_city_object_resident_ids(
 			home
 		).has(citizen_id)
 		or not CityNavigationSystem.city_citizen_can_access_object_interior(
@@ -2368,10 +2368,10 @@ static func _get_citizen_life_anchor_tile(citizen: Dictionary) -> Vector2i:
 
 	if (
 		CityResourceMatcher.city_object_is_household_home(home)
-		and WorldData.get_city_object_resident_ids(home).has(citizen_id)
+		and CityAssignmentSystem.get_city_object_resident_ids(home).has(citizen_id)
 	):
 		var home_tiles := CityObjectSystem.get_city_object_footprint_tiles(home)
-		var resident_ids := WorldData.get_city_object_resident_ids(home)
+		var resident_ids := CityAssignmentSystem.get_city_object_resident_ids(home)
 		resident_ids.sort()
 		var resident_index := resident_ids.find(citizen_id)
 

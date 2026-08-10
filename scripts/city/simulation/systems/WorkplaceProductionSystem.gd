@@ -919,7 +919,7 @@ static func _commit_workplace_tick_output(
 static func _get_productive_worker_count(
 	city_object: Dictionary
 ) -> int:
-	return WorldData.get_city_object_attending_worker_count(
+	return CityEmploymentSystem.get_city_object_attending_worker_count(
 		city_object
 	)
 

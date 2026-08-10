@@ -26,6 +26,12 @@ const CityResourceAccountingStateScript = preload(
 const CityCitizenRegistryStateScript = preload(
 	"res://scripts/city/simulation/CityCitizenRegistryState.gd"
 )
+const CityAssignmentStateScript = preload(
+	"res://scripts/city/simulation/CityAssignmentState.gd"
+)
+const CityWorkplaceStateScript = preload(
+	"res://scripts/city/simulation/CityWorkplaceState.gd"
+)
 const CityCitizenSpatialStateScript = preload(
 	"res://scripts/city/simulation/CityCitizenSpatialState.gd"
 )
@@ -63,6 +69,8 @@ var _unbound_city_resource_accounting_state = (
 var _unbound_city_citizen_registry_state = (
 	CityCitizenRegistryStateScript.new()
 )
+var _unbound_city_assignment_state = CityAssignmentStateScript.new()
+var _unbound_city_workplace_state = CityWorkplaceStateScript.new()
 var _unbound_city_citizen_spatial_state = (
 	CityCitizenSpatialStateScript.new()
 )
@@ -94,6 +102,8 @@ func reset_state() -> void:
 	_unbound_city_citizen_registry_state = (
 		CityCitizenRegistryStateScript.new()
 	)
+	_unbound_city_assignment_state = CityAssignmentStateScript.new()
+	_unbound_city_workplace_state = CityWorkplaceStateScript.new()
 	_unbound_city_citizen_spatial_state = (
 		CityCitizenSpatialStateScript.new()
 	)
@@ -130,6 +140,8 @@ func synchronize_foundation_with_world_data() -> bool:
 	var unbound_citizen_registry_state_to_adopt = (
 		_unbound_city_citizen_registry_state
 	)
+	var unbound_assignment_state_to_adopt = _unbound_city_assignment_state
+	var unbound_workplace_state_to_adopt = _unbound_city_workplace_state
 	var unbound_citizen_spatial_state_to_adopt = (
 		_unbound_city_citizen_spatial_state
 	)
@@ -201,6 +213,8 @@ func synchronize_foundation_with_world_data() -> bool:
 		capital_state.citizen_registry_state = (
 			unbound_citizen_registry_state_to_adopt
 		)
+		capital_state.assignment_state = unbound_assignment_state_to_adopt
+		capital_state.workplace_state = unbound_workplace_state_to_adopt
 		capital_state.citizen_spatial_state = (
 			unbound_citizen_spatial_state_to_adopt
 		)
@@ -431,6 +445,10 @@ func set_settlement_simulation_backend(
 			_unbound_city_citizen_registry_state = (
 				CityCitizenRegistryStateScript.new()
 			)
+			city_state.assignment_state = _unbound_city_assignment_state
+			_unbound_city_assignment_state = CityAssignmentStateScript.new()
+			city_state.workplace_state = _unbound_city_workplace_state
+			_unbound_city_workplace_state = CityWorkplaceStateScript.new()
 			city_state.citizen_spatial_state = (
 				_unbound_city_citizen_spatial_state
 			)
@@ -523,6 +541,26 @@ func get_current_city_citizen_registry_state() -> CityCitizenRegistryState:
 	):
 		return active_city_state.citizen_registry_state
 	return _unbound_city_citizen_registry_state
+
+
+func get_current_city_assignment_state() -> CityAssignmentState:
+	var active_city_state = get_active_city_simulation_state()
+	if (
+		active_city_state != null
+		and active_city_state.assignment_state is CityAssignmentState
+	):
+		return active_city_state.assignment_state
+	return _unbound_city_assignment_state
+
+
+func get_current_city_workplace_state() -> CityWorkplaceState:
+	var active_city_state = get_active_city_simulation_state()
+	if (
+		active_city_state != null
+		and active_city_state.workplace_state is CityWorkplaceState
+	):
+		return active_city_state.workplace_state
+	return _unbound_city_workplace_state
 
 
 func get_current_city_citizen_spatial_state() -> CityCitizenSpatialState:

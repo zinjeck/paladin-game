@@ -845,7 +845,7 @@ static func _register_completed_rectangle(
 		return {}
 
 	if object_type == WorldData.CITY_OBJECT_HOUSE:
-		WorldData.assign_homeless_citizens_to_available_housing()
+		CityAssignmentSystem.assign_homeless_citizens_to_available_housing()
 
 	return city_object
 
@@ -978,7 +978,7 @@ static func _append_completed_city_object(
 	mark_city_objects_changed()
 
 	if WorldData.city_object_is_workplace(city_object):
-		WorldData._mark_city_workplaces_changed()
+		CityEmploymentSystem.mark_city_workplaces_changed()
 
 	if city_object.has("stored_resources"):
 		CityResourceAccountingSystem.mark_city_container_changed(city_object)

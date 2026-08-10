@@ -366,7 +366,7 @@ func _add_resident(
 	var citizen_id := int(citizen.get("id", -1))
 	_expect(
 		citizen_id > 0
-		and WorldData.assign_city_citizen_home(citizen_id, house_id),
+		and CityAssignmentSystem.assign_city_citizen_home(citizen_id, house_id),
 		"The task fixture must add one assigned resident."
 	)
 	return citizen

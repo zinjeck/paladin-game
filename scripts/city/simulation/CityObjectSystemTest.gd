@@ -336,8 +336,8 @@ func _test_object_reset_is_domain_local() -> void:
 	var public_storage_version_before := (
 		CityResourceAccountingSystem.get_city_public_storage_version()
 	)
-	var assignment_version_before := WorldData.city_assignment_version
-	var workplace_version_before := WorldData.city_workplace_version
+	var assignment_version_before := CityAssignmentSystem.get_city_assignment_version()
+	var workplace_version_before := CityEmploymentSystem.get_city_workplace_version()
 	var logistics_state := CityLogisticsSystem.get_current_state()
 	var construction_state := CityConstructionSystem.get_current_state()
 	var ground_pile_version_before := logistics_state.ground_pile_version
@@ -358,8 +358,8 @@ func _test_object_reset_is_domain_local() -> void:
 		== container_version_before
 		and CityResourceAccountingSystem.get_city_public_storage_version()
 		== public_storage_version_before
-		and WorldData.city_assignment_version == assignment_version_before
-		and WorldData.city_workplace_version == workplace_version_before
+		and CityAssignmentSystem.get_current_state().assignment_version == assignment_version_before
+		and CityEmploymentSystem.get_current_state().workplace_version == workplace_version_before
 		and logistics_state.ground_pile_version
 		== ground_pile_version_before
 		and construction_state.construction_version

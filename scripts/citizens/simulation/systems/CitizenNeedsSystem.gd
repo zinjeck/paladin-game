@@ -191,7 +191,7 @@ static func _city_citizen_can_directly_withdraw_food(
 			return (
 				int(citizen.get("home_object_id", -1))
 				== int(city_object.get("id", -1))
-				and WorldData.get_city_object_resident_ids(city_object).has(
+				and CityAssignmentSystem.get_city_object_resident_ids(city_object).has(
 					citizen_id
 				)
 			)
@@ -241,7 +241,7 @@ static func _get_city_citizen_direct_food_withdrawal_target_tiles(
 			if (
 				int(citizen.get("home_object_id", -1))
 				== int(city_object.get("id", -1))
-				and WorldData.get_city_object_resident_ids(city_object).has(
+				and CityAssignmentSystem.get_city_object_resident_ids(city_object).has(
 					citizen_id
 				)
 			):
