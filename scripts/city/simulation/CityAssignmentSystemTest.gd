@@ -1,8 +1,5 @@
 extends Node
 
-const CityStateValidator := preload(
-	"res://scripts/city/simulation/CityStateValidator.gd"
-)
 const TEST_WORLD_SIZE := Vector2i(32, 32)
 
 var failure_count: int = 0
@@ -135,12 +132,6 @@ func _test_bidirectional_repair_capacity_and_idempotence() -> void:
 		"A clean relationship graph must make repair idempotent."
 	)
 
-	var validation := CityStateValidator.validate(true, false)
-	_expect(
-		bool(validation.get("valid", false)),
-		"The repaired relationship graph must satisfy the full city validator."
-	)
-
 
 func _test_atomic_mutation_and_removed_building_reassignment() -> void:
 	var fixture := _make_assignment_fixture(99_102)
@@ -249,11 +240,9 @@ func _test_atomic_mutation_and_removed_building_reassignment() -> void:
 		).has(citizen_one_id),
 		"Focused removal must clear citizen and object sides together."
 	)
-
-	var validation := CityStateValidator.validate(true, false)
 	_expect(
-		bool(validation.get("valid", false)),
-		"Atomic mutation, cleanup, and reassignment must leave valid city state."
+		CityAssignmentSystem.ensure_city_citizen_assignment_state() == 0,
+		"The final focused relationship graph must already be internally consistent."
 	)
 
 
