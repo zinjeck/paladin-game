@@ -1,0 +1,25 @@
+name: Agent Pass 10 source export
+
+on:
+  push:
+    branches:
+      - agent/assignment-housing-employment-cleanup
+
+permissions:
+  contents: read
+
+jobs:
+  export:
+    name: Export reviewed source tree
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out branch
+        uses: actions/checkout@v4
+
+      - name: Upload source tree
+        uses: actions/upload-artifact@v4
+        with:
+          name: paladin-pass10-source
+          path: .
+          include-hidden-files: true
+          retention-days: 1
