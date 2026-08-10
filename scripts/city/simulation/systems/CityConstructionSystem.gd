@@ -2061,7 +2061,7 @@ static func _get_best_clearing_cleanup_candidate(
 	# before planning a footprint-cleanup pickup around it.
 	if (
 		citizen_id <= 0
-		or WorldData.get_city_citizen_haul_cargo_amount(citizen_id) > 0
+		or CityCitizenInventorySystem.get_city_citizen_haul_cargo_amount(citizen_id) > 0
 	):
 		return {}
 
@@ -3300,7 +3300,7 @@ static func _release_site_delivery_tasks(site_id: int) -> bool:
 			continue
 
 		var cargo_amount := (
-			WorldData.get_city_citizen_haul_cargo_amount(citizen_id)
+			CityCitizenInventorySystem.get_city_citizen_haul_cargo_amount(citizen_id)
 		)
 
 		if cargo_amount > 0:
@@ -3530,7 +3530,7 @@ static func rebalance_uncommitted_construction_workers_for_sites(
 			citizen.is_empty()
 			or not bool(citizen.get("alive", false))
 			or int(citizen.get("job_object_id", -1)) > 0
-			or WorldData.get_city_citizen_haul_cargo_amount(citizen_id) > 0
+			or CityCitizenInventorySystem.get_city_citizen_haul_cargo_amount(citizen_id) > 0
 			or not citizen_task_is_interruptible_construction(citizen_id)
 		):
 			continue

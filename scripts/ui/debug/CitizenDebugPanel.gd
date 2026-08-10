@@ -315,10 +315,12 @@ static func get_debug_line(citizen: Dictionary) -> String:
 			str(citizen.get("sex", ""))
 		)
 	)
-	var hunger := int(citizen.get("hunger", 0))
-	var happiness := int(citizen.get("happiness", 0))
+	var hunger := CitizenNeedsSystem.get_city_citizen_hunger(citizen_id)
+	var happiness := CitizenNeedsSystem.get_city_citizen_happiness(citizen_id)
 	var inventory_used := get_inventory_used(citizen)
-	var carry_capacity := int(citizen.get("carry_capacity", 0))
+	var carry_capacity := (
+		CityCitizenInventorySystem.get_city_citizen_carry_capacity(citizen_id)
+	)
 	var haul_text := get_haul_text(citizen)
 
 	return (
@@ -340,16 +342,17 @@ static func get_debug_line(citizen: Dictionary) -> String:
 static func get_haul_text(citizen: Dictionary) -> String:
 	var citizen_id := int(citizen.get("id", -1))
 
-	if not WorldData.city_citizen_is_hauling(citizen_id):
+	if not CitizenHaulingSystem.city_citizen_is_hauling(citizen_id):
 		return "No"
 
 	var haul := CityCitizenTaskRuntimeSystem.get_city_citizen_current_haul(citizen_id)
 	var cargo_resources := (
-		WorldData.get_city_citizen_haul_cargo_resources(citizen_id)
+		CityCitizenInventorySystem.get_city_citizen_haul_cargo_resources(citizen_id)
 	)
 	var inventory_used := get_inventory_used(citizen)
 	var haul_capacity := maxi(
-		int(citizen.get("carry_capacity", 0)) - inventory_used,
+		CityCitizenInventorySystem.get_city_citizen_carry_capacity(citizen_id)
+		- inventory_used,
 		0
 	)
 	var phase := str(
@@ -362,7 +365,7 @@ static func get_haul_text(citizen: Dictionary) -> String:
 	return (
 		format_resource_manifest(cargo_resources)
 		+ " "
-		+ str(WorldData.get_city_citizen_haul_cargo_amount(citizen_id))
+		+ str(CityCitizenInventorySystem.get_city_citizen_haul_cargo_amount(citizen_id))
 		+ "/"
 		+ str(haul_capacity)
 		+ " | "
@@ -526,13 +529,8 @@ static func get_task_text(citizen: Dictionary) -> String:
 
 
 static func get_inventory_used(citizen: Dictionary) -> int:
-	var inventory = citizen.get("inventory", {})
-
-	if not inventory is Dictionary:
-		return 0
-
-	return CityResourceContainerSystem.get_resource_container_total_amount(
-		inventory
+	return CityCitizenInventorySystem.get_city_citizen_inventory_used_capacity(
+		int(citizen.get("id", -1))
 	)
 
 

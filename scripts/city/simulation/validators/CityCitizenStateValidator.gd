@@ -647,11 +647,12 @@ static func _validate_city_citizen_need_state(
 
 		var raw_hunger = citizen.get("hunger")
 		var raw_hunger_remainder = citizen.get("hunger_decay_remainder")
+		var raw_happiness = citizen.get("happiness")
 
 		if (
 			typeof(raw_hunger) != TYPE_INT
 			or int(raw_hunger) < 0
-			or int(raw_hunger) > WorldData.MAX_CITIZEN_HUNGER
+			or int(raw_hunger) > CityCitizens.MAX_CITIZEN_HUNGER
 		):
 			errors.append(
 				"Citizen "
@@ -663,7 +664,7 @@ static func _validate_city_citizen_need_state(
 			typeof(raw_hunger_remainder) != TYPE_INT
 			or int(raw_hunger_remainder) < 0
 			or int(raw_hunger_remainder)
-			>= WorldData.CITIZEN_HUNGER_DECAY_DENOMINATOR_MINUTES
+			>= CityCitizens.CITIZEN_HUNGER_DECAY_DENOMINATOR_MINUTES
 		):
 			errors.append(
 				"Citizen "
@@ -671,10 +672,21 @@ static func _validate_city_citizen_need_state(
 				+ " has invalid hunger-decay remainder."
 			)
 
-	for resource in WorldData.get_city_food_resource_types():
+		if (
+			typeof(raw_happiness) != TYPE_INT
+			or int(raw_happiness) < 0
+			or int(raw_happiness) > 100
+		):
+			errors.append(
+				"Citizen "
+				+ str(citizen_id)
+				+ " has out-of-range happiness state."
+			)
+
+	for resource in CityResourceCatalog.get_city_food_resource_types():
 		if (
 			not WorldData.is_city_resource_type(resource)
-			or WorldData.get_city_food_hunger_restore(resource) <= 0
+			or CityResourceCatalog.get_city_food_hunger_restore(resource) <= 0
 		):
 			errors.append(
 				"Food configuration contains invalid resource '"
@@ -1482,7 +1494,7 @@ static func _validate_acquire_food_task_kind_state(values: Dictionary) -> void:
 	var food_requested_amount: int = raw_food_requested_amount
 	var food_access_purpose: String = raw_food_source_access_purpose
 
-	if WorldData.get_city_food_hunger_restore(food_resource) <= 0:
+	if CityResourceCatalog.get_city_food_hunger_restore(food_resource) <= 0:
 		errors.append(
 			"Citizen "
 			+ str(citizen_id)
@@ -1517,7 +1529,7 @@ static func _validate_acquire_food_task_kind_state(values: Dictionary) -> void:
 
 	if (
 		not raw_food_target_tile is Vector2i
-		or not WorldData.get_city_citizen_food_endpoint_target_tiles(
+		or not CitizenNeedsSystem.get_city_citizen_food_endpoint_target_tiles(
 			citizen_id,
 			food_endpoint
 		).has(raw_food_target_tile)
@@ -1528,7 +1540,7 @@ static func _validate_acquire_food_task_kind_state(values: Dictionary) -> void:
 			+ " food task has an invalid withdrawal target tile."
 		)
 
-	if not WorldData.city_citizen_can_withdraw_food_from_endpoint(
+	if not CitizenNeedsSystem.city_citizen_can_withdraw_food_from_endpoint(
 		citizen_id,
 		food_endpoint,
 		food_resource

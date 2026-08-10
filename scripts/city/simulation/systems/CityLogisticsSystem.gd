@@ -855,7 +855,7 @@ static func city_haul_reservation_is_soft(
 	# the hard commitment boundary.
 	return (
 		citizen_id > 0
-		and WorldData.get_city_citizen_haul_cargo_amount(citizen_id) <= 0
+		and CityCitizenInventorySystem.get_city_citizen_haul_cargo_amount(citizen_id) <= 0
 		and int(reservation.get("source_reserved_amount", 0)) > 0
 		and int(reservation.get("destination_reserved_amount", 0)) > 0
 	)
@@ -1687,8 +1687,8 @@ static func _make_city_haul_reservation_context(
 		"requested_amount": requested_amount,
 		"source_access_purpose": source_access_purpose,
 		"destination_access_purpose": destination_access_purpose,
-		"cargo_resources": WorldData.get_city_citizen_haul_cargo_resources(citizen_id),
-		"cargo_amount": WorldData.get_city_citizen_haul_cargo_amount(citizen_id),
+		"cargo_resources": CityCitizenInventorySystem.get_city_citizen_haul_cargo_resources(citizen_id),
+		"cargo_amount": CityCitizenInventorySystem.get_city_citizen_haul_cargo_amount(citizen_id),
 		"destination_space": destination_space,
 		"source_reserved_amount": 0,
 		"destination_resources": {},
@@ -1792,7 +1792,7 @@ static func _prepare_pending_city_haul_reservation(
 	var reservable_amount := mini(
 		int(context.get("requested_amount", 0)),
 		mini(
-			WorldData.get_city_citizen_available_haul_capacity(citizen_id),
+			CityCitizenInventorySystem.get_city_citizen_available_haul_capacity(citizen_id),
 			mini(
 				get_city_haul_endpoint_unreserved_resource_amount(
 					source,
@@ -1924,7 +1924,7 @@ static func expand_pending_city_haul_reservation(
 			)
 		) != reservation_id
 		or not pre_pickup_phases.has(haul_phase)
-		or WorldData.get_city_citizen_haul_cargo_amount(citizen_id) > 0
+		or CityCitizenInventorySystem.get_city_citizen_haul_cargo_amount(citizen_id) > 0
 	):
 		return 0
 
@@ -1982,7 +1982,7 @@ static func expand_pending_city_haul_reservation(
 		return 0
 
 	var maximum_claim := mini(
-		WorldData.get_city_citizen_available_haul_capacity(citizen_id),
+		CityCitizenInventorySystem.get_city_citizen_available_haul_capacity(citizen_id),
 		mini(
 			get_city_haul_endpoint_unreserved_resource_amount(
 				source,
@@ -2102,7 +2102,7 @@ static func retarget_city_haul_reservation_source(
 	var reserved_amount := mini(
 		requested_amount,
 		mini(
-			WorldData.get_city_citizen_available_haul_capacity(citizen_id),
+			CityCitizenInventorySystem.get_city_citizen_available_haul_capacity(citizen_id),
 			mini(
 			get_city_haul_endpoint_unreserved_resource_amount(
 				normalized_source,

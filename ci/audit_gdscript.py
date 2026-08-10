@@ -191,6 +191,7 @@ WORLD_DATA_FORBIDDEN_CITY_RESOURCE_ACCOUNTING_SYMBOLS = (
     "get_total_public_city_resource_amount",
     "get_total_public_city_resource_storage_capacity",
     "get_total_stored_city_resource_amount",
+    "get_total_physical_city_resource_amount",
     "get_total_owned_city_resource_amount",
     "get_total_owned_city_resource_amounts",
     "get_total_city_resource_storage_capacity",
@@ -240,6 +241,7 @@ REQUIRED_CITY_RESOURCE_ACCOUNTING_SYSTEM_FUNCTIONS = (
     "get_total_public_city_resource_amount",
     "get_total_public_city_resource_storage_capacity",
     "get_total_stored_city_resource_amount",
+    "get_total_physical_city_resource_amount",
     "get_total_owned_city_resource_amount",
     "get_total_owned_city_resource_amounts",
     "get_total_city_resource_storage_capacity",
@@ -514,6 +516,289 @@ DEFERRED_CITIZEN_ROOT_FIELDS = {
     "workplace_version": "city_workplace_version",
 }
 
+# Pass 9 keeps physical inventory and scalar needs embedded in the authoritative
+# citizen record, but gives every query and mutation a focused, stateless
+# behavior owner. These lists are deliberately explicit: adding a new public
+# boundary is a reviewed architecture change rather than an accidental return
+# to WorldData.
+PASS9_CITIZEN_INVENTORY_SYSTEM_PATH = (
+    "scripts/citizens/simulation/systems/CityCitizenInventorySystem.gd"
+)
+PASS9_CITIZEN_INVENTORY_SYSTEM_FUNCTIONS = (
+    "ensure_city_citizen_inventory_state",
+    "get_city_citizen_carry_capacity",
+    "set_city_citizen_carry_capacity",
+    "get_city_citizen_inventory",
+    "get_city_citizen_inventory_resource_amount",
+    "get_city_citizen_inventory_used_capacity",
+    "get_city_citizen_personal_inventory_free_space",
+    "get_city_citizen_inventory_free_space",
+    "set_city_citizen_inventory_resource_amount",
+    "add_resource_to_city_citizen_inventory",
+    "remove_resource_from_city_citizen_inventory",
+    "get_city_citizen_haul_cargo",
+    "get_city_citizen_haul_cargo_resources",
+    "get_city_citizen_haul_cargo_resource_amount",
+    "get_city_citizen_haul_cargo_resource",
+    "get_city_citizen_haul_cargo_amount",
+    "get_city_citizen_total_carried_amount",
+    "get_city_citizen_record_carried_resource_amount",
+    "get_city_citizen_available_haul_capacity",
+    "set_city_citizen_haul_cargo_resources",
+    "change_city_citizen_haul_cargo_resource",
+    "set_city_citizen_haul_cargo",
+)
+PASS9_CITIZEN_INVENTORY_PRIMITIVE_MUTATORS = (
+    "ensure_city_citizen_inventory_state",
+    "set_city_citizen_carry_capacity",
+    "set_city_citizen_inventory_resource_amount",
+    "set_city_citizen_haul_cargo_resources",
+)
+
+PASS9_CITIZEN_NEEDS_SYSTEM_PATH = (
+    "scripts/citizens/simulation/systems/CitizenNeedsSystem.gd"
+)
+PASS9_CITIZEN_NEEDS_SYSTEM_FUNCTIONS = (
+    "ensure_city_citizen_need_state",
+    "get_city_citizen_hunger",
+    "set_city_citizen_hunger_state",
+    "get_city_citizen_happiness",
+    "set_city_citizen_happiness",
+    "_city_citizen_can_directly_withdraw_food",
+    "_get_city_citizen_direct_food_withdrawal_target_tiles",
+    "city_citizen_can_withdraw_food_from_endpoint",
+    "get_city_citizen_food_endpoint_target_tiles",
+    "get_city_food_endpoint_unreserved_amount",
+    "transfer_city_food_endpoint_to_citizen_inventory",
+    "run_tick",
+    "get_single_food_allocation_nutrition_cap",
+    "get_citizen_food_need_nutrition",
+    "get_citizen_next_food_allocation_nutrition",
+    "citizen_should_seek_food",
+    "citizen_has_critical_food_need",
+    "eat_personal_food_if_hungry",
+)
+PASS9_CITIZEN_NEEDS_PRIMITIVE_MUTATORS = (
+    "ensure_city_citizen_need_state",
+    "set_city_citizen_hunger_state",
+    "set_city_citizen_happiness",
+)
+
+PASS9_CITIZEN_HAULING_SYSTEM_PATH = (
+    "scripts/citizens/simulation/systems/CitizenHaulingSystem.gd"
+)
+PASS9_CITIZEN_HAULING_SYSTEM_FUNCTIONS = (
+    "city_citizen_is_hauling",
+)
+
+PASS9_RETIRED_WORLD_DATA_CITIZEN_INVENTORY_NEEDS_SYMBOLS = (
+    "make_empty_citizen_inventory",
+    *PASS9_CITIZEN_INVENTORY_SYSTEM_FUNCTIONS,
+    "ensure_city_citizen_need_state",
+    "get_city_citizen_hunger",
+    "set_city_citizen_hunger_state",
+    "get_city_citizen_happiness",
+    "set_city_citizen_happiness",
+    "city_citizen_can_directly_withdraw_resource",
+    "get_city_citizen_direct_withdrawal_target_tiles",
+    "city_citizen_can_withdraw_food_from_endpoint",
+    "get_city_citizen_food_endpoint_target_tiles",
+    "get_city_food_endpoint_unreserved_amount",
+    "transfer_city_food_endpoint_to_citizen_inventory",
+    "transfer_city_object_resource_to_citizen_inventory",
+    "CITY_FOOD_HUNGER_RESTORE_BY_RESOURCE",
+    "get_city_food_resource_types",
+    "get_city_food_hunger_restore",
+    "DEFAULT_CITIZEN_CARRY_CAPACITY",
+    "DEFAULT_CITIZEN_HUNGER",
+    "MAX_CITIZEN_HUNGER",
+    "CITIZEN_HUNGER_LOSS_PER_DAY",
+    "CITIZEN_HUNGER_DECAY_DENOMINATOR_MINUTES",
+    "CITIZEN_FOOD_SEEK_TRIGGER_HUNGER",
+    "CITIZEN_FOOD_CARRY_TRIGGER_HUNGER",
+    "CITIZEN_CRITICAL_FOOD_SEEK_TRIGGER_HUNGER",
+    "CITIZEN_EAT_TARGET_HUNGER",
+    "DEFAULT_CITIZEN_HAPPINESS",
+    "HOUSEHOLD_FOOD_TARGET_DAY_NUMERATOR",
+    "HOUSEHOLD_FOOD_TARGET_DAY_DENOMINATOR",
+    "PUBLIC_FOOD_RESERVE_TARGET_DAY_NUMERATOR",
+    "PUBLIC_FOOD_RESERVE_TARGET_DAY_DENOMINATOR",
+    *PASS9_CITIZEN_HAULING_SYSTEM_FUNCTIONS,
+)
+
+PASS9_CITIZEN_INVENTORY_FIELDS = (
+    "inventory",
+    "carry_capacity",
+    "haul_cargo",
+)
+PASS9_CITIZEN_NEEDS_FIELDS = (
+    "hunger",
+    "hunger_decay_remainder",
+    "happiness",
+)
+
+# Bootstrap coverage is the only approved place to corrupt embedded citizen
+# fields directly. All ordinary tests must exercise the same focused APIs as
+# production. Keep this allowlist path-exact and intentionally small.
+PASS9_CITIZEN_STATE_CORRUPTION_FIXTURE_PATHS = {
+    "scripts/city/simulation/CityCitizenInventoryNeedsBootstrapTest.gd",
+}
+
+PASS9_REQUIRED_TEST_FUNCTIONS = {
+    "scripts/city/simulation/CityCitizenInventoryNeedsBootstrapTest.gd": (
+        "_test_real_founding_records_and_clean_ensures",
+        "_test_lossless_legacy_repair_and_identity",
+        "_test_headless_simulation_bootstrap_and_canonical_setters",
+        "_test_malformed_carried_state_quarantine",
+        "_test_validator_rejects_uninterpretable_embedded_state",
+    ),
+    "scripts/city/simulation/CityCitizenInventoryNeedsIsolationTest.gd": (
+        "_test_equal_version_city_isolation",
+    ),
+    "scripts/city/simulation/CityFoodAllocationFairnessTest.gd": (
+        "_test_current_source_allocates_one_immediate_meal",
+        "_test_hungry_citizens_reserve_before_household_stocking",
+    ),
+    "scripts/city/simulation/CityEmploymentFoodDeadlockTest.gd": (
+        "_test_hunger_waits_for_real_food_opportunity",
+        "_test_starving_food_workers_keep_survival_schedule",
+        "_test_starving_worker_recovers_and_returns_to_work",
+        "_test_starving_residents_keep_return_home_schedule",
+    ),
+    "scripts/city/simulation/CityUnifiedBoundaryTest.gd": (
+        "_test_public_storage_keep_fallback",
+        "_test_critical_hunger_interrupts_cargo_safely",
+    ),
+    "scripts/city/simulation/CityUnifiedWorkSystemTest.gd": (
+        "_test_food_replenishment_cycle_and_whole_item_consumption",
+        "_test_household_and_public_food_reserve_targets",
+        "_test_normal_home_food_preference_allowance",
+        "_test_survival_food_fallback_and_reservation_accounting",
+    ),
+}
+
+PASS9_REQUIRED_TEST_CALLS = {
+    "scripts/city/simulation/CityCitizenInventoryNeedsBootstrapTest.gd": {
+        "_test_real_founding_records_and_clean_ensures": (
+            "found_player_city",
+            "ensure_city_citizen_inventory_state",
+            "ensure_city_citizen_need_state",
+        ),
+        "_test_lossless_legacy_repair_and_identity": (
+            "ensure_city_citizen_inventory_state",
+            "ensure_city_citizen_need_state",
+        ),
+        "_test_headless_simulation_bootstrap_and_canonical_setters": (
+            "run_settlement_simulation_systems",
+            "set_city_citizen_inventory_resource_amount",
+            "set_city_citizen_hunger_state",
+        ),
+        "_test_malformed_carried_state_quarantine": (
+            "ensure_city_citizen_inventory_state",
+            "get_city_citizen_inventory_free_space",
+            "transfer_city_food_endpoint_to_citizen_inventory",
+        ),
+        "_test_validator_rejects_uninterpretable_embedded_state": (
+            "_validate_citizen_inventories",
+            "_validate_city_citizen_need_state",
+            "_errors_contain",
+        ),
+    },
+    "scripts/city/simulation/CityCitizenInventoryNeedsIsolationTest.gd": {
+        "_test_equal_version_city_isolation": (
+            "set_active_settlement",
+            "_active_city_matches",
+            "is_same",
+        ),
+    },
+    "scripts/city/simulation/CityFoodAllocationFairnessTest.gd": {
+        "_test_current_source_allocates_one_immediate_meal": (
+            "run_tick",
+            "get_city_object_stored_resource_amount",
+        ),
+        "_test_hungry_citizens_reserve_before_household_stocking": (
+            "_process_food_needs",
+            "get_city_public_food_surplus_nutrition",
+            "_get_scheduled_home_food_delivery_task_request",
+        ),
+    },
+    "scripts/city/simulation/CityEmploymentFoodDeadlockTest.gd": {
+        "_test_hunger_waits_for_real_food_opportunity": (
+            "_process_player_commands",
+            "_process_food_needs",
+        ),
+        "_test_starving_food_workers_keep_survival_schedule": (
+            "_get_assigned_work_task_request",
+            "_process_food_needs",
+        ),
+        "_test_starving_worker_recovers_and_returns_to_work": (
+            "run_tick",
+            "get_city_citizen_hunger",
+            "get_city_object_stored_resource_amount",
+        ),
+        "_test_starving_residents_keep_return_home_schedule": (
+            "_get_assigned_home_task_request",
+            "_process_food_needs",
+        ),
+    },
+    "scripts/city/simulation/CityUnifiedBoundaryTest.gd": {
+        "_test_public_storage_keep_fallback": (
+            "validate",
+            "get_total_physical_city_resource_amount",
+            "get_city_citizen_haul_cargo_amount",
+        ),
+        "_test_critical_hunger_interrupts_cargo_safely": (
+            "run_tick",
+            "get_total_physical_city_resource_amount",
+            "get_city_citizen_haul_cargo_amount",
+        ),
+    },
+    "scripts/city/simulation/CityUnifiedWorkSystemTest.gd": {
+        "_test_food_replenishment_cycle_and_whole_item_consumption": (
+            "eat_personal_food_if_hungry",
+            "citizen_has_critical_food_need",
+        ),
+        "_test_household_and_public_food_reserve_targets": (
+            "get_city_home_food_target_nutrition",
+            "get_city_public_food_reserve_target_nutrition",
+            "find_best_household_food_source",
+        ),
+        "_test_normal_home_food_preference_allowance": (
+            "_choose_normal_survival_food_result",
+        ),
+        "_test_survival_food_fallback_and_reservation_accounting": (
+            "find_best_survival_food_source",
+            "_assign_food_match",
+            "get_city_food_endpoint_unreserved_amount",
+        ),
+    },
+}
+
+PASS9_FOCUSED_QUERY_CONSUMERS = {
+    "scripts/ui/city/CityInformationPanel.gd": (
+        "get_city_citizen_hunger",
+        "get_city_citizen_happiness",
+    ),
+    "scripts/ui/debug/CitizenDebugPanel.gd": (
+        "get_city_citizen_hunger",
+        "get_city_citizen_happiness",
+        "get_city_citizen_carry_capacity",
+        "get_city_citizen_inventory_used_capacity",
+        "get_city_citizen_haul_cargo_amount",
+        "get_city_citizen_haul_cargo_resources",
+        "city_citizen_is_hauling",
+    ),
+    "scripts/city/rendering/CityRenderer.gd": (
+        "get_city_citizen_hunger",
+        "get_city_citizen_carry_capacity",
+        "get_city_citizen_inventory",
+        "get_city_citizen_inventory_used_capacity",
+        "get_city_citizen_haul_cargo_amount",
+        "get_city_citizen_haul_cargo_resources",
+        "city_citizen_is_hauling",
+    ),
+}
+
 WORLD_DATA_FORBIDDEN_CITY_CONSTRUCTION_SYMBOLS = (
     "city_construction_sites",
     "city_construction_site_index_by_id",
@@ -669,6 +954,103 @@ def function_metrics(path: Path, text: str) -> list[FunctionMetric]:
             )
         )
     return metrics
+
+
+def gdscript_function_body(text: str, function_name: str) -> str | None:
+    """Return one top-level GDScript function body, excluding its signature."""
+
+    lines = text.splitlines()
+    start_index: int | None = None
+
+    for index, line in enumerate(lines):
+        match = FUNC_LINE_RE.match(line)
+        if match and match.group(1) == function_name:
+            start_index = index + 1
+            break
+
+    if start_index is None:
+        return None
+
+    end_index = len(lines)
+    for index in range(start_index, len(lines)):
+        if FUNC_LINE_RE.match(lines[index]):
+            end_index = index
+            break
+
+    return "\n".join(lines[start_index:end_index])
+
+
+def gdscript_without_line_comments(text: str) -> str:
+    """Remove GDScript line comments while preserving quoted string content."""
+
+    cleaned_lines: list[str] = []
+    for line in text.splitlines(keepends=True):
+        quote: str | None = None
+        escaped = False
+        comment_start: int | None = None
+
+        for index, character in enumerate(line):
+            if quote is not None:
+                if escaped:
+                    escaped = False
+                elif character == "\\":
+                    escaped = True
+                elif character == quote:
+                    quote = None
+                continue
+
+            if character in {'"', "'"}:
+                quote = character
+            elif character == "#":
+                comment_start = index
+                break
+
+        if comment_start is None:
+            cleaned_lines.append(line)
+            continue
+
+        newline = "\n" if line.endswith("\n") else ""
+        cleaned_lines.append(line[:comment_start].rstrip() + newline)
+
+    return "".join(cleaned_lines)
+
+
+def gdscript_masked_code(text: str) -> str:
+    """Mask comments and string bodies, leaving executable token layout intact."""
+
+    comment_free = gdscript_without_line_comments(text)
+    masked: list[str] = []
+    quote: str | None = None
+    escaped = False
+
+    for character in comment_free:
+        if quote is not None:
+            if character == "\n":
+                masked.append("\n")
+                escaped = False
+                continue
+            if escaped:
+                masked.append(" ")
+                escaped = False
+                continue
+            if character == "\\":
+                masked.append(" ")
+                escaped = True
+                continue
+            if character == quote:
+                masked.append(character)
+                quote = None
+            else:
+                masked.append(" ")
+            continue
+
+        if character in {'"', "'"}:
+            quote = character
+            masked.append(character)
+        else:
+            masked.append(character)
+
+    return "".join(masked)
 
 
 def main() -> int:
@@ -2870,6 +3252,687 @@ def main() -> int:
                 f"{required_path.relative_to(ROOT)}: missing permanent Pass 8 "
                 "citizen behavior API boundary coverage"
             )
+
+    # Pass 9: citizen-carried resources and scalar needs remain embedded in the
+    # registry-owned citizen Dictionary, while focused stateless systems own all
+    # behavior. WorldData compatibility wrappers and cross-system raw writes
+    # would recreate split authority, so reject both direct and reflective forms.
+    pass9_system_configs = (
+        (
+            PASS9_CITIZEN_INVENTORY_SYSTEM_PATH,
+            "CityCitizenInventorySystem",
+            PASS9_CITIZEN_INVENTORY_SYSTEM_FUNCTIONS,
+            PASS9_CITIZEN_INVENTORY_PRIMITIVE_MUTATORS,
+            True,
+        ),
+        (
+            PASS9_CITIZEN_NEEDS_SYSTEM_PATH,
+            "CitizenNeedsSystem",
+            PASS9_CITIZEN_NEEDS_SYSTEM_FUNCTIONS,
+            PASS9_CITIZEN_NEEDS_PRIMITIVE_MUTATORS,
+            True,
+        ),
+        (
+            PASS9_CITIZEN_HAULING_SYSTEM_PATH,
+            "CitizenHaulingSystem",
+            PASS9_CITIZEN_HAULING_SYSTEM_FUNCTIONS,
+            (),
+            False,
+        ),
+    )
+
+    for (
+        system_relative,
+        class_name,
+        required_functions,
+        primitive_mutators,
+        requires_registry_routing,
+    ) in pass9_system_configs:
+        system_path = ROOT / system_relative
+
+        if not system_path.exists():
+            errors.append(
+                f"{system_relative}: missing permanent Pass 9 focused owner"
+            )
+            continue
+
+        system_text = system_path.read_text(encoding="utf-8")
+
+        if not re.search(
+            rf"^class_name\s+{re.escape(class_name)}\s*$",
+            system_text,
+            re.MULTILINE,
+        ):
+            errors.append(
+                f"{system_relative}: missing {class_name} class_name"
+            )
+
+        mutable_top_level_names = re.findall(
+            r"^(?:static\s+)?var\s+([A-Za-z_][A-Za-z0-9_]*)\b",
+            system_text,
+            re.MULTILINE,
+        )
+        if mutable_top_level_names:
+            errors.append(
+                f"{system_relative}: Pass 9 focused owner must remain stateless; "
+                "top-level mutable fields are forbidden: "
+                + ", ".join(sorted(set(mutable_top_level_names)))
+            )
+
+        missing_static_functions = [
+            function_name
+            for function_name in required_functions
+            if not re.search(
+                rf"^static\s+func\s+{re.escape(function_name)}\s*\(",
+                system_text,
+                re.MULTILINE,
+            )
+        ]
+        if missing_static_functions:
+            errors.append(
+                f"{system_relative}: missing focused static citizen behavior: "
+                + ", ".join(sorted(missing_static_functions))
+            )
+
+        if (
+            requires_registry_routing
+            and "CityCitizenRegistrySystem.get_current_state()"
+            not in system_text
+        ):
+            errors.append(
+                f"{system_relative}: embedded citizen state must route through "
+                "CityCitizenRegistrySystem.get_current_state()"
+            )
+
+        for function_name in primitive_mutators:
+            function_body = gdscript_function_body(system_text, function_name)
+
+            if function_body is None:
+                continue
+            if (
+                "CityCitizenRegistrySystem.mark_city_citizens_changed()"
+                not in function_body
+            ):
+                errors.append(
+                    f"{system_relative}: primitive mutator {function_name} "
+                    "must publish citizen-registry version changes"
+                )
+
+    simulation_coordinator_relative = (
+        "scripts/world/simulation/SimulationCoordinator.gd"
+    )
+    simulation_coordinator_path = ROOT / simulation_coordinator_relative
+    if simulation_coordinator_path.exists():
+        simulation_coordinator_text = simulation_coordinator_path.read_text(
+            encoding="utf-8"
+        )
+        simulation_bootstrap_body = gdscript_function_body(
+            simulation_coordinator_text,
+            "run_settlement_simulation_systems",
+        )
+        required_simulation_bootstrap_calls = (
+            "CityCitizenInventorySystem.ensure_city_citizen_inventory_state()",
+            "CitizenNeedsSystem.ensure_city_citizen_need_state()",
+        )
+        if simulation_bootstrap_body is None or any(
+            call not in simulation_bootstrap_body
+            for call in required_simulation_bootstrap_calls
+        ):
+            errors.append(
+                f"{simulation_coordinator_relative}: headless settlement "
+                "simulation must repair embedded inventory/cargo and need state "
+                "without a renderer"
+            )
+
+    matcher_relative = "scripts/city/simulation/systems/CityResourceMatcher.gd"
+    matcher_path = ROOT / matcher_relative
+    if matcher_path.exists():
+        matcher_text = matcher_path.read_text(encoding="utf-8")
+        matcher_policy_constants = {
+            "HOUSEHOLD_FOOD_TARGET_DAY_NUMERATOR": "1",
+            "HOUSEHOLD_FOOD_TARGET_DAY_DENOMINATOR": "1",
+            "PUBLIC_FOOD_RESERVE_TARGET_DAY_NUMERATOR": "1",
+            "PUBLIC_FOOD_RESERVE_TARGET_DAY_DENOMINATOR": "2",
+        }
+        for constant_name, expected_value in matcher_policy_constants.items():
+            if not re.search(
+                rf"^const\s+{re.escape(constant_name)}\s*:\s*int\s*=\s*"
+                rf"{re.escape(expected_value)}\s*$",
+                matcher_text,
+                re.MULTILINE,
+            ):
+                errors.append(
+                    f"{matcher_relative}: missing Pass 9 food policy constant "
+                    f"{constant_name} = {expected_value}"
+                )
+
+    pass9_world_data_symbols = sorted(
+        set(PASS9_RETIRED_WORLD_DATA_CITIZEN_INVENTORY_NEEDS_SYMBOLS)
+    )
+    pass9_world_data_symbol_alternation = "|".join(
+        re.escape(symbol)
+        for symbol in sorted(
+            pass9_world_data_symbols,
+            key=len,
+            reverse=True,
+        )
+    )
+
+    if world_data_path.exists():
+        world_data_text = world_data_path.read_text(encoding="utf-8")
+
+        for symbol in pass9_world_data_symbols:
+            declaration_patterns = (
+                rf"^\s*(?:static\s+)?var\s+{re.escape(symbol)}\b",
+                rf"^\s*const\s+{re.escape(symbol)}\b",
+                rf"^\s*(?:static\s+)?func\s+{re.escape(symbol)}\s*\(",
+            )
+            if any(
+                re.search(pattern, world_data_text, re.MULTILINE)
+                for pattern in declaration_patterns
+            ):
+                errors.append(
+                    "scripts/world/simulation/WorldData.gd: Pass 9 citizen "
+                    "inventory/needs declaration must not return: "
+                    f"{symbol}"
+                )
+
+    for path in scripts:
+        text = path.read_text(encoding="utf-8")
+        relative = path.relative_to(ROOT).as_posix()
+        comment_free_text = gdscript_without_line_comments(text)
+        masked_code = gdscript_masked_code(text)
+        world_data_receiver = r"WorldData(?:Script)?"
+        gdscript_string_literal_prefix = r"&?"
+        world_data_alias_patterns = (
+            re.compile(
+                r"^\s*(?:const|var)\s+([A-Za-z_][A-Za-z0-9_]*)"
+                r"(?:\s*:\s*[A-Za-z_][^=\n]*)?\s*(?::=|=)\s*"
+                r"(?:preload|load)\s*\(\s*[\"']"
+                r"res://scripts/world/simulation/WorldData\.gd[\"']\s*\)",
+                re.MULTILINE,
+            ),
+            re.compile(
+                r"^\s*(?:const|var)\s+([A-Za-z_][A-Za-z0-9_]*)"
+                r"(?:\s*:\s*[A-Za-z_][^=\n]*)?\s*(?::=|=)\s*"
+                r"WorldData(?:Script)?\s*$",
+                re.MULTILINE,
+            ),
+        )
+        world_data_aliases: set[str] = set()
+        for alias_pattern in world_data_alias_patterns:
+            world_data_aliases.update(alias_pattern.findall(comment_free_text))
+
+        if world_data_aliases:
+            errors.append(
+                f"{relative}: WorldData aliases can bypass retired API guards; "
+                "use the global WorldData class directly: "
+                + ", ".join(sorted(world_data_aliases))
+            )
+
+        reflective_world_data_pattern = re.compile(
+            rf"(?:\b{world_data_receiver}\s*\.\s*"
+            r"(?:get|set|call|callv|call_deferred|has_method)\s*\("
+            rf"|\b{world_data_receiver}\s*\["
+            rf"|\bCallable\s*\(\s*{world_data_receiver}\b)"
+        )
+        direct_symbols = set(
+            re.findall(
+                rf"\b{world_data_receiver}\s*\.\s*"
+                rf"({pass9_world_data_symbol_alternation})\b",
+                masked_code,
+            )
+        )
+        dynamic_symbols = set(
+            re.findall(
+                rf"\b{world_data_receiver}\s*\[\s*"
+                rf"{gdscript_string_literal_prefix}[\"']"
+                rf"({pass9_world_data_symbol_alternation})[\"']\s*\]",
+                comment_free_text,
+            )
+        )
+        dynamic_symbols.update(
+            re.findall(
+                rf"\b{world_data_receiver}\s*\.\s*"
+                rf"(?:get|set|call|callv|call_deferred|has_method)\s*\(\s*"
+                rf"{gdscript_string_literal_prefix}[\"']"
+                rf"({pass9_world_data_symbol_alternation})[\"']",
+                comment_free_text,
+            )
+        )
+        dynamic_symbols.update(
+            re.findall(
+                rf"\bCallable\s*\(\s*{world_data_receiver}\s*,\s*"
+                rf"{gdscript_string_literal_prefix}[\"']"
+                rf"({pass9_world_data_symbol_alternation})[\"']\s*\)",
+                comment_free_text,
+            )
+        )
+
+        if (
+            reflective_world_data_pattern.search(masked_code)
+            and not dynamic_symbols
+        ):
+            errors.append(
+                f"{relative}: reflective or indexed WorldData access is "
+                "forbidden because computed names bypass retired API guards"
+            )
+
+        for symbol in sorted(direct_symbols):
+            errors.append(
+                f"{relative}: retired Pass 9 WorldData citizen "
+                f"inventory/needs reference remains: WorldData.{symbol}"
+            )
+        for symbol in sorted(dynamic_symbols):
+            errors.append(
+                f"{relative}: dynamic retired Pass 9 WorldData citizen "
+                f"inventory/needs reference remains: {symbol}"
+            )
+
+    citizen_schema_relative = "scripts/citizens/simulation/CityCitizens.gd"
+    field_owner_paths: dict[str, set[str]] = {}
+
+    for field_name in PASS9_CITIZEN_INVENTORY_FIELDS:
+        field_owner_paths[field_name] = {
+            citizen_schema_relative,
+            PASS9_CITIZEN_INVENTORY_SYSTEM_PATH,
+            *PASS9_CITIZEN_STATE_CORRUPTION_FIXTURE_PATHS,
+        }
+    for field_name in PASS9_CITIZEN_NEEDS_FIELDS:
+        field_owner_paths[field_name] = {
+            citizen_schema_relative,
+            PASS9_CITIZEN_NEEDS_SYSTEM_PATH,
+            *PASS9_CITIZEN_STATE_CORRUPTION_FIXTURE_PATHS,
+        }
+
+    embedded_field_alternation = "|".join(
+        re.escape(field_name)
+        for field_name in (
+            *PASS9_CITIZEN_INVENTORY_FIELDS,
+            *PASS9_CITIZEN_NEEDS_FIELDS,
+        )
+    )
+    embedded_physical_field_alternation = "|".join(
+        re.escape(field_name)
+        for field_name in ("inventory", "haul_cargo")
+    )
+    field_key_bodies = (
+        rf"(?:&\s*)?[\"']({embedded_field_alternation})[\"']",
+        rf"StringName\s*\(\s*[\"']"
+        rf"({embedded_field_alternation})[\"']\s*\)",
+    )
+    field_write_patterns: list[re.Pattern[str]] = []
+    for field_key_body in field_key_bodies:
+        field_write_patterns.extend(
+            (
+                re.compile(
+                    rf"\[\s*{field_key_body}\s*\]\s*"
+                    r"(?:=|\+=|-=|\*=|/=|%=)"
+                ),
+                re.compile(
+                    rf"\.\s*set\s*\(\s*{field_key_body}\s*,"
+                ),
+                re.compile(
+                    rf"\.\s*erase\s*\(\s*{field_key_body}\s*\)"
+                ),
+                re.compile(
+                    rf"\.\s*get\s*\(\s*{field_key_body}[^)]*\)\s*"
+                    r"\[[^\]]+\]\s*(?:=|\+=|-=|\*=|/=|%=)"
+                ),
+                re.compile(
+                    rf"\[\s*{field_key_body}\s*\]\s*"
+                    r"(?:\[[^\]]+\]\s*(?:=|\+=|-=|\*=|/=|%=)"
+                    r"|\.\s*(?:set|erase|clear|merge|assign)\s*\()"
+                ),
+                re.compile(
+                    rf"\.\s*get\s*\(\s*{field_key_body}[^)]*\)\s*\.\s*"
+                    r"(?:set|erase|clear|merge|assign)\s*\("
+                ),
+            )
+        )
+    dotted_field_write_pattern = re.compile(
+        rf"\.\s*({embedded_field_alternation})\s*"
+        r"(?:=|\+=|-=|\*=|/=|%=)"
+    )
+    field_write_patterns.append(dotted_field_write_pattern)
+
+    protected_field_key_alias_patterns = (
+        re.compile(
+            rf"^\s*(?:const|var)\s+([A-Za-z_][A-Za-z0-9_]*)"
+            rf"(?:\s*:\s*[^=\n]+)?\s*(?::=|=)\s*(?:&\s*)?[\"']"
+            rf"({embedded_field_alternation})[\"']\s*$",
+            re.MULTILINE,
+        ),
+        re.compile(
+            rf"^\s*(?:const|var)\s+([A-Za-z_][A-Za-z0-9_]*)"
+            rf"(?:\s*:\s*[^=\n]+)?\s*(?::=|=)\s*StringName\s*\(\s*[\"']"
+            rf"({embedded_field_alternation})[\"']\s*\)\s*$",
+            re.MULTILINE,
+        ),
+    )
+
+    pass9_ledger_domain = r"(?:inventory|haul_?cargo|cargo|carry|hunger|happiness|needs?)"
+    pass9_ledger_scope = r"(?:citizen|resident|population)"
+    pass9_ledger_name_patterns = (
+        re.compile(
+            rf"^(?:city_)?{pass9_ledger_scope}.*{pass9_ledger_domain}"
+            r"(?:_by_.+|_(?:ledger|lookup|cache|state|amounts?))$"
+        ),
+        re.compile(
+            rf"^{pass9_ledger_domain}.*(?:_by_.*{pass9_ledger_scope}.*"
+            rf"|_(?:ledger|lookup|cache|state|amounts?).*{pass9_ledger_scope}.*)$"
+        ),
+        re.compile(
+            rf"^(?:city_)?{pass9_ledger_scope}_{pass9_ledger_domain}s?$"
+        ),
+    )
+    top_level_mutable_container_pattern = re.compile(
+        r"^(?:static\s+)?var\s+([A-Za-z_][A-Za-z0-9_]*)([^\n]*)$",
+        re.MULTILINE,
+    )
+
+    for path in scripts:
+        if path.name.endswith("Test.gd"):
+            continue
+
+        relative = path.relative_to(ROOT).as_posix()
+        text = gdscript_without_line_comments(path.read_text(encoding="utf-8"))
+
+        for declaration_match in top_level_mutable_container_pattern.finditer(text):
+            ledger_name = declaration_match.group(1)
+            declaration_tail = declaration_match.group(2)
+            is_mutable_container = bool(
+                re.search(r"\b(?:Array|Dictionary)\b", declaration_tail)
+                or re.search(r"(?:=|:=)\s*[\[{]", declaration_tail)
+            )
+            is_pass9_ledger_name = any(
+                pattern.fullmatch(ledger_name)
+                for pattern in pass9_ledger_name_patterns
+            )
+
+            if not is_mutable_container or not is_pass9_ledger_name:
+                continue
+
+            line_number = text.count("\n", 0, declaration_match.start()) + 1
+            errors.append(
+                f"{relative}:{line_number}: top-level mutable Pass 9 citizen "
+                f"ledger is forbidden: {ledger_name}"
+            )
+
+    for path in scripts:
+        relative = path.relative_to(ROOT).as_posix()
+        text = path.read_text(encoding="utf-8")
+        comment_free_text = gdscript_without_line_comments(text)
+
+        for write_pattern in field_write_patterns:
+            for match in write_pattern.finditer(comment_free_text):
+                field_name = match.group(1)
+
+                if relative in field_owner_paths[field_name]:
+                    continue
+
+                line_number = comment_free_text.count("\n", 0, match.start()) + 1
+                errors.append(
+                    f"{relative}:{line_number}: direct write to embedded citizen "
+                    f"field {field_name} is private to its focused Pass 9 owner"
+                )
+
+        protected_field_key_aliases: dict[str, str] = {}
+        for alias_pattern in protected_field_key_alias_patterns:
+            for alias_name, field_name in alias_pattern.findall(comment_free_text):
+                protected_field_key_aliases[alias_name] = field_name
+
+        for alias_name, field_name in protected_field_key_aliases.items():
+            alias_write_patterns = (
+                re.compile(
+                    rf"\[\s*{re.escape(alias_name)}\s*\]\s*"
+                    r"(?:=|\+=|-=|\*=|/=|%=)"
+                ),
+                re.compile(
+                    rf"\.\s*set\s*\(\s*{re.escape(alias_name)}\s*,"
+                ),
+                re.compile(
+                    rf"\.\s*erase\s*\(\s*{re.escape(alias_name)}\s*\)"
+                ),
+            )
+            if relative in field_owner_paths[field_name]:
+                continue
+
+            for alias_write_pattern in alias_write_patterns:
+                for match in alias_write_pattern.finditer(comment_free_text):
+                    line_number = (
+                        comment_free_text.count("\n", 0, match.start()) + 1
+                    )
+                    errors.append(
+                        f"{relative}:{line_number}: indirect write through "
+                        f"protected field key {alias_name} ({field_name})"
+                    )
+
+        if relative not in (
+            field_owner_paths["inventory"] | field_owner_paths["haul_cargo"]
+        ):
+            for function_name in FUNC_RE.findall(comment_free_text):
+                function_body = gdscript_function_body(
+                    comment_free_text,
+                    function_name,
+                )
+                if function_body is None:
+                    continue
+
+                alias_assignments = list(
+                    re.finditer(
+                        r"^\s*(?:var\s+)?([A-Za-z_][A-Za-z0-9_]*)"
+                        r"(?:\s*:\s*[^=\n]+)?\s*(?::=|=)\s*(.+)$",
+                        function_body,
+                        re.MULTILINE,
+                    )
+                )
+                nested_aliases: set[str] = set()
+
+                for assignment in alias_assignments:
+                    alias_name = assignment.group(1)
+                    assignment_value = assignment.group(2)
+                    if ".duplicate(" in assignment_value:
+                        continue
+                    if not (
+                        "citizen" in assignment_value
+                        or "citizens[" in assignment_value
+                    ):
+                        continue
+                    if re.search(
+                        rf"(?:\.\s*get\s*\(\s*(?:&\s*)?[\"']"
+                        rf"(?:{embedded_physical_field_alternation})[\"']"
+                        rf"|\[\s*(?:&\s*)?[\"']"
+                        rf"(?:{embedded_physical_field_alternation})[\"']\s*\])",
+                        assignment_value,
+                    ):
+                        nested_aliases.add(alias_name)
+
+                aliases_changed = True
+                while aliases_changed:
+                    aliases_changed = False
+                    for assignment in alias_assignments:
+                        alias_name = assignment.group(1)
+                        assignment_value = assignment.group(2).strip()
+                        if (
+                            alias_name not in nested_aliases
+                            and assignment_value in nested_aliases
+                        ):
+                            nested_aliases.add(alias_name)
+                            aliases_changed = True
+
+                for alias_name in sorted(nested_aliases):
+                    alias_mutation_pattern = re.compile(
+                        rf"\b{re.escape(alias_name)}\s*(?:"
+                        r"\[[^\]]+\]\s*(?:=|\+=|-=|\*=|/=|%=)"
+                        r"|\.\s*(?:set|erase|clear|merge|assign)\s*\()"
+                    )
+                    if alias_mutation_pattern.search(function_body):
+                        errors.append(
+                            f"{relative}: {function_name} mutates aliased "
+                            f"citizen inventory/cargo outside its focused owner"
+                        )
+
+        required_query_calls = PASS9_FOCUSED_QUERY_CONSUMERS.get(relative)
+        if required_query_calls is not None:
+            masked_code = gdscript_masked_code(text)
+            missing_query_calls = [
+                call_name
+                for call_name in required_query_calls
+                if not re.search(
+                    rf"\b{re.escape(call_name)}\s*\(",
+                    masked_code,
+                )
+            ]
+            if missing_query_calls:
+                errors.append(
+                    f"{relative}: focused Pass 9 query migration is missing: "
+                    + ", ".join(sorted(missing_query_calls))
+                )
+
+            ui_raw_field_patterns: list[re.Pattern[str]] = []
+            for field_key_body in field_key_bodies:
+                ui_raw_field_patterns.extend(
+                    (
+                        re.compile(rf"\.\s*get\s*\(\s*{field_key_body}"),
+                        re.compile(rf"\[\s*{field_key_body}\s*\]"),
+                    )
+                )
+            ui_raw_field_patterns.append(
+                re.compile(rf"\.\s*({embedded_field_alternation})\b")
+            )
+            raw_query_fields = sorted(
+                {
+                    match.group(1)
+                    for pattern in ui_raw_field_patterns
+                    for match in pattern.finditer(comment_free_text)
+                }
+            )
+            if raw_query_fields:
+                errors.append(
+                    f"{relative}: UI/rendering must query focused Pass 9 "
+                    "owners instead of raw citizen fields: "
+                    + ", ".join(raw_query_fields)
+                )
+
+    # Preserve the focused behavioral contract as well as its implementation:
+    # bootstrap repair, equal-version A/B/A isolation, fair scarce-food access,
+    # interruption safety, starvation recovery, and return-to-work all remain
+    # mandatory headless scenes in the repository-wide runner.
+    for test_relative, required_test_functions in (
+        PASS9_REQUIRED_TEST_FUNCTIONS.items()
+    ):
+        test_path = ROOT / test_relative
+        test_scene_path = test_path.with_suffix(".tscn")
+
+        for required_path in (test_path, test_scene_path):
+            if not required_path.exists():
+                errors.append(
+                    f"{required_path.relative_to(ROOT)}: missing permanent "
+                    "Pass 9 citizen inventory/needs coverage"
+                )
+
+        if not test_path.exists():
+            continue
+
+        test_text = test_path.read_text(encoding="utf-8")
+        test_functions = set(FUNC_RE.findall(test_text))
+        missing_test_functions = sorted(
+            set(required_test_functions) - test_functions
+        )
+        if missing_test_functions:
+            errors.append(
+                f"{test_relative}: missing permanent Pass 9 regression: "
+                + ", ".join(missing_test_functions)
+            )
+
+        ready_body = gdscript_function_body(test_text, "_ready") or ""
+        masked_ready_body = gdscript_masked_code(ready_body)
+        uninvoked_test_functions = sorted(
+            function_name
+            for function_name in required_test_functions
+            if not re.search(
+                rf"^\s*{re.escape(function_name)}\s*\(",
+                masked_ready_body,
+                re.MULTILINE,
+            )
+        )
+        if uninvoked_test_functions:
+            errors.append(
+                f"{test_relative}: Pass 9 regressions are not invoked by _ready: "
+                + ", ".join(uninvoked_test_functions)
+            )
+
+        required_call_contracts = PASS9_REQUIRED_TEST_CALLS.get(
+            test_relative,
+            {},
+        )
+        for function_name in required_test_functions:
+            function_body = gdscript_function_body(test_text, function_name)
+            if function_body is None:
+                continue
+
+            masked_function_body = gdscript_masked_code(function_body)
+            if not re.search(r"\b_expect\s*\(", masked_function_body):
+                errors.append(
+                    f"{test_relative}: Pass 9 regression {function_name} "
+                    "must contain executable expectations"
+                )
+
+            missing_contract_calls = sorted(
+                call_name
+                for call_name in required_call_contracts.get(function_name, ())
+                if not re.search(
+                    rf"\b{re.escape(call_name)}\s*\(",
+                    masked_function_body,
+                )
+            )
+            if missing_contract_calls:
+                errors.append(
+                    f"{test_relative}: Pass 9 regression {function_name} "
+                    "is missing contract calls: "
+                    + ", ".join(missing_contract_calls)
+                )
+
+        if test_scene_path.exists():
+            scene_text = test_scene_path.read_text(encoding="utf-8")
+            expected_resource_path = f"res://{test_relative}"
+            expected_script_ids: set[str] = set()
+            for raw_line in scene_text.splitlines():
+                if not raw_line.startswith("[ext_resource "):
+                    continue
+                if 'type="Script"' not in raw_line:
+                    continue
+
+                path_match = re.search(r'\bpath="([^"]+)"', raw_line)
+                id_match = re.search(r'\bid="([^"]+)"', raw_line)
+                if (
+                    path_match is not None
+                    and id_match is not None
+                    and path_match.group(1) == expected_resource_path
+                ):
+                    expected_script_ids.add(id_match.group(1))
+
+            root_node_match = re.search(
+                r"^\[node\b[^\]]*\]\s*(.*?)(?=^\[|\Z)",
+                scene_text,
+                re.MULTILINE | re.DOTALL,
+            )
+            root_script_id: str | None = None
+            if root_node_match is not None:
+                root_script_match = re.search(
+                    r'^script\s*=\s*ExtResource\("([^"]+)"\)\s*$',
+                    root_node_match.group(1),
+                    re.MULTILINE,
+                )
+                if root_script_match is not None:
+                    root_script_id = root_script_match.group(1)
+
+            if root_script_id not in expected_script_ids:
+                errors.append(
+                    f"{test_scene_path.relative_to(ROOT)}: Pass 9 scene must bind "
+                    f"{expected_resource_path} on its root node"
+                )
 
     report = {
         "script_count": len(scripts),

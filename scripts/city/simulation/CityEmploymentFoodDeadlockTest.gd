@@ -26,6 +26,7 @@ var test_culture_id: int = -1
 func _ready() -> void:
 	_test_hunger_waits_for_real_food_opportunity()
 	_test_starving_food_workers_keep_survival_schedule()
+	_test_starving_worker_recovers_and_returns_to_work()
 	_test_starving_residents_keep_return_home_schedule()
 	_test_persistent_workplace_staffing_policy()
 	WorldData.reset_runtime_session_state()
@@ -49,8 +50,8 @@ func _test_hunger_waits_for_real_food_opportunity() -> void:
 	var normal_id := int(normal_citizen.get("id", -1))
 	var critical_id := int(critical_citizen.get("id", -1))
 
-	WorldData.set_city_citizen_hunger_state(normal_id, 60, 0)
-	WorldData.set_city_citizen_hunger_state(critical_id, 0, 0)
+	CitizenNeedsSystem.set_city_citizen_hunger_state(normal_id, 60, 0)
+	CitizenNeedsSystem.set_city_citizen_hunger_state(critical_id, 0, 0)
 
 	var road_sites := CityConstructionSystemScript.create_road_sites(
 		[Vector2i(9, 4), Vector2i(9, 6)],
@@ -126,7 +127,7 @@ func _test_starving_food_workers_keep_survival_schedule() -> void:
 		var citizen := _add_citizen(Vector2i(3, 3 + index * 2))
 		var citizen_id := int(citizen.get("id", -1))
 		citizen_ids.append(citizen_id)
-		WorldData.set_city_citizen_hunger_state(citizen_id, 0, 0)
+		CitizenNeedsSystem.set_city_citizen_hunger_state(citizen_id, 0, 0)
 
 	var fishery := CityObjectSystem.add_city_object({
 		"object_type": WorldData.CITY_OBJECT_FISHING_GROUNDS,
@@ -201,12 +202,143 @@ func _test_starving_food_workers_keep_survival_schedule() -> void:
 	)
 
 
+func _test_starving_worker_recovers_and_returns_to_work() -> void:
+	var city_world := _reset_fixture()
+	WorldData.player_city_founded = true
+	SimulationClock.start_new_game(1, 8, 0)
+	var fishery := CityObjectSystem.add_city_object({
+		"object_type": WorldData.CITY_OBJECT_FISHING_GROUNDS,
+		"top_left": Vector2i(15, 8),
+		"size_tiles": WorldData.get_city_object_size_for_type(
+			WorldData.CITY_OBJECT_FISHING_GROUNDS
+		),
+		"object_owner": "player",
+		"city_world": city_world,
+	})
+	var fishery_id := int(fishery.get("id", -1))
+	var access_tiles := WorldData.get_city_object_access_tiles(
+		city_world,
+		fishery
+	)
+	_expect(
+		fishery_id > 0 and not access_tiles.is_empty(),
+		"The starvation-recovery fixture must create an accessible Fishery."
+	)
+
+	if fishery_id <= 0 or access_tiles.is_empty():
+		return
+
+	var citizen := _add_citizen(access_tiles[0])
+	var citizen_id := int(citizen.get("id", -1))
+	CityEmploymentSystemScript.run_tick(1, 2)
+	CitizenDecisionSystemScript.run_tick(1, 2)
+	citizen = CityCitizenRegistrySystem.get_city_citizen_by_id(citizen_id)
+	_expect(
+		int(citizen.get("job_object_id", -1)) == fishery_id
+		and _task_kind(citizen_id) == WorldData.CITY_CITIZEN_TASK_KIND_WORK,
+		"An employed Fishery worker must begin scheduled Work during the shift."
+	)
+
+	_expect(
+		CitizenNeedsSystem.set_city_citizen_hunger_state(citizen_id, 0, 0),
+		"The starvation-recovery fixture must make the worker critically hungry."
+	)
+	_expect(
+		CityResourceContainerSystem.add_resource_to_city_object_storage(
+			fishery_id,
+			WorldData.RESOURCE_FISH,
+			4
+		) == 4,
+		"The starvation-recovery fixture must expose four whole workplace fish."
+	)
+
+	for meal_index in range(4):
+		var decision_tick := meal_index + 2
+		CitizenDecisionSystemScript.run_tick(decision_tick, 2)
+		_expect(
+			_task_kind(citizen_id)
+			== WorldData.CITY_CITIZEN_TASK_KIND_ACQUIRE_FOOD,
+			"A real accessible fish must interrupt Work and allocate exactly one meal."
+		)
+
+		CitizenTaskSystemScript.run_tick(decision_tick, 2)
+		_expect(
+			CitizenNeedsSystem.get_city_citizen_hunger(citizen_id)
+			== (meal_index + 1) * 20
+			and CityCitizenInventorySystem.get_city_citizen_inventory_resource_amount(
+				citizen_id,
+				WorldData.RESOURCE_FISH
+			) == 0,
+			"Each Acquire Food task must consume one whole fish without pocketing a reserve."
+		)
+
+	_expect(
+		CitizenNeedsSystem.get_city_citizen_hunger(citizen_id) == 80
+		and _task_kind(citizen_id) == WorldData.CITY_CITIZEN_TASK_KIND_NONE,
+		"Four whole fish must recover starvation to 80 and complete the food task."
+	)
+	_expect(
+		CityResourceContainerSystem.get_city_object_stored_resource_amount(
+			CityObjectSystem.get_city_object_by_id(fishery_id),
+			WorldData.RESOURCE_FISH
+		) == 0,
+		"Starvation recovery must consume exactly the four physical source fish."
+	)
+
+	CitizenDecisionSystemScript.run_tick(6, 2)
+	citizen = CityCitizenRegistrySystem.get_city_citizen_by_id(citizen_id)
+	_expect(
+		_task_kind(citizen_id) == WorldData.CITY_CITIZEN_TASK_KIND_WORK
+		and int(citizen.get("job_object_id", -1)) == fishery_id,
+		"The next in-shift decision must return the recovered worker to Work without losing the job."
+	)
+	CitizenTaskSystemScript.run_tick(7, 2)
+	_expect(
+		_task_kind(citizen_id) == WorldData.CITY_CITIZEN_TASK_KIND_WORK,
+		"Resumed scheduled Work must execute a task step instead of being a transient assignment."
+	)
+
+	_expect(
+		CityCitizenInventorySystem.set_city_citizen_haul_cargo(
+			citizen_id,
+			WorldData.RESOURCE_STONE,
+			1
+		) == 1
+		and CityCitizenTaskRuntimeSystem.clear_city_citizen_task(
+			citizen_id,
+			WorldData.CITY_CITIZEN_TASK_SOURCE_SCHEDULE
+		)
+		and CityCitizenInventorySystem.get_city_citizen_haul_cargo_resource_amount(
+			citizen_id,
+			WorldData.RESOURCE_STONE
+		) == 1,
+		"Clearing non-haul Work while cargo exists must preserve the physical cargo."
+	)
+
+	citizen = CityCitizenRegistrySystem.get_city_citizen_by_id(citizen_id)
+	var resumed_work_request := (
+		CitizenDecisionSystemScript._get_assigned_work_task_request(citizen)
+	)
+	_expect(
+		not resumed_work_request.is_empty()
+		and not CityCitizenTaskRuntimeSystem.assign_city_citizen_task(
+			citizen_id,
+			resumed_work_request
+		)
+		and CityCitizenInventorySystem.get_city_citizen_haul_cargo_resource_amount(
+			citizen_id,
+			WorldData.RESOURCE_STONE
+		) == 1,
+		"Rejecting non-haul reassignment while cargo exists must not erase the cargo."
+	)
+
+
 func _test_starving_residents_keep_return_home_schedule() -> void:
 	var city_world := _reset_fixture()
 	SimulationClock.start_new_game(1, 18, 0)
 	var citizen := _add_citizen(Vector2i(3, 4))
 	var citizen_id := int(citizen.get("id", -1))
-	WorldData.set_city_citizen_hunger_state(citizen_id, 0, 0)
+	CitizenNeedsSystem.set_city_citizen_hunger_state(citizen_id, 0, 0)
 
 	var house := CityObjectSystem.add_city_object({
 		"object_type": WorldData.CITY_OBJECT_HOUSE,
@@ -275,7 +407,7 @@ func _test_persistent_workplace_staffing_policy() -> void:
 
 	var blocked_citizen_id := citizen_ids[0]
 	_expect(
-		WorldData.set_city_citizen_haul_cargo(
+		CityCitizenInventorySystem.set_city_citizen_haul_cargo(
 			blocked_citizen_id,
 			WorldData.RESOURCE_STONE,
 			1
@@ -315,7 +447,7 @@ func _test_persistent_workplace_staffing_policy() -> void:
 		"A temporarily unavailable first candidate must not block later unemployed citizens from filling the Fishery."
 	)
 
-	WorldData.set_city_citizen_haul_cargo_resources(blocked_citizen_id, {})
+	CityCitizenInventorySystem.set_city_citizen_haul_cargo_resources(blocked_citizen_id, {})
 	CityEmploymentSystemScript.run_tick(2, 2)
 	fishery = CityObjectSystem.get_city_object_by_id(fishery_id)
 	_expect(

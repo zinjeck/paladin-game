@@ -140,6 +140,11 @@ func run_settlement_simulation_systems(
 	if should_record_durations:
 		system_start_usec = Time.get_ticks_usec()
 
+	# Embedded citizen inventory/cargo and needs have no duplicate state owner.
+	# Normalize supported legacy records at the headless simulation boundary so
+	# correctness never depends on CityRenderer having been constructed.
+	CityCitizenInventorySystem.ensure_city_citizen_inventory_state()
+	CitizenNeedsSystem.ensure_city_citizen_need_state()
 	CitizenNeedsSystem.run_tick(tick_index, minutes_advanced)
 
 	if should_record_durations:

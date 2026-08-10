@@ -1818,7 +1818,7 @@ static func _get_runtime_eligible_worker_ids() -> Array[int]:
 			citizen_id <= 0
 			or not bool(citizen.get("alive", false))
 			or int(citizen.get("job_object_id", -1)) > 0
-			or WorldData.get_city_citizen_haul_cargo_amount(citizen_id) > 0
+			or CityCitizenInventorySystem.get_city_citizen_haul_cargo_amount(citizen_id) > 0
 		):
 			continue
 
@@ -3081,7 +3081,7 @@ static func _get_construction_source_diagnostics(
 
 	if legal_physical_source_exists and legal_unreserved_amount <= 0:
 		blocked_reason = BLOCKED_REASON_SOURCE_FULLY_RESERVED
-	elif WorldData.get_total_physical_city_resource_amount(resource) <= 0:
+	elif CityResourceAccountingSystem.get_total_physical_city_resource_amount(resource) <= 0:
 		blocked_reason = BLOCKED_REASON_SOURCE_EMPTY
 
 	return {

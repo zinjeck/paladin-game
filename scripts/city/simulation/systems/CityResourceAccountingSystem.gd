@@ -127,6 +127,53 @@ static func get_total_stored_city_resource_amount(
 	return total_amount
 
 
+static func get_total_physical_city_resource_amount(
+	resource: String
+) -> int:
+	if not CityResourceCatalog.is_city_resource_type(resource):
+		return 0
+
+	var total_amount := (
+		CityLogisticsSystem.get_total_city_ground_pile_resource_amount(
+			resource
+		)
+	)
+
+	# Conservation includes every completed-object container, including private
+	# homes and storage that is intentionally absent from the secured-city total.
+	for raw_city_object in CityObjectSystem.get_city_objects():
+		if not raw_city_object is Dictionary:
+			continue
+
+		total_amount += (
+			CityResourceContainerSystem.get_city_object_stored_resource_amount(
+				raw_city_object,
+				resource
+			)
+		)
+
+	# Personal inventory and in-transit cargo are still physical even though
+	# neither is secured settlement property while a living citizen carries it.
+	for raw_citizen in CityCitizenRegistrySystem.get_current_state().citizens:
+		if not raw_citizen is Dictionary:
+			continue
+
+		var citizen: Dictionary = raw_citizen
+
+		if not bool(citizen.get("alive", false)):
+			continue
+
+		total_amount += (
+			CityCitizenInventorySystem
+			.get_city_citizen_record_carried_resource_amount(
+				citizen,
+				resource
+			)
+		)
+
+	return total_amount
+
+
 static func get_total_owned_city_resource_amount(
 	resource: String
 ) -> int:

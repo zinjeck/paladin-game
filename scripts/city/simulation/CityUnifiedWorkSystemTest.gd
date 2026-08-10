@@ -944,19 +944,19 @@ func _test_food_replenishment_cycle_and_whole_item_consumption() -> void:
 	var citizen_id := int(citizen.get("id", -1))
 
 	_expect(
-		WorldData.get_city_food_hunger_restore(WorldData.RESOURCE_FISH) == 20
-		and WorldData.get_city_food_hunger_restore(WorldData.RESOURCE_MEAT) == 20,
+		CityResourceCatalog.get_city_food_hunger_restore(WorldData.RESOURCE_FISH) == 20
+		and CityResourceCatalog.get_city_food_hunger_restore(WorldData.RESOURCE_MEAT) == 20,
 		"Fish and meat must each restore exactly 20 hunger."
 	)
 	_expect(
-		WorldData.CITIZEN_FOOD_SEEK_TRIGGER_HUNGER == 70
-		and WorldData.CITIZEN_EAT_TARGET_HUNGER == 100,
+		CityCitizens.CITIZEN_FOOD_SEEK_TRIGGER_HUNGER == 70
+		and CityCitizens.CITIZEN_EAT_TARGET_HUNGER == 100,
 		"Food seeking must begin at 70 while the eating target remains 100."
 	)
 
-	WorldData.set_city_citizen_hunger_state(citizen_id, 90, 0)
+	CitizenNeedsSystem.set_city_citizen_hunger_state(citizen_id, 90, 0)
 	_expect(
-		WorldData.add_resource_to_city_citizen_inventory(
+		CityCitizenInventorySystem.add_resource_to_city_citizen_inventory(
 			citizen_id,
 			WorldData.RESOURCE_FISH,
 			1
@@ -965,26 +965,26 @@ func _test_food_replenishment_cycle_and_whole_item_consumption() -> void:
 	)
 	CitizenNeedsSystemScript.eat_personal_food_if_hungry(citizen_id)
 	_expect(
-		WorldData.get_city_citizen_hunger(citizen_id) == 90
-		and WorldData.get_city_citizen_inventory_resource_amount(
+		CitizenNeedsSystem.get_city_citizen_hunger(citizen_id) == 90
+		and CityCitizenInventorySystem.get_city_citizen_inventory_resource_amount(
 			citizen_id,
 			WorldData.RESOURCE_FISH
 		) == 1,
 		"A citizen at 90 must keep a 20-point food item instead of wasting half."
 	)
 
-	WorldData.set_city_citizen_hunger_state(citizen_id, 80, 0)
+	CitizenNeedsSystem.set_city_citizen_hunger_state(citizen_id, 80, 0)
 	CitizenNeedsSystemScript.eat_personal_food_if_hungry(citizen_id)
 	_expect(
-		WorldData.get_city_citizen_hunger(citizen_id) == 100
-		and WorldData.get_city_citizen_inventory_resource_amount(
+		CitizenNeedsSystem.get_city_citizen_hunger(citizen_id) == 100
+		and CityCitizenInventorySystem.get_city_citizen_inventory_resource_amount(
 			citizen_id,
 			WorldData.RESOURCE_FISH
 		) == 0,
 		"The retained item must be eaten at 80 to reach exactly 100."
 	)
 
-	WorldData.set_city_citizen_hunger_state(citizen_id, 70, 0)
+	CitizenNeedsSystem.set_city_citizen_hunger_state(citizen_id, 70, 0)
 	_expect(
 		CitizenNeedsSystemScript.citizen_should_seek_food(citizen_id)
 		and CitizenNeedsSystemScript.get_citizen_food_need_nutrition(citizen_id)
@@ -992,7 +992,7 @@ func _test_food_replenishment_cycle_and_whole_item_consumption() -> void:
 		"A citizen reaching 70 without food must seek 30 nutrition toward 100."
 	)
 	_expect(
-		WorldData.add_resource_to_city_citizen_inventory(
+		CityCitizenInventorySystem.add_resource_to_city_citizen_inventory(
 			citizen_id,
 			WorldData.RESOURCE_FISH,
 			2
@@ -1001,8 +1001,8 @@ func _test_food_replenishment_cycle_and_whole_item_consumption() -> void:
 	)
 	CitizenNeedsSystemScript.eat_personal_food_if_hungry(citizen_id)
 	_expect(
-		WorldData.get_city_citizen_hunger(citizen_id) == 90
-		and WorldData.get_city_citizen_inventory_resource_amount(
+		CitizenNeedsSystem.get_city_citizen_hunger(citizen_id) == 90
+		and CityCitizenInventorySystem.get_city_citizen_inventory_resource_amount(
 			citizen_id,
 			WorldData.RESOURCE_FISH
 		) == 1
@@ -1010,15 +1010,26 @@ func _test_food_replenishment_cycle_and_whole_item_consumption() -> void:
 		"At 70, one item must raise hunger to 90 while the second remains carried."
 	)
 
-	WorldData.set_city_citizen_hunger_state(citizen_id, 80, 0)
+	CitizenNeedsSystem.set_city_citizen_hunger_state(citizen_id, 80, 0)
 	CitizenNeedsSystemScript.eat_personal_food_if_hungry(citizen_id)
 	_expect(
-		WorldData.get_city_citizen_hunger(citizen_id) == 100
-		and WorldData.get_city_citizen_inventory_resource_amount(
+		CitizenNeedsSystem.get_city_citizen_hunger(citizen_id) == 100
+		and CityCitizenInventorySystem.get_city_citizen_inventory_resource_amount(
 			citizen_id,
 			WorldData.RESOURCE_FISH
 		) == 0,
 		"The carried second item must complete the daily 70-to-100 cycle."
+	)
+
+	CitizenNeedsSystem.set_city_citizen_hunger_state(citizen_id, 31, 0)
+	_expect(
+		not CitizenNeedsSystemScript.citizen_has_critical_food_need(citizen_id),
+		"Hunger 31 must remain above the critical interruption boundary."
+	)
+	CitizenNeedsSystem.set_city_citizen_hunger_state(citizen_id, 30, 0)
+	_expect(
+		CitizenNeedsSystemScript.citizen_has_critical_food_need(citizen_id),
+		"Hunger 30 must enter the critical interruption boundary exactly."
 	)
 
 
@@ -1109,7 +1120,7 @@ func _test_workplace_fish_production_accounting() -> void:
 			WorldData.RESOURCE_FISH
 		)
 	)
-	var physical_fish := WorldData.get_total_physical_city_resource_amount(
+	var physical_fish := CityResourceAccountingSystem.get_total_physical_city_resource_amount(
 		WorldData.RESOURCE_FISH
 	)
 	var owned_fish := (
@@ -1368,7 +1379,7 @@ func _test_survival_food_fallback_and_reservation_accounting() -> void:
 		"Three fully reserved fish must not be promised to a fourth citizen."
 	)
 	_expect(
-		WorldData.get_city_food_endpoint_unreserved_amount(
+		CitizenNeedsSystem.get_city_food_endpoint_unreserved_amount(
 			int(fourth.get("id", -1)),
 			CityLogisticsSystem.make_city_ground_pile_haul_endpoint(pile_id),
 			WorldData.RESOURCE_FISH
@@ -1660,8 +1671,8 @@ func _test_unified_food_search_avoids_budget_starvation() -> void:
 		),
 		"The fixture must release the critical food reservation before normal seeking."
 	)
-	WorldData.set_city_citizen_hunger_state(first_id, 40, 0)
-	WorldData.set_city_citizen_hunger_state(second_id, 40, 0)
+	CitizenNeedsSystem.set_city_citizen_hunger_state(first_id, 40, 0)
+	CitizenNeedsSystem.set_city_citizen_hunger_state(second_id, 40, 0)
 	CitizenDecisionSystemScript._process_food_needs(false)
 	second_task = CityCitizenTaskRuntimeSystem.get_city_citizen_current_task(second_id)
 	_expect(
@@ -1871,7 +1882,7 @@ func _test_safe_boundary_and_cancellation_preserve_physical_cargo() -> void:
 		site_id
 	)
 	_expect(
-		WorldData.set_city_citizen_haul_cargo(
+		CityCitizenInventorySystem.set_city_citizen_haul_cargo(
 			citizen_id,
 			WorldData.RESOURCE_STONE,
 			2
@@ -1908,7 +1919,7 @@ func _test_safe_boundary_and_cancellation_preserve_physical_cargo() -> void:
 	)
 	_expect(assigned, "The fixture must attach carried cargo to the site request.")
 
-	var total_before := WorldData.get_total_physical_city_resource_amount(
+	var total_before := CityResourceAccountingSystem.get_total_physical_city_resource_amount(
 		WorldData.RESOURCE_STONE
 	)
 	var task_before := CityCitizenTaskRuntimeSystem.get_city_citizen_current_task(citizen_id)
@@ -1918,7 +1929,7 @@ func _test_safe_boundary_and_cancellation_preserve_physical_cargo() -> void:
 		"Normal player work must wait when an unemployed citizen already carries cargo."
 	)
 	_expect(
-		WorldData.get_city_citizen_haul_cargo_resource_amount(
+		CityCitizenInventorySystem.get_city_citizen_haul_cargo_resource_amount(
 			citizen_id,
 			WorldData.RESOURCE_STONE
 		) == 2
@@ -1931,14 +1942,14 @@ func _test_safe_boundary_and_cancellation_preserve_physical_cargo() -> void:
 		"Cancel Task must cancel the blueprint referenced by in-flight cargo."
 	)
 	_expect(
-		WorldData.get_city_citizen_haul_cargo_resource_amount(
+		CityCitizenInventorySystem.get_city_citizen_haul_cargo_resource_amount(
 			citizen_id,
 			WorldData.RESOURCE_STONE
 		) == 2,
 		"Blueprint cancellation must preserve picked-up cargo instead of spilling or deleting it."
 	)
 	_expect(
-		WorldData.get_total_physical_city_resource_amount(
+		CityResourceAccountingSystem.get_total_physical_city_resource_amount(
 			WorldData.RESOURCE_STONE
 		) == total_before,
 		"Blueprint cancellation must conserve the total amount of physical cargo and resources."
@@ -2059,7 +2070,7 @@ func _test_cargo_ready_demand_preempts_soft_claim() -> void:
 	)
 
 	_expect(
-		WorldData.set_city_citizen_haul_cargo(
+		CityCitizenInventorySystem.set_city_citizen_haul_cargo(
 			carrier_id,
 			WorldData.RESOURCE_STONE,
 			4
@@ -2152,7 +2163,7 @@ func _test_cargo_ready_demand_preempts_soft_claim() -> void:
 		"The ready carrier must displace the other citizen's unpicked claim without duplicating the delivery."
 	)
 	_expect(
-		WorldData.get_city_citizen_haul_cargo_resource_amount(
+		CityCitizenInventorySystem.get_city_citizen_haul_cargo_resource_amount(
 			carrier_id,
 			WorldData.RESOURCE_STONE
 		) == 4,
@@ -2310,7 +2321,7 @@ func _test_off_shift_homeless_idle_wander() -> void:
 				""
 			)
 		) == WorldData.CITY_CITIZEN_TASK_KIND_NONE
-		and WorldData.get_city_citizen_haul_cargo_amount(citizen_id) == 0,
+		and CityCitizenInventorySystem.get_city_citizen_haul_cargo_amount(citizen_id) == 0,
 		"Idle wandering must preserve the Fishery job without creating a task or cargo."
 	)
 
@@ -2393,7 +2404,7 @@ func _add_hungry_citizen(
 	tile_position: Vector2i
 ) -> Dictionary:
 	var citizen := _add_citizen(display_name, tile_position)
-	WorldData.set_city_citizen_hunger_state(
+	CitizenNeedsSystem.set_city_citizen_hunger_state(
 		int(citizen.get("id", -1)),
 		20,
 		0
@@ -2512,7 +2523,7 @@ func _get_assignment_snapshot(citizen_id: int) -> Dictionary:
 	return {
 		"task": CityCitizenTaskRuntimeSystem.get_city_citizen_current_task(citizen_id),
 		"haul": CityCitizenTaskRuntimeSystem.get_city_citizen_current_haul(citizen_id),
-		"cargo": WorldData.get_city_citizen_haul_cargo(citizen_id),
+		"cargo": CityCitizenInventorySystem.get_city_citizen_haul_cargo(citizen_id),
 		"movement_state": str(citizen.get("movement_state", "")),
 		"movement_path": citizen.get("movement_path", []).duplicate(),
 		"movement_path_index": int(citizen.get("movement_path_index", 0)),

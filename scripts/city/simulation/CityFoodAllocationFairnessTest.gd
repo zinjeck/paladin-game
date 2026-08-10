@@ -66,7 +66,7 @@ func _test_current_source_allocates_one_immediate_meal() -> void:
 		) == 2,
 		"The one-meal fixture pantry must begin with two fish."
 	)
-	WorldData.set_city_citizen_hunger_state(citizen_id, 70, 0)
+	CitizenNeedsSystem.set_city_citizen_hunger_state(citizen_id, 70, 0)
 	_expect(
 		CitizenNeedsSystemScript.get_citizen_food_need_nutrition(
 			citizen_id
@@ -83,11 +83,11 @@ func _test_current_source_allocates_one_immediate_meal() -> void:
 	CitizenNeedsSystemScript.run_tick(1, 1)
 
 	_expect(
-		WorldData.get_city_citizen_hunger(citizen_id) == 90,
+		CitizenNeedsSystem.get_city_citizen_hunger(citizen_id) == 90,
 		"A hungry citizen at a legal source must eat one 20-point fish."
 	)
 	_expect(
-		WorldData.get_city_citizen_inventory_resource_amount(
+		CityCitizenInventorySystem.get_city_citizen_inventory_resource_amount(
 			citizen_id,
 			WorldData.RESOURCE_FISH
 		) == 0,
@@ -111,9 +111,9 @@ func _test_hungry_citizens_reserve_before_household_stocking() -> void:
 	var hungry_b_id := int(hungry_b.get("id", -1))
 	var provisioner_id := int(provisioner.get("id", -1))
 
-	WorldData.set_city_citizen_hunger_state(hungry_a_id, 60, 0)
-	WorldData.set_city_citizen_hunger_state(hungry_b_id, 60, 0)
-	WorldData.set_city_citizen_hunger_state(provisioner_id, 100, 0)
+	CitizenNeedsSystem.set_city_citizen_hunger_state(hungry_a_id, 60, 0)
+	CitizenNeedsSystem.set_city_citizen_hunger_state(hungry_b_id, 60, 0)
+	CitizenNeedsSystem.set_city_citizen_hunger_state(provisioner_id, 100, 0)
 
 	var stockpile := CityObjectSystem.add_city_object({
 		"object_type": WorldData.CITY_OBJECT_STOCKPILE,

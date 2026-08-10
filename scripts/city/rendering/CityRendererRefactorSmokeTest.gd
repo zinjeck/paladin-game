@@ -465,10 +465,15 @@ func _test_city_information_panel_live_data(
 			citizen.get("happiness", 70)
 		)
 
-	first_citizen["happiness"] = 30
-	CityCitizenRegistrySystem.get_current_state().citizens[0] = first_citizen
 	_expect(
-		WorldData.set_city_citizen_hunger_state(
+		CitizenNeedsSystem.set_city_citizen_happiness(
+			first_citizen_id,
+			30
+		),
+		"Need-meter fixture must update the first citizen's happiness."
+	)
+	_expect(
+		CitizenNeedsSystem.set_city_citizen_hunger_state(
 			first_citizen_id,
 			40,
 			original_hunger_remainder
@@ -492,10 +497,11 @@ func _test_city_information_panel_live_data(
 		"Citizen version changes must refresh both average need meters."
 	)
 
-	first_citizen = CityCitizenRegistrySystem.get_current_state().citizens[0]
-	first_citizen["happiness"] = original_happiness
-	CityCitizenRegistrySystem.get_current_state().citizens[0] = first_citizen
-	WorldData.set_city_citizen_hunger_state(
+	CitizenNeedsSystem.set_city_citizen_happiness(
+		first_citizen_id,
+		original_happiness
+	)
+	CitizenNeedsSystem.set_city_citizen_hunger_state(
 		first_citizen_id,
 		original_hunger,
 		original_hunger_remainder
@@ -872,7 +878,7 @@ func _test_resource_catalog_and_bulk_totals() -> void:
 		"Unknown resource IDs must remain invalid."
 	)
 	_expect(
-		WorldData.get_city_food_hunger_restore(
+		CityResourceCatalog.get_city_food_hunger_restore(
 			WorldData.RESOURCE_MEAT
 		)
 		== 20,
@@ -1280,7 +1286,7 @@ func _place_and_validate_city_fixture(
 		WorldData.RESOURCE_FISH,
 		1
 	)
-	var carried_fish := WorldData.set_city_citizen_haul_cargo(
+	var carried_fish := CityCitizenInventorySystem.set_city_citizen_haul_cargo(
 		first_citizen_id,
 		WorldData.RESOURCE_FISH,
 		removed_fish
@@ -1294,13 +1300,13 @@ func _place_and_validate_city_fixture(
 		"In-transit citizen cargo must not count as secured city resources."
 	)
 	_expect(
-		WorldData.get_total_physical_city_resource_amount(
+		CityResourceAccountingSystem.get_total_physical_city_resource_amount(
 			WorldData.RESOURCE_FISH
 		)
 		== 3,
 		"Resource conservation must still include in-transit cargo."
 	)
-	WorldData.set_city_citizen_haul_cargo(
+	CityCitizenInventorySystem.set_city_citizen_haul_cargo(
 		first_citizen_id,
 		WorldData.RESOURCE_NONE,
 		0
@@ -1330,20 +1336,20 @@ func _place_and_validate_city_fixture(
 		"Mixed haul cargo must preserve its 4 + 4 + 2 manifest."
 	)
 	_expect(
-		WorldData.set_city_citizen_haul_cargo_resources(
+		CityCitizenInventorySystem.set_city_citizen_haul_cargo_resources(
 			first_citizen_id,
 			mixed_cargo.get("resources", {})
 		) == 10,
 		"A citizen with capacity ten must accept a full mixed load."
 	)
 	_expect(
-		WorldData.get_city_citizen_haul_cargo_resource_amount(
+		CityCitizenInventorySystem.get_city_citizen_haul_cargo_resource_amount(
 			first_citizen_id,
 			WorldData.RESOURCE_STONE
 		) == 4,
 		"Mixed cargo lookup must return the requested resource amount."
 	)
-	WorldData.set_city_citizen_haul_cargo_resources(
+	CityCitizenInventorySystem.set_city_citizen_haul_cargo_resources(
 		first_citizen_id,
 		{}
 	)

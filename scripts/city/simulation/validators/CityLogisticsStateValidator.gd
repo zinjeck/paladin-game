@@ -1606,11 +1606,11 @@ static func _validate_city_haul_reservation_entry(
 	var current_haul := CityCitizenTaskRuntimeSystem.get_city_citizen_current_haul(
 		citizen_id
 	)
-	var cargo_amount := WorldData.get_city_citizen_haul_cargo_amount(
+	var cargo_amount := CityCitizenInventorySystem.get_city_citizen_haul_cargo_amount(
 		citizen_id
 	)
 	var cargo_resources := (
-		WorldData.get_city_citizen_haul_cargo_resources(
+		CityCitizenInventorySystem.get_city_citizen_haul_cargo_resources(
 			citizen_id
 		)
 	)
