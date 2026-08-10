@@ -1,5 +1,8 @@
 extends Node
 
+const CityStateValidator := preload(
+	"res://scripts/city/simulation/CityStateValidator.gd"
+)
 const SHARED_HOUSE_TOP_LEFT := Vector2i(3, 3)
 const SHARED_FISHERY_TOP_LEFT := Vector2i(10, 10)
 const SHARED_CITIZEN_TILE := Vector2i(20, 20)
