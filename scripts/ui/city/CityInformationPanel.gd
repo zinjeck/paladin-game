@@ -272,25 +272,12 @@ func refresh_citizen_data() -> void:
 
 		for raw_citizen in citizen_snapshot:
 			var citizen: Dictionary = raw_citizen
-			total_hunger += clampf(
-				float(
-					citizen.get(
-						"hunger",
-						WorldData.DEFAULT_CITIZEN_HUNGER
-					)
-				),
-				0.0,
-				100.0
+			var citizen_id := int(citizen.get("id", -1))
+			total_hunger += float(
+				CitizenNeedsSystem.get_city_citizen_hunger(citizen_id)
 			)
-			total_happiness += clampf(
-				float(
-					citizen.get(
-						"happiness",
-						WorldData.DEFAULT_CITIZEN_HAPPINESS
-					)
-				),
-				0.0,
-				100.0
+			total_happiness += float(
+				CitizenNeedsSystem.get_city_citizen_happiness(citizen_id)
 			)
 
 		average_hunger = total_hunger / float(citizen_count)

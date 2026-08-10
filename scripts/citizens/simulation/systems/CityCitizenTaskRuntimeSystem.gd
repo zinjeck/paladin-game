@@ -254,7 +254,7 @@ static func get_city_food_task_reserved_endpoint_amount(
 ) -> int:
 	if (
 		endpoint_id <= 0
-		or WorldData.get_city_food_hunger_restore(resource) <= 0
+		or CityResourceCatalog.get_city_food_hunger_restore(resource) <= 0
 		or not [
 			WorldData.CITY_CITIZEN_HAUL_ENDPOINT_KIND_CITY_OBJECT_CONTAINER,
 			WorldData.CITY_CITIZEN_HAUL_ENDPOINT_KIND_GROUND_PILE,
@@ -334,29 +334,19 @@ static func ensure_city_citizen_task_state() -> int:
 
 		if (
 			not CityCitizensScript
-			.has_complete_city_citizen_haul_state(citizen)
+			.has_complete_city_citizen_haul_runtime_state(citizen)
 		):
 			var raw_current_haul = citizen.get("current_haul", {})
-			var raw_haul_cargo = citizen.get("haul_cargo", {})
 
-			if (
-				raw_current_haul is Dictionary
-				and raw_haul_cargo is Dictionary
-			):
+			if raw_current_haul is Dictionary:
 				citizen["current_haul"] = (
 					CityCitizensScript.make_city_citizen_haul(
 						raw_current_haul
 					)
 				)
-				citizen["haul_cargo"] = (
-					CityCitizensScript.make_city_citizen_haul_cargo(
-						raw_haul_cargo
-					)
-				)
 			else:
-				CityCitizensScript.reset_city_citizen_haul_state(
-					citizen,
-					true
+				CityCitizensScript.reset_city_citizen_haul_runtime_state(
+					citizen
 				)
 			citizen_was_migrated = true
 
@@ -522,7 +512,7 @@ static func _make_city_citizen_task_assignment_context(
 			return {}
 
 	var haul_cargo_amount := maxi(
-		int(WorldData.get_city_citizen_haul_cargo(citizen_id).get("amount", 0)),
+		int(CityCitizenInventorySystem.get_city_citizen_haul_cargo(citizen_id).get("amount", 0)),
 		0
 	)
 
@@ -623,15 +613,15 @@ static func _prepare_city_food_task_assignment(
 		"target_tile",
 		WorldData.INVALID_CITY_TILE_POSITION
 	)
-	var hunger_restore := WorldData.get_city_food_hunger_restore(food_resource)
+	var hunger_restore := CityResourceCatalog.get_city_food_hunger_restore(food_resource)
 	var personal_food_nutrition := (
 		CityResourceContainerSystem.get_food_nutrition_in_resource_container(
-			WorldData.get_city_citizen_inventory(citizen_id)
+			CityCitizenInventorySystem.get_city_citizen_inventory(citizen_id)
 		)
 	)
 	var desired_nutrition := maxi(
-		WorldData.CITIZEN_EAT_TARGET_HUNGER
-		- WorldData.get_city_citizen_hunger(citizen_id)
+		CityCitizens.CITIZEN_EAT_TARGET_HUNGER
+		- CitizenNeedsSystem.get_city_citizen_hunger(citizen_id)
 		- personal_food_nutrition,
 		0
 	)
@@ -646,11 +636,11 @@ static func _prepare_city_food_task_assignment(
 		or not CityCitizensScript.is_valid_city_citizen_haul_endpoint(
 			food_endpoint
 		)
-		or not WorldData.get_city_citizen_food_endpoint_target_tiles(
+		or not CitizenNeedsSystem.get_city_citizen_food_endpoint_target_tiles(
 			citizen_id,
 			food_endpoint
 		).has(raw_food_target_tile)
-		or not WorldData.city_citizen_can_withdraw_food_from_endpoint(
+		or not CitizenNeedsSystem.city_citizen_can_withdraw_food_from_endpoint(
 			citizen_id,
 			food_endpoint,
 			food_resource
@@ -661,14 +651,14 @@ static func _prepare_city_food_task_assignment(
 	var assigned_amount := mini(
 		food_requested_amount,
 		mini(
-			WorldData.get_city_food_endpoint_unreserved_amount(
+			CitizenNeedsSystem.get_city_food_endpoint_unreserved_amount(
 				citizen_id,
 				food_endpoint,
 				food_resource,
 				citizen_id
 			),
 			mini(
-				WorldData.get_city_citizen_inventory_free_space(citizen_id),
+				CityCitizenInventorySystem.get_city_citizen_inventory_free_space(citizen_id),
 				ceili(float(desired_nutrition) / float(hunger_restore))
 			)
 		)
@@ -793,7 +783,7 @@ static func _prepare_city_haul_task_assignment(
 		}):
 			return false
 	else:
-		var cargo_resources := WorldData.get_city_citizen_haul_cargo_resources(citizen_id)
+		var cargo_resources := CityCitizenInventorySystem.get_city_citizen_haul_cargo_resources(citizen_id)
 
 		if cargo_resources.is_empty():
 			return false
@@ -824,7 +814,7 @@ static func _prepare_city_haul_task_assignment(
 		}
 
 		if haul_cargo_amount > 0:
-			destination_resources = WorldData.get_city_citizen_haul_cargo_resources(
+			destination_resources = CityCitizenInventorySystem.get_city_citizen_haul_cargo_resources(
 				citizen_id
 			)
 
@@ -941,7 +931,7 @@ static func _commit_city_citizen_task_assignment(
 			CityCitizensScript.make_city_citizen_haul()
 		)
 	else:
-		CityCitizensScript.reset_city_citizen_haul_state(citizen)
+		CityCitizensScript.reset_city_citizen_haul_runtime_state(citizen)
 
 	CityCitizenRegistrySystem.get_current_state().citizens[citizen_index] = citizen
 	_add_city_active_task_id(citizen_id)
@@ -1216,17 +1206,11 @@ static func clear_city_citizen_task(
 		)
 
 	if current_task_kind == WorldData.CITY_CITIZEN_TASK_KIND_HAUL:
-		var raw_cargo = citizen.get("haul_cargo", {})
-		var cargo := CityCitizensScript.make_city_citizen_haul_cargo()
-
-		if raw_cargo is Dictionary:
-			cargo = (
-				CityCitizensScript.make_city_citizen_haul_cargo(
-					raw_cargo
-				)
-			)
-
-		if int(cargo.get("amount", 0)) > 0:
+		if (
+			CityCitizenInventorySystem.get_city_citizen_haul_cargo_amount(
+				citizen_id
+			) > 0
+		):
 			var raw_haul = citizen.get("current_haul", {})
 			var current_haul := (
 				CityCitizensScript.make_city_citizen_haul()
@@ -1250,7 +1234,7 @@ static func clear_city_citizen_task(
 			)
 			citizen["current_haul"] = current_haul
 		else:
-			CityCitizensScript.reset_city_citizen_haul_state(
+			CityCitizensScript.reset_city_citizen_haul_runtime_state(
 				citizen
 			)
 

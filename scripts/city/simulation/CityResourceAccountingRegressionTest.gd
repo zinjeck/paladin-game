@@ -141,7 +141,7 @@ func _test_container_accounting_and_cache_invalidation() -> void:
 			WorldData.RESOURCE_FISH
 		) == 19
 		and int(owned_totals.get(WorldData.RESOURCE_FISH, 0)) == 19
-		and WorldData.get_total_physical_city_resource_amount(
+		and CityResourceAccountingSystem.get_total_physical_city_resource_amount(
 			WorldData.RESOURCE_FISH
 		) == 26,
 		"Public, owned/UI, and total physical fish must preserve distinct scopes."

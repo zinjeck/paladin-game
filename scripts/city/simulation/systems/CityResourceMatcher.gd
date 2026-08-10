@@ -1,7 +1,9 @@
 extends RefCounted
 class_name CityResourceMatcher
 
-# File responsibility: Food-demand accounting plus central resource supply, demand, endpoint, and reachability matching. Authoritative inventories remain in WorldData.
+# File responsibility: Food-demand accounting plus central resource supply,
+# demand, endpoint, and reachability matching. Authoritative carried resources
+# remain embedded in citizen records behind CityCitizenInventorySystem.
 # Matching policy lives here; hauling executes the selected physical transfer.
 
 const CityNavigationSystemScript = preload(
@@ -19,6 +21,13 @@ const SURVIVAL_SOURCE_PREFERENCE_STOCKPILE: int = 1
 const SURVIVAL_SOURCE_PREFERENCE_KEEP: int = 2
 const SURVIVAL_SOURCE_PREFERENCE_WORKPLACE: int = 3
 const SURVIVAL_SOURCE_PREFERENCE_GROUND_PILE: int = 4
+# Homes target one citizen-day of food per resident. Public storage keeps a
+# separate half-day emergency floor before pantry replenishment draws from it.
+# Integer ratios avoid simulation drift from floats.
+const HOUSEHOLD_FOOD_TARGET_DAY_NUMERATOR: int = 1
+const HOUSEHOLD_FOOD_TARGET_DAY_DENOMINATOR: int = 1
+const PUBLIC_FOOD_RESERVE_TARGET_DAY_NUMERATOR: int = 1
+const PUBLIC_FOOD_RESERVE_TARGET_DAY_DENOMINATOR: int = 2
 
 # Resource destinations are scored through one configurable policy boundary.
 # The future priority UI can alter these values without rewriting hauling,
@@ -69,10 +78,10 @@ static func get_city_home_food_target_nutrition(
 	return ceili(
 		float(
 			WorldData.get_city_object_resident_count(home)
-			* WorldData.CITIZEN_HUNGER_LOSS_PER_DAY
-			* WorldData.HOUSEHOLD_FOOD_TARGET_DAY_NUMERATOR
+			* CityCitizens.CITIZEN_HUNGER_LOSS_PER_DAY
+			* HOUSEHOLD_FOOD_TARGET_DAY_NUMERATOR
 		)
-		/ float(WorldData.HOUSEHOLD_FOOD_TARGET_DAY_DENOMINATOR)
+		/ float(HOUSEHOLD_FOOD_TARGET_DAY_DENOMINATOR)
 	)
 
 
@@ -102,10 +111,10 @@ static func get_city_public_food_reserve_target_nutrition() -> int:
 	return ceili(
 		float(
 			get_living_city_citizen_count()
-			* WorldData.CITIZEN_HUNGER_LOSS_PER_DAY
-			* WorldData.PUBLIC_FOOD_RESERVE_TARGET_DAY_NUMERATOR
+			* CityCitizens.CITIZEN_HUNGER_LOSS_PER_DAY
+			* PUBLIC_FOOD_RESERVE_TARGET_DAY_NUMERATOR
 		)
-		/ float(WorldData.PUBLIC_FOOD_RESERVE_TARGET_DAY_DENOMINATOR)
+		/ float(PUBLIC_FOOD_RESERVE_TARGET_DAY_DENOMINATOR)
 	)
 
 static func get_city_food_task_reserved_source_amount(
@@ -126,7 +135,7 @@ static func get_city_object_unreserved_food_amount(
 	resource: String,
 	excluding_citizen_id: int = -1
 ) -> int:
-	if city_object.is_empty() or WorldData.get_city_food_hunger_restore(resource) <= 0:
+	if city_object.is_empty() or CityResourceCatalog.get_city_food_hunger_restore(resource) <= 0:
 		return 0
 
 	var object_id := int(city_object.get("id", -1))
@@ -159,10 +168,10 @@ static func get_city_public_unreserved_food_nutrition() -> int:
 		):
 			continue
 
-		for resource in WorldData.get_city_food_resource_types():
+		for resource in CityResourceCatalog.get_city_food_resource_types():
 			total_nutrition += (
 				get_city_object_unreserved_food_amount(city_object, resource)
-				* WorldData.get_city_food_hunger_restore(resource)
+				* CityResourceCatalog.get_city_food_hunger_restore(resource)
 			)
 
 	return total_nutrition
@@ -236,7 +245,7 @@ static func get_city_home_incoming_food_nutrition(
 				),
 				0
 			)
-			* WorldData.get_city_food_hunger_restore(resource)
+			* CityResourceCatalog.get_city_food_hunger_restore(resource)
 		)
 
 	return incoming_nutrition
@@ -264,7 +273,7 @@ static func get_city_home_requested_food_units(
 		WorldData.INVALID_CITY_CITIZEN_HAUL_RESERVATION_ID
 	)
 ) -> int:
-	var hunger_restore := WorldData.get_city_food_hunger_restore(resource)
+	var hunger_restore := CityResourceCatalog.get_city_food_hunger_restore(resource)
 
 	if hunger_restore <= 0:
 		return 0
@@ -1756,7 +1765,7 @@ static func _append_supply_candidate(values: Dictionary) -> void:
 			resource
 		)
 	)
-	var hunger_restore := WorldData.get_city_food_hunger_restore(resource)
+	var hunger_restore := CityResourceCatalog.get_city_food_hunger_restore(resource)
 
 	if protect_public_food and hunger_restore > 0:
 		available_amount = mini(
@@ -1882,8 +1891,8 @@ static func find_best_survival_food_source(
 
 	var current_tile: Vector2i = raw_current_tile
 	var is_critical := (
-		WorldData.get_city_citizen_hunger(citizen_id)
-		<= WorldData.CITIZEN_CRITICAL_FOOD_SEEK_TRIGGER_HUNGER
+		CitizenNeedsSystem.get_city_citizen_hunger(citizen_id)
+		<= CityCitizens.CITIZEN_CRITICAL_FOOD_SEEK_TRIGGER_HUNGER
 	)
 
 	# Critical hunger ignores routine source preferences and takes the fastest
@@ -1983,7 +1992,7 @@ static func find_best_household_food_source(
 	if (
 		citizen_id <= 0
 		or not raw_current_tile is Vector2i
-		or WorldData.get_city_food_hunger_restore(resource) <= 0
+		or CityResourceCatalog.get_city_food_hunger_restore(resource) <= 0
 		or requested_amount <= 0
 		or maximum_path_requests <= 0
 		or get_city_public_food_surplus_nutrition() <= 0
@@ -2071,7 +2080,7 @@ static func _get_survival_source_groups(
 		if (
 			not raw_pile is Dictionary
 			or CityLogisticsSystem.city_ground_pile_is_construction_reserved(raw_pile)
-			or WorldData.get_city_food_hunger_restore(
+			or CityResourceCatalog.get_city_food_hunger_restore(
 				str(raw_pile.get("resource_type", WorldData.RESOURCE_NONE))
 			) <= 0
 		):
@@ -2177,17 +2186,17 @@ static func _make_survival_endpoint_candidate(
 	var best_resource := WorldData.RESOURCE_NONE
 	var requested_amount := 0
 
-	for resource in WorldData.get_city_food_resource_types():
-		if not WorldData.city_citizen_can_withdraw_food_from_endpoint(
+	for resource in CityResourceCatalog.get_city_food_resource_types():
+		if not CitizenNeedsSystem.city_citizen_can_withdraw_food_from_endpoint(
 			citizen_id,
 			endpoint,
 			resource
 		):
 			continue
 
-		var hunger_restore := WorldData.get_city_food_hunger_restore(resource)
+		var hunger_restore := CityResourceCatalog.get_city_food_hunger_restore(resource)
 		var available_amount := (
-			WorldData.get_city_food_endpoint_unreserved_amount(
+			CitizenNeedsSystem.get_city_food_endpoint_unreserved_amount(
 				citizen_id,
 				endpoint,
 				resource
@@ -2215,7 +2224,7 @@ static func _make_survival_endpoint_candidate(
 	if requested_amount <= 0:
 		return {}
 
-	var target_tiles := WorldData.get_city_citizen_food_endpoint_target_tiles(
+	var target_tiles := CitizenNeedsSystem.get_city_citizen_food_endpoint_target_tiles(
 		citizen_id,
 		endpoint
 	)
@@ -2264,7 +2273,7 @@ static func _make_household_source_candidate(
 			available_amount,
 			floori(
 				float(get_city_public_food_surplus_nutrition())
-				/ float(WorldData.get_city_food_hunger_restore(resource))
+				/ float(CityResourceCatalog.get_city_food_hunger_restore(resource))
 			)
 		)
 

@@ -2,8 +2,9 @@ extends RefCounted
 class_name CityCitizens
 
 # This script owns the intrinsic definition of one citizen record.
-# WorldData continues to own the population collection, stable-ID indexes,
-# city placement, housing, employment, and other city-level relationships.
+# CityCitizenRegistryState owns the population collection and stable-ID index;
+# focused systems own embedded runtime fields. Housing and employment
+# relationships remain deferred to the Pass 10 assignment boundary.
 
 const CITY_CITIZEN_SEX_MALE := "male"
 const CITY_CITIZEN_SEX_FEMALE := "female"
@@ -486,10 +487,12 @@ static func make_city_citizen_haul_cargo(
 				continue
 
 			var resource: String = raw_resource
-			var amount := maxi(
-				int(raw_resources.get(raw_resource, 0)),
-				0
-			)
+			var raw_amount = raw_resources.get(raw_resource)
+
+			if typeof(raw_amount) != TYPE_INT:
+				continue
+
+			var amount := maxi(int(raw_amount), 0)
 
 			if resource == "none" or amount <= 0:
 				continue
@@ -499,13 +502,17 @@ static func make_city_citizen_haul_cargo(
 	# Legacy snapshots stored a single resource and amount. Normalize them into
 	# the manifest so old saves and existing callers remain compatible.
 	if normalized_resources.is_empty():
-		var legacy_amount := maxi(
-			int(values.get("amount", 0)),
-			0
-		)
-		var legacy_resource := str(
-			values.get("resource_type", "none")
-		)
+		var raw_legacy_amount = values.get("amount")
+		var legacy_amount := 0
+
+		if typeof(raw_legacy_amount) == TYPE_INT:
+			legacy_amount = maxi(int(raw_legacy_amount), 0)
+
+		var raw_legacy_resource = values.get("resource_type")
+		var legacy_resource := "none"
+
+		if typeof(raw_legacy_resource) == TYPE_STRING:
+			legacy_resource = raw_legacy_resource
 
 		if legacy_amount > 0 and legacy_resource != "none":
 			normalized_resources[legacy_resource] = legacy_amount
@@ -515,9 +522,11 @@ static func make_city_citizen_haul_cargo(
 	for raw_amount in normalized_resources.values():
 		total_amount += maxi(int(raw_amount), 0)
 
-	var primary_resource := str(
-		values.get("resource_type", "none")
-	)
+	var raw_primary_resource = values.get("resource_type")
+	var primary_resource := "none"
+
+	if typeof(raw_primary_resource) == TYPE_STRING:
+		primary_resource = raw_primary_resource
 
 	if (
 		total_amount <= 0
@@ -622,23 +631,21 @@ static func make_city_citizen_haul(
 static func has_complete_city_citizen_haul_state(
 	citizen: Dictionary
 ) -> bool:
-	if not citizen.has("current_haul"):
-		return false
+	return (
+		has_complete_city_citizen_haul_runtime_state(citizen)
+		and has_complete_city_citizen_haul_cargo_state(citizen)
+	)
 
-	if not citizen.has("haul_cargo"):
-		return false
 
+static func has_complete_city_citizen_haul_runtime_state(
+	citizen: Dictionary
+) -> bool:
 	var raw_current_haul = citizen.get("current_haul")
-	var raw_haul_cargo = citizen.get("haul_cargo")
 
 	if not raw_current_haul is Dictionary:
 		return false
 
-	if not raw_haul_cargo is Dictionary:
-		return false
-
 	var current_haul: Dictionary = raw_current_haul
-	var haul_cargo: Dictionary = raw_haul_cargo
 	var required_haul_keys := [
 		"source",
 		"destination",
@@ -660,6 +667,19 @@ static func has_complete_city_citizen_haul_state(
 		if not current_haul.has(key):
 			return false
 
+	return true
+
+
+static func has_complete_city_citizen_haul_cargo_state(
+	citizen: Dictionary
+) -> bool:
+	var raw_haul_cargo = citizen.get("haul_cargo")
+
+	if not raw_haul_cargo is Dictionary:
+		return false
+
+	var haul_cargo: Dictionary = raw_haul_cargo
+
 	return (
 		haul_cargo.has("resource_type")
 		and haul_cargo.has("amount")
@@ -672,6 +692,20 @@ static func reset_city_citizen_haul_state(
 	citizen: Dictionary,
 	preserve_cargo: bool = false
 ) -> void:
+	reset_city_citizen_haul_runtime_state(citizen)
+	reset_city_citizen_haul_cargo_state(citizen, preserve_cargo)
+
+
+static func reset_city_citizen_haul_runtime_state(
+	citizen: Dictionary
+) -> void:
+	citizen["current_haul"] = make_city_citizen_haul()
+
+
+static func reset_city_citizen_haul_cargo_state(
+	citizen: Dictionary,
+	preserve_cargo: bool = false
+) -> void:
 	var cargo := make_city_citizen_haul_cargo()
 
 	if preserve_cargo:
@@ -680,7 +714,6 @@ static func reset_city_citizen_haul_state(
 		if raw_cargo is Dictionary:
 			cargo = make_city_citizen_haul_cargo(raw_cargo)
 
-	citizen["current_haul"] = make_city_citizen_haul()
 	citizen["haul_cargo"] = cargo
 
 
@@ -700,18 +733,36 @@ static func has_complete_city_citizen_need_state(
 static func normalize_city_citizen_need_state(
 	citizen: Dictionary
 ) -> void:
+	var raw_hunger = citizen.get("hunger")
+	var raw_hunger_remainder = citizen.get("hunger_decay_remainder")
+	var raw_happiness = citizen.get("happiness")
+	var hunger := (
+		int(raw_hunger)
+		if typeof(raw_hunger) == TYPE_INT
+		else DEFAULT_CITIZEN_HUNGER
+	)
+	var hunger_remainder := (
+		int(raw_hunger_remainder)
+		if typeof(raw_hunger_remainder) == TYPE_INT
+		else 0
+	)
+	var happiness := (
+		int(raw_happiness)
+		if typeof(raw_happiness) == TYPE_INT
+		else DEFAULT_CITIZEN_HAPPINESS
+	)
 	citizen["hunger"] = clampi(
-		int(citizen.get("hunger", DEFAULT_CITIZEN_HUNGER)),
+		hunger,
 		0,
 		MAX_CITIZEN_HUNGER
 	)
 	citizen["hunger_decay_remainder"] = clampi(
-		int(citizen.get("hunger_decay_remainder", 0)),
+		hunger_remainder,
 		0,
 		CITIZEN_HUNGER_DECAY_DENOMINATOR_MINUTES - 1
 	)
 	citizen["happiness"] = clampi(
-		int(citizen.get("happiness", DEFAULT_CITIZEN_HAPPINESS)),
+		happiness,
 		0,
 		100
 	)

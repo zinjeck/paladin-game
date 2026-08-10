@@ -286,7 +286,7 @@ func _create_mixed_work_fixture(renderer: CityRenderer) -> Dictionary:
 
 		var current_citizen: Dictionary = raw_citizen
 		var current_citizen_id := int(current_citizen.get("id", -1))
-		WorldData.set_city_citizen_hunger_state(
+		CitizenNeedsSystem.set_city_citizen_hunger_state(
 			current_citizen_id,
 			45,
 			0
@@ -486,7 +486,7 @@ func _update_food_liveness(fixture: Dictionary) -> void:
 
 		var citizen: Dictionary = raw_citizen
 		var citizen_id := int(citizen.get("id", -1))
-		var hunger := WorldData.get_city_citizen_hunger(citizen_id)
+		var hunger := CitizenNeedsSystem.get_city_citizen_hunger(citizen_id)
 		maximum_observed_hunger_by_citizen_id[citizen_id] = maxi(
 			int(maximum_observed_hunger_by_citizen_id.get(citizen_id, hunger)),
 			hunger
@@ -494,7 +494,7 @@ func _update_food_liveness(fixture: Dictionary) -> void:
 
 		var fish_reachable := false
 
-		if fish_available and hunger <= WorldData.CITIZEN_CRITICAL_FOOD_SEEK_TRIGGER_HUNGER:
+		if fish_available and hunger <= CityCitizens.CITIZEN_CRITICAL_FOOD_SEEK_TRIGGER_HUNGER:
 			fish_reachable = _citizen_can_reach_tiles(
 				citizen_id,
 				fishery_access_tiles
@@ -555,7 +555,7 @@ func _record_validation(validation: Dictionary, elapsed_minutes: int) -> void:
 func _check_nonnegative_state(elapsed_minutes: int) -> void:
 	for resource in WorldData.get_city_resource_types():
 		_expect(
-			WorldData.get_total_physical_city_resource_amount(resource) >= 0,
+			CityResourceAccountingSystem.get_total_physical_city_resource_amount(resource) >= 0,
 			"Physical " + resource + " became negative after "
 			+ str(elapsed_minutes) + " minutes."
 		)
@@ -566,9 +566,9 @@ func _check_nonnegative_state(elapsed_minutes: int) -> void:
 
 		var citizen: Dictionary = raw_citizen
 		var citizen_id := int(citizen.get("id", -1))
-		var hunger := WorldData.get_city_citizen_hunger(citizen_id)
+		var hunger := CitizenNeedsSystem.get_city_citizen_hunger(citizen_id)
 		_expect(
-			hunger >= 0 and hunger <= WorldData.MAX_CITIZEN_HUNGER,
+			hunger >= 0 and hunger <= CityCitizens.MAX_CITIZEN_HUNGER,
 			"Citizen " + str(citizen_id)
 			+ " has invalid hunger after " + str(elapsed_minutes)
 			+ " minutes."
@@ -576,7 +576,7 @@ func _check_nonnegative_state(elapsed_minutes: int) -> void:
 
 		for resource in WorldData.get_city_resource_types():
 			_expect(
-				WorldData.get_city_citizen_inventory_resource_amount(
+				CityCitizenInventorySystem.get_city_citizen_inventory_resource_amount(
 					citizen_id,
 					resource
 				) >= 0,
@@ -630,7 +630,7 @@ func _assert_long_run_outcomes(fixture: Dictionary) -> void:
 	_assert_material_conservation(fixture, site_completed)
 
 	var initial_fish_total := int(fixture.get("initial_fish_total", 0))
-	var final_fish_total := WorldData.get_total_physical_city_resource_amount(
+	var final_fish_total := CityResourceAccountingSystem.get_total_physical_city_resource_amount(
 		WorldData.RESOURCE_FISH
 	)
 	var consumed_fish := initial_fish_total - final_fish_total
@@ -689,7 +689,7 @@ func _assert_material_conservation(
 		if site_completed:
 			expected_total -= int(recipe.get(resource, 0))
 
-		var actual_total := WorldData.get_total_physical_city_resource_amount(
+		var actual_total := CityResourceAccountingSystem.get_total_physical_city_resource_amount(
 			resource
 		)
 		_expect(
@@ -703,7 +703,7 @@ func _capture_physical_resource_totals() -> Dictionary:
 	var totals: Dictionary = {}
 
 	for resource in WorldData.get_city_resource_types():
-		totals[resource] = WorldData.get_total_physical_city_resource_amount(
+		totals[resource] = CityResourceAccountingSystem.get_total_physical_city_resource_amount(
 			resource
 		)
 

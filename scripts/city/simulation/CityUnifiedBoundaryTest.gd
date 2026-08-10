@@ -85,7 +85,7 @@ func _test_normal_order_preempts_before_pickup() -> void:
 	)
 	_expect(
 		reservation_id > 0
-		and WorldData.get_city_citizen_haul_cargo_amount(citizen_id) == 0,
+		and CityCitizenInventorySystem.get_city_citizen_haul_cargo_amount(citizen_id) == 0,
 		"The autonomous haul must begin reserved but before pickup."
 	)
 
@@ -112,7 +112,7 @@ func _test_normal_order_preempts_before_pickup() -> void:
 			CityLogisticsSystem.get_city_ground_pile_by_id(source_id),
 			WorldData.RESOURCE_LUMBER
 		) == 2
-		and WorldData.get_city_citizen_haul_cargo_amount(citizen_id) == 0,
+		and CityCitizenInventorySystem.get_city_citizen_haul_cargo_amount(citizen_id) == 0,
 		"Pre-pickup interruption must leave the physical source untouched."
 	)
 
@@ -130,7 +130,7 @@ func _test_normal_order_preempts_before_pickup() -> void:
 	CitizenTaskSystemScript.run_tick(3, 2)
 	_expect(
 		CityWorkSystem.get_city_player_command_by_id(command_id).is_empty()
-		and WorldData.get_total_physical_city_resource_amount(
+		and CityResourceAccountingSystem.get_total_physical_city_resource_amount(
 			WorldData.RESOURCE_LUMBER
 		) == 6,
 		"The representative tree command must complete and create its yield."
@@ -165,7 +165,7 @@ func _test_normal_order_waits_for_picked_up_cargo_delivery() -> void:
 
 	var haul_after_pickup := CityCitizenTaskRuntimeSystem.get_city_citizen_current_haul(citizen_id)
 	_expect(
-		WorldData.get_city_citizen_haul_cargo_resource_amount(
+		CityCitizenInventorySystem.get_city_citizen_haul_cargo_resource_amount(
 			citizen_id,
 			WorldData.RESOURCE_STONE
 		) == 2
@@ -183,7 +183,7 @@ func _test_normal_order_waits_for_picked_up_cargo_delivery() -> void:
 		Vector2i(4, 5)
 	)
 	var physical_before_order := (
-		WorldData.get_total_physical_city_resource_amount(
+		CityResourceAccountingSystem.get_total_physical_city_resource_amount(
 			WorldData.RESOURCE_STONE
 		)
 	)
@@ -193,7 +193,7 @@ func _test_normal_order_waits_for_picked_up_cargo_delivery() -> void:
 	_expect(
 		str(task_after_order.get("kind", ""))
 		== WorldData.CITY_CITIZEN_TASK_KIND_HAUL
-		and WorldData.get_city_citizen_haul_cargo_resource_amount(
+		and CityCitizenInventorySystem.get_city_citizen_haul_cargo_resource_amount(
 			citizen_id,
 			WorldData.RESOURCE_STONE
 		) == 2,
@@ -203,7 +203,7 @@ func _test_normal_order_waits_for_picked_up_cargo_delivery() -> void:
 		CityLogisticsSystem.get_total_city_ground_pile_resource_amount(
 			WorldData.RESOURCE_STONE
 		) == 0
-		and WorldData.get_total_physical_city_resource_amount(
+		and CityResourceAccountingSystem.get_total_physical_city_resource_amount(
 			WorldData.RESOURCE_STONE
 		) == physical_before_order,
 		"Issuing the Normal order after pickup must not spill or lose cargo."
@@ -232,7 +232,7 @@ func _test_normal_order_waits_for_picked_up_cargo_delivery() -> void:
 			CityObjectSystem.get_city_object_by_id(stockpile_id),
 			WorldData.RESOURCE_STONE
 		) == 2
-		and WorldData.get_city_citizen_haul_cargo_amount(citizen_id) == 0,
+		and CityCitizenInventorySystem.get_city_citizen_haul_cargo_amount(citizen_id) == 0,
 		"Picked-up cargo must reach its reserved destination before preemption."
 	)
 	_expect(
@@ -330,7 +330,7 @@ func _test_chained_pickup_respects_near_full_destination() -> void:
 			break
 
 	_expect(
-		WorldData.get_city_citizen_haul_cargo_resource_amount(
+		CityCitizenInventorySystem.get_city_citizen_haul_cargo_resource_amount(
 			citizen_id,
 			WorldData.RESOURCE_LUMBER
 		) == 2
@@ -356,7 +356,7 @@ func _test_chained_pickup_respects_near_full_destination() -> void:
 		CityResourceAccountingSystem.get_city_public_storage_version()
 	)
 	var physical_lumber_before_deposit := (
-		WorldData.get_total_physical_city_resource_amount(
+		CityResourceAccountingSystem.get_total_physical_city_resource_amount(
 			WorldData.RESOURCE_LUMBER
 		)
 	)
@@ -397,7 +397,7 @@ func _test_chained_pickup_respects_near_full_destination() -> void:
 		CitizenTaskSystemScript.run_tick(tick_index, 2)
 
 		if (
-			WorldData.get_city_citizen_haul_cargo_amount(citizen_id) == 0
+			CityCitizenInventorySystem.get_city_citizen_haul_cargo_amount(citizen_id) == 0
 			and CityLogisticsSystem
 			.get_city_haul_reservation(reservation_id).is_empty()
 			and CityResourceContainerSystem
@@ -432,7 +432,7 @@ func _test_chained_pickup_respects_near_full_destination() -> void:
 		"The chained source must retain the six units that could not fit."
 	)
 	_expect(
-		WorldData.get_city_citizen_haul_cargo_amount(citizen_id) == 0
+		CityCitizenInventorySystem.get_city_citizen_haul_cargo_amount(citizen_id) == 0
 		and CityLogisticsSystem
 		.get_city_haul_reservation(reservation_id).is_empty(),
 		"Completed delivery must clear both citizen cargo and its reservation."
@@ -443,7 +443,7 @@ func _test_chained_pickup_respects_near_full_destination() -> void:
 		"The completed near-full haul must leave the unified city state valid."
 	)
 	_expect(
-		WorldData.get_total_physical_city_resource_amount(
+		CityResourceAccountingSystem.get_total_physical_city_resource_amount(
 			WorldData.RESOURCE_LUMBER
 		) == physical_lumber_before_deposit,
 		"The chained pickup and reserved deposit must conserve physical lumber."
@@ -526,7 +526,7 @@ func _test_public_storage_keep_fallback() -> void:
 		and CityLogisticsSystem.get_city_haul_reservation(
 			stockpile_probe_reservation_id
 		).is_empty()
-		and WorldData.get_city_citizen_haul_cargo_amount(citizen_id) == 0
+		and CityCitizenInventorySystem.get_city_citizen_haul_cargo_amount(citizen_id) == 0
 		and CityResourceAccountingSystem.get_city_container_version()
 		== int(versions_before_stockpile_probe["container"])
 		and CityResourceAccountingSystem.get_city_public_storage_version()
@@ -553,7 +553,7 @@ func _test_public_storage_keep_fallback() -> void:
 		CityResourceAccountingSystem.get_city_public_storage_version()
 	)
 	var physical_lumber_before_keep_delivery := (
-		WorldData.get_total_physical_city_resource_amount(
+		CityResourceAccountingSystem.get_total_physical_city_resource_amount(
 			WorldData.RESOURCE_LUMBER
 		)
 	)
@@ -605,7 +605,7 @@ func _test_public_storage_keep_fallback() -> void:
 		CitizenTaskSystemScript.run_tick(tick_index, 2)
 
 		if (
-			WorldData.get_city_citizen_haul_cargo_amount(citizen_id) == 0
+			CityCitizenInventorySystem.get_city_citizen_haul_cargo_amount(citizen_id) == 0
 			and CityLogisticsSystem
 			.get_city_haul_reservation(keep_reservation_id).is_empty()
 			and CityResourceContainerSystem
@@ -636,7 +636,7 @@ func _test_public_storage_keep_fallback() -> void:
 		"The completed Keep fallback must empty the cleanup pile."
 	)
 	_expect(
-		WorldData.get_city_citizen_haul_cargo_amount(citizen_id) == 0
+		CityCitizenInventorySystem.get_city_citizen_haul_cargo_amount(citizen_id) == 0
 		and CityLogisticsSystem
 		.get_city_haul_reservation(keep_reservation_id).is_empty(),
 		"The completed Keep fallback must clear cargo and its reservation."
@@ -647,7 +647,7 @@ func _test_public_storage_keep_fallback() -> void:
 		"The Keep fallback must leave the unified city state valid."
 	)
 	_expect(
-		WorldData.get_total_physical_city_resource_amount(
+		CityResourceAccountingSystem.get_total_physical_city_resource_amount(
 			WorldData.RESOURCE_LUMBER
 		) == physical_lumber_before_keep_delivery,
 		"The Keep fallback must conserve physical lumber."
@@ -718,7 +718,7 @@ func _test_critical_hunger_interrupts_cargo_safely() -> void:
 	CitizenTaskSystemScript.run_tick(1, 2)
 	CitizenTaskSystemScript.run_tick(2, 2)
 	_expect(
-		WorldData.get_city_citizen_haul_cargo_resource_amount(
+		CityCitizenInventorySystem.get_city_citizen_haul_cargo_resource_amount(
 			citizen_id,
 			WorldData.RESOURCE_LUMBER
 		) == 2,
@@ -729,11 +729,11 @@ func _test_critical_hunger_interrupts_cargo_safely() -> void:
 		citizen_id
 	)
 	var physical_before_interrupt := (
-		WorldData.get_total_physical_city_resource_amount(
+		CityResourceAccountingSystem.get_total_physical_city_resource_amount(
 			WorldData.RESOURCE_LUMBER
 		)
 	)
-	WorldData.set_city_citizen_hunger_state(citizen_id, 20, 0)
+	CitizenNeedsSystem.set_city_citizen_hunger_state(citizen_id, 20, 0)
 	CitizenDecisionSystemScript.run_tick(3, 2)
 	var food_task := CityCitizenTaskRuntimeSystem.get_city_citizen_current_task(citizen_id)
 
@@ -744,7 +744,7 @@ func _test_critical_hunger_interrupts_cargo_safely() -> void:
 		"Critical hunger must replace an in-flight haul with workplace-food acquisition."
 	)
 	_expect(
-		WorldData.get_city_citizen_haul_cargo_amount(citizen_id) == 0
+		CityCitizenInventorySystem.get_city_citizen_haul_cargo_amount(citizen_id) == 0
 		and CityLogisticsSystem.get_city_haul_reservation(reservation_id).is_empty(),
 		"Critical interruption must release cargo state and its old reservation."
 	)
@@ -752,7 +752,7 @@ func _test_critical_hunger_interrupts_cargo_safely() -> void:
 		CityLogisticsSystem.get_total_city_ground_pile_resource_amount(
 			WorldData.RESOURCE_LUMBER
 		) == 2
-		and WorldData.get_total_physical_city_resource_amount(
+		and CityResourceAccountingSystem.get_total_physical_city_resource_amount(
 			WorldData.RESOURCE_LUMBER
 		) == physical_before_interrupt,
 		"Critical interruption may spill exceptionally, but must do so atomically without loss."
@@ -1211,7 +1211,7 @@ func _make_cleanup_haul_request(
 				WorldData.RESOURCE_NONE
 			)
 		),
-		"requested_amount": WorldData.DEFAULT_CITIZEN_CARRY_CAPACITY,
+		"requested_amount": CityCitizens.DEFAULT_CITIZEN_CARRY_CAPACITY,
 		"reason": WorldData.CITY_CITIZEN_HAUL_REASON_GROUND_PILE_CLEANUP,
 		"source_access_purpose": (
 			WorldData.CONTAINER_HAUL_PURPOSE_GROUND_PILE_CLEANUP

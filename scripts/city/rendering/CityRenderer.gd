@@ -343,7 +343,8 @@ func _ready() -> void:
 		city_world
 	)
 	WorldData.ensure_city_citizen_demographic_state()
-	WorldData.ensure_city_citizen_need_state()
+	CityCitizenInventorySystem.ensure_city_citizen_inventory_state()
+	CitizenNeedsSystem.ensure_city_citizen_need_state()
 	CityCitizenTaskRuntimeSystem.ensure_city_citizen_task_state()
 	CityCitizenMovementRuntimeSystem.ensure_city_citizen_movement_state()
 	city_citizen_movement_presentation.initialize()
@@ -3033,13 +3034,13 @@ func update_selected_city_citizen_panel() -> void:
 		"Activity tile: " + task_target_text,
 		"Movement: " + movement_text,
 		"Hunger: "
-			+ str(WorldData.get_city_citizen_hunger(citizen_id))
+			+ str(CitizenNeedsSystem.get_city_citizen_hunger(citizen_id))
 			+ " / "
-			+ str(WorldData.MAX_CITIZEN_HUNGER),
+			+ str(CityCitizens.MAX_CITIZEN_HUNGER),
 		"Personal food: "
 			+ str(
 				CityResourceContainerSystem.get_food_nutrition_in_resource_container(
-					WorldData.get_city_citizen_inventory(citizen_id)
+					CityCitizenInventorySystem.get_city_citizen_inventory(citizen_id)
 				)
 			)
 			+ " nutrition",
@@ -3074,12 +3075,12 @@ func get_citizen_haul_status_lines(
 ) -> Array:
 	var citizen_id := int(citizen.get("id", -1))
 
-	if not WorldData.city_citizen_is_hauling(citizen_id):
+	if not CitizenHaulingSystem.city_citizen_is_hauling(citizen_id):
 		return ["Hauling: No"]
 
 	var haul := CityCitizenTaskRuntimeSystem.get_city_citizen_current_haul(citizen_id)
 	var cargo_resources := (
-		WorldData.get_city_citizen_haul_cargo_resources(citizen_id)
+		CityCitizenInventorySystem.get_city_citizen_haul_cargo_resources(citizen_id)
 	)
 	var resource := str(
 		haul.get("resource_type", WorldData.RESOURCE_NONE)
@@ -3091,14 +3092,13 @@ func get_citizen_haul_status_lines(
 		resource = str(cargo_resource_names[0])
 
 	var cargo_amount := (
-		WorldData.get_city_citizen_haul_cargo_amount(citizen_id)
+		CityCitizenInventorySystem.get_city_citizen_haul_cargo_amount(citizen_id)
 	)
-	var carry_capacity := maxi(
-		int(citizen.get("carry_capacity", 0)),
-		0
+	var carry_capacity := (
+		CityCitizenInventorySystem.get_city_citizen_carry_capacity(citizen_id)
 	)
 	var personal_inventory_used := (
-		WorldData.get_city_citizen_inventory_used_capacity(citizen_id)
+		CityCitizenInventorySystem.get_city_citizen_inventory_used_capacity(citizen_id)
 	)
 	var haul_capacity := maxi(
 		carry_capacity - personal_inventory_used,
@@ -3202,30 +3202,30 @@ func get_haul_endpoint_display_text(raw_endpoint) -> String:
 func update_citizen_inventory_display(
 	citizen: Dictionary
 ) -> void:
-	var raw_inventory = citizen.get("inventory", {})
+	var citizen_id := int(citizen.get("id", -1))
 
-	if not raw_inventory is Dictionary:
+	if citizen_id <= 0:
 		hide_object_info_storage_display()
 		return
 
-	var inventory: Dictionary = raw_inventory
+	var inventory := (
+		CityCitizenInventorySystem.get_city_citizen_inventory(citizen_id)
+	)
 	var present_resources := (
 		CityResourceContainerSystem.get_resource_container_present_resources(
 			inventory
 		)
 	)
 	var used_capacity := (
-		CityResourceContainerSystem.get_resource_container_total_amount(
-			inventory
+		CityCitizenInventorySystem.get_city_citizen_inventory_used_capacity(
+			citizen_id
 		)
 	)
-	var carry_capacity := maxi(
-		int(citizen.get("carry_capacity", 0)),
-		0
+	var carry_capacity := (
+		CityCitizenInventorySystem.get_city_citizen_carry_capacity(citizen_id)
 	)
-	var citizen_id := int(citizen.get("id", -1))
 	var haul_cargo_amount := (
-		WorldData.get_city_citizen_haul_cargo_amount(
+		CityCitizenInventorySystem.get_city_citizen_haul_cargo_amount(
 			citizen_id
 		)
 	)
@@ -6271,10 +6271,10 @@ func draw_city_citizen_haul_cargo_marker(
 ) -> void:
 	var citizen_id := int(citizen.get("id", -1))
 	var cargo_resources := (
-		WorldData.get_city_citizen_haul_cargo_resources(citizen_id)
+		CityCitizenInventorySystem.get_city_citizen_haul_cargo_resources(citizen_id)
 	)
 	var cargo_amount := (
-		WorldData.get_city_citizen_haul_cargo_amount(citizen_id)
+		CityCitizenInventorySystem.get_city_citizen_haul_cargo_amount(citizen_id)
 	)
 
 	if cargo_amount <= 0 or cargo_resources.is_empty():

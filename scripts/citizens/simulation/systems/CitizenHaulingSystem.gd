@@ -20,6 +20,27 @@ const BLOCKED_HAUL_RETRY_DELAY_MINUTES: int = 30
 # other container kinds can be added without rewriting the state machine.
 
 
+static func city_citizen_is_hauling(citizen_id: int) -> bool:
+	if (
+		CityCitizenInventorySystem.get_city_citizen_haul_cargo_amount(
+			citizen_id
+		) > 0
+	):
+		return true
+
+	return (
+		str(
+			CityCitizenTaskRuntimeSystem.get_city_citizen_current_haul(
+				citizen_id
+			).get(
+				"phase",
+				WorldData.CITY_CITIZEN_HAUL_PHASE_NONE
+			)
+		)
+		!= WorldData.CITY_CITIZEN_HAUL_PHASE_NONE
+	)
+
+
 # Higher-priority interruptions must never strand physical haul cargo. Cargo is
 # atomically converted into one mono-resource ground pile per carried resource,
 # reservations and movement are released, and the interrupted task is cleared.
@@ -41,10 +62,10 @@ static func drop_citizen_haul_cargo_for_priority_interrupt(
 		return false
 
 	var cargo_resources := (
-		WorldData.get_city_citizen_haul_cargo_resources(citizen_id)
+		CityCitizenInventorySystem.get_city_citizen_haul_cargo_resources(citizen_id)
 	)
 	var cargo_amount := (
-		WorldData.get_city_citizen_haul_cargo_amount(citizen_id)
+		CityCitizenInventorySystem.get_city_citizen_haul_cargo_amount(citizen_id)
 	)
 	var drop_tile := WorldData.INVALID_CITY_TILE_POSITION
 	var added_placements_by_resource: Dictionary = {}
@@ -101,7 +122,7 @@ static func drop_citizen_haul_cargo_for_priority_interrupt(
 				add_result.get("placements", [])
 			)
 
-		if WorldData.set_city_citizen_haul_cargo_resources(
+		if CityCitizenInventorySystem.set_city_citizen_haul_cargo_resources(
 			citizen_id,
 			{}
 		) != 0:
@@ -116,7 +137,7 @@ static func drop_citizen_haul_cargo_for_priority_interrupt(
 	):
 		if cargo_amount > 0:
 			var restored_total := (
-				WorldData.set_city_citizen_haul_cargo_resources(
+				CityCitizenInventorySystem.set_city_citizen_haul_cargo_resources(
 					citizen_id,
 					cargo_resources
 				)
@@ -331,12 +352,12 @@ static func make_public_storage_haul_task_request(
 
 	var current_tile: Vector2i = raw_current_tile
 	var cargo_resources := (
-		WorldData.get_city_citizen_haul_cargo_resources(
+		CityCitizenInventorySystem.get_city_citizen_haul_cargo_resources(
 			citizen_id
 		)
 	)
 	var cargo_amount := (
-		WorldData.get_city_citizen_haul_cargo_amount(citizen_id)
+		CityCitizenInventorySystem.get_city_citizen_haul_cargo_amount(citizen_id)
 	)
 	var destination_result: Dictionary = {}
 	var initial_phase: String = (
@@ -370,7 +391,7 @@ static func make_public_storage_haul_task_request(
 			return {}
 
 		var remaining_capacity := (
-			WorldData.get_city_citizen_available_haul_capacity(
+			CityCitizenInventorySystem.get_city_citizen_available_haul_capacity(
 				citizen_id
 			)
 		)
@@ -583,7 +604,7 @@ static func make_directed_haul_task_request(
 		citizen_id <= 0
 		or not bool(citizen.get("alive", false))
 		or not raw_current_tile is Vector2i
-		or WorldData.get_city_citizen_haul_cargo_amount(citizen_id) > 0
+		or CityCitizenInventorySystem.get_city_citizen_haul_cargo_amount(citizen_id) > 0
 		or not WorldData.is_city_resource_type(resource)
 		or requested_amount <= 0
 		or reason == WorldData.CITY_CITIZEN_HAUL_REASON_NONE
@@ -617,7 +638,7 @@ static func make_directed_haul_task_request(
 	requested_amount = mini(
 		requested_amount,
 		mini(
-			WorldData.get_city_citizen_available_haul_capacity(
+			CityCitizenInventorySystem.get_city_citizen_available_haul_capacity(
 				citizen_id
 			),
 			mini(
@@ -754,7 +775,7 @@ static func advance_haul_task(
 		citizen_id
 	)
 	var cargo_amount := (
-		WorldData.get_city_citizen_haul_cargo_amount(citizen_id)
+		CityCitizenInventorySystem.get_city_citizen_haul_cargo_amount(citizen_id)
 	)
 	var haul_resource := str(
 		haul.get("resource_type", WorldData.RESOURCE_NONE)
@@ -946,7 +967,7 @@ static func _advance_pending_source(
 			reservation.get("source_reserved_amount", 0)
 		) <= 0
 	):
-		if WorldData.get_city_citizen_haul_cargo_amount(citizen_id) > 0:
+		if CityCitizenInventorySystem.get_city_citizen_haul_cargo_amount(citizen_id) > 0:
 			haul["phase"] = (
 				WorldData.CITY_CITIZEN_HAUL_PHASE_PENDING_DESTINATION
 			)
@@ -966,7 +987,7 @@ static func _advance_pending_source(
 		"require_unreserved_amount": true,
 		"excluding_reservation_id": reservation_id,
 	}):
-		if WorldData.get_city_citizen_haul_cargo_amount(citizen_id) > 0:
+		if CityCitizenInventorySystem.get_city_citizen_haul_cargo_amount(citizen_id) > 0:
 			haul["phase"] = (
 				WorldData.CITY_CITIZEN_HAUL_PHASE_PENDING_DESTINATION
 			)
@@ -980,7 +1001,7 @@ static func _advance_pending_source(
 		return path_requests_remaining
 
 	if (
-		WorldData.get_city_citizen_available_haul_capacity(
+		CityCitizenInventorySystem.get_city_citizen_available_haul_capacity(
 			citizen_id
 		) <= 0
 	):
@@ -1214,7 +1235,7 @@ static func _attempt_pickup(
 		"require_unreserved_amount": true,
 		"excluding_reservation_id": reservation_id,
 	}):
-		if WorldData.get_city_citizen_haul_cargo_amount(citizen_id) > 0:
+		if CityCitizenInventorySystem.get_city_citizen_haul_cargo_amount(citizen_id) > 0:
 			haul["phase"] = (
 				WorldData.CITY_CITIZEN_HAUL_PHASE_PENDING_DESTINATION
 			)
@@ -1245,7 +1266,7 @@ static func _attempt_pickup(
 					resource,
 					reservation_id
 				),
-				WorldData.get_city_citizen_available_haul_capacity(
+				CityCitizenInventorySystem.get_city_citizen_available_haul_capacity(
 					citizen_id
 				)
 			)
@@ -1261,7 +1282,7 @@ static func _attempt_pickup(
 	)
 
 	if amount_to_pick_up <= 0:
-		if WorldData.get_city_citizen_haul_cargo_amount(citizen_id) > 0:
+		if CityCitizenInventorySystem.get_city_citizen_haul_cargo_amount(citizen_id) > 0:
 			haul["phase"] = (
 				WorldData.CITY_CITIZEN_HAUL_PHASE_PENDING_DESTINATION
 			)
@@ -1284,7 +1305,7 @@ static func _attempt_pickup(
 	})
 
 	if picked_up_amount <= 0:
-		if WorldData.get_city_citizen_haul_cargo_amount(citizen_id) > 0:
+		if CityCitizenInventorySystem.get_city_citizen_haul_cargo_amount(citizen_id) > 0:
 			haul["phase"] = (
 				WorldData.CITY_CITIZEN_HAUL_PHASE_PENDING_DESTINATION
 			)
@@ -1351,10 +1372,10 @@ static func _continue_after_successful_pickup(
 		}
 
 	var cargo_resources_after_pickup := (
-		WorldData.get_city_citizen_haul_cargo_resources(citizen_id)
+		CityCitizenInventorySystem.get_city_citizen_haul_cargo_resources(citizen_id)
 	)
 	var cargo_amount_after_pickup := (
-		WorldData.get_city_citizen_haul_cargo_amount(citizen_id)
+		CityCitizenInventorySystem.get_city_citizen_haul_cargo_amount(citizen_id)
 	)
 	var immediate_routing_result := (
 		_try_route_cargo_to_best_resource_demand(
@@ -1416,7 +1437,7 @@ static func _continue_after_successful_pickup(
 				false
 			)
 		)
-		and WorldData.get_city_citizen_available_haul_capacity(
+		and CityCitizenInventorySystem.get_city_citizen_available_haul_capacity(
 			citizen_id
 		) > 0
 	):
@@ -1509,7 +1530,7 @@ static func _begin_next_ground_pile_pickup(
 		)
 	)
 	var remaining_capacity := (
-		WorldData.get_city_citizen_available_haul_capacity(
+		CityCitizenInventorySystem.get_city_citizen_available_haul_capacity(
 			citizen_id
 		)
 	)
@@ -1960,7 +1981,7 @@ static func _try_route_cargo_to_best_resource_demand(
 		)
 	else:
 		var primary_resource := (
-			WorldData.get_city_citizen_haul_cargo_resource(
+			CityCitizenInventorySystem.get_city_citizen_haul_cargo_resource(
 				citizen_id
 			)
 		)
@@ -2045,12 +2066,12 @@ static func _advance_pending_destination(
 		0
 	)
 	var cargo_resources := (
-		WorldData.get_city_citizen_haul_cargo_resources(
+		CityCitizenInventorySystem.get_city_citizen_haul_cargo_resources(
 			citizen_id
 		)
 	)
 	var cargo_amount := (
-		WorldData.get_city_citizen_haul_cargo_amount(citizen_id)
+		CityCitizenInventorySystem.get_city_citizen_haul_cargo_amount(citizen_id)
 	)
 
 	if cargo_amount <= 0 or cargo_resources.is_empty():
@@ -2249,7 +2270,7 @@ static func _advance_pending_destination(
 		or int(reservation.get("citizen_id", -1)) != citizen_id
 	):
 		var primary_resource := (
-			WorldData.get_city_citizen_haul_cargo_resource(citizen_id)
+			CityCitizenInventorySystem.get_city_citizen_haul_cargo_resource(citizen_id)
 		)
 		reservation = CityLogisticsSystem.create_city_haul_reservation({
 			"citizen_id": citizen_id,
@@ -2525,7 +2546,7 @@ static func _deposit_and_retarget(
 		return _advance_pending_destination(city_world, values)
 
 	var cargo_resources := (
-		WorldData.get_city_citizen_haul_cargo_resources(
+		CityCitizenInventorySystem.get_city_citizen_haul_cargo_resources(
 			citizen_id
 		)
 	)
@@ -2546,7 +2567,7 @@ static func _deposit_and_retarget(
 	for raw_resource in resource_names:
 		var resource := str(raw_resource)
 		var cargo_amount := (
-			WorldData.get_city_citizen_haul_cargo_resource_amount(
+			CityCitizenInventorySystem.get_city_citizen_haul_cargo_resource_amount(
 				citizen_id,
 				resource
 			)
@@ -2569,7 +2590,7 @@ static func _deposit_and_retarget(
 			"reservation_id": reservation_id,
 		})
 
-	if WorldData.get_city_citizen_haul_cargo_amount(citizen_id) <= 0:
+	if CityCitizenInventorySystem.get_city_citizen_haul_cargo_amount(citizen_id) <= 0:
 		_complete_haul(citizen_id, current_task)
 		return path_requests_remaining
 
@@ -2662,7 +2683,7 @@ static func _pickup_from_endpoint(values: Dictionary) -> int:
 					resource,
 					reservation_id
 				),
-				WorldData.get_city_citizen_available_haul_capacity(
+				CityCitizenInventorySystem.get_city_citizen_available_haul_capacity(
 					citizen_id
 				)
 			)
@@ -2681,13 +2702,13 @@ static func _pickup_from_endpoint(values: Dictionary) -> int:
 		return 0
 
 	var old_cargo_amount := (
-		WorldData.get_city_citizen_haul_cargo_resource_amount(
+		CityCitizenInventorySystem.get_city_citizen_haul_cargo_resource_amount(
 			citizen_id,
 			resource
 		)
 	)
 	var final_cargo_amount := (
-		WorldData.change_city_citizen_haul_cargo_resource(
+		CityCitizenInventorySystem.change_city_citizen_haul_cargo_resource(
 			citizen_id,
 			resource,
 			amount_to_remove
@@ -2705,7 +2726,7 @@ static func _pickup_from_endpoint(values: Dictionary) -> int:
 	})
 
 	if removed_amount != amount_to_remove:
-		WorldData.change_city_citizen_haul_cargo_resource(
+		CityCitizenInventorySystem.change_city_citizen_haul_cargo_resource(
 			citizen_id,
 			resource,
 			-(amount_to_remove - maxi(removed_amount, 0))
@@ -2818,7 +2839,7 @@ static func _deposit_to_endpoint(values: Dictionary) -> int:
 		return 0
 
 	var cargo_amount := (
-		WorldData.get_city_citizen_haul_cargo_resource_amount(
+		CityCitizenInventorySystem.get_city_citizen_haul_cargo_resource_amount(
 			citizen_id,
 			resource
 		)
@@ -2894,7 +2915,7 @@ static func _deposit_to_endpoint(values: Dictionary) -> int:
 		return 0
 
 	var final_resource_amount := (
-		WorldData.change_city_citizen_haul_cargo_resource(
+		CityCitizenInventorySystem.change_city_citizen_haul_cargo_resource(
 			citizen_id,
 			resource,
 			-accepted_amount
@@ -2945,7 +2966,7 @@ static func _deposit_to_endpoint(values: Dictionary) -> int:
 				accepted_amount
 			)
 		)
-	WorldData.change_city_citizen_haul_cargo_resource(
+	CityCitizenInventorySystem.change_city_citizen_haul_cargo_resource(
 		citizen_id,
 		resource,
 		accepted_amount
@@ -2969,7 +2990,7 @@ static func _complete_haul(
 	citizen_id: int,
 	current_task: Dictionary
 ) -> void:
-	if WorldData.get_city_citizen_haul_cargo_amount(citizen_id) > 0:
+	if CityCitizenInventorySystem.get_city_citizen_haul_cargo_amount(citizen_id) > 0:
 		return
 
 	CityCitizenMovementRuntimeSystem.cancel_city_citizen_movement(citizen_id)
@@ -2993,7 +3014,7 @@ static func _finish_haul_without_pickup(
 	citizen_id: int,
 	current_task: Dictionary
 ) -> void:
-	if WorldData.get_city_citizen_haul_cargo_amount(citizen_id) > 0:
+	if CityCitizenInventorySystem.get_city_citizen_haul_cargo_amount(citizen_id) > 0:
 		return
 
 	_complete_haul(citizen_id, current_task)
@@ -3016,7 +3037,7 @@ static func _set_haul_blocked(
 	# Before pickup there is no physical obligation to retain. Releasing the
 	# claim lets a different citizen try immediately instead of locking goods
 	# and capacity for a blocked retry window.
-	if WorldData.get_city_citizen_haul_cargo_amount(citizen_id) <= 0:
+	if CityCitizenInventorySystem.get_city_citizen_haul_cargo_amount(citizen_id) <= 0:
 		var current_task := CityCitizenTaskRuntimeSystem.get_city_citizen_current_task(
 			citizen_id
 		)

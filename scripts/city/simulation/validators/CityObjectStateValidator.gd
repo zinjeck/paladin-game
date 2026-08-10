@@ -872,25 +872,32 @@ static func _validate_citizen_inventories(
 			CityCitizenRegistrySystem.get_current_state().citizens[citizen_index]
 		)
 
-		var carry_capacity := int(
-			citizen.get("carry_capacity", 0)
-		)
+		var raw_carry_capacity = citizen.get("carry_capacity")
+		var carry_capacity := 0
 
-		if carry_capacity < 0:
+		if (
+			not citizen.has("carry_capacity")
+			or typeof(raw_carry_capacity) != TYPE_INT
+		):
+			errors.append(
+				"Citizen "
+					+ str(citizen_id)
+					+ " has missing or non-integer carry capacity."
+			)
+		elif int(raw_carry_capacity) < 0:
 			errors.append(
 				"Citizen "
 					+ str(citizen_id)
 					+ " has negative carry capacity "
-					+ str(carry_capacity)
+					+ str(raw_carry_capacity)
 					+ "."
 			)
+		else:
+			carry_capacity = int(raw_carry_capacity)
 
-		var raw_inventory = citizen.get(
-			"inventory",
-			{}
-		)
+		var raw_inventory = citizen.get("inventory")
 
-		if not raw_inventory is Dictionary:
+		if not citizen.has("inventory") or not raw_inventory is Dictionary:
 			errors.append(
 				"Citizen "
 					+ str(citizen_id)

@@ -286,7 +286,7 @@ static func _process_food_needs(critical_only: bool) -> void:
 
 		candidates.append({
 			"citizen_id": citizen_id,
-			"hunger": WorldData.get_city_citizen_hunger(citizen_id),
+			"hunger": CitizenNeedsSystem.get_city_citizen_hunger(citizen_id),
 		})
 
 	candidates.sort_custom(_sort_food_need_candidates)
@@ -318,9 +318,9 @@ static func _process_food_needs(critical_only: bool) -> void:
 		var citizen_id := int(raw_candidate.get("citizen_id", -1))
 		var citizen := CityCitizenRegistrySystem.get_city_citizen_by_id(citizen_id)
 		var available_food_capacity := (
-			WorldData.get_city_citizen_personal_inventory_free_space(citizen_id)
+			CityCitizenInventorySystem.get_city_citizen_personal_inventory_free_space(citizen_id)
 			if critical_only
-			else WorldData.get_city_citizen_inventory_free_space(citizen_id)
+			else CityCitizenInventorySystem.get_city_citizen_inventory_free_space(citizen_id)
 		)
 		var food_result := _find_best_food_source_for_citizen(
 			citizen,
@@ -484,8 +484,8 @@ static func _take_food_scan_start_index(
 
 
 static func _sort_food_need_candidates(a: Dictionary, b: Dictionary) -> bool:
-	var hunger_a := int(a.get("hunger", WorldData.MAX_CITIZEN_HUNGER))
-	var hunger_b := int(b.get("hunger", WorldData.MAX_CITIZEN_HUNGER))
+	var hunger_a := int(a.get("hunger", CityCitizens.MAX_CITIZEN_HUNGER))
+	var hunger_b := int(b.get("hunger", CityCitizens.MAX_CITIZEN_HUNGER))
 
 	if hunger_a != hunger_b:
 		return hunger_a < hunger_b
@@ -828,7 +828,7 @@ static func _get_outstanding_obligation_task_request(
 	if citizen_id <= 0:
 		return {}
 
-	var cargo := WorldData.get_city_citizen_haul_cargo(
+	var cargo := CityCitizenInventorySystem.get_city_citizen_haul_cargo(
 		citizen_id
 	)
 	var cargo_amount := maxi(
@@ -925,7 +925,7 @@ static func _get_outstanding_obligation_task_request(
 	)
 
 	var remaining_carry_capacity := (
-		WorldData.get_city_citizen_available_haul_capacity(
+		CityCitizenInventorySystem.get_city_citizen_available_haul_capacity(
 			citizen_id
 		)
 	)
@@ -1015,7 +1015,7 @@ static func _get_scheduled_home_food_delivery_task_request(
 		return {}
 
 	var remaining_carry_capacity := (
-		WorldData.get_city_citizen_available_haul_capacity(citizen_id)
+		CityCitizenInventorySystem.get_city_citizen_available_haul_capacity(citizen_id)
 	)
 
 	if remaining_carry_capacity <= 0:
@@ -1026,7 +1026,7 @@ static func _get_scheduled_home_food_delivery_task_request(
 	)
 	var current_tile: Vector2i = raw_current_tile
 
-	for resource in WorldData.get_city_food_resource_types():
+	for resource in CityResourceCatalog.get_city_food_resource_types():
 		var requested_amount := mini(
 			remaining_carry_capacity,
 			CityResourceMatcher.get_city_home_requested_food_units(
@@ -1395,7 +1395,7 @@ static func _citizen_is_available_for_autonomous_hauling(
 	if (
 		citizen_id <= 0
 		or CitizenNeedsSystem.citizen_should_seek_food(citizen_id)
-		or WorldData.get_city_citizen_haul_cargo_amount(citizen_id) > 0
+		or CityCitizenInventorySystem.get_city_citizen_haul_cargo_amount(citizen_id) > 0
 		or not citizen.get("city_tile_position") is Vector2i
 	):
 		return false
@@ -1566,7 +1566,7 @@ static func _get_active_ground_pile_chain_capacity() -> int:
 			continue
 
 		open_carry_capacity += maxi(
-			WorldData.get_city_citizen_available_haul_capacity(citizen_id)
+			CityCitizenInventorySystem.get_city_citizen_available_haul_capacity(citizen_id)
 			- maxi(
 				int(reservation.get("source_reserved_amount", 0)),
 				0
@@ -1956,7 +1956,7 @@ static func _try_assign_autonomous_haul_match(
 		return {"attempted_build": false, "assigned": false}
 
 	var requested_amount := mini(
-		WorldData.get_city_citizen_available_haul_capacity(citizen_id),
+		CityCitizenInventorySystem.get_city_citizen_available_haul_capacity(citizen_id),
 		CityLogisticsSystem.get_city_haul_endpoint_unreserved_resource_amount(
 			source,
 			resource
@@ -2226,7 +2226,7 @@ static func _citizen_is_available_for_idle_behavior(
 		return false
 
 	if (
-		WorldData.get_city_citizen_haul_cargo_amount(
+		CityCitizenInventorySystem.get_city_citizen_haul_cargo_amount(
 			int(citizen.get("id", -1))
 		) > 0
 	):

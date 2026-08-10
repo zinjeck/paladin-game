@@ -394,7 +394,7 @@ static func get_resource_conservation_text() -> String:
 			)
 			+ "/"
 			+ str(
-				WorldData.get_total_physical_city_resource_amount(
+				CityResourceAccountingSystem.get_total_physical_city_resource_amount(
 					resource
 				)
 			)

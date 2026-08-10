@@ -131,7 +131,7 @@ func _test_scheduled_home_delivery_accounting() -> void:
 			stockpile,
 			WorldData.RESOURCE_FISH
 		) == 1
-		and WorldData.get_city_citizen_haul_cargo_resource_amount(
+		and CityCitizenInventorySystem.get_city_citizen_haul_cargo_resource_amount(
 			citizen_id,
 			WorldData.RESOURCE_FISH
 		) == 2
@@ -160,14 +160,14 @@ func _test_scheduled_home_delivery_accounting() -> void:
 			house,
 			WorldData.RESOURCE_FISH
 		) == 2
-		and WorldData.get_city_citizen_haul_cargo_amount(citizen_id) == 0
+		and CityCitizenInventorySystem.get_city_citizen_haul_cargo_amount(citizen_id) == 0
 		and CityResourceContainerSystem.get_resource_container_total_amount(
-			WorldData.get_city_citizen_inventory(citizen_id)
+			CityCitizenInventorySystem.get_city_citizen_inventory(citizen_id)
 		) == 0,
 		"The real haul must finish with Stockpile 1, House 2, and no citizen inventory or cargo."
 	)
 	_expect(
-		WorldData.get_total_physical_city_resource_amount(
+		CityResourceAccountingSystem.get_total_physical_city_resource_amount(
 			WorldData.RESOURCE_FISH
 		) == 3
 		and CityResourceAccountingSystem.get_total_public_city_resource_amount(
@@ -299,7 +299,7 @@ func _test_construction_supply_and_delivery() -> void:
 	var source_tile := _get_object_access_tile(city_world, stockpile)
 	var citizen := _add_citizen(source_tile)
 	var citizen_id := int(citizen.get("id", -1))
-	var physical_before := WorldData.get_total_physical_city_resource_amount(
+	var physical_before := CityResourceAccountingSystem.get_total_physical_city_resource_amount(
 		WorldData.RESOURCE_LUMBER
 	)
 	var candidate := (
@@ -368,7 +368,7 @@ func _test_construction_supply_and_delivery() -> void:
 			CityObjectSystem.get_city_object_by_id(stockpile_id),
 			WorldData.RESOURCE_LUMBER
 		) == 0
-		and WorldData.get_city_citizen_haul_cargo_resource_amount(
+		and CityCitizenInventorySystem.get_city_citizen_haul_cargo_resource_amount(
 			citizen_id,
 			WorldData.RESOURCE_LUMBER
 		) == 8
@@ -379,7 +379,7 @@ func _test_construction_supply_and_delivery() -> void:
 			site_id,
 			WorldData.RESOURCE_LUMBER
 		) == 8
-		and WorldData.get_total_physical_city_resource_amount(
+		and CityResourceAccountingSystem.get_total_physical_city_resource_amount(
 			WorldData.RESOURCE_LUMBER
 		) == physical_before,
 		"Construction pickup must hard-commit the source, retain exact site capacity, and conserve physical lumber in cargo."
@@ -407,8 +407,8 @@ func _test_construction_supply_and_delivery() -> void:
 			site_id,
 			WorldData.RESOURCE_LUMBER
 		) == 0
-		and WorldData.get_city_citizen_haul_cargo_amount(citizen_id) == 0
-		and WorldData.get_total_physical_city_resource_amount(
+		and CityCitizenInventorySystem.get_city_citizen_haul_cargo_amount(citizen_id) == 0
+		and CityResourceAccountingSystem.get_total_physical_city_resource_amount(
 			WorldData.RESOURCE_LUMBER
 		) == physical_before,
 		"The real Stockpile-to-House-site haul must release reservations, deliver eight lumber, and conserve every physical unit."
@@ -549,7 +549,7 @@ func _test_reserved_stockpile_falls_back_to_keep() -> void:
 	if cleanup_request.is_empty():
 		return
 
-	var physical_before := WorldData.get_total_physical_city_resource_amount(
+	var physical_before := CityResourceAccountingSystem.get_total_physical_city_resource_amount(
 		WorldData.RESOURCE_LUMBER
 	)
 	var accounting_state := CityResourceAccountingSystem.get_current_state()
@@ -602,7 +602,7 @@ func _test_reserved_stockpile_falls_back_to_keep() -> void:
 		"The real fallback haul must fill the Keep while preserving the earlier Stockpile reservation."
 	)
 	_expect(
-		WorldData.get_total_physical_city_resource_amount(
+		CityResourceAccountingSystem.get_total_physical_city_resource_amount(
 			WorldData.RESOURCE_LUMBER
 		) == physical_before
 		and accounting_state.container_version == container_before_cleanup + 1
@@ -726,7 +726,7 @@ func _run_single_haul_to_completion(
 		if (
 			str(current_task.get("kind", ""))
 			== WorldData.CITY_CITIZEN_TASK_KIND_NONE
-			and WorldData.get_city_citizen_haul_cargo_amount(citizen_id) == 0
+			and CityCitizenInventorySystem.get_city_citizen_haul_cargo_amount(citizen_id) == 0
 			and reservation_id
 			== WorldData.INVALID_CITY_CITIZEN_HAUL_RESERVATION_ID
 		):

@@ -202,7 +202,7 @@ static func _task_is_at_normal_food_safe_boundary(
 	citizen_id: int,
 	current_task: Dictionary
 ) -> bool:
-	if WorldData.get_city_citizen_haul_cargo_amount(citizen_id) > 0:
+	if CityCitizenInventorySystem.get_city_citizen_haul_cargo_amount(citizen_id) > 0:
 		return false
 
 	var task_kind := str(
@@ -268,7 +268,7 @@ static func _release_task_for_normal_food(
 	citizen_id: int,
 	expected_task: Dictionary
 ) -> bool:
-	if WorldData.get_city_citizen_haul_cargo_amount(citizen_id) > 0:
+	if CityCitizenInventorySystem.get_city_citizen_haul_cargo_amount(citizen_id) > 0:
 		return false
 
 	var current_task := CityCitizenTaskRuntimeSystem.get_city_citizen_current_task(citizen_id)
@@ -407,7 +407,7 @@ static func _advance_acquire_food_task(
 	)
 
 	if (
-		WorldData.get_city_food_hunger_restore(resource) <= 0
+		CityResourceCatalog.get_city_food_hunger_restore(resource) <= 0
 		or requested_amount <= 0
 		or access_purpose
 		!= WorldData.CONTAINER_DIRECT_WITHDRAWAL_PURPOSE_PERSONAL_FOOD
@@ -416,11 +416,11 @@ static func _advance_acquire_food_task(
 		or not CityCitizens.is_valid_city_citizen_haul_endpoint(
 			source_endpoint
 		)
-		or not WorldData.get_city_citizen_food_endpoint_target_tiles(
+		or not CitizenNeedsSystem.get_city_citizen_food_endpoint_target_tiles(
 			citizen_id,
 			source_endpoint
 		).has(raw_target_tile)
-		or not WorldData.city_citizen_can_withdraw_food_from_endpoint(
+		or not CitizenNeedsSystem.city_citizen_can_withdraw_food_from_endpoint(
 			citizen_id,
 			source_endpoint,
 			resource
@@ -446,13 +446,13 @@ static func _advance_acquire_food_task(
 		var desired_nutrition := CitizenNeedsSystem.get_citizen_food_need_nutrition(
 			citizen_id
 		)
-		var hunger_restore := WorldData.get_city_food_hunger_restore(resource)
+		var hunger_restore := CityResourceCatalog.get_city_food_hunger_restore(resource)
 		var exact_requested_units := mini(
 			requested_amount,
 			ceili(float(desired_nutrition) / float(hunger_restore))
 		)
 		var transferred_amount := (
-			WorldData.transfer_city_food_endpoint_to_citizen_inventory(
+			CitizenNeedsSystem.transfer_city_food_endpoint_to_citizen_inventory(
 				citizen_id,
 				source_endpoint,
 				resource,
@@ -555,7 +555,7 @@ static func prepare_unemployed_citizen_for_priority_interrupt(
 	if (
 		str(current_task.get("kind", ""))
 		== WorldData.CITY_CITIZEN_TASK_KIND_ACQUIRE_FOOD
-		or WorldData.get_city_citizen_haul_cargo_amount(citizen_id) > 0
+		or CityCitizenInventorySystem.get_city_citizen_haul_cargo_amount(citizen_id) > 0
 	):
 		return false
 
