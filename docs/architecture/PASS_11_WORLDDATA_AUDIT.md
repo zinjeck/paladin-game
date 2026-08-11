@@ -35,11 +35,11 @@ The remaining city compatibility workspace is deliberately deferred to Pass 12. 
 
 ## Verification
 
-Godot CI run #315 passed on commit `61a144f004a71568cfbfb799fcc119ce80d069a6` before this documentation-only finalization:
+The implementation passed Godot CI run #315 on commit `61a144f004a71568cfbfb799fcc119ce80d069a6`. The final documentation-only commit is separately CI-verified by the PR check before merge readiness.
 
-- static GDScript architecture/resource-path audit passed
-- Godot 4.7.1 project import passed
-- full `scripts/**/*Test.tscn` headless suite passed
-- CI completed successfully
+The verified suite covers:
 
-Focused coverage includes navigation-state bootstrap/adoption and A/B/A settlement isolation with equal settlement-local object IDs.
+- static GDScript architecture/resource-path audit
+- Godot 4.7.1 project import
+- full `scripts/**/*Test.tscn` headless suite
+- focused navigation-state bootstrap/adoption and A/B/A settlement isolation with equal settlement-local object IDs
