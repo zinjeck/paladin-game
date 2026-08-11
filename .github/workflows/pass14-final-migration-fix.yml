@@ -1,0 +1,48 @@
+name: Pass 14 Final Migration Fix
+on:
+  push:
+    branches: [agent/pass14-worlddata-final-boundary]
+permissions:
+  contents: write
+jobs:
+  fix:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/pass14-worlddata-final-boundary
+      - run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+          for p in Path('scripts').rglob('*.gd'):
+              if p.name == 'WorldData.gd':
+                  continue
+              t = p.read_text(encoding='utf-8')
+              # Citizen/task/haul/movement constants now live in CityCitizens.
+              t = re.sub(r'\bWorldData\.(CITY_CITIZEN_[A-Z0-9_]+)', r'CityCitizens.\1', t)
+              t = re.sub(r'\bWorldData\.(INVALID_CITY_CITIZEN_[A-Z0-9_]+)', r'CityCitizens.\1', t)
+              # Container/workplace policy constants now live in CityObjectCatalog.
+              t = re.sub(r'\bWorldData\.(CONTAINER_[A-Z0-9_]+)', r'CityObjectCatalog.\1', t)
+              t = re.sub(r'\bWorldData\.(WORKPLACE_[A-Z0-9_]+)', r'CityObjectCatalog.\1', t)
+              # Starting population belongs to the registry owner.
+              t = re.sub(r'\bWorldData\.(STARTING_CITY_[A-Z0-9_]+)', r'CityCitizenRegistrySystem.\1', t)
+              t = t.replace('WorldData.get_city_object_resident_capacity(', 'CityObjectCatalog.get_city_object_resident_capacity(')
+              p.write_text(t, encoding='utf-8')
+
+          # Moved reservation functions brought two now-unqualified endpoint constants with them.
+          lp = Path('scripts/city/simulation/systems/CityLogisticsSystem.gd')
+          t = lp.read_text(encoding='utf-8')
+          for name in (
+              'CITY_CITIZEN_HAUL_ENDPOINT_KIND_NONE',
+              'CITY_CITIZEN_HAUL_ENDPOINT_KIND_CONSTRUCTION_SITE',
+          ):
+              t = re.sub(rf'(?<![\.A-Za-z0-9_]){name}\b', f'CityCitizens.{name}', t)
+          lp.write_text(t, encoding='utf-8')
+          PY
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add scripts
+          git commit -m "Pass 14: migrate remaining WorldData city callers"
+          git push origin HEAD:agent/pass14-worlddata-final-boundary
