@@ -85,7 +85,7 @@ static func get_city_object_access_tiles(
 			continue
 		var footprint_tile: Vector2i = raw_footprint_tile
 		for offset in WorldData.CITY_CARDINAL_TILE_OFFSETS:
-			var candidate_tile := footprint_tile + offset
+			var candidate_tile: Vector2i = footprint_tile + offset
 			if footprint_lookup.has(candidate_tile):
 				continue
 			if access_tile_lookup.has(candidate_tile):
