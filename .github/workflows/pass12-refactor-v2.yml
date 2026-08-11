@@ -1,0 +1,59 @@
+name: Pass 12 Refactor V2
+
+on:
+  push:
+    branches:
+      - agent/pass12-remove-city-workspace
+
+permissions:
+  contents: write
+
+jobs:
+  refactor:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/pass12-remove-city-workspace
+          fetch-depth: 0
+
+      - name: Apply corrected Pass 12 transformation
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          wf = Path('.github/workflows/pass12-refactor.yml').read_text(encoding='utf-8')
+          marker = "          python3 - <<'PY'\n"
+          start = wf.index(marker) + len(marker)
+          end = wf.index("\n          PY\n", start)
+          code = wf[start:end]
+          # De-indent the embedded Python from YAML.
+          lines = code.splitlines()
+          code = '\n'.join(line[10:] if line.startswith('          ') else line for line in lines)
+
+          # Add single-field setters needed by old tests and low-level setup paths.
+          needle = '''func store_current_city_world(city_world, city_seed: int) -> void:\n'''
+          replacement = '''func set_current_city_world(city_world) -> void:\n\tvar active_city_state = get_active_city_simulation_state()\n\tif active_city_state != null:\n\t\tactive_city_state.city_world = city_world\n\t\treturn\n\t_unbound_city_world = city_world\n\n\nfunc set_current_city_seed(city_seed: int) -> void:\n\tvar active_city_state = get_active_city_simulation_state()\n\tif active_city_state != null:\n\t\tactive_city_state.city_seed = city_seed\n\t\treturn\n\t_unbound_city_seed = city_seed\n\n\n''' + needle
+          assert needle in code
+          code = code.replace(needle, replacement, 1)
+
+          # Translate direct assignments before translating read expressions.
+          old = '''    s = gp.read_text(encoding='utf-8')\n    s = s.replace('WorldData.official_city_world', 'WorldPoliticalState.get_current_city_world()')\n    s = s.replace('WorldData.official_city_seed', 'WorldPoliticalState.get_current_city_seed()')\n    s = s.replace('WorldData.player_city_data', 'WorldPoliticalState.get_current_city_runtime_data()')\n    gp.write_text(s, encoding='utf-8')\n'''
+          new = '''    s = gp.read_text(encoding='utf-8')\n    s = re.sub(r'^(\\s*)WorldData\\.official_city_world\\s*=\\s*(.+)$', r'\\1WorldPoliticalState.set_current_city_world(\\2)', s, flags=re.M)\n    s = re.sub(r'^(\\s*)WorldData\\.official_city_seed\\s*=\\s*(.+)$', r'\\1WorldPoliticalState.set_current_city_seed(\\2)', s, flags=re.M)\n    s = re.sub(r'^(\\s*)WorldData\\.player_city_data\\s*=\\s*(.+)$', r'\\1WorldPoliticalState.replace_current_city_runtime_data(\\2)', s, flags=re.M)\n    s = s.replace('WorldData.official_city_world', 'WorldPoliticalState.get_current_city_world()')\n    s = s.replace('WorldData.official_city_seed', 'WorldPoliticalState.get_current_city_seed()')\n    s = s.replace('WorldData.player_city_data', 'WorldPoliticalState.get_current_city_runtime_data()')\n    gp.write_text(s, encoding='utf-8')\n'''
+          assert old in code
+          code = code.replace(old, new, 1)
+
+          exec(compile(code, '<pass12-refactor-v2>', 'exec'), {})
+          PY
+
+      - name: Commit Pass 12 implementation
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add scripts ci/audit_gdscript.py
+          git commit -m "Pass 12: remove WorldData city compatibility workspace"
+          git push origin HEAD:agent/pass12-remove-city-workspace
