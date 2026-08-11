@@ -6,7 +6,6 @@ class_name SettlementSimulationContext
 # changing how the world selects or identifies a settlement.
 
 const BACKEND_NONE := "none"
-const BACKEND_LEGACY_CITY_WORLD_DATA := "legacy_city_world_data"
 const BACKEND_CITY_SETTLEMENT_STATE := "city_settlement_state"
 
 var settlement_id: int = SettlementData.INVALID_SETTLEMENT_ID
@@ -42,12 +41,10 @@ func supports_city_simulation() -> bool:
 	if settlement_type != SettlementData.SETTLEMENT_TYPE_CITY:
 		return false
 
-	if backend_kind == BACKEND_CITY_SETTLEMENT_STATE:
-		return local_state is CitySettlementSimulationState
-
-	# Kept only as a compatibility backend for records created by the previous
-	# foundation pass. New city settlements use BACKEND_CITY_SETTLEMENT_STATE.
-	return backend_kind == BACKEND_LEGACY_CITY_WORLD_DATA
+	return (
+		backend_kind == BACKEND_CITY_SETTLEMENT_STATE
+		and local_state is CitySettlementSimulationState
+	)
 
 
 func has_instance_owned_city_state() -> bool:

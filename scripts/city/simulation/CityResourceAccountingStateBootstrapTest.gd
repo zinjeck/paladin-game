@@ -9,7 +9,6 @@ var failure_count: int = 0
 func _ready() -> void:
 	_test_state_defaults()
 	_test_founding_adopts_pre_context_state()
-	_test_legacy_backend_conversion_adopts_state()
 	WorldPoliticalState.reset_state()
 	WorldData.reset_runtime_session_state()
 
@@ -126,127 +125,6 @@ func _test_founding_adopts_pre_context_state() -> void:
 		"Repeated founding synchronization must not replace accounting state."
 	)
 
-
-func _test_legacy_backend_conversion_adopts_state() -> void:
-	WorldPoliticalState.reset_state()
-	WorldData.reset_runtime_session_state()
-
-	var culture := WorldData.create_culture("Resource Legacy Culture")
-	var polity := WorldPoliticalState.create_polity({
-		"name": "Resource Legacy Realm",
-		"polity_type": PolityData.POLITY_TYPE_KINGDOM,
-		"primary_culture_id": int(culture.get("id", -1)),
-	})
-	var legacy_city := WorldPoliticalState.create_settlement({
-		"name": "Resource Legacy City",
-		"settlement_type": SettlementData.SETTLEMENT_TYPE_CITY,
-		"polity_id": int(polity.get("id", -1)),
-		"world_region_top_left": Vector2i(2, 2),
-		"world_region_center": Vector2i(2, 2),
-		"world_region_size": 1,
-		"simulation_backend_kind": (
-			SettlementSimulationContext.BACKEND_LEGACY_CITY_WORLD_DATA
-		),
-	})
-	_expect(
-		not legacy_city.is_empty()
-		and WorldPoliticalState.set_active_settlement(
-			int(legacy_city.get("id", -1))
-		),
-		"Fixture must activate a legacy-backed City."
-	)
-	if legacy_city.is_empty():
-		return
-
-	var legacy_cache: Dictionary = {WorldData.RESOURCE_STONE: 23}
-	var legacy_state := (
-		CityResourceAccountingSystem.get_current_state()
-	)
-	legacy_state.owned_resource_amount_cache = legacy_cache
-	legacy_state.owned_resource_amount_cache_container_version = 9
-	legacy_state.container_version = 9
-	legacy_state.public_storage_version = 6
-
-	var city_id := int(legacy_city["id"])
-	_expect(
-		WorldPoliticalState.set_settlement_simulation_backend(
-			city_id,
-			SettlementSimulationContext.BACKEND_CITY_SETTLEMENT_STATE
-		),
-		"The active legacy City must convert to instance-owned state."
-	)
-	var converted_state = WorldPoliticalState.get_city_simulation_state(city_id)
-	_expect(
-		converted_state is CitySettlementSimulationState
-		and is_same(
-			converted_state.resource_accounting_state,
-			legacy_state
-		)
-		and is_same(
-			converted_state.resource_accounting_state.owned_resource_amount_cache,
-			legacy_cache
-		)
-		and CityResourceAccountingSystem.get_current_state().owned_resource_amount_cache_container_version == 9
-		and CityResourceAccountingSystem.get_city_container_version() == 9
-		and CityResourceAccountingSystem.get_city_public_storage_version() == 6,
-		"Legacy conversion must preserve all four accounting-state values."
-	)
-
-	var fallback_city := WorldPoliticalState.create_settlement({
-		"name": "Second Resource Legacy City",
-		"settlement_type": SettlementData.SETTLEMENT_TYPE_CITY,
-		"polity_id": int(polity.get("id", -1)),
-		"world_region_top_left": Vector2i(6, 6),
-		"world_region_center": Vector2i(6, 6),
-		"world_region_size": 1,
-		"simulation_backend_kind": (
-			SettlementSimulationContext.BACKEND_LEGACY_CITY_WORLD_DATA
-		),
-	})
-	_expect(
-		not fallback_city.is_empty()
-		and WorldPoliticalState.set_active_settlement(
-			int(fallback_city.get("id", -1))
-		),
-		"Fixture must activate a second legacy-backed City."
-	)
-	var rotated_fallback := (
-		CityResourceAccountingSystem.get_current_state()
-	)
-	_expect(
-		not is_same(rotated_fallback, legacy_state)
-		and rotated_fallback.owned_resource_amount_cache.is_empty()
-		and rotated_fallback.owned_resource_amount_cache_container_version == -1
-		and rotated_fallback.container_version == 0
-		and rotated_fallback.public_storage_version == 0,
-		"Legacy conversion must rotate a fresh pre-context accounting fallback."
-	)
-	_expect(
-		WorldPoliticalState.set_active_settlement(city_id)
-		and is_same(
-			CityResourceAccountingSystem.get_current_state(),
-			legacy_state
-		)
-		and is_same(
-			CityResourceAccountingSystem.get_current_state().owned_resource_amount_cache,
-			legacy_cache
-		),
-		"The converted City must retain its accounting owner after fallback use."
-	)
-
-	WorldData.reset_runtime_session_state()
-	var reset_state := (
-		CityResourceAccountingSystem.get_current_state()
-	)
-	_expect(
-		WorldPoliticalState.settlement_city_state_by_id.is_empty()
-		and not is_same(reset_state, legacy_state)
-		and reset_state.owned_resource_amount_cache.is_empty()
-		and reset_state.owned_resource_amount_cache_container_version == -1
-		and reset_state.container_version == 0
-		and reset_state.public_storage_version == 0,
-		"A global runtime reset must discard every settlement accounting owner."
-	)
 
 
 func _make_world(width: int, height: int, seed: int) -> WorldData:

@@ -10,7 +10,6 @@ func _ready() -> void:
 	_test_state_defaults()
 	_test_pre_context_state_adoption()
 	_test_real_founding_spatial_bootstrap()
-	_test_legacy_backend_conversion_adopts_state()
 	WorldData.reset_runtime_session_state()
 
 	if failure_count > 0:
@@ -182,114 +181,6 @@ func _test_real_founding_spatial_bootstrap() -> void:
 		"A clean spatial ensure must not publish a false change."
 	)
 
-
-func _test_legacy_backend_conversion_adopts_state() -> void:
-	WorldData.reset_runtime_session_state()
-	var culture := WorldData.create_culture("Citizen Spatial Legacy Culture")
-	var culture_id := int(culture.get("id", -1))
-	var polity := WorldPoliticalState.create_polity({
-		"name": "Citizen Spatial Legacy Realm",
-		"polity_type": PolityData.POLITY_TYPE_KINGDOM,
-		"primary_culture_id": culture_id,
-	})
-	var legacy_city := _create_city(
-		"Citizen Spatial Legacy City",
-		int(polity.get("id", -1)),
-		Vector2i(2, 2),
-		SettlementSimulationContext.BACKEND_LEGACY_CITY_WORLD_DATA
-	)
-	_expect(
-		not legacy_city.is_empty()
-		and WorldPoliticalState.set_active_settlement(
-			int(legacy_city.get("id", -1))
-		),
-		"The fixture must activate a legacy-backed City."
-	)
-	if legacy_city.is_empty():
-		return
-
-	WorldData.add_city_citizen(
-		"",
-		Vector2i(3, 3),
-		WorldData.CITY_CITIZEN_SEX_MALE,
-		culture_id
-	)
-	WorldData.add_city_citizen(
-		"",
-		Vector2i(3, 3),
-		WorldData.CITY_CITIZEN_SEX_FEMALE,
-		culture_id
-	)
-	var legacy_state := (
-		CityCitizenSpatialSystem.get_current_state()
-	)
-	var legacy_index: Dictionary = legacy_state.citizen_ids_by_tile
-	var legacy_city_id := int(legacy_city["id"])
-	_expect(
-		WorldPoliticalState.set_settlement_simulation_backend(
-			legacy_city_id,
-			SettlementSimulationContext.BACKEND_CITY_SETTLEMENT_STATE
-		),
-		"Legacy spatial data must exist before backend conversion."
-	)
-	var converted_state = WorldPoliticalState.get_city_simulation_state(
-		legacy_city_id
-	)
-	_expect(
-		converted_state is CitySettlementSimulationState
-		and is_same(converted_state.citizen_spatial_state, legacy_state)
-		and is_same(
-			converted_state.citizen_spatial_state.citizen_ids_by_tile,
-			legacy_index
-		)
-		and legacy_index.get(Vector2i(3, 3), []) == [1, 2]
-		and legacy_state.citizen_spatial_version == 2,
-		"Legacy conversion must transfer the exact two-field spatial owner."
-	)
-
-	var fallback_city := _create_city(
-		"Second Citizen Spatial Legacy City",
-		int(polity.get("id", -1)),
-		Vector2i(6, 6),
-		SettlementSimulationContext.BACKEND_LEGACY_CITY_WORLD_DATA
-	)
-	_expect(
-		not fallback_city.is_empty()
-		and WorldPoliticalState.set_active_settlement(
-			int(fallback_city.get("id", -1))
-		),
-		"A second legacy-backed City must use the rotated fallback."
-	)
-	var rotated_fallback := (
-		CityCitizenSpatialSystem.get_current_state()
-	)
-	_expect(
-		not is_same(rotated_fallback, legacy_state)
-		and rotated_fallback.citizen_ids_by_tile.is_empty()
-		and rotated_fallback.citizen_spatial_version == 0,
-		"Conversion must rotate a fresh pre-context spatial fallback."
-	)
-	_expect(
-		WorldPoliticalState.set_active_settlement(legacy_city_id)
-		and is_same(
-			CityCitizenSpatialSystem.get_current_state(),
-			legacy_state
-		)
-		and is_same(CityCitizenSpatialSystem.get_current_state().citizen_ids_by_tile, legacy_index),
-		"The converted City must retain its exact spatial owner after switching."
-	)
-
-	WorldData.reset_runtime_session_state()
-	var reset_state := (
-		CityCitizenSpatialSystem.get_current_state()
-	)
-	_expect(
-		WorldPoliticalState.settlement_city_state_by_id.is_empty()
-		and not is_same(reset_state, legacy_state)
-		and reset_state.citizen_ids_by_tile.is_empty()
-		and reset_state.citizen_spatial_version == 0,
-		"A runtime reset must discard every settlement spatial owner."
-	)
 
 
 func _spatial_index_matches_registry(spatial_index: Dictionary) -> bool:

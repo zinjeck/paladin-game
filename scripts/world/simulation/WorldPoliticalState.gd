@@ -1,9 +1,8 @@
 extends Node
 
 # Authoritative runtime registry for polity and settlement identity plus each
-# settlement's local simulation state. WorldData remains the compatibility
-# execution workspace while city systems are migrated, but it is no longer the
-# only place where a city's mutable state can live.
+# settlement's local simulation state. City settlements use instance-owned
+# CitySettlementSimulationState as their only simulation backend.
 
 const PolityDataScript = preload(
 	"res://scripts/world/simulation/PolityData.gd"
@@ -416,13 +415,6 @@ func set_settlement_simulation_backend(
 	):
 		return false
 
-	var previous_backend_kind := str(
-		settlement_backend_kind_by_id.get(
-			settlement_id,
-			SettlementSimulationContextScript.BACKEND_NONE
-		)
-	)
-
 	settlement_backend_kind_by_id[settlement_id] = backend_kind
 
 	if (
@@ -430,66 +422,9 @@ func set_settlement_simulation_backend(
 		== SettlementSimulationContextScript.BACKEND_CITY_SETTLEMENT_STATE
 		and not settlement_city_state_by_id.has(settlement_id)
 	):
-		var city_state := CitySettlementSimulationStateScript.new()
-
-		# Only the old legacy backend can legitimately mean that the current
-		# WorldData workspace belongs to this same settlement. BACKEND_NONE may
-		# leave another city's compatibility workspace loaded, so copying it here
-		# would silently clone that city's population/resources into this one.
-		if (
-			settlement_id == active_settlement_id
-			and previous_backend_kind
-			== SettlementSimulationContextScript.BACKEND_LEGACY_CITY_WORLD_DATA
-		):
-			# Extracted ownership still resolves through unbound compatibility
-			# state while the legacy backend is active. Transfer those exact
-			# owners once; the retired compatibility capture hook no longer copies them.
-			city_state.object_state = _unbound_city_object_state
-			_unbound_city_object_state = CityObjectStateScript.new()
-			city_state.resource_accounting_state = (
-				_unbound_city_resource_accounting_state
-			)
-			_unbound_city_resource_accounting_state = (
-				CityResourceAccountingStateScript.new()
-			)
-			city_state.citizen_registry_state = (
-				_unbound_city_citizen_registry_state
-			)
-			_unbound_city_citizen_registry_state = (
-				CityCitizenRegistryStateScript.new()
-			)
-			city_state.assignment_state = _unbound_city_assignment_state
-			_unbound_city_assignment_state = CityAssignmentStateScript.new()
-			city_state.workplace_state = _unbound_city_workplace_state
-			_unbound_city_workplace_state = CityWorkplaceStateScript.new()
-			city_state.citizen_spatial_state = (
-				_unbound_city_citizen_spatial_state
-			)
-			_unbound_city_citizen_spatial_state = (
-				CityCitizenSpatialStateScript.new()
-			)
-			city_state.citizen_movement_runtime_state = (
-				_unbound_city_citizen_movement_runtime_state
-			)
-			_unbound_city_citizen_movement_runtime_state = (
-				CityCitizenMovementRuntimeStateScript.new()
-			)
-			city_state.citizen_task_runtime_state = (
-				_unbound_city_citizen_task_runtime_state
-			)
-			_unbound_city_citizen_task_runtime_state = (
-				CityCitizenTaskRuntimeStateScript.new()
-			)
-			city_state.navigation_state = _unbound_city_navigation_state
-			_unbound_city_navigation_state = CityNavigationStateScript.new()
-			city_state.city_world = _unbound_city_world
-			city_state.city_seed = _unbound_city_seed
-			city_state.city_runtime_data = _unbound_city_runtime_data
-			_unbound_city_world = null
-			_unbound_city_seed = 0
-			_unbound_city_runtime_data = {}
-
-		settlement_city_state_by_id[settlement_id] = city_state
+		settlement_city_state_by_id[settlement_id] = (
+			CitySettlementSimulationStateScript.new()
+		)
 
 	return true
 
@@ -905,8 +840,6 @@ func _has_live_foundation_registry() -> bool:
 func _is_valid_backend_kind(backend_kind: String) -> bool:
 	return (
 		backend_kind == SettlementSimulationContextScript.BACKEND_NONE
-		or backend_kind
-		== SettlementSimulationContextScript.BACKEND_LEGACY_CITY_WORLD_DATA
 		or backend_kind
 		== SettlementSimulationContextScript.BACKEND_CITY_SETTLEMENT_STATE
 	)

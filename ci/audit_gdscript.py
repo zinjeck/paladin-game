@@ -184,6 +184,11 @@ RETIRED_CITY_WORKSPACE_BRIDGE_SYMBOLS = (
     "is_bound_to_world_data_workspace",
 )
 
+RETIRED_LEGACY_CITY_BACKEND_SYMBOLS = (
+    "BACKEND_LEGACY_CITY_WORLD_DATA",
+    "legacy_city_world_data",
+)
+
 WORLD_DATA_FORBIDDEN_CITY_NAVIGATION_SYMBOLS = (
     "city_object_access_tile_cache",
     "get_city_object_access_tiles",
@@ -1319,6 +1324,15 @@ def main() -> int:
                 if re.search(rf"(?:func\s+)?{re.escape(symbol)}\b", source_text):
                     errors.append(f"{relative}: retired Pass 12 capture/apply bridge symbol remains: {symbol}")
 
+        for path in scripts:
+            relative = str(path.relative_to(ROOT))
+            source_text = path.read_text(encoding="utf-8")
+            for symbol in RETIRED_LEGACY_CITY_BACKEND_SYMBOLS:
+                if symbol in source_text:
+                    errors.append(
+                        f"{relative}: retired Pass 13 legacy city backend symbol remains: {symbol}"
+                    )
+
         for symbol in WORLD_DATA_FORBIDDEN_CITY_NAVIGATION_SYMBOLS:
             declaration_patterns = (
                 rf"^\s*static\s+var\s+{re.escape(symbol)}\b",
@@ -1879,7 +1893,6 @@ def main() -> int:
             "func get_current_city_resource_accounting_state() -> "
             "CityResourceAccountingState:",
             "capital_state.resource_accounting_state =",
-            "city_state.resource_accounting_state =",
         )
         for required_surface in required_political_accounting_surfaces:
             if required_surface not in political_state_text:
@@ -2292,10 +2305,6 @@ def main() -> int:
                 "founding adoption",
                 r"^\s*capital_state\.citizen_registry_state\s*=",
             ),
-            (
-                "legacy adoption",
-                r"^\s*city_state\.citizen_registry_state\s*=",
-            ),
         )
         for surface_description, required_pattern in (
             required_political_registry_surfaces
@@ -2310,11 +2319,10 @@ def main() -> int:
                     "citizen-registry ownership surface: "
                     f"{surface_description}"
                 )
-        if political_state_text.count("CityCitizenRegistryStateScript.new()") < 3:
+        if political_state_text.count("CityCitizenRegistryStateScript.new()") < 2:
             errors.append(
                 "scripts/world/simulation/WorldPoliticalState.gd: citizen "
-                "registry fallback must be created initially, on reset, and "
-                "after legacy adoption"
+                "registry fallback must be created initially and on reset"
             )
         if not re.search(
             r"^func\s+get_city_citizen_registry_state\s*\(\s*\)\s*:",
@@ -2527,10 +2535,6 @@ def main() -> int:
                 "founding adoption",
                 r"^\s*capital_state\.citizen_spatial_state\s*=",
             ),
-            (
-                "legacy adoption",
-                r"^\s*city_state\.citizen_spatial_state\s*=",
-            ),
         )
         for surface_description, required_pattern in (
             required_political_spatial_surfaces
@@ -2545,11 +2549,10 @@ def main() -> int:
                     "citizen-spatial ownership surface: "
                     f"{surface_description}"
                 )
-        if political_state_text.count("CityCitizenSpatialStateScript.new()") < 3:
+        if political_state_text.count("CityCitizenSpatialStateScript.new()") < 2:
             errors.append(
                 "scripts/world/simulation/WorldPoliticalState.gd: citizen "
-                "spatial fallback must be created initially, on reset, and "
-                "after legacy adoption"
+                "spatial fallback must be created initially and on reset"
             )
         if not re.search(
             r"^func\s+get_city_citizen_spatial_state\s*\(\s*\)\s*:",
@@ -2802,10 +2805,6 @@ def main() -> int:
                 "founding adoption",
                 r"^\s*capital_state\.citizen_movement_runtime_state\s*=",
             ),
-            (
-                "legacy adoption",
-                r"^\s*city_state\.citizen_movement_runtime_state\s*=",
-            ),
         )
         for surface_description, required_pattern in (
             required_political_movement_runtime_surfaces
@@ -2824,12 +2823,11 @@ def main() -> int:
             political_state_text.count(
                 "CityCitizenMovementRuntimeStateScript.new()"
             )
-            < 3
+            < 2
         ):
             errors.append(
                 "scripts/world/simulation/WorldPoliticalState.gd: citizen "
-                "movement-runtime fallback must be created initially, on "
-                "reset, and after legacy adoption"
+                "movement-runtime fallback must be created initially and on reset"
             )
         if not re.search(
             r"^func\s+get_city_citizen_movement_runtime_state"
@@ -3055,10 +3053,6 @@ def main() -> int:
                 "founding adoption",
                 r"^\s*capital_state\.citizen_task_runtime_state\s*=",
             ),
-            (
-                "legacy adoption",
-                r"^\s*city_state\.citizen_task_runtime_state\s*=",
-            ),
         )
         for surface_description, required_pattern in (
             required_political_task_runtime_surfaces
@@ -3073,11 +3067,10 @@ def main() -> int:
                     "citizen task-runtime ownership surface: "
                     f"{surface_description}"
                 )
-        if political_state_text.count("CityCitizenTaskRuntimeStateScript.new()") < 3:
+        if political_state_text.count("CityCitizenTaskRuntimeStateScript.new()") < 2:
             errors.append(
                 "scripts/world/simulation/WorldPoliticalState.gd: citizen "
-                "task-runtime fallback must be created initially, on reset, and "
-                "after legacy adoption"
+                "task-runtime fallback must be created initially and on reset"
             )
         if not re.search(
             r"^func\s+get_city_citizen_task_runtime_state\s*\(\s*\)\s*:",

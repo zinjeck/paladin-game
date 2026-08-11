@@ -10,7 +10,6 @@ func _ready() -> void:
 	_test_state_defaults()
 	_test_pre_context_state_adoption()
 	_test_real_founding_bootstrap()
-	_test_legacy_backend_conversion_adopts_state()
 	_test_city_and_session_reset()
 	WorldData.reset_runtime_session_state()
 
@@ -175,106 +174,6 @@ func _test_real_founding_bootstrap() -> void:
 		"A clean founding ensure must neither replace nor invalidate runtime."
 	)
 
-
-func _test_legacy_backend_conversion_adopts_state() -> void:
-	WorldData.reset_runtime_session_state()
-	var culture := WorldData.create_culture("Movement Runtime Legacy Culture")
-	var polity := WorldPoliticalState.create_polity({
-		"name": "Movement Runtime Legacy Realm",
-		"polity_type": PolityData.POLITY_TYPE_KINGDOM,
-		"primary_culture_id": int(culture.get("id", -1)),
-	})
-	var legacy_city := _create_city(
-		"Movement Runtime Legacy City",
-		int(polity.get("id", -1)),
-		Vector2i(2, 2),
-		SettlementSimulationContext.BACKEND_LEGACY_CITY_WORLD_DATA
-	)
-	_expect(
-		not legacy_city.is_empty()
-		and WorldPoliticalState.set_active_settlement(
-			int(legacy_city.get("id", -1))
-		),
-		"The fixture must activate a legacy-backed City."
-	)
-	if legacy_city.is_empty():
-		return
-
-	var legacy_ids: Array[int] = [31]
-	var legacy_lookup: Dictionary = {31: true}
-	var legacy_events: Array = [{"marker": "legacy"}]
-	var legacy_state := (
-		CityCitizenMovementRuntimeSystem.get_current_state()
-	)
-	legacy_state.active_mover_ids = legacy_ids
-	legacy_state.active_mover_id_lookup = legacy_lookup
-	legacy_state.citizen_movement_visual_events = legacy_events
-	legacy_state.citizen_movement_visual_tick_index = 91
-	legacy_state.citizen_movement_version = 12
-	var legacy_city_id := int(legacy_city["id"])
-	_expect(
-		WorldPoliticalState.set_settlement_simulation_backend(
-			legacy_city_id,
-			SettlementSimulationContext.BACKEND_CITY_SETTLEMENT_STATE
-		),
-		"Legacy movement runtime must exist before backend conversion."
-	)
-	var converted_state = WorldPoliticalState.get_city_simulation_state(
-		legacy_city_id
-	)
-	_expect(
-		converted_state is CitySettlementSimulationState
-		and is_same(
-			converted_state.citizen_movement_runtime_state,
-			legacy_state
-		)
-		and is_same(
-			converted_state
-			.citizen_movement_runtime_state
-			.active_mover_ids,
-			legacy_ids
-		)
-		and is_same(
-			converted_state
-			.citizen_movement_runtime_state
-			.citizen_movement_visual_events,
-			legacy_events
-		)
-		and legacy_state.citizen_movement_visual_tick_index == 91
-		and legacy_state.citizen_movement_version == 12,
-		"Legacy conversion must transfer the exact five-field owner."
-	)
-
-	var fallback_city := _create_city(
-		"Second Movement Runtime Legacy City",
-		int(polity.get("id", -1)),
-		Vector2i(6, 6),
-		SettlementSimulationContext.BACKEND_LEGACY_CITY_WORLD_DATA
-	)
-	_expect(
-		not fallback_city.is_empty()
-		and WorldPoliticalState.set_active_settlement(
-			int(fallback_city.get("id", -1))
-		),
-		"A second legacy-backed City must use the rotated fallback."
-	)
-	var rotated_fallback := (
-		CityCitizenMovementRuntimeSystem.get_current_state()
-	)
-	_expect(
-		not is_same(rotated_fallback, legacy_state)
-		and _state_has_clean_defaults(rotated_fallback),
-		"Legacy conversion must rotate a clean movement-runtime fallback."
-	)
-	_expect(
-		WorldPoliticalState.set_active_settlement(legacy_city_id)
-		and is_same(
-			CityCitizenMovementRuntimeSystem.get_current_state(),
-			legacy_state
-		)
-		and is_same(CityCitizenMovementRuntimeSystem.get_current_state().active_mover_ids, legacy_ids),
-		"The converted City must retain its owner after fallback use."
-	)
 
 
 func _test_city_and_session_reset() -> void:
