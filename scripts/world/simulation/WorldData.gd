@@ -98,10 +98,6 @@ static var official_region_size: int = 0
 static var official_world_scene_path: String = ""
 static var official_city_scene_path: String = ""
 
-# Navigation access-tile caching is the remaining city-local compatibility
-# projection still owned by WorldData after Pass 10.
-static var city_object_access_tile_cache: Dictionary = {}
-
 const STARTING_CITY_POPULATION := 8
 const CITY_CITIZEN_SEX_MALE := (
 	CityCitizensScript.CITY_CITIZEN_SEX_MALE
@@ -2353,7 +2349,7 @@ static func reset_player_city_state() -> void:
 	CityLogisticsSystem.reset_city_haul_reservation_state()
 	CityLogisticsSystem.reset_city_ground_pile_state()
 	CityConstructionSystem.reset_city_construction_state()
-	city_object_access_tile_cache.clear()
+	CityNavigationSystem.reset_city_navigation_state()
 	CityObjectSystem.reset_city_object_state()
 	CityEmploymentSystem.mark_city_workplaces_changed()
 
@@ -2367,121 +2363,6 @@ static func reset_player_city_state() -> void:
 #endregion
 
 #region City Object Placement and Traversal
-
-
-static func _sort_city_tiles_y_then_x(
-	tile_a: Vector2i,
-	tile_b: Vector2i
-) -> bool:
-	if tile_a.y == tile_b.y:
-		return tile_a.x < tile_b.x
-
-	return tile_a.y < tile_b.y
-
-
-static func get_city_object_access_tiles(
-	city_world: WorldData,
-	city_object: Dictionary
-) -> Array:
-	var access_tiles := []
-
-	if city_world == null:
-		return access_tiles
-
-	if city_object.is_empty():
-		return access_tiles
-
-	var footprint_tiles := CityObjectSystem.get_city_object_footprint_tiles(
-		city_object
-	)
-	var object_id := int(city_object.get("id", -1))
-	var footprint_hash_value := int(hash(footprint_tiles))
-
-	if object_id > 0:
-		var raw_cache_entry = city_object_access_tile_cache.get(
-			object_id,
-			{}
-		)
-
-		if raw_cache_entry is Dictionary:
-			var cache_entry: Dictionary = raw_cache_entry
-
-			if (
-				int(cache_entry.get("world_instance_id", -1))
-				== int(city_world.get_instance_id())
-				and int(cache_entry.get("tile_data_version", -1))
-				== city_world.tile_data_version
-				and int(cache_entry.get("city_object_version", -1))
-				== CityObjectSystem.get_city_object_version()
-				and int(cache_entry.get("footprint_hash", -1))
-				== footprint_hash_value
-			):
-				var raw_cached_tiles = cache_entry.get(
-					"access_tiles",
-					[]
-				)
-
-				if raw_cached_tiles is Array:
-					return raw_cached_tiles.duplicate()
-
-	var footprint_lookup: Dictionary = {}
-
-	for raw_footprint_tile in footprint_tiles:
-		if not raw_footprint_tile is Vector2i:
-			continue
-
-		var footprint_tile: Vector2i = (
-			raw_footprint_tile
-		)
-
-		footprint_lookup[footprint_tile] = true
-
-	var access_tile_lookup: Dictionary = {}
-
-	for raw_footprint_tile in footprint_tiles:
-		if not raw_footprint_tile is Vector2i:
-			continue
-
-		var footprint_tile: Vector2i = (
-			raw_footprint_tile
-		)
-
-		for offset in CITY_CARDINAL_TILE_OFFSETS:
-			var candidate_tile: Vector2i = (
-				footprint_tile + offset
-			)
-
-			if footprint_lookup.has(candidate_tile):
-				continue
-
-			if access_tile_lookup.has(candidate_tile):
-				continue
-
-			if not CityNavigationSystem.is_city_tile_walkable_for_citizen(
-				city_world,
-				candidate_tile
-			):
-				continue
-
-			access_tile_lookup[candidate_tile] = true
-			access_tiles.append(candidate_tile)
-
-	access_tiles.sort_custom(
-		_sort_city_tiles_y_then_x
-	)
-
-	if object_id > 0:
-		city_object_access_tile_cache[object_id] = {
-			"world_instance_id": int(
-				city_world.get_instance_id()
-			),
-			"tile_data_version": city_world.tile_data_version,
-			"city_object_version": CityObjectSystem.get_city_object_version(),
-			"footprint_hash": footprint_hash_value,
-			"access_tiles": access_tiles.duplicate(),
-		}
-
-	return access_tiles
 
 
 static func get_starting_city_citizen_spawn_tiles(
@@ -2499,7 +2380,7 @@ static func get_starting_city_citizen_spawn_tiles(
 		):
 			continue
 
-		return get_city_object_access_tiles(
+		return CityNavigationSystem.get_city_object_access_tiles(
 			city_world,
 			city_object
 		)

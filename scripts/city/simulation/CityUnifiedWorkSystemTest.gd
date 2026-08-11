@@ -1054,7 +1054,7 @@ func _test_workplace_fish_production_accounting() -> void:
 		"city_world": city_world,
 	})
 	var fishery_id := int(fishery.get("id", -1))
-	var access_tiles := WorldData.get_city_object_access_tiles(
+	var access_tiles := CityNavigationSystem.get_city_object_access_tiles(
 		city_world,
 		fishery
 	)

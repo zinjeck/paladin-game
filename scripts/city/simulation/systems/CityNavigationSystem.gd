@@ -22,6 +22,93 @@ const EXACT_DESTINATION_HEURISTIC_LIMIT: int = 8
 # weight-one heuristic and optimizes exact estimated travel time.
 const HEURISTIC_WEIGHT: int = 1
 
+static func get_current_state() -> CityNavigationState:
+	return WorldPoliticalState.get_current_city_navigation_state()
+
+
+static func reset_city_navigation_state() -> void:
+	get_current_state().object_access_tile_cache.clear()
+
+
+static func _sort_city_tiles_y_then_x(
+	tile_a: Vector2i,
+	tile_b: Vector2i
+) -> bool:
+	if tile_a.y == tile_b.y:
+		return tile_a.x < tile_b.x
+
+	return tile_a.y < tile_b.y
+
+
+static func get_city_object_access_tiles(
+	city_world: WorldData,
+	city_object: Dictionary
+) -> Array:
+	var access_tiles := []
+
+	if city_world == null or city_object.is_empty():
+		return access_tiles
+
+	var footprint_tiles := CityObjectSystem.get_city_object_footprint_tiles(
+		city_object
+	)
+	var object_id := int(city_object.get("id", -1))
+	var footprint_hash_value := int(hash(footprint_tiles))
+	var cache := get_current_state().object_access_tile_cache
+
+	if object_id > 0:
+		var raw_cache_entry = cache.get(object_id, {})
+		if raw_cache_entry is Dictionary:
+			var cache_entry: Dictionary = raw_cache_entry
+			if (
+				int(cache_entry.get("world_instance_id", -1))
+				== int(city_world.get_instance_id())
+				and int(cache_entry.get("tile_data_version", -1))
+				== city_world.tile_data_version
+				and int(cache_entry.get("city_object_version", -1))
+				== CityObjectSystem.get_city_object_version()
+				and int(cache_entry.get("footprint_hash", -1))
+				== footprint_hash_value
+			):
+				var raw_cached_tiles = cache_entry.get("access_tiles", [])
+				if raw_cached_tiles is Array:
+					return raw_cached_tiles.duplicate()
+
+	var footprint_lookup: Dictionary = {}
+	for raw_footprint_tile in footprint_tiles:
+		if raw_footprint_tile is Vector2i:
+			footprint_lookup[raw_footprint_tile] = true
+
+	var access_tile_lookup: Dictionary = {}
+	for raw_footprint_tile in footprint_tiles:
+		if not raw_footprint_tile is Vector2i:
+			continue
+		var footprint_tile: Vector2i = raw_footprint_tile
+		for offset in WorldData.CITY_CARDINAL_TILE_OFFSETS:
+			var candidate_tile := footprint_tile + offset
+			if footprint_lookup.has(candidate_tile):
+				continue
+			if access_tile_lookup.has(candidate_tile):
+				continue
+			if not is_city_tile_walkable_for_citizen(city_world, candidate_tile):
+				continue
+			access_tile_lookup[candidate_tile] = true
+			access_tiles.append(candidate_tile)
+
+	access_tiles.sort_custom(_sort_city_tiles_y_then_x)
+
+	if object_id > 0:
+		cache[object_id] = {
+			"world_instance_id": int(city_world.get_instance_id()),
+			"tile_data_version": city_world.tile_data_version,
+			"city_object_version": CityObjectSystem.get_city_object_version(),
+			"footprint_hash": footprint_hash_value,
+			"access_tiles": access_tiles.duplicate(),
+		}
+
+	return access_tiles
+
+
 const HEAP_TILE_INDEX: int = 0
 const HEAP_TOTAL_COST_INDEX: int = 1
 const HEAP_HEURISTIC_INDEX: int = 2

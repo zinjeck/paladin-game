@@ -2390,7 +2390,7 @@ static func _get_endpoint_access_tiles(
 ) -> Array:
 	match str(endpoint.get("kind", "")):
 		WorldData.CITY_CITIZEN_HAUL_ENDPOINT_KIND_CITY_OBJECT_CONTAINER:
-			return WorldData.get_city_object_access_tiles(
+			return CityNavigationSystem.get_city_object_access_tiles(
 				WorldData.official_city_world,
 				CityObjectSystem.get_city_object_by_id(int(endpoint.get("id", -1)))
 			)
@@ -2474,7 +2474,7 @@ static func get_haul_endpoint_access_tiles(
 	if city_object.is_empty():
 		return []
 
-	return WorldData.get_city_object_access_tiles(city_world, city_object)
+	return CityNavigationSystem.get_city_object_access_tiles(city_world, city_object)
 
 
 static func _get_container_object_for_endpoint(

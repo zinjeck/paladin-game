@@ -290,7 +290,7 @@ static func is_city_citizen_attending_workplace(
 	if city_world == null:
 		return false
 
-	var access_tiles := WorldData.get_city_object_access_tiles(
+	var access_tiles := CityNavigationSystem.get_city_object_access_tiles(
 		city_world,
 		workplace
 	)
@@ -327,7 +327,7 @@ static func get_city_object_attending_worker_ids(
 	if city_world == null:
 		return attending_worker_ids
 
-	var access_tiles := WorldData.get_city_object_access_tiles(
+	var access_tiles := CityNavigationSystem.get_city_object_access_tiles(
 		city_world,
 		city_object
 	)

@@ -7602,7 +7602,7 @@ func request_debug_navigation_path() -> void:
 		!= WorldData.CITY_OBJECT_ROAD
 	):
 		destination_tiles = (
-			WorldData.get_city_object_access_tiles(
+			CityNavigationSystem.get_city_object_access_tiles(
 				city_world,
 				target_object
 			)

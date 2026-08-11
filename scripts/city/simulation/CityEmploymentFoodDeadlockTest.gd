@@ -216,7 +216,7 @@ func _test_starving_worker_recovers_and_returns_to_work() -> void:
 		"city_world": city_world,
 	})
 	var fishery_id := int(fishery.get("id", -1))
-	var access_tiles := WorldData.get_city_object_access_tiles(
+	var access_tiles := CityNavigationSystem.get_city_object_access_tiles(
 		city_world,
 		fishery
 	)

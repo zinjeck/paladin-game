@@ -139,6 +139,12 @@ WORLD_DATA_FORBIDDEN_CITY_LOGISTICS_SYMBOLS = (
     "reset_city_haul_reservation_state",
 )
 
+WORLD_DATA_FORBIDDEN_CITY_NAVIGATION_SYMBOLS = (
+    "city_object_access_tile_cache",
+    "get_city_object_access_tiles",
+    "_sort_city_tiles_y_then_x",
+)
+
 WORLD_DATA_FORBIDDEN_CITY_OBJECT_SYMBOLS = (
     "city_objects",
     "city_object_index_by_id",
@@ -1209,6 +1215,21 @@ def main() -> int:
                     f"ownership declaration must not return to WorldData: {symbol}"
                 )
 
+
+        for symbol in WORLD_DATA_FORBIDDEN_CITY_NAVIGATION_SYMBOLS:
+            declaration_patterns = (
+                rf"^\s*static\s+var\s+{re.escape(symbol)}\b",
+                rf"^\s*(?:static\s+)?func\s+{re.escape(symbol)}\s*\(",
+            )
+            if any(
+                re.search(pattern, world_data_text, re.MULTILINE)
+                for pattern in declaration_patterns
+            ):
+                errors.append(
+                    "scripts/world/simulation/WorldData.gd: extracted city-navigation "
+                    f"cache/behavior must not return to WorldData: {symbol}"
+                )
+
         settlement_state_path = (
             ROOT / "scripts/city/simulation/CitySettlementSimulationState.gd"
         )
@@ -1232,6 +1253,19 @@ def main() -> int:
                         "scripts/city/simulation/CitySettlementSimulationState.gd: "
                         "logistics storage must live in CityLogisticsState, not "
                         f"the settlement root: {declaration}"
+                    )
+
+        for path in scripts:
+            if path == world_data_path:
+                continue
+            relative = str(path.relative_to(ROOT))
+            source_text = path.read_text(encoding="utf-8")
+            for symbol in WORLD_DATA_FORBIDDEN_CITY_NAVIGATION_SYMBOLS:
+                legacy_pattern = rf"WorldData\s*\.\s*{re.escape(symbol)}\b"
+                if re.search(legacy_pattern, source_text):
+                    errors.append(
+                        f"{relative}: legacy WorldData city-navigation reference remains: "
+                        f"WorldData.{symbol}"
                     )
 
         for symbol in WORLD_DATA_FORBIDDEN_CITY_WORK_SYMBOLS:

@@ -1369,11 +1369,11 @@ func _place_and_validate_city_fixture(
 		"Haul state must preserve multi-stop ground-pile routing."
 	)
 
-	var first_access_tiles := WorldData.get_city_object_access_tiles(
+	var first_access_tiles := CityNavigationSystem.get_city_object_access_tiles(
 		renderer.city_world,
 		keep
 	)
-	var second_access_tiles := WorldData.get_city_object_access_tiles(
+	var second_access_tiles := CityNavigationSystem.get_city_object_access_tiles(
 		renderer.city_world,
 		keep
 	)
@@ -1389,7 +1389,7 @@ func _place_and_validate_city_fixture(
 	if not first_access_tiles.is_empty():
 		first_access_tiles.clear()
 		_expect(
-			not WorldData.get_city_object_access_tiles(
+			not CityNavigationSystem.get_city_object_access_tiles(
 				renderer.city_world,
 				keep
 			).is_empty(),
@@ -1417,7 +1417,7 @@ func _test_universal_construction_core(
 			and str(raw_object.get("type", ""))
 			== WorldData.CITY_OBJECT_CITY_CENTER
 		):
-			keep_access_tiles = WorldData.get_city_object_access_tiles(
+			keep_access_tiles = CityNavigationSystem.get_city_object_access_tiles(
 				renderer.city_world,
 				raw_object
 			)
