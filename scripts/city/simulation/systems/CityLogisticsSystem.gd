@@ -2522,10 +2522,10 @@ static func reserve_city_haul_destination(
 		str(
 			normalized_destination.get(
 				"kind",
-				CITY_CITIZEN_HAUL_ENDPOINT_KIND_NONE
+				CityCitizens.CITY_CITIZEN_HAUL_ENDPOINT_KIND_NONE
 			)
 		)
-		== CITY_CITIZEN_HAUL_ENDPOINT_KIND_CONSTRUCTION_SITE
+		== CityCitizens.CITY_CITIZEN_HAUL_ENDPOINT_KIND_CONSTRUCTION_SITE
 	):
 		for resource in resources_to_reserve.keys():
 			var resource_space := (
