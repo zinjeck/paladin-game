@@ -2394,7 +2394,7 @@ static func _get_citizen_life_anchor_tile(citizen: Dictionary) -> Vector2i:
 		if str(city_object.get("type", "")) != WorldData.CITY_OBJECT_CITY_CENTER:
 			continue
 
-		var access_tiles := WorldData.get_city_object_access_tiles(
+		var access_tiles := CityNavigationSystem.get_city_object_access_tiles(
 			WorldData.official_city_world,
 			city_object
 		)

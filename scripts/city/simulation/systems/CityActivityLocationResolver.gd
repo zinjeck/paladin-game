@@ -365,7 +365,7 @@ static func _get_exterior_access_tiles(
 ) -> Array[Vector2i]:
 	var activity_tiles: Array[Vector2i] = []
 
-	for raw_tile in WorldData.get_city_object_access_tiles(
+	for raw_tile in CityNavigationSystem.get_city_object_access_tiles(
 		city_world,
 		workplace
 	):

@@ -37,8 +37,7 @@ var citizen_task_runtime_state: CityCitizenTaskRuntimeState = (
 var work_state: CityWorkState = CityWorkState.new()
 var logistics_state: CityLogisticsState = CityLogisticsState.new()
 var construction_state: CityConstructionState = CityConstructionState.new()
-
-var object_access_tile_cache: Dictionary = {}
+var navigation_state: CityNavigationState = CityNavigationState.new()
 
 
 func capture_from_world_data() -> void:
@@ -46,7 +45,6 @@ func capture_from_world_data() -> void:
 	city_seed = WorldData.official_city_seed
 	city_runtime_data = WorldData.player_city_data
 
-	object_access_tile_cache = WorldData.city_object_access_tile_cache
 
 
 
@@ -55,7 +53,6 @@ func apply_to_world_data() -> void:
 	WorldData.official_city_seed = city_seed
 	WorldData.player_city_data = city_runtime_data
 
-	WorldData.city_object_access_tile_cache = object_access_tile_cache
 
 
 

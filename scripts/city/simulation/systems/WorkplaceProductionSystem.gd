@@ -1049,7 +1049,7 @@ static func _find_workplace_overflow_tile(
 	if footprint_tiles.is_empty():
 		return WorldData.INVALID_CITY_TILE_POSITION
 
-	var access_tiles := WorldData.get_city_object_access_tiles(
+	var access_tiles := CityNavigationSystem.get_city_object_access_tiles(
 		active_world,
 		city_object
 	)

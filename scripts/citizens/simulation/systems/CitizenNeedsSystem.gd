@@ -254,7 +254,7 @@ static func _get_city_citizen_direct_food_withdrawal_target_tiles(
 				CityResourceContainerSystem
 				.city_object_container_is_publicly_usable(city_object)
 			):
-				return WorldData.get_city_object_access_tiles(
+				return CityNavigationSystem.get_city_object_access_tiles(
 					WorldData.official_city_world,
 					city_object
 				)
@@ -265,7 +265,7 @@ static func _get_city_citizen_direct_food_withdrawal_target_tiles(
 				== WorldData.CONTAINER_DIRECT_WITHDRAWAL_PURPOSE_PERSONAL_FOOD
 				and WorldData.city_object_is_workplace(city_object)
 			):
-				return WorldData.get_city_object_access_tiles(
+				return CityNavigationSystem.get_city_object_access_tiles(
 					WorldData.official_city_world,
 					city_object
 				)

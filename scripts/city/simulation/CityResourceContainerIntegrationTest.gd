@@ -666,7 +666,7 @@ func _get_object_access_tile(
 	city_world: WorldData,
 	city_object: Dictionary
 ) -> Vector2i:
-	for raw_tile in WorldData.get_city_object_access_tiles(
+	for raw_tile in CityNavigationSystem.get_city_object_access_tiles(
 		city_world,
 		city_object
 	):

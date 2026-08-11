@@ -258,7 +258,7 @@ func _create_mixed_work_fixture(renderer: CityRenderer) -> Dictionary:
 		"The non-public workplace must hold the fallback fish supply."
 	)
 
-	var fishery_access_tiles := WorldData.get_city_object_access_tiles(
+	var fishery_access_tiles := CityNavigationSystem.get_city_object_access_tiles(
 		city_world,
 		fishery
 	)

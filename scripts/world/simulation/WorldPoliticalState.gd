@@ -50,6 +50,9 @@ const CityLogisticsStateScript = preload(
 const CityConstructionStateScript = preload(
 	"res://scripts/city/simulation/CityConstructionState.gd"
 )
+const CityNavigationStateScript = preload(
+	"res://scripts/city/simulation/CityNavigationState.gd"
+)
 
 var polities_by_id: Dictionary = {}
 var settlements_by_id: Dictionary = {}
@@ -83,6 +86,7 @@ var _unbound_city_citizen_task_runtime_state = (
 var _unbound_city_work_state = CityWorkStateScript.new()
 var _unbound_city_logistics_state = CityLogisticsStateScript.new()
 var _unbound_city_construction_state = CityConstructionStateScript.new()
+var _unbound_city_navigation_state = CityNavigationStateScript.new()
 
 
 func reset_state() -> void:
@@ -116,6 +120,7 @@ func reset_state() -> void:
 	_unbound_city_work_state = CityWorkStateScript.new()
 	_unbound_city_logistics_state = CityLogisticsStateScript.new()
 	_unbound_city_construction_state = CityConstructionStateScript.new()
+	_unbound_city_navigation_state = CityNavigationStateScript.new()
 
 
 func synchronize_foundation_with_world_data() -> bool:
@@ -154,6 +159,7 @@ func synchronize_foundation_with_world_data() -> bool:
 	var unbound_work_state_to_adopt = _unbound_city_work_state
 	var unbound_logistics_state_to_adopt = _unbound_city_logistics_state
 	var unbound_construction_state_to_adopt = _unbound_city_construction_state
+	var unbound_navigation_state_to_adopt = _unbound_city_navigation_state
 
 	reset_state()
 
@@ -227,6 +233,7 @@ func synchronize_foundation_with_world_data() -> bool:
 		capital_state.work_state = unbound_work_state_to_adopt
 		capital_state.logistics_state = unbound_logistics_state_to_adopt
 		capital_state.construction_state = unbound_construction_state_to_adopt
+		capital_state.navigation_state = unbound_navigation_state_to_adopt
 	capital_state.capture_from_world_data()
 
 	_foundation_world_fingerprint = fingerprint
@@ -467,6 +474,8 @@ func set_settlement_simulation_backend(
 			_unbound_city_citizen_task_runtime_state = (
 				CityCitizenTaskRuntimeStateScript.new()
 			)
+			city_state.navigation_state = _unbound_city_navigation_state
+			_unbound_city_navigation_state = CityNavigationStateScript.new()
 			city_state.capture_from_world_data()
 
 		settlement_city_state_by_id[settlement_id] = city_state
@@ -623,6 +632,16 @@ func get_current_city_construction_state() -> CityConstructionState:
 	):
 		return active_city_state.construction_state
 	return _unbound_city_construction_state
+
+
+func get_current_city_navigation_state() -> CityNavigationState:
+	var active_city_state = get_active_city_simulation_state()
+	if (
+		active_city_state != null
+		and active_city_state.navigation_state is CityNavigationState
+	):
+		return active_city_state.navigation_state
+	return _unbound_city_navigation_state
 
 
 # WorldData still owns the legacy city-session reset entry point while local
