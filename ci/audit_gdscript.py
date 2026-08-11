@@ -516,9 +516,7 @@ CITIZEN_SCHEMA_WORLD_DATA_RETIRED_PROPERTIES = (
     "city_citizen_unassigned_name_pool",
 )
 
-DEFERRED_CITIZEN_ROOT_FIELDS = {
-    "object_access_tile_cache": "city_object_access_tile_cache",
-}
+DEFERRED_CITIZEN_ROOT_FIELDS = {}
 
 # Pass 9 keeps physical inventory and scalar needs embedded in the authoritative
 # citizen record, but gives every query and mutation a focused, stateless
@@ -1228,6 +1226,74 @@ def main() -> int:
                 errors.append(
                     "scripts/world/simulation/WorldData.gd: extracted city-navigation "
                     f"cache/behavior must not return to WorldData: {symbol}"
+                )
+
+        navigation_state_path = (
+            ROOT / "scripts/city/simulation/CityNavigationState.gd"
+        )
+        navigation_system_path = (
+            ROOT / "scripts/city/simulation/systems/CityNavigationSystem.gd"
+        )
+        political_state_path = (
+            ROOT / "scripts/world/simulation/WorldPoliticalState.gd"
+        )
+        settlement_state_path_for_navigation = (
+            ROOT / "scripts/city/simulation/CitySettlementSimulationState.gd"
+        )
+        if not navigation_state_path.exists():
+            errors.append(
+                "scripts/city/simulation/CityNavigationState.gd: missing navigation cache state owner"
+            )
+        elif (
+            navigation_system_path.exists()
+            and political_state_path.exists()
+            and settlement_state_path_for_navigation.exists()
+        ):
+            navigation_state_text = navigation_state_path.read_text(encoding="utf-8")
+            navigation_system_text = navigation_system_path.read_text(encoding="utf-8")
+            political_state_text = political_state_path.read_text(encoding="utf-8")
+            settlement_navigation_text = settlement_state_path_for_navigation.read_text(encoding="utf-8")
+            declared_navigation_fields = set(
+                re.findall(
+                    r"^var\s+([A-Za-z_][A-Za-z0-9_]*)\b",
+                    navigation_state_text,
+                    re.MULTILINE,
+                )
+            )
+            if declared_navigation_fields != {"object_access_tile_cache"}:
+                errors.append(
+                    "scripts/city/simulation/CityNavigationState.gd: must own exactly object_access_tile_cache"
+                )
+            if FUNC_RE.search(navigation_state_text):
+                errors.append(
+                    "scripts/city/simulation/CityNavigationState.gd: must remain data-only; navigation behavior belongs in CityNavigationSystem"
+                )
+            required_navigation_surfaces = (
+                "static func get_current_state() -> CityNavigationState:",
+                "static func reset_city_navigation_state() -> void:",
+                "static func get_city_object_access_tiles(",
+            )
+            for surface in required_navigation_surfaces:
+                if surface not in navigation_system_text:
+                    errors.append(
+                        "scripts/city/simulation/systems/CityNavigationSystem.gd: missing required navigation-cache API: "
+                        + surface
+                    )
+            if "var navigation_state: CityNavigationState" not in settlement_navigation_text:
+                errors.append(
+                    "scripts/city/simulation/CitySettlementSimulationState.gd: missing navigation_state owner"
+                )
+            if "object_access_tile_cache = WorldData" in settlement_navigation_text or "WorldData.city_object_access_tile_cache" in settlement_navigation_text:
+                errors.append(
+                    "scripts/city/simulation/CitySettlementSimulationState.gd: navigation cache must not participate in capture/apply"
+                )
+            if "var _unbound_city_navigation_state" not in political_state_text:
+                errors.append(
+                    "scripts/world/simulation/WorldPoliticalState.gd: missing pre-context CityNavigationState owner"
+                )
+            if "func get_current_city_navigation_state() -> CityNavigationState:" not in political_state_text:
+                errors.append(
+                    "scripts/world/simulation/WorldPoliticalState.gd: missing typed current CityNavigationState resolver"
                 )
 
         settlement_state_path = (

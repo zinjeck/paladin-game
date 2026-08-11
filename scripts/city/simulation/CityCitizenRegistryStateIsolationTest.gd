@@ -85,7 +85,7 @@ func _test_equal_version_city_isolation() -> void:
 	CityCitizenMovementRuntimeSystem.get_current_state().citizen_movement_visual_tick_index = 101
 	CityCitizenTaskRuntimeSystem.get_current_state().active_task_ids = task_ids_a
 	CityCitizenTaskRuntimeSystem.get_current_state().active_task_id_lookup = task_lookup_a
-	WorldData.city_object_access_tile_cache = access_cache_a
+	CityNavigationSystem.get_current_state().object_access_tile_cache = access_cache_a
 	CityCitizenMovementRuntimeSystem.get_current_state().citizen_movement_version = 11
 	CityCitizenTaskRuntimeSystem.get_current_state().citizen_task_version = 13
 	CityAssignmentSystem.get_current_state().assignment_version = 15
@@ -157,7 +157,7 @@ func _test_equal_version_city_isolation() -> void:
 	CityCitizenMovementRuntimeSystem.get_current_state().citizen_movement_visual_tick_index = 202
 	CityCitizenTaskRuntimeSystem.get_current_state().active_task_ids = task_ids_b
 	CityCitizenTaskRuntimeSystem.get_current_state().active_task_id_lookup = task_lookup_b
-	WorldData.city_object_access_tile_cache = access_cache_b
+	CityNavigationSystem.get_current_state().object_access_tile_cache = access_cache_b
 	CityCitizenMovementRuntimeSystem.get_current_state().citizen_movement_version = 12
 	CityCitizenTaskRuntimeSystem.get_current_state().citizen_task_version = 14
 	CityAssignmentSystem.get_current_state().assignment_version = 16
@@ -181,7 +181,7 @@ func _test_equal_version_city_isolation() -> void:
 		and CityCitizenMovementRuntimeSystem.get_current_state().citizen_movement_visual_tick_index == 101
 		and is_same(CityCitizenTaskRuntimeSystem.get_current_state().active_task_ids, task_ids_a)
 		and is_same(CityCitizenTaskRuntimeSystem.get_current_state().active_task_id_lookup, task_lookup_a)
-		and is_same(WorldData.city_object_access_tile_cache, access_cache_a)
+		and is_same(CityNavigationSystem.get_current_state().object_access_tile_cache, access_cache_a)
 		and CityCitizenMovementRuntimeSystem.get_current_state().citizen_movement_version == 11
 		and CityCitizenTaskRuntimeSystem.get_current_state().citizen_task_version == 13
 		and CityAssignmentSystem.get_current_state().assignment_version == 15
@@ -210,7 +210,7 @@ func _test_equal_version_city_isolation() -> void:
 		and CityCitizenMovementRuntimeSystem.get_current_state().citizen_movement_visual_tick_index == 202
 		and is_same(CityCitizenTaskRuntimeSystem.get_current_state().active_task_ids, task_ids_b)
 		and is_same(CityCitizenTaskRuntimeSystem.get_current_state().active_task_id_lookup, task_lookup_b)
-		and is_same(WorldData.city_object_access_tile_cache, access_cache_b)
+		and is_same(CityNavigationSystem.get_current_state().object_access_tile_cache, access_cache_b)
 		and CityCitizenMovementRuntimeSystem.get_current_state().citizen_movement_version == 12
 		and CityCitizenTaskRuntimeSystem.get_current_state().citizen_task_version == 14
 		and CityAssignmentSystem.get_current_state().assignment_version == 16
