@@ -221,8 +221,8 @@ func _test_equal_version_city_isolation() -> void:
 			city_b_root.citizen_task_runtime_state.active_task_ids,
 			task_ids_b
 		)
-		and is_same(city_a_root.object_access_tile_cache, access_cache_a)
-		and is_same(city_b_root.object_access_tile_cache, access_cache_b),
+		and is_same(city_a_root.navigation_state.object_access_tile_cache, access_cache_a)
+		and is_same(city_b_root.navigation_state.object_access_tile_cache, access_cache_b),
 		"Spatial, movement, and task owners must remain separate from the "
 		+ "access-cache root."
 	)
