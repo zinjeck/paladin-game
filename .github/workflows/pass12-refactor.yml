@@ -1,0 +1,166 @@
+name: Pass 12 Refactor
+
+on:
+  push:
+    branches:
+      - agent/pass12-remove-city-workspace
+
+permissions:
+  contents: write
+
+jobs:
+  refactor:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/pass12-remove-city-workspace
+          fetch-depth: 0
+
+      - name: Remove WorldData city compatibility workspace
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+
+          root = Path('.')
+          def read(p): return (root / p).read_text(encoding='utf-8')
+          def write(p, t): (root / p).write_text(t, encoding='utf-8')
+
+          # 1. CitySettlementSimulationState already owns these values. Remove the
+          # old copy bridge entirely so settlement selection is identity-only.
+          p = 'scripts/city/simulation/CitySettlementSimulationState.gd'
+          t = read(p)
+          t = re.sub(
+              r'\nfunc capture_from_world_data\(\) -> void:.*?\nfunc is_bound_to_world_data_workspace\(\) -> bool:.*?\n\t\)\n?$',
+              '\n', t, flags=re.S,
+          )
+          t = t.replace(
+              '# WorldData still exposes historical compatibility fields while the remaining\n# city systems are migrated, but extracted subsystems are not captured into or\n# restored from that workspace anymore.\n#\n',
+              '# City runtime identity and mutable simulation state live directly on this\n# settlement owner. No state is copied through WorldData when settlements switch.\n#\n'
+          )
+          write(p, t)
+
+          # 2. WorldPoliticalState gains the last pre-context runtime holders and
+          # direct current-settlement APIs. These support bootstrap and the legacy
+          # backend until Pass 13 without recreating a WorldData workspace.
+          p = 'scripts/world/simulation/WorldPoliticalState.gd'
+          t = read(p)
+          needle = 'var _foundation_world_fingerprint: String = ""\n'
+          assert needle in t
+          t = t.replace(needle, needle + '''var _unbound_city_world = null\nvar _unbound_city_seed: int = 0\nvar _unbound_city_runtime_data: Dictionary = {}\n''', 1)
+          needle = '\t_foundation_world_fingerprint = ""\n'
+          assert needle in t
+          t = t.replace(needle, needle + '''\t_unbound_city_world = null\n\t_unbound_city_seed = 0\n\t_unbound_city_runtime_data = {}\n''', 1)
+
+          # Preserve pre-context runtime references across the reset performed by
+          # first-time foundation synchronization.
+          needle = '\tvar should_adopt_unbound_city_state := not _has_live_foundation_registry()\n'
+          assert needle in t
+          t = t.replace(needle, needle + '''\tvar unbound_city_world_to_adopt = _unbound_city_world\n\tvar unbound_city_seed_to_adopt: int = _unbound_city_seed\n\tvar unbound_city_runtime_data_to_adopt: Dictionary = _unbound_city_runtime_data\n''', 1)
+          needle = '\tif should_adopt_unbound_city_state:\n'
+          idx = t.index(needle)
+          # Insert runtime adoption at the start of the existing subsystem adoption block.
+          insert_at = idx + len(needle)
+          t = t[:insert_at] + '''\t\tcapital_state.city_world = unbound_city_world_to_adopt\n\t\tcapital_state.city_seed = unbound_city_seed_to_adopt\n\t\tcapital_state.city_runtime_data = unbound_city_runtime_data_to_adopt\n''' + t[insert_at:]
+          t = t.replace('\tcapital_state.capture_from_world_data()\n', '')
+
+          # Switching cities now selects an owner. There is nothing to capture or apply.
+          t = t.replace('\t_capture_active_city_workspace()\n\tactive_settlement_id = settlement_id\n\t_apply_active_city_workspace()\n', '\tactive_settlement_id = settlement_id\n')
+          t = t.replace('\tif settlement_id == active_settlement_id:\n\t\t_capture_active_city_workspace()\n\n', '')
+          t = t.replace('\n\tif settlement_id == active_settlement_id:\n\t\t_apply_active_city_workspace()\n\n\treturn true\n', '\n\treturn true\n', 1)
+
+          # Legacy-backend conversion transfers the remaining unbound runtime
+          # references exactly once, alongside already-extracted subsystem owners.
+          needle = '\t\t\tcity_state.navigation_state = _unbound_city_navigation_state\n\t\t\t_unbound_city_navigation_state = CityNavigationStateScript.new()\n'
+          assert needle in t
+          t = t.replace(needle, needle + '''\t\t\tcity_state.city_world = _unbound_city_world\n\t\t\tcity_state.city_seed = _unbound_city_seed\n\t\t\tcity_state.city_runtime_data = _unbound_city_runtime_data\n\t\t\t_unbound_city_world = null\n\t\t\t_unbound_city_seed = 0\n\t\t\t_unbound_city_runtime_data = {}\n''', 1)
+          t = t.replace('\t\t\tcity_state.capture_from_world_data()\n', '')
+
+          # Remove the old public capture entry point and private copy helpers.
+          t = re.sub(r'\nfunc capture_active_settlement_state\(\) -> void:\n\t_capture_active_city_workspace\(\)\n', '\n', t)
+          t = re.sub(r'\nfunc _capture_active_city_workspace\(\) -> void:.*?\nfunc _is_settlement_parent_relationship_valid\(', '\nfunc _is_settlement_parent_relationship_valid(', t, flags=re.S)
+
+          # Add direct runtime accessors immediately before snapshot APIs.
+          anchor = '\nfunc get_polity_snapshot() -> Array[Dictionary]:\n'
+          assert anchor in t
+          api = '''\nfunc get_current_city_world():\n\tvar active_city_state = get_active_city_simulation_state()\n\tif active_city_state != null:\n\t\treturn active_city_state.city_world\n\treturn _unbound_city_world\n\n\nfunc get_current_city_seed() -> int:\n\tvar active_city_state = get_active_city_simulation_state()\n\tif active_city_state != null:\n\t\treturn active_city_state.city_seed\n\treturn _unbound_city_seed\n\n\nfunc get_current_city_runtime_data() -> Dictionary:\n\tvar active_city_state = get_active_city_simulation_state()\n\tif active_city_state != null:\n\t\treturn active_city_state.city_runtime_data\n\treturn _unbound_city_runtime_data\n\n\nfunc store_current_city_world(city_world, city_seed: int) -> void:\n\tvar active_city_state = get_active_city_simulation_state()\n\tif active_city_state != null:\n\t\tactive_city_state.city_world = city_world\n\t\tactive_city_state.city_seed = city_seed\n\t\treturn\n\t_unbound_city_world = city_world\n\t_unbound_city_seed = city_seed\n\n\nfunc replace_current_city_runtime_data(values: Dictionary) -> void:\n\tvar active_city_state = get_active_city_simulation_state()\n\tif active_city_state != null:\n\t\tactive_city_state.city_runtime_data = values\n\t\treturn\n\t_unbound_city_runtime_data = values\n\n\nfunc clear_current_city_world() -> void:\n\tvar active_city_state = get_active_city_simulation_state()\n\tif active_city_state != null:\n\t\tactive_city_state.city_world = null\n\t\tactive_city_state.city_seed = 0\n\t\treturn\n\t_unbound_city_world = null\n\t_unbound_city_seed = 0\n\n\nfunc clear_current_city_runtime_data() -> void:\n\tvar active_city_state = get_active_city_simulation_state()\n\tif active_city_state != null:\n\t\tactive_city_state.city_runtime_data = {}\n\t\treturn\n\t_unbound_city_runtime_data = {}\n\n'''
+          t = t.replace(anchor, api + anchor, 1)
+          write(p, t)
+
+          # 3. WorldData no longer physically owns the workspace. Its remaining
+          # high-level foundation/session APIs delegate into the selected settlement.
+          p = 'scripts/world/simulation/WorldData.gd'
+          t = read(p)
+          t = re.sub(r'^static var official_city_world = null\n', '', t, flags=re.M)
+          t = re.sub(r'^static var official_city_seed: int = 0\n', '', t, flags=re.M)
+          t = re.sub(r'^static var player_city_data: Dictionary = \{\}\n', '', t, flags=re.M)
+
+          # Explicit write sites first.
+          t = t.replace('''static func store_city_world_save(city_world: WorldData, city_seed: int) -> void:\n\tWorkplaceProductionSystem.clear_resource_source_evaluation_cache()\n\tofficial_city_world = city_world\n\tofficial_city_seed = city_seed\n\tMapTextureCacheStateScript.clear_city_cache()\n''', '''static func store_city_world_save(city_world: WorldData, city_seed: int) -> void:\n\tWorkplaceProductionSystem.clear_resource_source_evaluation_cache()\n\tWorldPoliticalState.store_current_city_world(city_world, city_seed)\n\tMapTextureCacheStateScript.clear_city_cache()\n''')
+          # Founding runtime record assignment.
+          t = t.replace('''\tplayer_city_data = {\n''', '''\tWorldPoliticalState.replace_current_city_runtime_data({\n''', 1)
+          # Close the founding dictionary call. Locate the distinctive founded tail.
+          t = t.replace('''\t\t"can_build": true,\n\t\t"founded": true\n\t}\n\n\tinitialize_starting_city_population()\n''', '''\t\t"can_build": true,\n\t\t"founded": true\n\t})\n\n\tinitialize_starting_city_population()\n''', 1)
+          # Reset paths.
+          t = t.replace('\tplayer_city_data.clear()\n', '\tWorldPoliticalState.clear_current_city_runtime_data()\n')
+          t = t.replace('''static func reset_city_session_state() -> void:\n\tofficial_city_world = null\n\tofficial_city_seed = 0\n''', '''static func reset_city_session_state() -> void:\n\tWorldPoliticalState.clear_current_city_world()\n''')
+
+          # Remaining reads inside WorldData.
+          t = re.sub(r'\bofficial_city_world\b', 'WorldPoliticalState.get_current_city_world()', t)
+          t = re.sub(r'\bofficial_city_seed\b', 'WorldPoliticalState.get_current_city_seed()', t)
+          t = re.sub(r'\bplayer_city_data\b', 'WorldPoliticalState.get_current_city_runtime_data()', t)
+          write(p, t)
+
+          # 4. Migrate direct readers throughout the repository. Direct assignments
+          # are intentionally rejected below so they cannot be silently mistranslated.
+          for gp in root.glob('scripts/**/*.gd'):
+              if str(gp) == p:
+                  continue
+              s = gp.read_text(encoding='utf-8')
+              s = s.replace('WorldData.official_city_world', 'WorldPoliticalState.get_current_city_world()')
+              s = s.replace('WorldData.official_city_seed', 'WorldPoliticalState.get_current_city_seed()')
+              s = s.replace('WorldData.player_city_data', 'WorldPoliticalState.get_current_city_runtime_data()')
+              gp.write_text(s, encoding='utf-8')
+
+          # 5. Focused regression coverage for direct A/B/A selection and pre-context adoption.
+          test = '''extends Node\n\nvar failure_count: int = 0\n\nfunc _ready() -> void:\n\t_test_direct_city_runtime_selection()\n\t_test_pre_context_runtime_adoption()\n\tWorldData.reset_runtime_session_state()\n\tif failure_count > 0:\n\t\tpush_error("City workspace removal test failed: " + str(failure_count))\n\t\tget_tree().quit(1)\n\t\treturn\n\tprint("City workspace removal test passed.")\n\tget_tree().quit(0)\n\nfunc _test_direct_city_runtime_selection() -> void:\n\tWorldData.reset_runtime_session_state()\n\tvar culture := WorldData.create_culture("Workspace Culture")\n\tvar polity := WorldPoliticalState.create_polity({\n\t\t"name": "Workspace Realm",\n\t\t"polity_type": PolityData.POLITY_TYPE_KINGDOM,\n\t\t"primary_culture_id": int(culture.get("id", -1)),\n\t})\n\tvar city_a := _create_city("Workspace A", int(polity.get("id", -1)), Vector2i(1, 1))\n\tvar city_b := _create_city("Workspace B", int(polity.get("id", -1)), Vector2i(2, 2))\n\tvar state_a = WorldPoliticalState.get_city_simulation_state(int(city_a.get("id", -1)))\n\tvar state_b = WorldPoliticalState.get_city_simulation_state(int(city_b.get("id", -1)))\n\tvar world_a := _make_world(6, 6, 12001)\n\tvar world_b := _make_world(7, 7, 12002)\n\tstate_a.city_world = world_a\n\tstate_a.city_seed = 111\n\tstate_a.city_runtime_data = {"marker": "A"}\n\tstate_b.city_world = world_b\n\tstate_b.city_seed = 222\n\tstate_b.city_runtime_data = {"marker": "B"}\n\t_expect(WorldPoliticalState.set_active_settlement(int(city_a["id"])), "City A must activate.")\n\t_expect(WorldPoliticalState.get_current_city_world() == world_a and WorldPoliticalState.get_current_city_seed() == 111 and WorldPoliticalState.get_current_city_runtime_data().get("marker") == "A", "City A runtime must resolve directly.")\n\tWorldPoliticalState.get_current_city_runtime_data()["local_only"] = 1\n\t_expect(WorldPoliticalState.set_active_settlement(int(city_b["id"])), "City B must activate.")\n\t_expect(WorldPoliticalState.get_current_city_world() == world_b and WorldPoliticalState.get_current_city_seed() == 222 and WorldPoliticalState.get_current_city_runtime_data().get("marker") == "B" and not state_b.city_runtime_data.has("local_only"), "City B must not receive City A workspace data.")\n\tWorldPoliticalState.get_current_city_runtime_data()["local_only"] = 2\n\t_expect(WorldPoliticalState.set_active_settlement(int(city_a["id"])), "City A must reactivate.")\n\t_expect(WorldPoliticalState.get_current_city_runtime_data().get("local_only") == 1 and state_b.city_runtime_data.get("local_only") == 2, "A/B/A switching must select owners without copying.")\n\nfunc _test_pre_context_runtime_adoption() -> void:\n\tWorldData.reset_runtime_session_state()\n\tvar city_world := _make_world(5, 5, 13001)\n\tvar runtime_data := {"marker": "bootstrap"}\n\tWorldPoliticalState.store_current_city_world(city_world, 31337)\n\tWorldPoliticalState.replace_current_city_runtime_data(runtime_data)\n\tvar world := _make_world(8, 8, 13002)\n\t_expect(WorldData.lock_world_save({\n\t\t"source_world": world,\n\t\t"region_top_left": Vector2i(1, 1),\n\t\t"region_center": Vector2i(2, 2),\n\t\t"region_size": 3,\n\t\t"world_scene_path": "res://scenes/GameSession.tscn",\n\t\t"city_scene_path": "res://scenes/CityScreen.tscn",\n\t\t"city_name": "Bootstrap City",\n\t\t"culture_name": "Bootstrap Culture",\n\t}), "Founding world must lock.")\n\t_expect(WorldPoliticalState.synchronize_foundation_with_world_data(), "Foundation must synchronize.")\n\tvar state = WorldPoliticalState.get_active_city_simulation_state()\n\t_expect(state != null and state.city_world == city_world and state.city_seed == 31337 and is_same(state.city_runtime_data, runtime_data), "Foundation must adopt the exact pre-context runtime owner values.")\n\nfunc _create_city(name: String, polity_id: int, center: Vector2i) -> Dictionary:\n\treturn WorldPoliticalState.create_settlement({\n\t\t"name": name,\n\t\t"settlement_type": SettlementData.SETTLEMENT_TYPE_CITY,\n\t\t"polity_id": polity_id,\n\t\t"world_region_top_left": center,\n\t\t"world_region_center": center,\n\t\t"world_region_size": 1,\n\t\t"simulation_backend_kind": SettlementSimulationContext.BACKEND_CITY_SETTLEMENT_STATE,\n\t})\n\nfunc _make_world(width: int, height: int, seed_value: int) -> WorldData:\n\tvar world := WorldData.new()\n\tworld.setup(width, height, seed_value)\n\treturn world\n\nfunc _expect(condition: bool, message: String) -> void:\n\tif condition:\n\t\treturn\n\tfailure_count += 1\n\tpush_error("City workspace removal test: " + message)\n'''
+          write('scripts/city/simulation/CityWorkspaceRemovalTest.gd', test)
+          write('scripts/city/simulation/CityWorkspaceRemovalTest.tscn', '''[gd_scene load_steps=2 format=3]\n\n[ext_resource path="res://scripts/city/simulation/CityWorkspaceRemovalTest.gd" type="Script" id="1"]\n\n[node name="CityWorkspaceRemovalTest" type="Node"]\nscript = ExtResource("1")\n''')
+
+          # 6. Permanent architecture guard.
+          p = 'ci/audit_gdscript.py'
+          t = read(p)
+          marker = 'WORLD_DATA_FORBIDDEN_CITY_NAVIGATION_SYMBOLS = (\n'
+          assert marker in t
+          guard_def = '''WORLD_DATA_FORBIDDEN_CITY_WORKSPACE_SYMBOLS = (\n    "official_city_world",\n    "official_city_seed",\n    "player_city_data",\n)\n\nRETIRED_CITY_WORKSPACE_BRIDGE_SYMBOLS = (\n    "capture_from_world_data",\n    "apply_to_world_data",\n    "capture_active_settlement_state",\n    "_capture_active_city_workspace",\n    "_apply_active_city_workspace",\n    "is_bound_to_world_data_workspace",\n)\n\n'''
+          t = t.replace(marker, guard_def + marker, 1)
+          anchor = '        for symbol in WORLD_DATA_FORBIDDEN_CITY_NAVIGATION_SYMBOLS:\n'
+          assert anchor in t
+          checks = '''        for symbol in WORLD_DATA_FORBIDDEN_CITY_WORKSPACE_SYMBOLS:\n            declaration_patterns = (\n                rf"^\\s*static\\s+var\\s+{re.escape(symbol)}\\b",\n                rf"^\\s*var\\s+{re.escape(symbol)}\\b",\n            )\n            if any(re.search(pattern, world_data_text, re.MULTILINE) for pattern in declaration_patterns):\n                errors.append(\n                    "scripts/world/simulation/WorldData.gd: retired Pass 12 city workspace field must not return: " + symbol\n                )\n\n        for path in scripts:\n            relative = str(path.relative_to(ROOT))\n            source_text = path.read_text(encoding="utf-8")\n            for symbol in WORLD_DATA_FORBIDDEN_CITY_WORKSPACE_SYMBOLS:\n                if re.search(rf"\\bWorldData\\s*\\.\\s*{re.escape(symbol)}\\b", source_text):\n                    errors.append(f"{relative}: retired WorldData city workspace reference remains: WorldData.{symbol}")\n            for symbol in RETIRED_CITY_WORKSPACE_BRIDGE_SYMBOLS:\n                if re.search(rf"(?:func\\s+)?{re.escape(symbol)}\\b", source_text):\n                    errors.append(f"{relative}: retired Pass 12 capture/apply bridge symbol remains: {symbol}")\n\n'''
+          t = t.replace(anchor, checks + anchor, 1)
+          write(p, t)
+
+          # Hard fail before committing if a mechanical migration produced setter syntax
+          # or any retired direct reference survives.
+          bad = []
+          for gp in root.glob('scripts/**/*.gd'):
+              s = gp.read_text(encoding='utf-8')
+              for tok in ('WorldData.official_city_world', 'WorldData.official_city_seed', 'WorldData.player_city_data'):
+                  if tok in s: bad.append(f'{gp}: {tok}')
+              if re.search(r'get_current_city_(?:world|seed|runtime_data)\(\)\s*=', s):
+                  bad.append(f'{gp}: assignment to current-city getter')
+          assert not bad, '\n'.join(bad)
+          PY
+
+      - name: Commit Pass 12 implementation
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add scripts ci/audit_gdscript.py
+          git commit -m "Pass 12: remove WorldData city compatibility workspace"
+          git push origin HEAD:agent/pass12-remove-city-workspace
