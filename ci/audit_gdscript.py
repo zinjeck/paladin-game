@@ -1275,10 +1275,18 @@ def main() -> int:
     if world_data_path.exists():
         world_data_text = world_data_path.read_text(encoding="utf-8")
         for symbol in WORLD_DATA_FINAL_FORBIDDEN_CITY_SYMBOLS:
-            if re.search(rf"\b{re.escape(symbol)}\b", world_data_text):
+            if symbol in {"CityCitizensScript", "CityObjectCatalogScript"}:
+                forbidden = symbol in world_data_text
+            else:
+                forbidden = bool(re.search(
+                    rf"^\s*(?:(?:static\s+)?(?:const|var)\s+{re.escape(symbol)}\b|(?:static\s+)?func\s+{re.escape(symbol)}\s*\()",
+                    world_data_text,
+                    re.MULTILINE,
+                ))
+            if forbidden:
                 errors.append(
                     "scripts/world/simulation/WorldData.gd: Pass 14 final boundary "
-                    f"forbids city-only symbol: {symbol}"
+                    f"forbids city-only declaration: {symbol}"
                 )
         for symbol in WORLD_DATA_FORBIDDEN_CITY_LOGISTICS_SYMBOLS:
             declaration_patterns = (

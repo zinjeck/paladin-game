@@ -90,8 +90,6 @@ static var official_world_scene_path: String = ""
 static var official_city_scene_path: String = ""
 
 
-#region City Object Definitions and Workplace Policies
-
 #region World Grid and Tile State
 
 func setup(new_width: int, new_height: int, new_seed: int):
