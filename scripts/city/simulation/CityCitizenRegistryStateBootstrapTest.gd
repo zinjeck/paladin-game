@@ -10,7 +10,6 @@ func _ready() -> void:
 	_test_state_defaults()
 	_test_pre_context_state_adoption()
 	_test_real_founding_population_bootstrap()
-	_test_legacy_backend_conversion_adopts_state()
 	WorldData.reset_runtime_session_state()
 
 	if failure_count > 0:
@@ -206,123 +205,6 @@ func _test_real_founding_population_bootstrap() -> void:
 		"Repeated founding initialization must not duplicate citizens."
 	)
 
-
-func _test_legacy_backend_conversion_adopts_state() -> void:
-	WorldData.reset_runtime_session_state()
-	var culture := WorldData.create_culture("Citizen Registry Legacy Culture")
-	var culture_id := int(culture.get("id", -1))
-	var polity := WorldPoliticalState.create_polity({
-		"name": "Citizen Registry Legacy Realm",
-		"polity_type": PolityData.POLITY_TYPE_KINGDOM,
-		"primary_culture_id": culture_id,
-	})
-	var legacy_city := _create_city(
-		"Citizen Registry Legacy City",
-		int(polity.get("id", -1)),
-		Vector2i(2, 2),
-		SettlementSimulationContext.BACKEND_LEGACY_CITY_WORLD_DATA
-	)
-	_expect(
-		not legacy_city.is_empty()
-		and WorldPoliticalState.set_active_settlement(
-			int(legacy_city.get("id", -1))
-		),
-		"The fixture must activate a legacy-backed City."
-	)
-	if legacy_city.is_empty():
-		return
-
-	var first := WorldData.add_city_citizen(
-		"",
-		WorldData.INVALID_CITY_TILE_POSITION,
-		WorldData.CITY_CITIZEN_SEX_MALE,
-		culture_id
-	)
-	var second := WorldData.add_city_citizen(
-		"",
-		WorldData.INVALID_CITY_TILE_POSITION,
-		WorldData.CITY_CITIZEN_SEX_FEMALE,
-		culture_id
-	)
-	var legacy_state := (
-		CityCitizenRegistrySystem.get_current_state()
-	)
-	var legacy_array: Array = legacy_state.citizens
-	var legacy_index: Dictionary = legacy_state.citizen_index_by_id
-	var legacy_city_id := int(legacy_city["id"])
-	_expect(
-		int(first.get("id", -1)) == 1
-		and int(second.get("id", -1)) == 2
-		and WorldPoliticalState.set_settlement_simulation_backend(
-			legacy_city_id,
-			SettlementSimulationContext.BACKEND_CITY_SETTLEMENT_STATE
-		),
-		"Legacy citizens must exist before backend conversion."
-	)
-	var converted_state = WorldPoliticalState.get_city_simulation_state(
-		legacy_city_id
-	)
-	_expect(
-		converted_state is CitySettlementSimulationState
-		and is_same(converted_state.citizen_registry_state, legacy_state)
-		and is_same(converted_state.citizen_registry_state.citizens, legacy_array)
-		and is_same(
-			converted_state.citizen_registry_state.citizen_index_by_id,
-			legacy_index
-		)
-		and legacy_state.next_citizen_id == 3
-		and legacy_state.citizen_version == 2,
-		"Legacy conversion must transfer the exact four-field registry owner."
-	)
-
-	var fallback_city := _create_city(
-		"Second Citizen Registry Legacy City",
-		int(polity.get("id", -1)),
-		Vector2i(6, 6),
-		SettlementSimulationContext.BACKEND_LEGACY_CITY_WORLD_DATA
-	)
-	_expect(
-		not fallback_city.is_empty()
-		and WorldPoliticalState.set_active_settlement(
-			int(fallback_city.get("id", -1))
-		),
-		"A second legacy-backed City must use the rotated fallback."
-	)
-	var rotated_fallback := (
-		CityCitizenRegistrySystem.get_current_state()
-	)
-	_expect(
-		not is_same(rotated_fallback, legacy_state)
-		and rotated_fallback.citizens.is_empty()
-		and rotated_fallback.citizen_index_by_id.is_empty()
-		and rotated_fallback.next_citizen_id == 1
-		and rotated_fallback.citizen_version == 0,
-		"Conversion must rotate a fresh pre-context citizen fallback."
-	)
-	_expect(
-		WorldPoliticalState.set_active_settlement(legacy_city_id)
-		and is_same(
-			CityCitizenRegistrySystem.get_current_state(),
-			legacy_state
-		)
-		and is_same(CityCitizenRegistrySystem.get_current_state().citizens, legacy_array)
-		and CityCitizenRegistrySystem.get_city_population_count() == 2,
-		"The converted City must retain its exact registry after fallback use."
-	)
-
-	WorldData.reset_runtime_session_state()
-	var reset_state := (
-		CityCitizenRegistrySystem.get_current_state()
-	)
-	_expect(
-		WorldPoliticalState.settlement_city_state_by_id.is_empty()
-		and not is_same(reset_state, legacy_state)
-		and reset_state.citizens.is_empty()
-		and reset_state.citizen_index_by_id.is_empty()
-		and reset_state.next_citizen_id == 1
-		and reset_state.citizen_version == 0,
-		"A runtime reset must discard every settlement citizen registry."
-	)
 
 
 func _lock_founding_world(world: WorldData, label: String) -> bool:

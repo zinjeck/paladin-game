@@ -184,6 +184,11 @@ RETIRED_CITY_WORKSPACE_BRIDGE_SYMBOLS = (
     "is_bound_to_world_data_workspace",
 )
 
+RETIRED_LEGACY_CITY_BACKEND_SYMBOLS = (
+    "BACKEND_LEGACY_CITY_WORLD_DATA",
+    "legacy_city_world_data",
+)
+
 WORLD_DATA_FORBIDDEN_CITY_NAVIGATION_SYMBOLS = (
     "city_object_access_tile_cache",
     "get_city_object_access_tiles",
@@ -1318,6 +1323,15 @@ def main() -> int:
             for symbol in RETIRED_CITY_WORKSPACE_BRIDGE_SYMBOLS:
                 if re.search(rf"(?:func\s+)?{re.escape(symbol)}\b", source_text):
                     errors.append(f"{relative}: retired Pass 12 capture/apply bridge symbol remains: {symbol}")
+
+        for path in scripts:
+            relative = str(path.relative_to(ROOT))
+            source_text = path.read_text(encoding="utf-8")
+            for symbol in RETIRED_LEGACY_CITY_BACKEND_SYMBOLS:
+                if symbol in source_text:
+                    errors.append(
+                        f"{relative}: retired Pass 13 legacy city backend symbol remains: {symbol}"
+                    )
 
         for symbol in WORLD_DATA_FORBIDDEN_CITY_NAVIGATION_SYMBOLS:
             declaration_patterns = (

@@ -9,7 +9,6 @@ var failure_count: int = 0
 func _ready() -> void:
 	_test_state_defaults()
 	_test_founding_adopts_pre_context_state()
-	_test_legacy_backend_conversion_adopts_state()
 	WorldPoliticalState.reset_state()
 	WorldData.reset_runtime_session_state()
 
@@ -123,124 +122,6 @@ func _test_founding_adopts_pre_context_state() -> void:
 		"Repeated founding synchronization must not replace or duplicate object state."
 	)
 
-
-func _test_legacy_backend_conversion_adopts_state() -> void:
-	WorldPoliticalState.reset_state()
-	WorldData.reset_runtime_session_state()
-
-	var culture := WorldData.create_culture("Object Legacy Culture")
-	var polity := WorldPoliticalState.create_polity({
-		"name": "Object Legacy Realm",
-		"polity_type": PolityData.POLITY_TYPE_KINGDOM,
-		"primary_culture_id": int(culture.get("id", -1)),
-	})
-	var legacy_city := WorldPoliticalState.create_settlement({
-		"name": "Object Legacy City",
-		"settlement_type": SettlementData.SETTLEMENT_TYPE_CITY,
-		"polity_id": int(polity.get("id", -1)),
-		"world_region_top_left": Vector2i(2, 2),
-		"world_region_center": Vector2i(2, 2),
-		"world_region_size": 1,
-		"simulation_backend_kind": (
-			SettlementSimulationContext.BACKEND_LEGACY_CITY_WORLD_DATA
-		),
-	})
-	_expect(
-		not legacy_city.is_empty()
-		and WorldPoliticalState.set_active_settlement(int(legacy_city.get("id", -1))),
-		"Fixture must activate a legacy-backed City."
-	)
-	if legacy_city.is_empty():
-		return
-
-	var tile := Vector2i(4, 4)
-	CityObjectSystem.get_current_state().objects = [{
-		"id": 29,
-		"type": WorldData.CITY_OBJECT_ROAD,
-		"tiles": [tile],
-		"owner": "legacy",
-	}]
-	CityObjectSystem.get_current_state().object_index_by_id = {29: 0}
-	CityObjectSystem.get_current_state().occupied_tiles = {tile: 29}
-	CityObjectSystem.get_current_state().next_object_id = 30
-	CityObjectSystem.get_current_state().object_version = 8
-	var legacy_object_state := CityObjectSystem.get_current_state()
-	var legacy_objects: Array = CityObjectSystem.get_current_state().objects
-	var legacy_index: Dictionary = CityObjectSystem.get_current_state().object_index_by_id
-	var legacy_occupancy: Dictionary = CityObjectSystem.get_current_state().occupied_tiles
-
-	var city_id := int(legacy_city["id"])
-	_expect(
-		WorldPoliticalState.set_settlement_simulation_backend(
-			city_id,
-			SettlementSimulationContext.BACKEND_CITY_SETTLEMENT_STATE
-		),
-		"The active legacy City must convert to instance-owned state."
-	)
-	var converted_state = WorldPoliticalState.get_city_simulation_state(city_id)
-	_expect(
-		converted_state is CitySettlementSimulationState
-		and is_same(converted_state.object_state, legacy_object_state),
-		"Legacy conversion must adopt the exact unbound object state."
-	)
-	_expect(
-		is_same(CityObjectSystem.get_current_state().objects, legacy_objects)
-		and is_same(CityObjectSystem.get_current_state().object_index_by_id, legacy_index)
-		and is_same(CityObjectSystem.get_current_state().occupied_tiles, legacy_occupancy)
-		and CityObjectSystem.get_current_state().next_object_id == 30
-		and CityObjectSystem.get_current_state().object_version == 8,
-		"Legacy conversion must preserve all five object-state values."
-	)
-	var fallback_city := WorldPoliticalState.create_settlement({
-		"name": "Second Object Legacy City",
-		"settlement_type": SettlementData.SETTLEMENT_TYPE_CITY,
-		"polity_id": int(polity.get("id", -1)),
-		"world_region_top_left": Vector2i(6, 6),
-		"world_region_center": Vector2i(6, 6),
-		"world_region_size": 1,
-		"simulation_backend_kind": (
-			SettlementSimulationContext.BACKEND_LEGACY_CITY_WORLD_DATA
-		),
-	})
-	_expect(
-		not fallback_city.is_empty()
-		and WorldPoliticalState.set_active_settlement(
-			int(fallback_city.get("id", -1))
-		),
-		"Fixture must activate a second legacy-backed City."
-	)
-	var rotated_fallback := CityObjectSystem.get_current_state()
-	_expect(
-		not is_same(rotated_fallback, legacy_object_state)
-		and rotated_fallback.objects.is_empty()
-		and rotated_fallback.object_index_by_id.is_empty()
-		and rotated_fallback.occupied_tiles.is_empty()
-		and rotated_fallback.next_object_id == 1
-		and rotated_fallback.object_version == 0,
-		"Legacy conversion must rotate to a fresh pre-context fallback state."
-	)
-	_expect(
-		WorldPoliticalState.set_active_settlement(city_id)
-		and is_same(
-			CityObjectSystem.get_current_state(),
-			legacy_object_state
-		)
-		and CityObjectSystem.get_current_state().objects.size() == 1,
-		"The converted City must retain its adopted state after fallback use."
-	)
-
-	WorldData.reset_runtime_session_state()
-	var reset_state := CityObjectSystem.get_current_state()
-	_expect(
-		WorldPoliticalState.settlement_city_state_by_id.is_empty()
-		and not is_same(reset_state, legacy_object_state)
-		and reset_state.objects.is_empty()
-		and reset_state.object_index_by_id.is_empty()
-		and reset_state.occupied_tiles.is_empty()
-		and reset_state.next_object_id == 1
-		and reset_state.object_version == 0,
-		"A global runtime reset must discard every settlement-owned object state."
-	)
 
 
 func _make_world(width: int, height: int, seed: int) -> WorldData:

@@ -9,7 +9,6 @@ var failure_count: int = 0
 func _ready() -> void:
 	_test_state_defaults()
 	_test_pre_context_state_adoption()
-	_test_legacy_backend_conversion_adopts_state()
 	WorldData.reset_runtime_session_state()
 
 	if failure_count > 0:
@@ -71,55 +70,6 @@ func _test_pre_context_state_adoption() -> void:
 		"Repeated synchronization must not replace the navigation owner."
 	)
 
-
-func _test_legacy_backend_conversion_adopts_state() -> void:
-	WorldData.reset_runtime_session_state()
-	var culture := WorldData.create_culture("Navigation Legacy Culture")
-	var culture_id := int(culture.get("id", -1))
-	var polity := WorldPoliticalState.create_polity({
-		"name": "Navigation Legacy Realm",
-		"polity_type": PolityData.POLITY_TYPE_KINGDOM,
-		"primary_culture_id": culture_id,
-	})
-	var legacy_city := WorldPoliticalState.create_settlement({
-		"name": "Navigation Legacy City",
-		"settlement_type": SettlementData.SETTLEMENT_TYPE_CITY,
-		"polity_id": int(polity.get("id", -1)),
-		"world_region_top_left": Vector2i(2, 2),
-		"world_region_center": Vector2i(2, 2),
-		"world_region_size": 1,
-		"simulation_backend_kind": (
-			SettlementSimulationContext.BACKEND_LEGACY_CITY_WORLD_DATA
-		),
-	})
-	_expect(
-		not legacy_city.is_empty()
-		and WorldPoliticalState.set_active_settlement(int(legacy_city.get("id", -1))),
-		"The fixture must activate a legacy-backed City."
-	)
-	if legacy_city.is_empty():
-		return
-
-	var bootstrap_state := CityNavigationSystem.get_current_state()
-	bootstrap_state.object_access_tile_cache[19] = {
-		"world_instance_id": 456,
-		"access_tiles": [Vector2i(4, 5)],
-	}
-	_expect(
-		WorldPoliticalState.set_settlement_simulation_backend(
-			int(legacy_city.get("id", -1)),
-			SettlementSimulationContext.BACKEND_CITY_SETTLEMENT_STATE
-		),
-		"Legacy City conversion must succeed."
-	)
-	var converted_state = WorldPoliticalState.get_active_city_simulation_state()
-	_expect(
-		converted_state is CitySettlementSimulationState
-		and is_same(converted_state.navigation_state, bootstrap_state)
-		and is_same(CityNavigationSystem.get_current_state(), bootstrap_state)
-		and bootstrap_state.object_access_tile_cache.has(19),
-		"Legacy conversion must transfer the exact pre-context navigation owner once."
-	)
 
 
 func _lock_founding_world(world: WorldData, label: String) -> bool:
