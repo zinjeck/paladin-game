@@ -1,0 +1,35 @@
+name: Pass 11 Compile Fix
+
+on:
+  push:
+    branches:
+      - agent/pass11-worlddata-audit
+
+permissions:
+  contents: write
+
+jobs:
+  fix:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/pass11-worlddata-audit
+      - name: Fix typed access candidate
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          path = Path('scripts/city/simulation/systems/CityNavigationSystem.gd')
+          text = path.read_text(encoding='utf-8')
+          old = '\t\t\tvar candidate_tile := footprint_tile + offset\n'
+          new = '\t\t\tvar candidate_tile: Vector2i = footprint_tile + offset\n'
+          assert old in text
+          path.write_text(text.replace(old, new, 1), encoding='utf-8')
+          PY
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add scripts/city/simulation/systems/CityNavigationSystem.gd
+          git commit -m "Pass 11: type navigation access candidate"
+          git push origin HEAD:agent/pass11-worlddata-audit
