@@ -493,8 +493,7 @@ static func _validate_city_assignments(
 				)
 
 				if (
-					WorldData
-					.get_city_object_resident_capacity(
+					CityObjectCatalog.get_city_object_resident_capacity(
 						home_object
 					)
 					<= 0

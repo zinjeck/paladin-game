@@ -525,8 +525,7 @@ static func make_public_storage_haul_task_request(
 			"destination_tile": destination_tile,
 			"allow_ground_pile_pickup_chaining": (
 				reason
-				== WorldData
-				.CITY_CITIZEN_HAUL_REASON_GROUND_PILE_CLEANUP
+				== CityCitizens.CITY_CITIZEN_HAUL_REASON_GROUND_PILE_CLEANUP
 			),
 		}),
 		"selection_path": selection_path,
@@ -2426,8 +2425,7 @@ static func _advance_traveling_to_destination(
 			int(
 				haul.get(
 					"reservation_id",
-					WorldData
-					.INVALID_CITY_CITIZEN_HAUL_RESERVATION_ID
+					CityCitizens.INVALID_CITY_CITIZEN_HAUL_RESERVATION_ID
 				)
 			)
 		)
@@ -2526,8 +2524,7 @@ static func _deposit_and_retarget(
 			int(
 				haul.get(
 					"reservation_id",
-					WorldData
-					.INVALID_CITY_CITIZEN_HAUL_RESERVATION_ID
+					CityCitizens.INVALID_CITY_CITIZEN_HAUL_RESERVATION_ID
 				)
 			)
 		)

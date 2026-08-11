@@ -1313,8 +1313,7 @@ static func _validate_city_haul_reservations(
 
 		if (
 			destination_kind
-			== WorldData
-			.CITY_CITIZEN_HAUL_ENDPOINT_KIND_CONSTRUCTION_SITE
+			== CityCitizens.CITY_CITIZEN_HAUL_ENDPOINT_KIND_CONSTRUCTION_SITE
 		):
 			var site_id := int(destination.get("id", -1))
 			var remaining_capacity := 0
@@ -2046,8 +2045,7 @@ static func _validate_city_haul_reservation_destination(
 			destination_policy_is_valid = false
 		elif (
 			destination_kind
-			== WorldData
-			.CITY_CITIZEN_HAUL_ENDPOINT_KIND_CONSTRUCTION_SITE
+			== CityCitizens.CITY_CITIZEN_HAUL_ENDPOINT_KIND_CONSTRUCTION_SITE
 			and destination_access_purpose
 			!= CityObjectCatalog.CONTAINER_HAUL_PURPOSE_CONSTRUCTION
 		):

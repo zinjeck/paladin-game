@@ -1905,8 +1905,7 @@ static func _set_work_task_activity_state(
 	var next_action_world_minute := int(
 		values.get(
 			"next_action_world_minute",
-			WorldData
-			.INVALID_CITY_CITIZEN_TASK_ACTION_WORLD_MINUTE
+			CityCitizens.INVALID_CITY_CITIZEN_TASK_ACTION_WORLD_MINUTE
 		)
 	)
 	var relocation_count := int(

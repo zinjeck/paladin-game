@@ -386,8 +386,7 @@ static func _process_food_needs(critical_only: bool) -> void:
 			"food_source_endpoint_kind": str(
 				food_result.get(
 					"source_kind",
-					WorldData
-					.CITY_CITIZEN_HAUL_ENDPOINT_KIND_CITY_OBJECT_CONTAINER
+					CityCitizens.CITY_CITIZEN_HAUL_ENDPOINT_KIND_CITY_OBJECT_CONTAINER
 				)
 			),
 			"food_source_access_purpose": (
@@ -879,8 +878,7 @@ static func _get_outstanding_obligation_task_request(
 				"source_access_purpose": str(
 					current_haul.get(
 						"source_access_purpose",
-						WorldData
-						.CONTAINER_HAUL_PURPOSE_WORKPLACE_OUTPUT
+						CityObjectCatalog.CONTAINER_HAUL_PURPOSE_WORKPLACE_OUTPUT
 					)
 				),
 				"destination_access_purpose": (
@@ -967,13 +965,11 @@ static func _get_outstanding_obligation_task_request(
 					"resource_type": resource,
 					"requested_amount": requested_amount,
 					"reason": (
-						WorldData
-						.CITY_CITIZEN_HAUL_REASON_WORKPLACE_OUTPUT_BEFORE_HOME
+						CityCitizens.CITY_CITIZEN_HAUL_REASON_WORKPLACE_OUTPUT_BEFORE_HOME
 					),
 					"requester": source,
 					"source_access_purpose": (
-						WorldData
-						.CONTAINER_HAUL_PURPOSE_WORKPLACE_OUTPUT
+						CityObjectCatalog.CONTAINER_HAUL_PURPOSE_WORKPLACE_OUTPUT
 					),
 					"destination_access_purpose": (
 						CityObjectCatalog.CONTAINER_HAUL_PURPOSE_PUBLIC_STORAGE
@@ -1069,8 +1065,7 @@ static func _get_scheduled_home_food_delivery_task_request(
 				"resource_type": resource,
 				"requested_amount": requested_amount,
 				"reason": (
-					WorldData
-					.CITY_CITIZEN_HAUL_REASON_SCHEDULED_HOME_FOOD_DELIVERY
+					CityCitizens.CITY_CITIZEN_HAUL_REASON_SCHEDULED_HOME_FOOD_DELIVERY
 				),
 				"requester": destination,
 				"source_access_purpose": (
@@ -1654,8 +1649,7 @@ static func _get_workplace_output_haul_opportunities() -> Array:
 				"requester": source,
 				"resource_type": resource,
 				"reason": (
-					WorldData
-					.CITY_CITIZEN_HAUL_REASON_AUTONOMOUS_WORKPLACE_OUTPUT
+					CityCitizens.CITY_CITIZEN_HAUL_REASON_AUTONOMOUS_WORKPLACE_OUTPUT
 				),
 				"source_access_purpose": (
 					CityObjectCatalog.CONTAINER_HAUL_PURPOSE_WORKPLACE_OUTPUT

@@ -2127,12 +2127,10 @@ static func _get_best_clearing_cleanup_candidate(
 				"resource_type": resource,
 				"requested_amount": requested_amount,
 				"reason": (
-					WorldData
-					.CITY_CITIZEN_HAUL_REASON_GROUND_PILE_CLEANUP
+					CityCitizens.CITY_CITIZEN_HAUL_REASON_GROUND_PILE_CLEANUP
 				),
 				"source_access_purpose": (
-					WorldData
-					.CONTAINER_HAUL_PURPOSE_GROUND_PILE_CLEANUP
+					CityObjectCatalog.CONTAINER_HAUL_PURPOSE_GROUND_PILE_CLEANUP
 				),
 				"destination_access_purpose": (
 					CityObjectCatalog.CONTAINER_HAUL_PURPOSE_PUBLIC_STORAGE
@@ -2460,8 +2458,7 @@ static func _get_best_delivery_candidate(
 					"resource_type": resource,
 					"requested_amount": source_requested_amount,
 					"reason": (
-						WorldData
-						.CITY_CITIZEN_HAUL_REASON_CONSTRUCTION_DELIVERY
+						CityCitizens.CITY_CITIZEN_HAUL_REASON_CONSTRUCTION_DELIVERY
 					),
 					"source_access_purpose": (
 						CityObjectCatalog.CONTAINER_HAUL_PURPOSE_CONSTRUCTION
@@ -4033,8 +4030,7 @@ static func _restore_construction_rebalance_assignment(
 			"next_action_world_minute": int(
 				task.get(
 					"next_action_world_minute",
-					WorldData
-					.INVALID_CITY_CITIZEN_TASK_ACTION_WORLD_MINUTE
+					CityCitizens.INVALID_CITY_CITIZEN_TASK_ACTION_WORLD_MINUTE
 				)
 			),
 			"relocation_count": int(task.get("relocation_count", 0)),
@@ -4161,16 +4157,14 @@ static func citizen_task_is_interruptible_construction(
 						CityCitizens.CITY_CITIZEN_HAUL_REASON_NONE
 					)
 				)
-				== WorldData
-				.CITY_CITIZEN_HAUL_REASON_CONSTRUCTION_DELIVERY
+				== CityCitizens.CITY_CITIZEN_HAUL_REASON_CONSTRUCTION_DELIVERY
 				or str(
 					requester.get(
 						"kind",
 						CityCitizens.CITY_CITIZEN_HAUL_ENDPOINT_KIND_NONE
 					)
 				)
-				== WorldData
-				.CITY_CITIZEN_HAUL_ENDPOINT_KIND_CONSTRUCTION_SITE
+				== CityCitizens.CITY_CITIZEN_HAUL_ENDPOINT_KIND_CONSTRUCTION_SITE
 			)
 
 	return false

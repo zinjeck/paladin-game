@@ -669,8 +669,7 @@ static func _workplace_tick_is_blocked(
 			"object_id": object_id,
 			"progress_work_units": current_progress,
 			"production_status": (
-				WorldData
-				.WORKPLACE_PRODUCTION_STATUS_BLOCKED_NO_RESOURCE_SOURCE
+				CityObjectCatalog.WORKPLACE_PRODUCTION_STATUS_BLOCKED_NO_RESOURCE_SOURCE
 			),
 			"productive_worker_count": productive_worker_count,
 			"site_productivity_basis_points": 0,
@@ -684,8 +683,7 @@ static func _workplace_tick_is_blocked(
 			"object_id": object_id,
 			"progress_work_units": current_progress,
 			"production_status": (
-				WorldData
-				.WORKPLACE_PRODUCTION_STATUS_BLOCKED_MISSING_INPUT
+				CityObjectCatalog.WORKPLACE_PRODUCTION_STATUS_BLOCKED_MISSING_INPUT
 			),
 			"productive_worker_count": productive_worker_count,
 			"site_productivity_basis_points": site_productivity,

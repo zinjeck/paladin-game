@@ -472,13 +472,11 @@ static func _validate_city_citizen_demographics(
 			errors.append(
 				"Founding population must contain "
 					+ str(
-						WorldData
-						.STARTING_CITY_MALE_POPULATION
+						CityCitizenRegistrySystem.STARTING_CITY_MALE_POPULATION
 					)
 					+ " male and "
 					+ str(
-						WorldData
-						.STARTING_CITY_FEMALE_POPULATION
+						CityCitizenRegistrySystem.STARTING_CITY_FEMALE_POPULATION
 					)
 					+ " female citizens, but contains "
 					+ str(male_count)
@@ -1472,8 +1470,7 @@ static func _validate_acquire_food_task_kind_state(values: Dictionary) -> void:
 	if (
 		target_object_id <= 0
 		or food_endpoint_kind not in [
-			WorldData
-			.CITY_CITIZEN_HAUL_ENDPOINT_KIND_CITY_OBJECT_CONTAINER,
+			CityCitizens.CITY_CITIZEN_HAUL_ENDPOINT_KIND_CITY_OBJECT_CONTAINER,
 			CityCitizens.CITY_CITIZEN_HAUL_ENDPOINT_KIND_GROUND_PILE,
 		]
 		or not CityCitizens.is_valid_city_citizen_haul_endpoint(
@@ -1691,8 +1688,7 @@ static func _validate_haul_task_kind_state(values: Dictionary) -> void:
 				haul_source
 			)
 			or str(haul_source.get("kind", ""))
-			== WorldData
-			.CITY_CITIZEN_HAUL_ENDPOINT_KIND_GROUND_TILE
+			== CityCitizens.CITY_CITIZEN_HAUL_ENDPOINT_KIND_GROUND_TILE
 		):
 			errors.append(
 				"Citizen "
@@ -1782,8 +1778,7 @@ static func _validate_haul_task_kind_state(values: Dictionary) -> void:
 			)
 		elif (
 			str(haul_destination.get("kind", ""))
-			== WorldData
-			.CITY_CITIZEN_HAUL_ENDPOINT_KIND_GROUND_TILE
+			== CityCitizens.CITY_CITIZEN_HAUL_ENDPOINT_KIND_GROUND_TILE
 			and haul.get(
 				"destination_tile",
 				CityCitizens.INVALID_CITY_TILE_POSITION
@@ -2228,8 +2223,7 @@ static func _validate_city_task_work_order_reference(
 					if raw_requester is Dictionary:
 						source_matches_task = (
 							str(raw_requester.get("kind", ""))
-							== WorldData
-							.CITY_CITIZEN_HAUL_ENDPOINT_KIND_CONSTRUCTION_SITE
+							== CityCitizens.CITY_CITIZEN_HAUL_ENDPOINT_KIND_CONSTRUCTION_SITE
 							and int(raw_requester.get("id", -1))
 							== source_id
 						)
