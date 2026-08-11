@@ -549,7 +549,7 @@ func is_tile_coastal(tile_x: int, tile_y: int) -> bool:
 
 	var tile: Dictionary = world.get_tile(tile_x, tile_y)
 
-	if str(tile["terrain"]) == WorldData.TERRAIN_WATER:
+	if str(tile["terrain"]) == CityObjectCatalog.TERRAIN_WATER:
 		return false
 
 	var directions: Array[Vector2i] = [
@@ -568,7 +568,7 @@ func is_tile_coastal(tile_x: int, tile_y: int) -> bool:
 
 		var neighbor: Dictionary = world.get_tile(neighbor_x, neighbor_y)
 
-		if str(neighbor["terrain"]) == WorldData.TERRAIN_WATER:
+		if str(neighbor["terrain"]) == CityObjectCatalog.TERRAIN_WATER:
 			return true
 
 	return false

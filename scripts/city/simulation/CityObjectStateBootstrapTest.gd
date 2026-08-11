@@ -58,7 +58,7 @@ func _test_founding_adopts_pre_context_state() -> void:
 	var tile := Vector2i(3, 3)
 	var objects: Array = [{
 		"id": 17,
-		"type": WorldData.CITY_OBJECT_ROAD,
+		"type": CityObjectCatalog.CITY_OBJECT_ROAD,
 		"tiles": [tile],
 		"owner": "bootstrap",
 	}]

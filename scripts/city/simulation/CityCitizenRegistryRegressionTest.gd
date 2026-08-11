@@ -81,7 +81,7 @@ func _test_add_rebuild_remove_and_reset_integrity() -> void:
 		"The next add after removal must preserve monotonic ID allocation."
 	)
 
-	WorldData.reset_city_citizen_state()
+	CityCitizenRegistrySystem.reset_city_citizen_state()
 	_expect(
 		is_same(
 			CityCitizenRegistrySystem.get_current_state(),
@@ -120,10 +120,10 @@ func _test_add_rebuild_remove_and_reset_integrity() -> void:
 
 
 func _add_citizen(culture_id: int) -> Dictionary:
-	return WorldData.add_city_citizen(
+	return CityCitizenRegistrySystem.add_city_citizen(
 		"",
-		WorldData.INVALID_CITY_TILE_POSITION,
-		WorldData.CITY_CITIZEN_SEX_MALE,
+		CityCitizens.INVALID_CITY_TILE_POSITION,
+		CityCitizens.CITY_CITIZEN_SEX_MALE,
 		culture_id
 	)
 

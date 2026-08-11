@@ -134,11 +134,11 @@ func _test_real_founding_population_bootstrap() -> void:
 	var registry_index: Dictionary = registry_state.citizen_index_by_id
 	var city_world := _make_world(20, 20, 96_102)
 	WorldData.store_city_world_save(city_world, 96_102)
-	var keep_size := WorldData.get_city_object_size_for_type(
-		WorldData.CITY_OBJECT_CITY_CENTER
+	var keep_size := CityObjectCatalog.get_city_object_size_for_type(
+		CityObjectCatalog.CITY_OBJECT_CITY_CENTER
 	)
 	var keep := CityObjectSystem.add_city_object({
-		"object_type": WorldData.CITY_OBJECT_CITY_CENTER,
+		"object_type": CityObjectCatalog.CITY_OBJECT_CITY_CENTER,
 		"top_left": Vector2i(6, 6),
 		"size_tiles": keep_size,
 		"object_owner": "player",
@@ -156,7 +156,7 @@ func _test_real_founding_population_bootstrap() -> void:
 	})
 
 	var exact_index := true
-	for citizen_index in range(WorldData.STARTING_CITY_POPULATION):
+	for citizen_index in range(CityCitizenRegistrySystem.STARTING_CITY_POPULATION):
 		var expected_id := citizen_index + 1
 		var raw_citizen = registry_array[citizen_index]
 		if (
@@ -169,12 +169,12 @@ func _test_real_founding_population_bootstrap() -> void:
 
 	_expect(
 		WorldData.has_player_city()
-		and registry_array.size() == WorldData.STARTING_CITY_POPULATION
-		and registry_index.size() == WorldData.STARTING_CITY_POPULATION
+		and registry_array.size() == CityCitizenRegistrySystem.STARTING_CITY_POPULATION
+		and registry_index.size() == CityCitizenRegistrySystem.STARTING_CITY_POPULATION
 		and registry_state.next_citizen_id
-		== WorldData.STARTING_CITY_POPULATION + 1
+		== CityCitizenRegistrySystem.STARTING_CITY_POPULATION + 1
 		and registry_state.citizen_version
-		== WorldData.STARTING_CITY_POPULATION
+		== CityCitizenRegistrySystem.STARTING_CITY_POPULATION
 		and exact_index,
 		"Founding must create IDs 1-8, exact indexes, next ID 9, and version 8."
 	)
@@ -190,18 +190,18 @@ func _test_real_founding_population_bootstrap() -> void:
 		"The eight founders must land directly in the capital registry."
 	)
 
-	var repeated_count := WorldData.initialize_starting_city_population()
+	var repeated_count := CityCitizenRegistrySystem.initialize_starting_city_population()
 	WorldData.found_player_city({
 		"city_world_seed": 96_102,
 		"city_map_size": Vector2i(city_world.width, city_world.height),
 	})
 	_expect(
 		repeated_count == 0
-		and registry_array.size() == WorldData.STARTING_CITY_POPULATION
+		and registry_array.size() == CityCitizenRegistrySystem.STARTING_CITY_POPULATION
 		and registry_state.next_citizen_id
-		== WorldData.STARTING_CITY_POPULATION + 1
+		== CityCitizenRegistrySystem.STARTING_CITY_POPULATION + 1
 		and registry_state.citizen_version
-		== WorldData.STARTING_CITY_POPULATION,
+		== CityCitizenRegistrySystem.STARTING_CITY_POPULATION,
 		"Repeated founding initialization must not duplicate citizens."
 	)
 

@@ -40,10 +40,10 @@ func _ready() -> void:
 func _test_current_source_allocates_one_immediate_meal() -> void:
 	var city_world := _reset_fixture()
 	var house := CityObjectSystem.add_city_object({
-		"object_type": WorldData.CITY_OBJECT_HOUSE,
+		"object_type": CityObjectCatalog.CITY_OBJECT_HOUSE,
 		"top_left": Vector2i(8, 8),
-		"size_tiles": WorldData.get_city_object_size_for_type(
-			WorldData.CITY_OBJECT_HOUSE
+		"size_tiles": CityObjectCatalog.get_city_object_size_for_type(
+			CityObjectCatalog.CITY_OBJECT_HOUSE
 		),
 		"object_owner": "player",
 		"city_world": city_world,
@@ -116,20 +116,20 @@ func _test_hungry_citizens_reserve_before_household_stocking() -> void:
 	CitizenNeedsSystem.set_city_citizen_hunger_state(provisioner_id, 100, 0)
 
 	var stockpile := CityObjectSystem.add_city_object({
-		"object_type": WorldData.CITY_OBJECT_STOCKPILE,
+		"object_type": CityObjectCatalog.CITY_OBJECT_STOCKPILE,
 		"top_left": Vector2i(10, 8),
-		"size_tiles": WorldData.get_city_object_size_for_type(
-			WorldData.CITY_OBJECT_STOCKPILE
+		"size_tiles": CityObjectCatalog.get_city_object_size_for_type(
+			CityObjectCatalog.CITY_OBJECT_STOCKPILE
 		),
 		"object_owner": "player",
 		"city_world": city_world,
 	})
 	var stockpile_id := int(stockpile.get("id", -1))
 	var house := CityObjectSystem.add_city_object({
-		"object_type": WorldData.CITY_OBJECT_HOUSE,
+		"object_type": CityObjectCatalog.CITY_OBJECT_HOUSE,
 		"top_left": Vector2i(22, 8),
-		"size_tiles": WorldData.get_city_object_size_for_type(
-			WorldData.CITY_OBJECT_HOUSE
+		"size_tiles": CityObjectCatalog.get_city_object_size_for_type(
+			CityObjectCatalog.CITY_OBJECT_HOUSE
 		),
 		"object_owner": "player",
 		"city_world": city_world,
@@ -161,9 +161,9 @@ func _test_hungry_citizens_reserve_before_household_stocking() -> void:
 	var task_b := CityCitizenTaskRuntimeSystem.get_city_citizen_current_task(hungry_b_id)
 	_expect(
 		str(task_a.get("kind", ""))
-		== WorldData.CITY_CITIZEN_TASK_KIND_ACQUIRE_FOOD
+		== CityCitizens.CITY_CITIZEN_TASK_KIND_ACQUIRE_FOOD
 		and str(task_b.get("kind", ""))
-		== WorldData.CITY_CITIZEN_TASK_KIND_ACQUIRE_FOOD,
+		== CityCitizens.CITY_CITIZEN_TASK_KIND_ACQUIRE_FOOD,
 		"Both equally hungry citizens must claim one shared meal before pantry stocking begins."
 	)
 	_expect(
@@ -212,10 +212,10 @@ func _reset_fixture() -> WorldData:
 
 
 func _add_citizen(tile_position: Vector2i) -> Dictionary:
-	return WorldData.add_city_citizen(
+	return CityCitizenRegistrySystem.add_city_citizen(
 		"",
 		tile_position,
-		WorldData.CITY_CITIZEN_SEX_FEMALE,
+		CityCitizens.CITY_CITIZEN_SEX_FEMALE,
 		test_culture_id
 	)
 

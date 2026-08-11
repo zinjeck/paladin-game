@@ -779,8 +779,8 @@ func _test_city_natural_features(
 
 
 func _test_city_keep_accepts_tree_covered_access() -> void:
-	var keep_size := WorldData.get_city_object_size_for_type(
-		WorldData.CITY_OBJECT_CITY_CENTER
+	var keep_size := CityObjectCatalog.get_city_object_size_for_type(
+		CityObjectCatalog.CITY_OBJECT_CITY_CENTER
 	)
 	var test_world := WorldData.new()
 	test_world.setup(
@@ -810,7 +810,7 @@ func _test_city_keep_accepts_tree_covered_access() -> void:
 			test_world,
 			keep_top_left,
 			keep_size,
-			WorldData.CITY_OBJECT_CITY_CENTER
+			CityObjectCatalog.CITY_OBJECT_CITY_CENTER
 		),
 		"A City Keep must accept tree-covered access tiles."
 	)
@@ -866,15 +866,15 @@ func _test_resource_catalog_and_bulk_totals() -> void:
 	]
 
 	_expect(
-		WorldData.get_city_resource_types() == expected_resources,
+		CityResourceCatalog.get_city_resource_types() == expected_resources,
 		"Resource catalog order must remain stable."
 	)
 	_expect(
-		WorldData.is_city_resource_type(WorldData.RESOURCE_MEAT),
+		CityResourceCatalog.is_city_resource_type(WorldData.RESOURCE_MEAT),
 		"Meat must be a valid city resource."
 	)
 	_expect(
-		not WorldData.is_city_resource_type("invalid_resource"),
+		not CityResourceCatalog.is_city_resource_type("invalid_resource"),
 		"Unknown resource IDs must remain invalid."
 	)
 	_expect(
@@ -885,8 +885,8 @@ func _test_resource_catalog_and_bulk_totals() -> void:
 		"Meat nutrition must remain 20."
 	)
 
-	var fishery_definition := WorldData.get_city_object_definition(
-		WorldData.CITY_OBJECT_FISHING_GROUNDS
+	var fishery_definition := CityObjectCatalog.get_city_object_definition(
+		CityObjectCatalog.CITY_OBJECT_FISHING_GROUNDS
 	)
 	var fishery_source_policy: Dictionary = (
 		fishery_definition.get("resource_source_policy", {})
@@ -915,8 +915,8 @@ func _test_resource_catalog_and_bulk_totals() -> void:
 	)
 
 
-	var house_definition := WorldData.get_city_object_definition(
-		WorldData.CITY_OBJECT_HOUSE
+	var house_definition := CityObjectCatalog.get_city_object_definition(
+		CityObjectCatalog.CITY_OBJECT_HOUSE
 	)
 	var house_container_policy: Dictionary = house_definition.get(
 		"container_access_policy",
@@ -925,7 +925,7 @@ func _test_resource_catalog_and_bulk_totals() -> void:
 	_expect(
 		not bool(
 			house_container_policy.get(
-				WorldData.CONTAINER_ACCESS_COUNTS_TOWARD_CITY_OWNED_TOTALS,
+				CityObjectCatalog.CONTAINER_ACCESS_COUNTS_TOWARD_CITY_OWNED_TOTALS,
 				true
 			)
 		),
@@ -1029,7 +1029,7 @@ func _test_ground_pile_coalescing(
 		var ground_pile: Dictionary = raw_ground_pile
 		var pile_tile: Vector2i = ground_pile.get(
 			"tile_position",
-			WorldData.INVALID_CITY_TILE_POSITION
+			CityCitizens.INVALID_CITY_TILE_POSITION
 		)
 		var pile_amount := int(ground_pile.get("amount", 0))
 
@@ -1111,13 +1111,13 @@ func _find_ground_pile_test_pair(
 func _place_and_validate_city_fixture(
 	renderer: CityRenderer
 ) -> void:
-	var keep_size := WorldData.get_city_object_size_for_type(
-		WorldData.CITY_OBJECT_CITY_CENTER
+	var keep_size := CityObjectCatalog.get_city_object_size_for_type(
+		CityObjectCatalog.CITY_OBJECT_CITY_CENTER
 	)
 	var keep_top_left := _find_placeable_rectangle(
 		renderer.city_world,
 		keep_size,
-		WorldData.CITY_OBJECT_CITY_CENTER
+		CityObjectCatalog.CITY_OBJECT_CITY_CENTER
 	)
 
 	_expect(
@@ -1166,13 +1166,13 @@ func _place_and_validate_city_fixture(
 			renderer.city_world,
 			keep_top_left,
 			keep_size,
-			WorldData.CITY_OBJECT_CITY_CENTER
+			CityObjectCatalog.CITY_OBJECT_CITY_CENTER
 		),
 		"Surface features must not invalidate building placement."
 	)
 
 	var keep := CityObjectSystem.add_city_object({
-		"object_type": WorldData.CITY_OBJECT_CITY_CENTER,
+		"object_type": CityObjectCatalog.CITY_OBJECT_CITY_CENTER,
 		"top_left": keep_top_left,
 		"size_tiles": keep_size,
 		"object_owner": "player",
@@ -1233,7 +1233,7 @@ func _place_and_validate_city_fixture(
 
 	_expect(
 		CityCitizenRegistrySystem.get_city_population_count()
-		== WorldData.STARTING_CITY_POPULATION,
+		== CityCitizenRegistrySystem.STARTING_CITY_POPULATION,
 		"Founding must still create the starting population."
 	)
 
@@ -1415,7 +1415,7 @@ func _test_universal_construction_core(
 		if (
 			raw_object is Dictionary
 			and str(raw_object.get("type", ""))
-			== WorldData.CITY_OBJECT_CITY_CENTER
+			== CityObjectCatalog.CITY_OBJECT_CITY_CENTER
 		):
 			keep_access_tiles = CityNavigationSystem.get_city_object_access_tiles(
 				renderer.city_world,
@@ -1431,23 +1431,23 @@ func _test_universal_construction_core(
 	if keep_access_tiles.is_empty():
 		return
 
-	var house_size := WorldData.get_city_object_size_for_type(
-		WorldData.CITY_OBJECT_HOUSE
+	var house_size := CityObjectCatalog.get_city_object_size_for_type(
+		CityObjectCatalog.CITY_OBJECT_HOUSE
 	)
 	var house_top_left := _find_reachable_construction_rectangle(
 		renderer.city_world,
 		house_size,
-		WorldData.CITY_OBJECT_HOUSE,
+		CityObjectCatalog.CITY_OBJECT_HOUSE,
 		citizen_id,
 		keep_access_tiles
 	)
 
 	_expect(
-		house_top_left != WorldData.INVALID_CITY_TILE_POSITION,
+		house_top_left != CityCitizens.INVALID_CITY_TILE_POSITION,
 		"A construction-enabled House footprint must exist."
 	)
 
-	if house_top_left == WorldData.INVALID_CITY_TILE_POSITION:
+	if house_top_left == CityCitizens.INVALID_CITY_TILE_POSITION:
 		return
 
 	var house_footprint := (
@@ -1482,7 +1482,7 @@ func _test_universal_construction_core(
 	renderer.city_world.consume_city_surface_feature_changes()
 
 	var house_site := CityConstructionSystemScript.create_rectangular_site({
-		"object_type": WorldData.CITY_OBJECT_HOUSE,
+		"object_type": CityObjectCatalog.CITY_OBJECT_HOUSE,
 		"top_left": house_top_left,
 		"size_tiles": house_size,
 		"object_owner": "player",
@@ -1574,7 +1574,7 @@ func _test_universal_construction_core(
 	renderer.set_selected_city_construction_site(house_site_id)
 
 	renderer.start_city_object_placement(
-		WorldData.CITY_OBJECT_HOUSE,
+		CityObjectCatalog.CITY_OBJECT_HOUSE,
 		house_size
 	)
 	_expect(
@@ -1745,7 +1745,7 @@ func _test_universal_construction_core(
 			not CityLogisticsSystem.city_haul_endpoint_can_provide_resource({
 				"endpoint": pile_endpoint,
 				"resource": str(raw_ground_pile.get("resource_type", "")),
-				"withdrawal_purpose": WorldData.CONTAINER_HAUL_PURPOSE_GROUND_PILE_CLEANUP,
+				"withdrawal_purpose": CityObjectCatalog.CONTAINER_HAUL_PURPOSE_GROUND_PILE_CLEANUP,
 				"require_unreserved_amount": true,
 			}),
 			"Ordinary hauling must ignore construction-reserved piles."
@@ -1784,7 +1784,7 @@ func _test_universal_construction_core(
 
 	_expect(
 		str(completed_house.get("type", ""))
-		== WorldData.CITY_OBJECT_HOUSE,
+		== CityObjectCatalog.CITY_OBJECT_HOUSE,
 		"Completed labor must consume material and create the House."
 	)
 	renderer.update_selected_entity_panel()
@@ -1950,7 +1950,7 @@ func _test_universal_construction_core(
 		CityNavigationSystem.get_city_citizen_movement_step_cost(
 			road_tiles[0] + Vector2i.LEFT,
 			road_tiles[0]
-		) == WorldData.CITY_CITIZEN_ROAD_CARDINAL_MOVEMENT_COST,
+		) == CityCitizens.CITY_CITIZEN_ROAD_CARDINAL_MOVEMENT_COST,
 		"Entering a completed road tile must cost half a normal cardinal step."
 	)
 
@@ -2003,16 +2003,16 @@ func _find_reachable_construction_rectangle(
 	destination_access_tiles: Array
 ) -> Vector2i:
 	if city_world == null or citizen_id <= 0:
-		return WorldData.INVALID_CITY_TILE_POSITION
+		return CityCitizens.INVALID_CITY_TILE_POSITION
 
 	var citizen := CityCitizenRegistrySystem.get_city_citizen_by_id(citizen_id)
 	var raw_citizen_tile = citizen.get(
 		"city_tile_position",
-		WorldData.INVALID_CITY_TILE_POSITION
+		CityCitizens.INVALID_CITY_TILE_POSITION
 	)
 
 	if not raw_citizen_tile is Vector2i:
-		return WorldData.INVALID_CITY_TILE_POSITION
+		return CityCitizens.INVALID_CITY_TILE_POSITION
 
 	var citizen_tile: Vector2i = raw_citizen_tile
 	var maximum_radius := maxi(city_world.width, city_world.height)
@@ -2032,7 +2032,7 @@ func _find_reachable_construction_rectangle(
 	)
 
 	if not bool(keep_path.get("success", false)):
-		return WorldData.INVALID_CITY_TILE_POSITION
+		return CityCitizens.INVALID_CITY_TILE_POSITION
 
 	for radius in range(maximum_radius + 1):
 		for offset_y in range(-radius, radius + 1):
@@ -2164,7 +2164,7 @@ func _find_reachable_construction_rectangle(
 				if bool(destination_path.get("success", false)):
 					return top_left
 
-	return WorldData.INVALID_CITY_TILE_POSITION
+	return CityCitizens.INVALID_CITY_TILE_POSITION
 
 
 func _make_cardinal_fixture_path(

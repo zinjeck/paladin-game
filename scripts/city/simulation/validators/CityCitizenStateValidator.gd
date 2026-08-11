@@ -72,7 +72,7 @@ static func _validate_city_citizen_spatial_state(
 
 		if (
 			tile_position
-			== WorldData.INVALID_CITY_TILE_POSITION
+			== CityCitizens.INVALID_CITY_TILE_POSITION
 		):
 			errors.append(
 				"Citizen "
@@ -239,7 +239,7 @@ static func _validate_city_citizen_spatial_state(
 				continue
 			var indexed_position = citizen.get(
 				"city_tile_position",
-				WorldData.INVALID_CITY_TILE_POSITION
+				CityCitizens.INVALID_CITY_TILE_POSITION
 			)
 
 			if indexed_position != tile_position:
@@ -344,7 +344,7 @@ static func _validate_city_citizen_demographics(
 	_validate_city_citizen_name_pool({
 		"errors": errors,
 		"pool_display_name": "Male",
-		"expected_sex": WorldData.CITY_CITIZEN_SEX_MALE,
+		"expected_sex": CityCitizens.CITY_CITIZEN_SEX_MALE,
 		"name_pool": CityCitizens.city_citizen_male_name_pool,
 		"global_name_owners": global_name_owners,
 	})
@@ -352,7 +352,7 @@ static func _validate_city_citizen_demographics(
 	_validate_city_citizen_name_pool({
 		"errors": errors,
 		"pool_display_name": "Female",
-		"expected_sex": WorldData.CITY_CITIZEN_SEX_FEMALE,
+		"expected_sex": CityCitizens.CITY_CITIZEN_SEX_FEMALE,
 		"name_pool": CityCitizens.city_citizen_female_name_pool,
 		"global_name_owners": global_name_owners,
 	})
@@ -421,7 +421,7 @@ static func _validate_city_citizen_demographics(
 			)
 			continue
 
-		if citizen_sex == WorldData.CITY_CITIZEN_SEX_MALE:
+		if citizen_sex == CityCitizens.CITY_CITIZEN_SEX_MALE:
 			male_count += 1
 		else:
 			female_count += 1
@@ -456,29 +456,27 @@ static func _validate_city_citizen_demographics(
 		WorldData.player_city_founded
 		and (
 			CityCitizenRegistrySystem.get_current_state().citizens.size()
-			== WorldData.STARTING_CITY_POPULATION
+			== CityCitizenRegistrySystem.STARTING_CITY_POPULATION
 		)
 		and (
 			CityCitizenRegistrySystem.get_current_state().next_citizen_id
-			== WorldData.STARTING_CITY_POPULATION + 1
+			== CityCitizenRegistrySystem.STARTING_CITY_POPULATION + 1
 		)
 	):
 		if (
 			male_count
-			!= WorldData.STARTING_CITY_MALE_POPULATION
+			!= CityCitizenRegistrySystem.STARTING_CITY_MALE_POPULATION
 			or female_count
-			!= WorldData.STARTING_CITY_FEMALE_POPULATION
+			!= CityCitizenRegistrySystem.STARTING_CITY_FEMALE_POPULATION
 		):
 			errors.append(
 				"Founding population must contain "
 					+ str(
-						WorldData
-						.STARTING_CITY_MALE_POPULATION
+						CityCitizenRegistrySystem.STARTING_CITY_MALE_POPULATION
 					)
 					+ " male and "
 					+ str(
-						WorldData
-						.STARTING_CITY_FEMALE_POPULATION
+						CityCitizenRegistrySystem.STARTING_CITY_FEMALE_POPULATION
 					)
 					+ " female citizens, but contains "
 					+ str(male_count)
@@ -603,11 +601,11 @@ static func _validate_city_citizen_culture_state(
 	if not (
 		primary_culture_id > 0
 		and CityCitizenRegistrySystem.get_current_state().next_citizen_id
-		> WorldData.STARTING_CITY_POPULATION
+		> CityCitizenRegistrySystem.STARTING_CITY_POPULATION
 	):
 		return
 
-	for citizen_id in range(1, WorldData.STARTING_CITY_POPULATION + 1):
+	for citizen_id in range(1, CityCitizenRegistrySystem.STARTING_CITY_POPULATION + 1):
 		if not citizen_lookup.has(citizen_id):
 			errors.append(
 				"Founding citizen "
@@ -685,7 +683,7 @@ static func _validate_city_citizen_need_state(
 
 	for resource in CityResourceCatalog.get_city_food_resource_types():
 		if (
-			not WorldData.is_city_resource_type(resource)
+			not CityResourceCatalog.is_city_resource_type(resource)
 			or CityResourceCatalog.get_city_food_hunger_restore(resource) <= 0
 		):
 			errors.append(
@@ -869,7 +867,7 @@ static func _validate_city_citizen_task_entry(
 		),
 		"raw_target_tile": task_field_context.get(
 			"raw_target_tile",
-			WorldData.INVALID_CITY_TILE_POSITION
+			CityCitizens.INVALID_CITY_TILE_POSITION
 		),
 		"food_resource_type": task_field_context.get(
 			"raw_food_resource_type",
@@ -889,7 +887,7 @@ static func _validate_city_citizen_task_entry(
 		),
 	}
 
-	if task_kind == WorldData.CITY_CITIZEN_TASK_KIND_NONE:
+	if task_kind == CityCitizens.CITY_CITIZEN_TASK_KIND_NONE:
 		_validate_empty_city_citizen_task_state(task_context)
 		return
 
@@ -1089,7 +1087,7 @@ static func _validate_empty_city_citizen_task_state(
 			+ " has no task but retains a work-order reference."
 		)
 
-	if task_source != WorldData.CITY_CITIZEN_TASK_SOURCE_NONE:
+	if task_source != CityCitizens.CITY_CITIZEN_TASK_SOURCE_NONE:
 		errors.append(
 			"Citizen "
 			+ str(citizen_id)
@@ -1098,7 +1096,7 @@ static func _validate_empty_city_citizen_task_state(
 			+ "'."
 		)
 
-	if task_phase != WorldData.CITY_CITIZEN_TASK_PHASE_NONE:
+	if task_phase != CityCitizens.CITY_CITIZEN_TASK_PHASE_NONE:
 		errors.append(
 			"Citizen "
 			+ str(citizen_id)
@@ -1107,7 +1105,7 @@ static func _validate_empty_city_citizen_task_state(
 			+ "'."
 		)
 
-	if task_priority != WorldData.CITY_CITIZEN_TASK_PRIORITY_NONE:
+	if task_priority != CityCitizens.CITY_CITIZEN_TASK_PRIORITY_NONE:
 		errors.append(
 			"Citizen "
 			+ str(citizen_id)
@@ -1127,7 +1125,7 @@ static func _validate_empty_city_citizen_task_state(
 
 	if (
 		start_world_minute
-		!= WorldData.INVALID_CITY_CITIZEN_TASK_START_WORLD_MINUTE
+		!= CityCitizens.INVALID_CITY_CITIZEN_TASK_START_WORLD_MINUTE
 	):
 		errors.append(
 			"Citizen "
@@ -1170,7 +1168,7 @@ static func _validate_active_city_citizen_task_state(
 	var player_locked := bool(values.get("player_locked", false))
 	var raw_target_tile = values.get(
 		"raw_target_tile",
-		WorldData.INVALID_CITY_TILE_POSITION
+		CityCitizens.INVALID_CITY_TILE_POSITION
 	)
 	var raw_food_resource_type = values.get("food_resource_type", "")
 	var raw_food_requested_amount = values.get("food_requested_amount", 0)
@@ -1191,7 +1189,7 @@ static func _validate_active_city_citizen_task_state(
 	else:
 		expected_active_task_ids.append(citizen_id)
 
-	if task_source == WorldData.CITY_CITIZEN_TASK_SOURCE_NONE:
+	if task_source == CityCitizens.CITY_CITIZEN_TASK_SOURCE_NONE:
 		errors.append(
 			"Citizen "
 			+ str(citizen_id)
@@ -1200,7 +1198,7 @@ static func _validate_active_city_citizen_task_state(
 			+ "' with no source."
 		)
 
-	if task_phase == WorldData.CITY_CITIZEN_TASK_PHASE_NONE:
+	if task_phase == CityCitizens.CITY_CITIZEN_TASK_PHASE_NONE:
 		errors.append(
 			"Citizen "
 			+ str(citizen_id)
@@ -1209,7 +1207,7 @@ static func _validate_active_city_citizen_task_state(
 			+ "' with no phase."
 		)
 
-	if task_priority <= WorldData.CITY_CITIZEN_TASK_PRIORITY_NONE:
+	if task_priority <= CityCitizens.CITY_CITIZEN_TASK_PRIORITY_NONE:
 		errors.append(
 			"Citizen "
 			+ str(citizen_id)
@@ -1234,7 +1232,7 @@ static func _validate_active_city_citizen_task_state(
 	if (
 		player_locked
 		and task_source
-		!= WorldData.CITY_CITIZEN_TASK_SOURCE_PLAYER
+		!= CityCitizens.CITY_CITIZEN_TASK_SOURCE_PLAYER
 	):
 		errors.append(
 			"Citizen "
@@ -1246,12 +1244,12 @@ static func _validate_active_city_citizen_task_state(
 
 	if (
 		(
-			task_source == WorldData.CITY_CITIZEN_TASK_SOURCE_PLAYER
+			task_source == CityCitizens.CITY_CITIZEN_TASK_SOURCE_PLAYER
 			or task_source
-			== WorldData.CITY_CITIZEN_TASK_SOURCE_AUTONOMY
+			== CityCitizens.CITY_CITIZEN_TASK_SOURCE_AUTONOMY
 		)
 		and int(citizen.get("job_object_id", -1)) > 0
-		and task_kind != WorldData.CITY_CITIZEN_TASK_KIND_ACQUIRE_FOOD
+		and task_kind != CityCitizens.CITY_CITIZEN_TASK_KIND_ACQUIRE_FOOD
 	):
 		errors.append(
 			"Employed citizen "
@@ -1262,12 +1260,12 @@ static func _validate_active_city_citizen_task_state(
 		)
 
 	var task_requires_work_order := (
-		task_kind == WorldData.CITY_CITIZEN_TASK_KIND_PLAYER_COMMAND
-		or task_kind == WorldData.CITY_CITIZEN_TASK_KIND_CONSTRUCTION
+		task_kind == CityCitizens.CITY_CITIZEN_TASK_KIND_PLAYER_COMMAND
+		or task_kind == CityCitizens.CITY_CITIZEN_TASK_KIND_CONSTRUCTION
 		or (
-			task_kind == WorldData.CITY_CITIZEN_TASK_KIND_HAUL
+			task_kind == CityCitizens.CITY_CITIZEN_TASK_KIND_HAUL
 			and task_source
-			== WorldData.CITY_CITIZEN_TASK_SOURCE_PLAYER
+			== CityCitizens.CITY_CITIZEN_TASK_SOURCE_PLAYER
 		)
 	)
 
@@ -1332,17 +1330,17 @@ static func _validate_city_citizen_task_kind_state(
 	var task_kind: String = str(values.get("task_kind", ""))
 
 	match task_kind:
-		WorldData.CITY_CITIZEN_TASK_KIND_WORK:
+		CityCitizens.CITY_CITIZEN_TASK_KIND_WORK:
 			_validate_work_task_kind_state(values)
-		WorldData.CITY_CITIZEN_TASK_KIND_ACQUIRE_FOOD:
+		CityCitizens.CITY_CITIZEN_TASK_KIND_ACQUIRE_FOOD:
 			_validate_acquire_food_task_kind_state(values)
-		WorldData.CITY_CITIZEN_TASK_KIND_HAUL:
+		CityCitizens.CITY_CITIZEN_TASK_KIND_HAUL:
 			_validate_haul_task_kind_state(values)
-		WorldData.CITY_CITIZEN_TASK_KIND_CONSTRUCTION:
+		CityCitizens.CITY_CITIZEN_TASK_KIND_CONSTRUCTION:
 			_validate_construction_task_kind_state(values)
-		WorldData.CITY_CITIZEN_TASK_KIND_PLAYER_COMMAND:
+		CityCitizens.CITY_CITIZEN_TASK_KIND_PLAYER_COMMAND:
 			_validate_player_command_task_kind_state(values)
-		WorldData.CITY_CITIZEN_TASK_KIND_RETURN_HOME:
+		CityCitizens.CITY_CITIZEN_TASK_KIND_RETURN_HOME:
 			_validate_return_home_task_kind_state(values)
 
 static func _validate_work_task_kind_state(values: Dictionary) -> void:
@@ -1357,7 +1355,7 @@ static func _validate_work_task_kind_state(values: Dictionary) -> void:
 	var player_locked := bool(values.get("player_locked", false))
 	var raw_target_tile = values.get(
 		"raw_target_tile",
-		WorldData.INVALID_CITY_TILE_POSITION
+		CityCitizens.INVALID_CITY_TILE_POSITION
 	)
 	var raw_food_resource_type = values.get("food_resource_type", "")
 	var raw_food_requested_amount = values.get("food_requested_amount", 0)
@@ -1395,7 +1393,7 @@ static func _validate_work_task_kind_state(values: Dictionary) -> void:
 		)
 	)
 
-	if not WorldData.city_object_is_workplace(
+	if not CityObjectCatalog.city_object_is_workplace(
 		target_object
 	):
 		errors.append(
@@ -1421,7 +1419,7 @@ static func _validate_work_task_kind_state(values: Dictionary) -> void:
 		)
 	if (
 		task_phase
-		== WorldData.CITY_CITIZEN_TASK_PHASE_PERFORMING
+		== CityCitizens.CITY_CITIZEN_TASK_PHASE_PERFORMING
 		and not CityEmploymentSystem.is_city_citizen_attending_workplace(
 			citizen_id,
 			target_object_id
@@ -1449,7 +1447,7 @@ static func _validate_acquire_food_task_kind_state(values: Dictionary) -> void:
 	var player_locked := bool(values.get("player_locked", false))
 	var raw_target_tile = values.get(
 		"raw_target_tile",
-		WorldData.INVALID_CITY_TILE_POSITION
+		CityCitizens.INVALID_CITY_TILE_POSITION
 	)
 	var raw_food_resource_type = values.get("food_resource_type", "")
 	var raw_food_requested_amount = values.get("food_requested_amount", 0)
@@ -1472,9 +1470,8 @@ static func _validate_acquire_food_task_kind_state(values: Dictionary) -> void:
 	if (
 		target_object_id <= 0
 		or food_endpoint_kind not in [
-			WorldData
-			.CITY_CITIZEN_HAUL_ENDPOINT_KIND_CITY_OBJECT_CONTAINER,
-			WorldData.CITY_CITIZEN_HAUL_ENDPOINT_KIND_GROUND_PILE,
+			CityCitizens.CITY_CITIZEN_HAUL_ENDPOINT_KIND_CITY_OBJECT_CONTAINER,
+			CityCitizens.CITY_CITIZEN_HAUL_ENDPOINT_KIND_GROUND_PILE,
 		]
 		or not CityCitizens.is_valid_city_citizen_haul_endpoint(
 			food_endpoint
@@ -1512,7 +1509,7 @@ static func _validate_acquire_food_task_kind_state(values: Dictionary) -> void:
 
 	if (
 		food_access_purpose
-		!= WorldData.CONTAINER_DIRECT_WITHDRAWAL_PURPOSE_PERSONAL_FOOD
+		!= CityObjectCatalog.CONTAINER_DIRECT_WITHDRAWAL_PURPOSE_PERSONAL_FOOD
 	):
 		errors.append(
 			"Citizen "
@@ -1524,7 +1521,7 @@ static func _validate_acquire_food_task_kind_state(values: Dictionary) -> void:
 
 	var raw_food_target_tile = current_task.get(
 		"target_tile",
-		WorldData.INVALID_CITY_TILE_POSITION
+		CityCitizens.INVALID_CITY_TILE_POSITION
 	)
 
 	if (
@@ -1566,7 +1563,7 @@ static func _validate_haul_task_kind_state(values: Dictionary) -> void:
 	var player_locked := bool(values.get("player_locked", false))
 	var raw_target_tile = values.get(
 		"raw_target_tile",
-		WorldData.INVALID_CITY_TILE_POSITION
+		CityCitizens.INVALID_CITY_TILE_POSITION
 	)
 	var raw_food_resource_type = values.get("food_resource_type", "")
 	var raw_food_requested_amount = values.get("food_requested_amount", 0)
@@ -1608,12 +1605,12 @@ static func _validate_haul_task_kind_state(values: Dictionary) -> void:
 	var haul_phase := str(
 		haul.get(
 			"phase",
-			WorldData.CITY_CITIZEN_HAUL_PHASE_NONE
+			CityCitizens.CITY_CITIZEN_HAUL_PHASE_NONE
 		)
 	)
 	var raw_reservation_id = haul.get("reservation_id")
 	var reservation_id := (
-		WorldData.INVALID_CITY_CITIZEN_HAUL_RESERVATION_ID
+		CityCitizens.INVALID_CITY_CITIZEN_HAUL_RESERVATION_ID
 	)
 
 	if typeof(raw_reservation_id) != TYPE_INT:
@@ -1631,7 +1628,7 @@ static func _validate_haul_task_kind_state(values: Dictionary) -> void:
 	)
 	var raw_haul_requester = haul.get("requester", {})
 
-	if not WorldData.is_city_resource_type(haul_resource):
+	if not CityResourceCatalog.is_city_resource_type(haul_resource):
 		errors.append(
 			"Citizen "
 				+ str(citizen_id)
@@ -1645,7 +1642,7 @@ static func _validate_haul_task_kind_state(values: Dictionary) -> void:
 			haul_phase
 		)
 		or haul_phase
-		== WorldData.CITY_CITIZEN_HAUL_PHASE_NONE
+		== CityCitizens.CITY_CITIZEN_HAUL_PHASE_NONE
 	):
 		errors.append(
 			"Citizen "
@@ -1665,9 +1662,9 @@ static func _validate_haul_task_kind_state(values: Dictionary) -> void:
 	if str(
 		haul.get(
 			"reason",
-			WorldData.CITY_CITIZEN_HAUL_REASON_NONE
+			CityCitizens.CITY_CITIZEN_HAUL_REASON_NONE
 		)
-	) == WorldData.CITY_CITIZEN_HAUL_REASON_NONE:
+	) == CityCitizens.CITY_CITIZEN_HAUL_REASON_NONE:
 		errors.append(
 			"Citizen "
 				+ str(citizen_id)
@@ -1691,8 +1688,7 @@ static func _validate_haul_task_kind_state(values: Dictionary) -> void:
 				haul_source
 			)
 			or str(haul_source.get("kind", ""))
-			== WorldData
-			.CITY_CITIZEN_HAUL_ENDPOINT_KIND_GROUND_TILE
+			== CityCitizens.CITY_CITIZEN_HAUL_ENDPOINT_KIND_GROUND_TILE
 		):
 			errors.append(
 				"Citizen "
@@ -1742,9 +1738,9 @@ static func _validate_haul_task_kind_state(values: Dictionary) -> void:
 		cargo_amount > 0
 		and reservation_id <= 0
 		and not [
-			WorldData.CITY_CITIZEN_HAUL_PHASE_BLOCKED,
-			WorldData.CITY_CITIZEN_HAUL_PHASE_RETARGETING,
-			WorldData.CITY_CITIZEN_HAUL_PHASE_PENDING_DESTINATION,
+			CityCitizens.CITY_CITIZEN_HAUL_PHASE_BLOCKED,
+			CityCitizens.CITY_CITIZEN_HAUL_PHASE_RETARGETING,
+			CityCitizens.CITY_CITIZEN_HAUL_PHASE_PENDING_DESTINATION,
 		].has(haul_phase)
 	):
 		errors.append(
@@ -1782,14 +1778,13 @@ static func _validate_haul_task_kind_state(values: Dictionary) -> void:
 			)
 		elif (
 			str(haul_destination.get("kind", ""))
-			== WorldData
-			.CITY_CITIZEN_HAUL_ENDPOINT_KIND_GROUND_TILE
+			== CityCitizens.CITY_CITIZEN_HAUL_ENDPOINT_KIND_GROUND_TILE
 			and haul.get(
 				"destination_tile",
-				WorldData.INVALID_CITY_TILE_POSITION
+				CityCitizens.INVALID_CITY_TILE_POSITION
 			) != haul_destination.get(
 				"tile_position",
-				WorldData.INVALID_CITY_TILE_POSITION
+				CityCitizens.INVALID_CITY_TILE_POSITION
 			)
 		):
 			errors.append(
@@ -1811,7 +1806,7 @@ static func _validate_construction_task_kind_state(values: Dictionary) -> void:
 	var player_locked := bool(values.get("player_locked", false))
 	var raw_target_tile = values.get(
 		"raw_target_tile",
-		WorldData.INVALID_CITY_TILE_POSITION
+		CityCitizens.INVALID_CITY_TILE_POSITION
 	)
 	var raw_food_resource_type = values.get("food_resource_type", "")
 	var raw_food_requested_amount = values.get("food_requested_amount", 0)
@@ -1841,7 +1836,7 @@ static func _validate_construction_task_kind_state(values: Dictionary) -> void:
 
 	if (
 		task_source
-		!= WorldData.CITY_CITIZEN_TASK_SOURCE_PLAYER
+		!= CityCitizens.CITY_CITIZEN_TASK_SOURCE_PLAYER
 		or player_locked
 	):
 		errors.append(
@@ -1885,7 +1880,7 @@ static func _validate_player_command_task_kind_state(values: Dictionary) -> void
 	var player_locked := bool(values.get("player_locked", false))
 	var raw_target_tile = values.get(
 		"raw_target_tile",
-		WorldData.INVALID_CITY_TILE_POSITION
+		CityCitizens.INVALID_CITY_TILE_POSITION
 	)
 	var raw_food_resource_type = values.get("food_resource_type", "")
 	var raw_food_requested_amount = values.get("food_requested_amount", 0)
@@ -1925,7 +1920,7 @@ static func _validate_player_command_task_kind_state(values: Dictionary) -> void
 
 	if (
 		task_source
-		!= WorldData.CITY_CITIZEN_TASK_SOURCE_PLAYER
+		!= CityCitizens.CITY_CITIZEN_TASK_SOURCE_PLAYER
 	):
 		errors.append(
 			"Citizen "
@@ -1971,7 +1966,7 @@ static func _validate_return_home_task_kind_state(values: Dictionary) -> void:
 	var player_locked := bool(values.get("player_locked", false))
 	var raw_target_tile = values.get(
 		"raw_target_tile",
-		WorldData.INVALID_CITY_TILE_POSITION
+		CityCitizens.INVALID_CITY_TILE_POSITION
 	)
 	var raw_food_resource_type = values.get("food_resource_type", "")
 	var raw_food_requested_amount = values.get("food_requested_amount", 0)
@@ -2008,7 +2003,7 @@ static func _validate_return_home_task_kind_state(values: Dictionary) -> void:
 	)
 
 	if (
-		WorldData.get_city_object_resident_capacity(
+		CityObjectCatalog.get_city_object_resident_capacity(
 			target_home
 		) <= 0
 		or not CityObjectSystem.city_object_supports_citizen_interior(
@@ -2180,7 +2175,7 @@ static func _validate_city_task_work_order_reference(
 		)
 
 	if (
-		task_source != WorldData.CITY_CITIZEN_TASK_SOURCE_PLAYER
+		task_source != CityCitizens.CITY_CITIZEN_TASK_SOURCE_PLAYER
 		or str(order.get("state", ""))
 		== CityWorkSystemScript.ORDER_STATE_CANCELLED
 	):
@@ -2199,14 +2194,14 @@ static func _validate_city_task_work_order_reference(
 			target_object_id
 		)
 		source_matches_task = (
-			task_kind == WorldData.CITY_CITIZEN_TASK_KIND_PLAYER_COMMAND
+			task_kind == CityCitizens.CITY_CITIZEN_TASK_KIND_PLAYER_COMMAND
 			and not command.is_empty()
 			and int(command.get("group_id", -1)) == source_id
 			and int(command.get("construction_site_id", -1)) <= 0
 		)
 	elif order_type == CityWorkSystemScript.ORDER_TYPE_CONSTRUCTION_SITE:
 		match task_kind:
-			WorldData.CITY_CITIZEN_TASK_KIND_PLAYER_COMMAND:
+			CityCitizens.CITY_CITIZEN_TASK_KIND_PLAYER_COMMAND:
 				var command := CityWorkSystem.get_city_player_command_by_id(
 					target_object_id
 				)
@@ -2216,10 +2211,10 @@ static func _validate_city_task_work_order_reference(
 					== source_id
 				)
 
-			WorldData.CITY_CITIZEN_TASK_KIND_CONSTRUCTION:
+			CityCitizens.CITY_CITIZEN_TASK_KIND_CONSTRUCTION:
 				source_matches_task = target_object_id == source_id
 
-			WorldData.CITY_CITIZEN_TASK_KIND_HAUL:
+			CityCitizens.CITY_CITIZEN_TASK_KIND_HAUL:
 				var raw_haul = citizen.get("current_haul", {})
 
 				if raw_haul is Dictionary:
@@ -2228,8 +2223,7 @@ static func _validate_city_task_work_order_reference(
 					if raw_requester is Dictionary:
 						source_matches_task = (
 							str(raw_requester.get("kind", ""))
-							== WorldData
-							.CITY_CITIZEN_HAUL_ENDPOINT_KIND_CONSTRUCTION_SITE
+							== CityCitizens.CITY_CITIZEN_HAUL_ENDPOINT_KIND_CONSTRUCTION_SITE
 							and int(raw_requester.get("id", -1))
 							== source_id
 						)
@@ -2475,7 +2469,7 @@ static func _validate_city_citizen_movement_path(
 	if (
 		movement_repath_attempt_count < 0
 		or movement_repath_attempt_count
-		> WorldData.MAX_CITIZEN_MOVEMENT_REPATH_ATTEMPTS
+		> CityCitizens.MAX_CITIZEN_MOVEMENT_REPATH_ATTEMPTS
 	):
 		errors.append(
 			"Citizen "
@@ -2563,14 +2557,14 @@ static func _validate_city_citizen_movement_state_details(
 	var movement_progress := int(values.get("movement_progress", 0))
 	var movement_destination: Vector2i = values.get(
 		"movement_destination",
-		WorldData.INVALID_CITY_TILE_POSITION
+		CityCitizens.INVALID_CITY_TILE_POSITION
 	)
 	var movement_repath_attempt_count := int(
 		values.get("movement_repath_attempt_count", 0)
 	)
 	var raw_failure = values.get(
 		"raw_failure",
-		WorldData.CITY_CITIZEN_MOVEMENT_FAILURE_NONE
+		CityCitizens.CITY_CITIZEN_MOVEMENT_FAILURE_NONE
 	)
 	var path_entries_valid := bool(values.get("path_entries_valid", false))
 	var citizen_is_active := (
@@ -2580,7 +2574,7 @@ static func _validate_city_citizen_movement_state_details(
 	)
 
 	match movement_state:
-		WorldData.CITY_CITIZEN_MOVEMENT_STATE_IDLE:
+		CityCitizens.CITY_CITIZEN_MOVEMENT_STATE_IDLE:
 			if not movement_path.is_empty():
 				errors.append(
 					"Idle citizen "
@@ -2597,7 +2591,7 @@ static func _validate_city_citizen_movement_state_details(
 
 			if (
 				movement_destination
-				!= WorldData.INVALID_CITY_TILE_POSITION
+				!= CityCitizens.INVALID_CITY_TILE_POSITION
 			):
 				errors.append(
 					"Idle citizen "
@@ -2607,7 +2601,7 @@ static func _validate_city_citizen_movement_state_details(
 
 			if (
 				str(raw_failure)
-				!= WorldData.CITY_CITIZEN_MOVEMENT_FAILURE_NONE
+				!= CityCitizens.CITY_CITIZEN_MOVEMENT_FAILURE_NONE
 			):
 				errors.append(
 					"Idle citizen "
@@ -2627,7 +2621,7 @@ static func _validate_city_citizen_movement_state_details(
 						+ " appears in the active-mover registry."
 				)
 
-		WorldData.CITY_CITIZEN_MOVEMENT_STATE_MOVING:
+		CityCitizens.CITY_CITIZEN_MOVEMENT_STATE_MOVING:
 			expected_active_ids[int(citizen_id)] = true
 
 			if not bool(citizen.get("alive", false)):
@@ -2658,7 +2652,7 @@ static func _validate_city_citizen_movement_state_details(
 				and movement_path[movement_index - 1]
 				!= citizen.get(
 					"city_tile_position",
-					WorldData.INVALID_CITY_TILE_POSITION
+					CityCitizens.INVALID_CITY_TILE_POSITION
 				)
 			):
 				errors.append(
@@ -2697,7 +2691,7 @@ static func _validate_city_citizen_movement_state_details(
 
 			if (
 				str(raw_failure)
-				!= WorldData.CITY_CITIZEN_MOVEMENT_FAILURE_NONE
+				!= CityCitizens.CITY_CITIZEN_MOVEMENT_FAILURE_NONE
 			):
 				errors.append(
 					"Moving citizen "
@@ -2712,7 +2706,7 @@ static func _validate_city_citizen_movement_state_details(
 						+ " is absent from the active-mover registry."
 				)
 
-		WorldData.CITY_CITIZEN_MOVEMENT_STATE_BLOCKED:
+		CityCitizens.CITY_CITIZEN_MOVEMENT_STATE_BLOCKED:
 			if citizen_is_active:
 				errors.append(
 					"Blocked citizen "
@@ -2766,7 +2760,7 @@ static func _validate_city_active_mover_registry(
 		if (
 			not bool(active_citizen.get("alive", false))
 			or str(active_citizen.get("movement_state", ""))
-			!= WorldData.CITY_CITIZEN_MOVEMENT_STATE_MOVING
+			!= CityCitizens.CITY_CITIZEN_MOVEMENT_STATE_MOVING
 		):
 			errors.append(
 				"Active-mover registry contains an ineligible citizen."

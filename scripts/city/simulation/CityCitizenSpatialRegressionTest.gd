@@ -147,7 +147,7 @@ func _test_index_mutations_rebuild_and_reset() -> void:
 	)
 
 	var version_before_reset := spatial_state.citizen_spatial_version
-	WorldData.reset_city_citizen_state()
+	CityCitizenRegistrySystem.reset_city_citizen_state()
 	_expect(
 		is_same(
 			CityCitizenSpatialSystem.get_current_state(),
@@ -284,7 +284,7 @@ func _test_dead_active_mover_cleanup() -> void:
 		"The death-cleanup fixture must begin with an active mover."
 	)
 	var occupied_tile: Dictionary = city_world.tiles[TILE_A.y][TILE_A.x]
-	occupied_tile["terrain"] = WorldData.TERRAIN_WATER
+	occupied_tile["terrain"] = CityObjectCatalog.TERRAIN_WATER
 	occupied_tile["is_land"] = false
 	city_world.tiles[TILE_A.y][TILE_A.x] = occupied_tile
 	city_world.mark_tile_data_changed()
@@ -310,7 +310,7 @@ func _test_dead_active_mover_cleanup() -> void:
 	var after := CityCitizenRegistrySystem.get_city_citizen_by_id(citizen_id)
 	_expect(
 		str(after.get("movement_state", ""))
-		== WorldData.CITY_CITIZEN_MOVEMENT_STATE_IDLE
+		== CityCitizens.CITY_CITIZEN_MOVEMENT_STATE_IDLE
 		and CityCitizenMovementRuntimeSystem.get_city_active_mover_ids_snapshot().is_empty()
 		and not CityCitizenSpatialSystem.get_current_state().citizen_ids_by_tile.has(TILE_A)
 		and spatial_state.citizen_spatial_version == version_before_tick + 1,
@@ -359,10 +359,10 @@ func _reset_fixture(seed_value: int) -> Dictionary:
 
 
 func _add_citizen(culture_id: int, tile: Vector2i) -> Dictionary:
-	return WorldData.add_city_citizen(
+	return CityCitizenRegistrySystem.add_city_citizen(
 		"",
 		tile,
-		WorldData.CITY_CITIZEN_SEX_MALE,
+		CityCitizens.CITY_CITIZEN_SEX_MALE,
 		culture_id
 	)
 

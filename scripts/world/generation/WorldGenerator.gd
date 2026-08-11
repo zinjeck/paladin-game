@@ -71,7 +71,7 @@ func assign_biomes(world: WorldData):
 			var precipitation: float = tile["precipitation"]
 			var mountain_score: float = float(mountain_score_cache[y][x])
 
-			if terrain == WorldData.TERRAIN_WATER:
+			if terrain == CityObjectCatalog.TERRAIN_WATER:
 				tile["biome"] = WorldData.BIOME_OCEAN
 
 			else:
@@ -130,7 +130,7 @@ func is_mountain_peak_center(world: WorldData, x: int, y: int, mountain_score: f
 
 			var neighbor: Dictionary = world.tiles[ny][nx]
 
-			if neighbor["terrain"] == WorldData.TERRAIN_WATER:
+			if neighbor["terrain"] == CityObjectCatalog.TERRAIN_WATER:
 				continue
 
 			var neighbor_score: float = float(mountain_score_cache[ny][nx])
@@ -403,7 +403,7 @@ func assign_basic_terrain(world: WorldData):
 			var elevation: float = tile["elevation"]
 
 			if elevation <= settings.sea_level:
-				tile["terrain"] = WorldData.TERRAIN_WATER
+				tile["terrain"] = CityObjectCatalog.TERRAIN_WATER
 			else:
 				tile["terrain"] = WorldData.TERRAIN_LAND
 
@@ -440,7 +440,7 @@ func assign_resources(world: WorldData):
 					tile["resource"] = WorldData.RESOURCE_FISH
 				continue
 
-			if tile["terrain"] == WorldData.TERRAIN_WATER:
+			if tile["terrain"] == CityObjectCatalog.TERRAIN_WATER:
 				continue
 
 			var biome: String = tile["biome"]
@@ -490,7 +490,7 @@ func get_gold_spawn_chance(biome: String) -> float:
 func is_coastal_water(world: WorldData, x: int, y: int) -> bool:
 	var tile: Dictionary = world.tiles[y][x]
 
-	if tile["terrain"] != WorldData.TERRAIN_WATER:
+	if tile["terrain"] != CityObjectCatalog.TERRAIN_WATER:
 		return false
 
 	for oy in range(-1, 2):
@@ -516,7 +516,7 @@ func is_coastal_water(world: WorldData, x: int, y: int) -> bool:
 func is_mountain_or_near_mountain(world: WorldData, x: int, y: int) -> bool:
 	var tile := world.get_tile(x, y)
 
-	if tile["terrain"] == WorldData.TERRAIN_WATER:
+	if tile["terrain"] == CityObjectCatalog.TERRAIN_WATER:
 		return false
 
 	for oy in range(-2, 3):
@@ -549,7 +549,7 @@ func generate_rivers(world: WorldData):
 		var y := rng.randi_range(0, world.height - 1)
 		var tile: Dictionary = world.tiles[y][x]
 
-		if tile["terrain"] == WorldData.TERRAIN_WATER:
+		if tile["terrain"] == CityObjectCatalog.TERRAIN_WATER:
 			continue
 
 		if tile["biome"] == WorldData.BIOME_MOUNTAIN:
@@ -592,7 +592,7 @@ func is_mountain_valley_source(world: WorldData, x: int, y: int) -> bool:
 	if tile["biome"] == WorldData.BIOME_MOUNTAIN:
 		return false
 
-	if tile["terrain"] == WorldData.TERRAIN_WATER:
+	if tile["terrain"] == CityObjectCatalog.TERRAIN_WATER:
 		return false
 
 	var mountain_count := 0
@@ -613,7 +613,7 @@ func is_mountain_valley_source(world: WorldData, x: int, y: int) -> bool:
 
 			if is_mountain_or_hills_biome(neighbor["biome"]):
 				mountain_count += 1
-			elif neighbor["terrain"] != WorldData.TERRAIN_WATER:
+			elif neighbor["terrain"] != CityObjectCatalog.TERRAIN_WATER:
 				land_passage_count += 1
 
 	return mountain_count >= 3 and land_passage_count >= 5
@@ -766,7 +766,7 @@ func carve_river(world: WorldData, start_x: int, start_y: int) -> bool:
 		if river_tile["biome"] == WorldData.BIOME_OCEAN:
 			continue
 
-		river_tile["terrain"] = WorldData.TERRAIN_WATER
+		river_tile["terrain"] = CityObjectCatalog.TERRAIN_WATER
 		river_tile["biome"] = WorldData.BIOME_RIVER
 		river_tile["fertility"] = -1.0
 

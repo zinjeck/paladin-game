@@ -155,10 +155,10 @@ func synchronize_committed_tick(raw_events: Array) -> bool:
 				var raw_before_position = before_snapshot.get("position")
 				var expected_before_target = before_snapshot.get(
 					"movement_visual_step_target_tile",
-					WorldData.INVALID_CITY_TILE_POSITION
+					CityCitizens.INVALID_CITY_TILE_POSITION
 				)
 				var actual_first_target = (
-					WorldData.INVALID_CITY_TILE_POSITION
+					CityCitizens.INVALID_CITY_TILE_POSITION
 				)
 
 				if (
@@ -169,7 +169,7 @@ func synchronize_committed_tick(raw_events: Array) -> bool:
 				else:
 					actual_first_target = after_snapshot.get(
 						"movement_visual_step_target_tile",
-						WorldData.INVALID_CITY_TILE_POSITION
+						CityCitizens.INVALID_CITY_TILE_POSITION
 					)
 
 				# A same-tick repath can turn while the previous snapshot is
@@ -327,7 +327,7 @@ func update(delta: float) -> bool:
 			float(
 				transition.get(
 					"movement_speed_basis_points_per_minute",
-					WorldData.DEFAULT_CITIZEN_MOVEMENT_SPEED_PER_MINUTE
+					CityCitizens.DEFAULT_CITIZEN_MOVEMENT_SPEED_PER_MINUTE
 				)
 			),
 			1.0
@@ -395,7 +395,7 @@ func update(delta: float) -> bool:
 func get_visual_tile_position(citizen: Dictionary) -> Vector2:
 	var raw_authoritative_tile = citizen.get(
 		"city_tile_position",
-		WorldData.INVALID_CITY_TILE_POSITION
+		CityCitizens.INVALID_CITY_TILE_POSITION
 	)
 
 	if not raw_authoritative_tile is Vector2i:
@@ -444,7 +444,7 @@ func _get_segment_movement_cost_per_world_unit(
 
 	if direction == Vector2i.ZERO:
 		return maxf(
-			float(WorldData.CITY_CITIZEN_CARDINAL_MOVEMENT_COST),
+			float(CityCitizens.CITY_CITIZEN_CARDINAL_MOVEMENT_COST),
 			1.0
 		)
 
@@ -460,9 +460,9 @@ func _get_segment_movement_cost_per_world_unit(
 
 	if step_cost <= 0:
 		step_cost = (
-			WorldData.CITY_CITIZEN_DIAGONAL_MOVEMENT_COST
+			CityCitizens.CITY_CITIZEN_DIAGONAL_MOVEMENT_COST
 			if direction.x != 0 and direction.y != 0
-			else WorldData.CITY_CITIZEN_CARDINAL_MOVEMENT_COST
+			else CityCitizens.CITY_CITIZEN_CARDINAL_MOVEMENT_COST
 		)
 
 	var full_step_distance := Vector2(direction).length()
@@ -569,7 +569,7 @@ func _queue_transition_extension(
 		{
 			"waypoints": [],
 			"movement_speed_basis_points_per_minute": (
-				WorldData.DEFAULT_CITIZEN_MOVEMENT_SPEED_PER_MINUTE
+				CityCitizens.DEFAULT_CITIZEN_MOVEMENT_SPEED_PER_MINUTE
 			)
 		}
 	)
@@ -594,7 +594,7 @@ func _queue_transition_extension(
 	transition["movement_speed_basis_points_per_minute"] = maxi(
 		int(current_snapshot.get(
 			"movement_speed_basis_points_per_minute",
-			WorldData.DEFAULT_CITIZEN_MOVEMENT_SPEED_PER_MINUTE
+			CityCitizens.DEFAULT_CITIZEN_MOVEMENT_SPEED_PER_MINUTE
 		)),
 		1
 	)
@@ -605,7 +605,7 @@ func _queue_transition_extension(
 func _make_movement_snapshot(citizen: Dictionary) -> Dictionary:
 	var raw_authoritative_tile = citizen.get(
 		"city_tile_position",
-		WorldData.INVALID_CITY_TILE_POSITION
+		CityCitizens.INVALID_CITY_TILE_POSITION
 	)
 
 	if not raw_authoritative_tile is Vector2i:
@@ -630,11 +630,11 @@ func _make_movement_snapshot(citizen: Dictionary) -> Dictionary:
 	)
 	var visual_step_target_tile = citizen.get(
 		"movement_visual_step_target_tile",
-		WorldData.INVALID_CITY_TILE_POSITION
+		CityCitizens.INVALID_CITY_TILE_POSITION
 	)
 
 	if (
-		movement_state == WorldData.CITY_CITIZEN_MOVEMENT_STATE_MOVING
+		movement_state == CityCitizens.CITY_CITIZEN_MOVEMENT_STATE_MOVING
 		and movement_path_index >= 1
 		and movement_path_index < movement_path.size()
 		and movement_path[movement_path_index - 1] is Vector2i
@@ -675,7 +675,7 @@ func _make_movement_snapshot(citizen: Dictionary) -> Dictionary:
 		"movement_progress_basis_points": movement_progress,
 		"movement_speed_basis_points_per_minute": int(citizen.get(
 			"movement_speed_basis_points_per_minute",
-			WorldData.DEFAULT_CITIZEN_MOVEMENT_SPEED_PER_MINUTE
+			CityCitizens.DEFAULT_CITIZEN_MOVEMENT_SPEED_PER_MINUTE
 		)),
 		"movement_visual_step_target_tile": visual_step_target_tile,
 		"position": position
@@ -729,14 +729,14 @@ func _build_snapshot_extension_points(
 		return points
 
 	if (
-		current_state != WorldData.CITY_CITIZEN_MOVEMENT_STATE_MOVING
+		current_state != CityCitizens.CITY_CITIZEN_MOVEMENT_STATE_MOVING
 		and previous_index >= 1
 		and previous_index < previous_path.size()
 		and not previous_path.is_empty()
 		and previous_path.back()
 		== current_snapshot.get(
 			"authoritative_tile",
-			WorldData.INVALID_CITY_TILE_POSITION
+			CityCitizens.INVALID_CITY_TILE_POSITION
 		)
 	):
 		for path_index in range(previous_index, previous_path.size()):
@@ -749,7 +749,7 @@ func _build_snapshot_extension_points(
 
 	var current_authoritative_tile = current_snapshot.get(
 		"authoritative_tile",
-		WorldData.INVALID_CITY_TILE_POSITION
+		CityCitizens.INVALID_CITY_TILE_POSITION
 	)
 
 	if current_authoritative_tile is Vector2i:

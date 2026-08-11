@@ -185,10 +185,10 @@ func _test_equal_version_city_isolation() -> void:
 	)
 
 	var fishery_b := CityObjectSystem.register_completed_city_object({
-		"object_type": WorldData.CITY_OBJECT_FISHING_GROUNDS,
+		"object_type": CityObjectCatalog.CITY_OBJECT_FISHING_GROUNDS,
 		"top_left": Vector2i(12, 4),
-		"size_tiles": WorldData.get_city_object_size_for_type(
-			WorldData.CITY_OBJECT_FISHING_GROUNDS
+		"size_tiles": CityObjectCatalog.get_city_object_size_for_type(
+			CityObjectCatalog.CITY_OBJECT_FISHING_GROUNDS
 		),
 		"object_owner": "player",
 		"city_world": world_b,
@@ -428,10 +428,10 @@ func _create_city(
 
 func _register_stockpile(city_world: WorldData) -> Dictionary:
 	return CityObjectSystem.register_completed_city_object({
-		"object_type": WorldData.CITY_OBJECT_STOCKPILE,
+		"object_type": CityObjectCatalog.CITY_OBJECT_STOCKPILE,
 		"top_left": SHARED_STOCKPILE_TOP_LEFT,
-		"size_tiles": WorldData.get_city_object_size_for_type(
-			WorldData.CITY_OBJECT_STOCKPILE
+		"size_tiles": CityObjectCatalog.get_city_object_size_for_type(
+			CityObjectCatalog.CITY_OBJECT_STOCKPILE
 		),
 		"object_owner": "player",
 		"city_world": city_world,

@@ -360,7 +360,7 @@ func accumulate_city_source_sample(
 	add_weight_to_dictionary(profile["biome_weights"], source_biome, weight)
 	add_weight_to_dictionary(profile["resource_weights"], source_resource, weight)
 
-	if source_terrain == WorldData.TERRAIN_WATER:
+	if source_terrain == CityObjectCatalog.TERRAIN_WATER:
 		profile["water_weight"] = float(profile["water_weight"]) + weight
 
 	if source_biome == WorldData.BIOME_OCEAN:
@@ -404,7 +404,7 @@ func copy_city_profile_into_tile(
 	tile["precipitation"] = float(profile["precipitation"])
 
 	if becomes_water:
-		tile["terrain"] = WorldData.TERRAIN_WATER
+		tile["terrain"] = CityObjectCatalog.TERRAIN_WATER
 		tile["is_land"] = false
 		tile["fertility"] = -1.0
 
@@ -1009,14 +1009,14 @@ func get_city_resource_from_profile(
 	if best_resource == WorldData.RESOURCE_NONE:
 		return WorldData.RESOURCE_NONE
 
-	if best_resource == WorldData.RESOURCE_FISH and terrain != WorldData.TERRAIN_WATER:
+	if best_resource == WorldData.RESOURCE_FISH and terrain != CityObjectCatalog.TERRAIN_WATER:
 		return WorldData.RESOURCE_NONE
 
 	if best_resource == WorldData.RESOURCE_GOLD:
 		if biome != WorldData.BIOME_HILLS and biome != WorldData.BIOME_MOUNTAIN:
 			return WorldData.RESOURCE_NONE
 
-	if best_resource != WorldData.RESOURCE_FISH and terrain == WorldData.TERRAIN_WATER:
+	if best_resource != WorldData.RESOURCE_FISH and terrain == CityObjectCatalog.TERRAIN_WATER:
 		return WorldData.RESOURCE_NONE
 
 	var noise_value: float = (resource_noise.get_noise_2d(city_x, city_y) + 1.0) * 0.5

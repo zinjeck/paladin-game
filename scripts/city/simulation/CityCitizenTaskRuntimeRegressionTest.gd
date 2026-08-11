@@ -67,7 +67,7 @@ func _test_assignment_registry_and_repairs() -> void:
 	_expect(
 		CityCitizenTaskRuntimeSystem.set_city_citizen_task_phase(
 			first_id,
-			WorldData.CITY_CITIZEN_TASK_PHASE_TRAVELING
+			CityCitizens.CITY_CITIZEN_TASK_PHASE_TRAVELING
 		)
 		and CityCitizenTaskRuntimeSystem.set_city_citizen_task_activity_state({
 			"citizen_id": first_id,
@@ -87,8 +87,8 @@ func _test_assignment_registry_and_repairs() -> void:
 	var lookup_before_rejection := state.active_task_id_lookup.duplicate(true)
 	_expect(
 		not CityCitizenTaskRuntimeSystem.assign_city_citizen_task(second_id, {
-			"kind": WorldData.CITY_CITIZEN_TASK_KIND_RETURN_HOME,
-			"source": WorldData.CITY_CITIZEN_TASK_SOURCE_SCHEDULE,
+			"kind": CityCitizens.CITY_CITIZEN_TASK_KIND_RETURN_HOME,
+			"source": CityCitizens.CITY_CITIZEN_TASK_SOURCE_SCHEDULE,
 			"priority": 50,
 			"target_object_id": 999,
 		})
@@ -122,7 +122,7 @@ func _test_assignment_registry_and_repairs() -> void:
 	_expect(
 		CityCitizenTaskRuntimeSystem.clear_city_citizen_task(
 			second_id,
-			WorldData.CITY_CITIZEN_TASK_SOURCE_SCHEDULE
+			CityCitizens.CITY_CITIZEN_TASK_SOURCE_SCHEDULE
 		)
 		and is_same(state.active_task_ids, duplicate_ids)
 		and is_same(state.active_task_id_lookup, duplicate_lookup)
@@ -150,7 +150,7 @@ func _test_assignment_registry_and_repairs() -> void:
 	_expect(
 		CityCitizenTaskRuntimeSystem.clear_city_citizen_task(
 			second_id,
-			WorldData.CITY_CITIZEN_TASK_SOURCE_SCHEDULE
+			CityCitizens.CITY_CITIZEN_TASK_SOURCE_SCHEDULE
 		),
 		"The lookup-only fixture must begin with citizen 2 idle."
 	)
@@ -208,7 +208,7 @@ func _test_assignment_registry_and_repairs() -> void:
 	_expect(
 		CityCitizenTaskRuntimeSystem.clear_city_citizen_task(
 			first_id,
-			WorldData.CITY_CITIZEN_TASK_SOURCE_SCHEDULE
+			CityCitizens.CITY_CITIZEN_TASK_SOURCE_SCHEDULE
 		),
 		"The stale-clear fixture must first clear citizen 1 normally."
 	)
@@ -220,7 +220,7 @@ func _test_assignment_registry_and_repairs() -> void:
 	_expect(
 		CityCitizenTaskRuntimeSystem.clear_city_citizen_task(
 			first_id,
-			WorldData.CITY_CITIZEN_TASK_SOURCE_SCHEDULE
+			CityCitizens.CITY_CITIZEN_TASK_SOURCE_SCHEDULE
 		)
 		and is_same(state.active_task_ids, stale_ids)
 		and is_same(state.active_task_id_lookup, stale_lookup)
@@ -269,7 +269,7 @@ func _test_empty_ensure_and_schema_migration() -> void:
 	var citizen_index := CityCitizenRegistrySystem.get_city_citizen_index_by_id(citizen_id)
 	var stored_citizen: Dictionary = CityCitizenRegistrySystem.get_current_state().citizens[citizen_index]
 	stored_citizen["current_task"] = {
-		"kind": WorldData.CITY_CITIZEN_TASK_KIND_NONE,
+		"kind": CityCitizens.CITY_CITIZEN_TASK_KIND_NONE,
 	}
 	CityCitizenRegistrySystem.get_current_state().citizens[citizen_index] = stored_citizen
 	var task_state := (
@@ -293,7 +293,7 @@ func _test_empty_ensure_and_schema_migration() -> void:
 	_expect(
 		not CityCitizenTaskRuntimeSystem.clear_city_citizen_task(
 			999,
-			WorldData.CITY_CITIZEN_TASK_SOURCE_SCHEDULE
+			CityCitizens.CITY_CITIZEN_TASK_SOURCE_SCHEDULE
 		)
 		and task_state.citizen_task_version == version_before_missing_clear,
 		"Rejected clear must not invalidate task runtime."
@@ -302,8 +302,8 @@ func _test_empty_ensure_and_schema_migration() -> void:
 
 func _assign_return_home(citizen_id: int, house_id: int) -> bool:
 	return CityCitizenTaskRuntimeSystem.assign_city_citizen_task(citizen_id, {
-		"kind": WorldData.CITY_CITIZEN_TASK_KIND_RETURN_HOME,
-		"source": WorldData.CITY_CITIZEN_TASK_SOURCE_SCHEDULE,
+		"kind": CityCitizens.CITY_CITIZEN_TASK_KIND_RETURN_HOME,
+		"source": CityCitizens.CITY_CITIZEN_TASK_SOURCE_SCHEDULE,
 		"priority": 50,
 		"target_object_id": house_id,
 	})
@@ -338,10 +338,10 @@ func _reset_fixture(seed_value: int) -> Dictionary:
 		"Task Runtime Regression Culture " + str(seed_value)
 	)
 	var house := CityObjectSystem.add_city_object({
-		"object_type": WorldData.CITY_OBJECT_HOUSE,
+		"object_type": CityObjectCatalog.CITY_OBJECT_HOUSE,
 		"top_left": Vector2i(8, 8),
-		"size_tiles": WorldData.get_city_object_size_for_type(
-			WorldData.CITY_OBJECT_HOUSE
+		"size_tiles": CityObjectCatalog.get_city_object_size_for_type(
+			CityObjectCatalog.CITY_OBJECT_HOUSE
 		),
 		"object_owner": "player",
 		"city_world": city_world,
@@ -357,10 +357,10 @@ func _add_resident(
 	house_id: int,
 	tile: Vector2i
 ) -> Dictionary:
-	var citizen := WorldData.add_city_citizen(
+	var citizen := CityCitizenRegistrySystem.add_city_citizen(
 		"",
 		tile,
-		WorldData.CITY_CITIZEN_SEX_FEMALE,
+		CityCitizens.CITY_CITIZEN_SEX_FEMALE,
 		culture_id
 	)
 	var citizen_id := int(citizen.get("id", -1))

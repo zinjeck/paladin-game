@@ -1,6 +1,11 @@
 extends RefCounted
 class_name CityObjectSystem
 
+const CITY_TOPOLOGY_MUTATION_FAILURE_NONE := "none"
+const CITY_TOPOLOGY_MUTATION_FAILURE_INVALID_REQUEST := "invalid_request"
+const CITY_TOPOLOGY_MUTATION_FAILURE_TILE_BLOCKED := "tile_blocked"
+const CITY_TOPOLOGY_MUTATION_FAILURE_FOOTPRINT_OCCUPIED := "footprint_occupied"
+
 # File responsibility: Authoritative completed-city-object behavior/API for
 # one active CITY settlement. CityObjectState remains the data-only owner of
 # the registry, ID index, footprint occupancy, next local ID, and version.
@@ -347,7 +352,7 @@ static func get_city_object_footprint_tiles(city_object: Dictionary) -> Array:
 	if city_object.has("top_left") and city_object.has("size"):
 		var top_left: Vector2i = city_object.get(
 			"top_left",
-			WorldData.INVALID_CITY_TILE_POSITION
+			CityCitizens.INVALID_CITY_TILE_POSITION
 		)
 		var size_tiles: Vector2i = city_object.get("size", Vector2i.ZERO)
 		return make_rectangle_city_object_footprint_tiles(top_left, size_tiles)
@@ -398,7 +403,7 @@ static func release_city_object_tiles(city_object: Dictionary) -> void:
 static func city_object_type_preserves_citizen_walkability(
 	object_type: String
 ) -> bool:
-	return object_type == WorldData.CITY_OBJECT_ROAD
+	return object_type == CityObjectCatalog.CITY_OBJECT_ROAD
 
 
 static func get_city_object_topology_blocking_citizen_ids(
@@ -416,7 +421,7 @@ static func validate_city_object_topology_mutation(
 ) -> Dictionary:
 	var result := {
 		"success": false,
-		"failure_reason": WorldData.CITY_TOPOLOGY_MUTATION_FAILURE_INVALID_REQUEST,
+		"failure_reason": CityObjectSystem.CITY_TOPOLOGY_MUTATION_FAILURE_INVALID_REQUEST,
 		"blocking_citizen_ids": [],
 	}
 	var city_world: WorldData = values.get("city_world")
@@ -431,7 +436,7 @@ static func validate_city_object_topology_mutation(
 
 	if (
 		city_world == null
-		or WorldData.get_city_object_definition(object_type).is_empty()
+		or CityObjectCatalog.get_city_object_definition(object_type).is_empty()
 		or not raw_footprint_tiles is Array
 		or raw_footprint_tiles.is_empty()
 	):
@@ -458,8 +463,8 @@ static func validate_city_object_topology_mutation(
 		)
 
 		if (
-			str(tile.get("terrain", WorldData.TERRAIN_WATER)) in [
-				WorldData.TERRAIN_WATER,
+			str(tile.get("terrain", CityObjectCatalog.TERRAIN_WATER)) in [
+				CityObjectCatalog.TERRAIN_WATER,
 				WorldData.TERRAIN_MOUNTAIN,
 			]
 			or not bool(tile.get("is_land", false))
@@ -473,7 +478,7 @@ static func validate_city_object_topology_mutation(
 			and occupied_object_id != allowed_occupied_object_id
 		):
 			result["failure_reason"] = (
-				WorldData.CITY_TOPOLOGY_MUTATION_FAILURE_TILE_BLOCKED
+				CityObjectSystem.CITY_TOPOLOGY_MUTATION_FAILURE_TILE_BLOCKED
 			)
 			return result
 
@@ -489,13 +494,13 @@ static func validate_city_object_topology_mutation(
 			and construction_site_id != allowed_construction_site_id
 		):
 			result["failure_reason"] = (
-				WorldData.CITY_TOPOLOGY_MUTATION_FAILURE_TILE_BLOCKED
+				CityObjectSystem.CITY_TOPOLOGY_MUTATION_FAILURE_TILE_BLOCKED
 			)
 			return result
 
 		if CityLogisticsSystem.has_city_ground_pile_at_tile(tile_position):
 			result["failure_reason"] = (
-				WorldData.CITY_TOPOLOGY_MUTATION_FAILURE_TILE_BLOCKED
+				CityObjectSystem.CITY_TOPOLOGY_MUTATION_FAILURE_TILE_BLOCKED
 			)
 			return result
 
@@ -509,13 +514,13 @@ static func validate_city_object_topology_mutation(
 
 	if not blocking_citizen_ids.is_empty():
 		result["failure_reason"] = (
-			WorldData.CITY_TOPOLOGY_MUTATION_FAILURE_FOOTPRINT_OCCUPIED
+			CityObjectSystem.CITY_TOPOLOGY_MUTATION_FAILURE_FOOTPRINT_OCCUPIED
 		)
 		result["blocking_citizen_ids"] = blocking_citizen_ids
 		return result
 
 	result["success"] = true
-	result["failure_reason"] = WorldData.CITY_TOPOLOGY_MUTATION_FAILURE_NONE
+	result["failure_reason"] = CityObjectSystem.CITY_TOPOLOGY_MUTATION_FAILURE_NONE
 	result["footprint_tiles"] = footprint_tiles
 	return result
 
@@ -562,13 +567,13 @@ static func can_place_city_object(
 			var tile: Dictionary = city_world.get_tile(x, y)
 
 			if str(tile.get("terrain", "")) in [
-				WorldData.TERRAIN_WATER,
+				CityObjectCatalog.TERRAIN_WATER,
 				WorldData.TERRAIN_MOUNTAIN,
 			]:
 				return false
 
 	if (
-		object_type == WorldData.CITY_OBJECT_CITY_CENTER
+		object_type == CityObjectCatalog.CITY_OBJECT_CITY_CENTER
 		and not city_object_placement_has_walkable_access_tile(
 			city_world,
 			top_left,
@@ -600,7 +605,7 @@ static func city_object_placement_has_walkable_access_tile(
 
 		var footprint_tile: Vector2i = raw_footprint_tile
 
-		for offset in WorldData.CITY_CARDINAL_TILE_OFFSETS:
+		for offset in CityNavigationSystem.CITY_CARDINAL_TILE_OFFSETS:
 			var candidate_tile: Vector2i = footprint_tile + Vector2i(offset)
 
 			if footprint_lookup.has(candidate_tile):
@@ -618,7 +623,7 @@ static func city_object_placement_has_walkable_access_tile(
 static func city_object_supports_citizen_interior(
 	city_object: Dictionary
 ) -> bool:
-	var definition := WorldData.get_city_object_definition_from_object(city_object)
+	var definition := CityObjectCatalog.get_city_object_definition_from_object(city_object)
 
 	if definition.is_empty():
 		return false
@@ -629,15 +634,15 @@ static func city_object_supports_citizen_interior(
 static func get_city_object_citizen_interior_access_mode(
 	city_object: Dictionary
 ) -> String:
-	var definition := WorldData.get_city_object_definition_from_object(city_object)
+	var definition := CityObjectCatalog.get_city_object_definition_from_object(city_object)
 
 	if definition.is_empty():
-		return WorldData.CITY_OBJECT_INTERIOR_ACCESS_NONE
+		return CityObjectCatalog.CITY_OBJECT_INTERIOR_ACCESS_NONE
 
 	return str(
 		definition.get(
 			"citizen_interior_access_mode",
-			WorldData.CITY_OBJECT_INTERIOR_ACCESS_NONE
+			CityObjectCatalog.CITY_OBJECT_INTERIOR_ACCESS_NONE
 		)
 	)
 
@@ -645,7 +650,7 @@ static func get_city_object_citizen_interior_access_mode(
 static func get_city_object_citizen_entry_policy(
 	city_object: Dictionary
 ) -> Dictionary:
-	return WorldData._get_city_object_definition_dictionary(
+	return CityObjectCatalog._get_city_object_definition_dictionary(
 		city_object,
 		"citizen_entry_policy"
 	)
@@ -679,15 +684,15 @@ static func city_object_boundary_tile_allows_entry(
 	var entry_mode := str(
 		entry_policy.get(
 			"mode",
-			WorldData.CITY_OBJECT_ENTRY_MODE_ANY_BOUNDARY
+			CityObjectCatalog.CITY_OBJECT_ENTRY_MODE_ANY_BOUNDARY
 		)
 	)
 
 	match entry_mode:
-		WorldData.CITY_OBJECT_ENTRY_MODE_ANY_BOUNDARY:
+		CityObjectCatalog.CITY_OBJECT_ENTRY_MODE_ANY_BOUNDARY:
 			return get_city_object_footprint_tiles(city_object).has(boundary_tile)
 
-		WorldData.CITY_OBJECT_ENTRY_MODE_EXPLICIT_TILES:
+		CityObjectCatalog.CITY_OBJECT_ENTRY_MODE_EXPLICIT_TILES:
 			return get_city_object_citizen_entry_tiles(city_object).has(boundary_tile)
 
 	return false
@@ -698,13 +703,13 @@ static func is_completed_city_road_tile(tile_position: Vector2i) -> bool:
 
 	return (
 		not city_object.is_empty()
-		and str(city_object.get("type", "")) == WorldData.CITY_OBJECT_ROAD
+		and str(city_object.get("type", "")) == CityObjectCatalog.CITY_OBJECT_ROAD
 	)
 
 
 static func register_completed_city_object(values: Dictionary) -> Dictionary:
 	var object_type := str(values.get("object_type", ""))
-	var definition := WorldData.get_city_object_definition(object_type)
+	var definition := CityObjectCatalog.get_city_object_definition(object_type)
 
 	if definition.is_empty():
 		return {}
@@ -712,11 +717,11 @@ static func register_completed_city_object(values: Dictionary) -> Dictionary:
 	var shape_mode := str(
 		definition.get(
 			"shape_mode",
-			WorldData.CITY_OBJECT_SHAPE_RECTANGLE
+			CityObjectCatalog.CITY_OBJECT_SHAPE_RECTANGLE
 		)
 	)
 
-	if shape_mode == WorldData.CITY_OBJECT_SHAPE_TILE_AREA:
+	if shape_mode == CityObjectCatalog.CITY_OBJECT_SHAPE_TILE_AREA:
 		return _register_completed_road(values)
 
 	return _register_completed_rectangle(values, definition, shape_mode)
@@ -733,7 +738,7 @@ static func add_city_road_object(
 	allowed_construction_site_id: int = -1
 ) -> Dictionary:
 	return register_completed_city_object({
-		"object_type": WorldData.CITY_OBJECT_ROAD,
+		"object_type": CityObjectCatalog.CITY_OBJECT_ROAD,
 		"footprint_tiles": tile_positions,
 		"object_owner": object_owner,
 		"city_world": city_world,
@@ -749,7 +754,7 @@ static func _register_completed_rectangle(
 	var object_type := str(values.get("object_type", ""))
 	var top_left: Vector2i = values.get(
 		"top_left",
-		WorldData.INVALID_CITY_TILE_POSITION
+		CityCitizens.INVALID_CITY_TILE_POSITION
 	)
 	var size_tiles: Vector2i = values.get("size_tiles", Vector2i.ZERO)
 	var object_owner := str(values.get("object_owner", "player"))
@@ -798,7 +803,7 @@ static func _register_completed_rectangle(
 	if bool(definition.get("is_workplace", false)):
 		city_object["is_workplace"] = true
 		city_object["workplace_kind"] = str(
-			definition.get("workplace_kind", WorldData.WORKPLACE_KIND_NONE)
+			definition.get("workplace_kind", CityObjectCatalog.WORKPLACE_KIND_NONE)
 		)
 		city_object["worker_capacity"] = int(
 			definition.get("worker_capacity", 0)
@@ -813,11 +818,11 @@ static func _register_completed_rectangle(
 		if production_recipe is Dictionary and not production_recipe.is_empty():
 			city_object["production_progress_work_units"] = 0
 			city_object["production_status"] = (
-				WorldData.WORKPLACE_PRODUCTION_STATUS_IDLE_NO_WORKERS
+				CityObjectCatalog.WORKPLACE_PRODUCTION_STATUS_IDLE_NO_WORKERS
 			)
 			city_object["productive_worker_count"] = 0
 			city_object["site_productivity_basis_points"] = (
-				WorldData.DEFAULT_WORKPLACE_SITE_PRODUCTIVITY_BASIS_POINTS
+				CityObjectCatalog.DEFAULT_WORKPLACE_SITE_PRODUCTIVITY_BASIS_POINTS
 			)
 
 	var raw_allowed_storage_resources = definition.get("storage_resources", [])
@@ -844,7 +849,7 @@ static func _register_completed_rectangle(
 	if not _append_completed_city_object(city_object, true):
 		return {}
 
-	if object_type == WorldData.CITY_OBJECT_HOUSE:
+	if object_type == CityObjectCatalog.CITY_OBJECT_HOUSE:
 		CityAssignmentSystem.assign_homeless_citizens_to_available_housing()
 
 	return city_object
@@ -882,7 +887,7 @@ static func _register_completed_road(values: Dictionary) -> Dictionary:
 
 	var topology_validation := validate_city_object_topology_mutation({
 		"city_world": city_world,
-		"object_type": WorldData.CITY_OBJECT_ROAD,
+		"object_type": CityObjectCatalog.CITY_OBJECT_ROAD,
 		"footprint_tiles": clean_tiles,
 		"allowed_construction_site_id": int(
 			values.get("allowed_construction_site_id", -1)
@@ -893,7 +898,7 @@ static func _register_completed_road(values: Dictionary) -> Dictionary:
 		return {}
 
 	var city_object := {
-		"type": WorldData.CITY_OBJECT_ROAD,
+		"type": CityObjectCatalog.CITY_OBJECT_ROAD,
 		"tiles": clean_tiles,
 		"owner": str(values.get("object_owner", "player")),
 	}
@@ -977,7 +982,7 @@ static func _append_completed_city_object(
 
 	mark_city_objects_changed()
 
-	if WorldData.city_object_is_workplace(city_object):
+	if CityObjectCatalog.city_object_is_workplace(city_object):
 		CityEmploymentSystem.mark_city_workplaces_changed()
 
 	if city_object.has("stored_resources"):
@@ -1003,3 +1008,26 @@ static func _sort_city_tiles_y_then_x(
 		return tile_a.x < tile_b.x
 
 	return tile_a.y < tile_b.y
+
+static func can_use_city_object_definition(object_type: String) -> bool:
+	var definition := CityObjectCatalog.get_city_object_definition(object_type)
+
+	if definition.is_empty():
+		return false
+
+	if bool(definition.get("requires_city", false)) and not WorldData.can_build_in_city():
+		return false
+
+	if bool(definition.get("requires_no_city", false)) and WorldData.has_player_city():
+		return false
+
+	return true
+
+static var city_object_definitions: Dictionary = (
+	CityObjectCatalog.get_city_object_definitions()
+)
+
+#endregion
+
+#region World Grid and Tile State
+

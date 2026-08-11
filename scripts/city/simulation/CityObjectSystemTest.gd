@@ -46,22 +46,22 @@ func _test_completed_object_registration_and_lookup() -> void:
 	var state := CityObjectSystem.get_current_state()
 	var requests: Array[Dictionary] = [
 		_make_rectangle_request(
-			WorldData.CITY_OBJECT_CITY_CENTER,
+			CityObjectCatalog.CITY_OBJECT_CITY_CENTER,
 			Vector2i(2, 2),
 			city_world
 		),
 		_make_rectangle_request(
-			WorldData.CITY_OBJECT_HOUSE,
+			CityObjectCatalog.CITY_OBJECT_HOUSE,
 			Vector2i(8, 2),
 			city_world
 		),
 		_make_rectangle_request(
-			WorldData.CITY_OBJECT_STOCKPILE,
+			CityObjectCatalog.CITY_OBJECT_STOCKPILE,
 			Vector2i(13, 2),
 			city_world
 		),
 		_make_rectangle_request(
-			WorldData.CITY_OBJECT_FISHING_GROUNDS,
+			CityObjectCatalog.CITY_OBJECT_FISHING_GROUNDS,
 			Vector2i(18, 2),
 			city_world
 		),
@@ -104,19 +104,19 @@ func _test_completed_object_registration_and_lookup() -> void:
 	_expect(
 		state.objects.size() == 5
 		and CityObjectSystem.has_city_object_type(
-			WorldData.CITY_OBJECT_CITY_CENTER
+			CityObjectCatalog.CITY_OBJECT_CITY_CENTER
 		)
 		and CityObjectSystem.has_city_object_type(
-			WorldData.CITY_OBJECT_HOUSE
+			CityObjectCatalog.CITY_OBJECT_HOUSE
 		)
 		and CityObjectSystem.has_city_object_type(
-			WorldData.CITY_OBJECT_STOCKPILE
+			CityObjectCatalog.CITY_OBJECT_STOCKPILE
 		)
 		and CityObjectSystem.has_city_object_type(
-			WorldData.CITY_OBJECT_FISHING_GROUNDS
+			CityObjectCatalog.CITY_OBJECT_FISHING_GROUNDS
 		)
 		and CityObjectSystem.has_city_object_type(
-			WorldData.CITY_OBJECT_ROAD
+			CityObjectCatalog.CITY_OBJECT_ROAD
 		),
 		"The completed registry must recognize every current object type."
 	)
@@ -126,7 +126,7 @@ func _test_rejected_registration_is_atomic() -> void:
 	var city_world := _reset_fixture(93_103)
 	var house := CityObjectSystem.register_completed_city_object(
 		_make_rectangle_request(
-			WorldData.CITY_OBJECT_HOUSE,
+			CityObjectCatalog.CITY_OBJECT_HOUSE,
 			Vector2i(4, 4),
 			city_world
 		)
@@ -141,7 +141,7 @@ func _test_rejected_registration_is_atomic() -> void:
 	var version_before := state.object_version
 	var overlapping_house := CityObjectSystem.register_completed_city_object(
 		_make_rectangle_request(
-			WorldData.CITY_OBJECT_HOUSE,
+			CityObjectCatalog.CITY_OBJECT_HOUSE,
 			Vector2i(4, 4),
 			city_world
 		)
@@ -179,7 +179,7 @@ func _test_snapshots_do_not_alias_authoritative_state() -> void:
 	var city_world := _reset_fixture(93_104)
 	var house := CityObjectSystem.register_completed_city_object(
 		_make_rectangle_request(
-			WorldData.CITY_OBJECT_HOUSE,
+			CityObjectCatalog.CITY_OBJECT_HOUSE,
 			Vector2i(4, 4),
 			city_world
 		)
@@ -222,14 +222,14 @@ func _test_registry_index_and_occupancy_repair() -> void:
 	var city_world := _reset_fixture(93_105)
 	var house := CityObjectSystem.register_completed_city_object(
 		_make_rectangle_request(
-			WorldData.CITY_OBJECT_HOUSE,
+			CityObjectCatalog.CITY_OBJECT_HOUSE,
 			Vector2i(4, 4),
 			city_world
 		)
 	)
 	var stockpile := CityObjectSystem.register_completed_city_object(
 		_make_rectangle_request(
-			WorldData.CITY_OBJECT_STOCKPILE,
+			CityObjectCatalog.CITY_OBJECT_STOCKPILE,
 			Vector2i(10, 4),
 			city_world
 		)
@@ -266,7 +266,7 @@ func _test_registry_index_and_occupancy_repair() -> void:
 	var duplicate_id_registration := (
 		CityObjectSystem.register_completed_city_object(
 			_make_rectangle_request(
-				WorldData.CITY_OBJECT_HOUSE,
+				CityObjectCatalog.CITY_OBJECT_HOUSE,
 				Vector2i(20, 4),
 				city_world
 			)
@@ -321,7 +321,7 @@ func _test_object_reset_is_domain_local() -> void:
 	var city_world := _reset_fixture(93_106)
 	var stockpile := CityObjectSystem.register_completed_city_object(
 		_make_rectangle_request(
-			WorldData.CITY_OBJECT_STOCKPILE,
+			CityObjectCatalog.CITY_OBJECT_STOCKPILE,
 			Vector2i(5, 5),
 			city_world
 		)
@@ -413,7 +413,7 @@ func _make_rectangle_request(
 	return {
 		"object_type": object_type,
 		"top_left": top_left,
-		"size_tiles": WorldData.get_city_object_size_for_type(object_type),
+		"size_tiles": CityObjectCatalog.get_city_object_size_for_type(object_type),
 		"object_owner": "player",
 		"city_world": city_world,
 	}

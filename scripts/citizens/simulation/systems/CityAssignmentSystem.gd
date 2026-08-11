@@ -96,7 +96,7 @@ static func get_total_city_resident_capacity() -> int:
 	for raw_city_object in CityObjectSystem.get_city_objects():
 		if not raw_city_object is Dictionary:
 			continue
-		total_capacity += WorldData.get_city_object_resident_capacity(
+		total_capacity += CityObjectCatalog.get_city_object_resident_capacity(
 			raw_city_object
 		)
 
@@ -163,7 +163,7 @@ static func ensure_city_citizen_assignment_state() -> int:
 			continue
 
 		object_indexes_by_id[object_id] = object_index
-		var resident_capacity := WorldData.get_city_object_resident_capacity(
+		var resident_capacity := CityObjectCatalog.get_city_object_resident_capacity(
 			city_object
 		)
 
@@ -171,8 +171,8 @@ static func ensure_city_citizen_assignment_state() -> int:
 			resident_capacity_by_object_id[object_id] = resident_capacity
 			resident_ids_by_object_id[object_id] = []
 
-		if WorldData.city_object_is_workplace(city_object):
-			var worker_capacity := WorldData.get_city_object_worker_capacity(
+		if CityObjectCatalog.city_object_is_workplace(city_object):
+			var worker_capacity := CityObjectCatalog.get_city_object_worker_capacity(
 				city_object
 			)
 
@@ -341,7 +341,7 @@ static func assign_homeless_citizens_to_available_housing() -> int:
 
 		var city_object: Dictionary = raw_city_object
 		var house_id := int(city_object.get("id", -1))
-		var resident_capacity := WorldData.get_city_object_resident_capacity(
+		var resident_capacity := CityObjectCatalog.get_city_object_resident_capacity(
 			city_object
 		)
 
@@ -411,7 +411,7 @@ static func assign_city_citizen_home(
 		return false
 
 	var house: Dictionary = raw_house
-	var resident_capacity := WorldData.get_city_object_resident_capacity(house)
+	var resident_capacity := CityObjectCatalog.get_city_object_resident_capacity(house)
 
 	if resident_capacity <= 0:
 		return false
@@ -556,10 +556,10 @@ static func assign_city_citizen_job(
 
 	var workplace: Dictionary = raw_workplace
 
-	if not WorldData.city_object_is_workplace(workplace):
+	if not CityObjectCatalog.city_object_is_workplace(workplace):
 		return false
 
-	var worker_capacity := WorldData.get_city_object_worker_capacity(workplace)
+	var worker_capacity := CityObjectCatalog.get_city_object_worker_capacity(workplace)
 
 	if worker_capacity <= 0:
 		return false
@@ -816,13 +816,13 @@ static func _clear_city_citizen_return_home_task_after_home_change(
 
 	if (
 		str(current_task.get("kind", ""))
-		!= WorldData.CITY_CITIZEN_TASK_KIND_RETURN_HOME
+		!= CityCitizens.CITY_CITIZEN_TASK_KIND_RETURN_HOME
 	):
 		return
 
 	CityCitizenTaskRuntimeSystem.clear_city_citizen_task(
 		citizen_id,
-		WorldData.CITY_CITIZEN_TASK_SOURCE_PLAYER
+		CityCitizens.CITY_CITIZEN_TASK_SOURCE_PLAYER
 	)
 	CityCitizenMovementRuntimeSystem.cancel_city_citizen_movement(citizen_id)
 
@@ -836,12 +836,12 @@ static func _clear_city_citizen_work_task_after_job_change(
 
 	if (
 		str(current_task.get("kind", ""))
-		!= WorldData.CITY_CITIZEN_TASK_KIND_WORK
+		!= CityCitizens.CITY_CITIZEN_TASK_KIND_WORK
 	):
 		return
 
 	CityCitizenTaskRuntimeSystem.clear_city_citizen_task(
 		citizen_id,
-		WorldData.CITY_CITIZEN_TASK_SOURCE_PLAYER
+		CityCitizens.CITY_CITIZEN_TASK_SOURCE_PLAYER
 	)
 	CityCitizenMovementRuntimeSystem.cancel_city_citizen_movement(citizen_id)

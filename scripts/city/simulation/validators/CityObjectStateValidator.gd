@@ -20,7 +20,7 @@ static func _validate_city_foundation_state(
 
 		if (
 			str(city_object.get("type", ""))
-			== WorldData.CITY_OBJECT_CITY_CENTER
+			== CityObjectCatalog.CITY_OBJECT_CITY_CENTER
 		):
 			city_center_count += 1
 
@@ -358,7 +358,7 @@ static func _validate_city_assignments(
 		)
 
 		var resident_capacity := (
-			WorldData.get_city_object_resident_capacity(
+			CityObjectCatalog.get_city_object_resident_capacity(
 				city_object
 			)
 		)
@@ -393,11 +393,11 @@ static func _validate_city_assignments(
 					+ " contains residents."
 			)
 
-		if WorldData.city_object_is_workplace(
+		if CityObjectCatalog.city_object_is_workplace(
 			city_object
 		):
 			var worker_capacity := (
-				WorldData.get_city_object_worker_capacity(
+				CityObjectCatalog.get_city_object_worker_capacity(
 					city_object
 				)
 			)
@@ -493,8 +493,7 @@ static func _validate_city_assignments(
 				)
 
 				if (
-					WorldData
-					.get_city_object_resident_capacity(
+					CityObjectCatalog.get_city_object_resident_capacity(
 						home_object
 					)
 					<= 0
@@ -557,7 +556,7 @@ static func _validate_city_assignments(
 					]
 				)
 
-				if not WorldData.city_object_is_workplace(
+				if not CityObjectCatalog.city_object_is_workplace(
 					workplace
 				):
 					errors.append(
@@ -860,7 +859,7 @@ static func _validate_citizen_inventories(
 ) -> int:
 	var checked_inventory_count := 0
 	var valid_resources := (
-		WorldData.get_city_resource_types()
+		CityResourceCatalog.get_city_resource_types()
 	)
 
 	for citizen_id in citizen_lookup.keys():
@@ -1122,10 +1121,10 @@ static func _validate_city_workplace_production(
 		var object_index := int(object_lookup[object_id])
 		var city_object: Dictionary = CityObjectSystem.get_city_objects()[object_index]
 
-		if not WorldData.city_object_is_workplace(city_object):
+		if not CityObjectCatalog.city_object_is_workplace(city_object):
 			continue
 
-		var definition := WorldData.get_city_object_definition_from_object(
+		var definition := CityObjectCatalog.get_city_object_definition_from_object(
 			city_object
 		)
 
@@ -1286,7 +1285,7 @@ static func _validate_workplace_recipe(
 	var city_object: Dictionary = values.get("city_object", {})
 	var object_id := int(values.get("object_id", -1))
 	var recipe: Dictionary = values.get("recipe", {})
-	var valid_resources := WorldData.get_city_resource_types()
+	var valid_resources := CityResourceCatalog.get_city_resource_types()
 	var raw_inputs = recipe.get("inputs", null)
 
 	if not recipe.has("inputs"):
@@ -1527,7 +1526,7 @@ static func _validate_workplace_runtime_production_state(
 					+ str(object_id)
 					+ " has non-String production_status."
 			)
-		elif not WorldData.is_valid_city_workplace_production_status(
+		elif not CityObjectCatalog.is_valid_city_workplace_production_status(
 			raw_status
 		):
 			errors.append(
@@ -1560,7 +1559,7 @@ static func _validate_workplace_runtime_production_state(
 				raw_productive_worker_count
 			)
 			var worker_capacity := (
-				WorldData.get_city_object_worker_capacity(city_object)
+				CityObjectCatalog.get_city_object_worker_capacity(city_object)
 			)
 
 			if productive_worker_count < 0:
@@ -1596,13 +1595,13 @@ static func _validate_workplace_runtime_production_state(
 			# Compare the derived count only after production has evaluated it.
 			var production_has_evaluated_workers := (
 				production_status
-				== WorldData.WORKPLACE_PRODUCTION_STATUS_WORKING
+				== CityObjectCatalog.WORKPLACE_PRODUCTION_STATUS_WORKING
 				or production_status
-				== WorldData.WORKPLACE_PRODUCTION_STATUS_BLOCKED_OUTPUT_FULL
+				== CityObjectCatalog.WORKPLACE_PRODUCTION_STATUS_BLOCKED_OUTPUT_FULL
 				or production_status
-				== WorldData.WORKPLACE_PRODUCTION_STATUS_BLOCKED_MISSING_INPUT
+				== CityObjectCatalog.WORKPLACE_PRODUCTION_STATUS_BLOCKED_MISSING_INPUT
 				or production_status
-				== WorldData.WORKPLACE_PRODUCTION_STATUS_BLOCKED_NO_RESOURCE_SOURCE
+				== CityObjectCatalog.WORKPLACE_PRODUCTION_STATUS_BLOCKED_NO_RESOURCE_SOURCE
 			)
 
 			if (
@@ -1699,7 +1698,7 @@ static func _get_expected_productive_worker_count(
 	return mini(
 		productive_worker_count,
 		maxi(
-			WorldData.get_city_object_worker_capacity(city_object),
+			CityObjectCatalog.get_city_object_worker_capacity(city_object),
 			0
 		)
 	)
@@ -1719,7 +1718,7 @@ static func _validate_workplace_resource_source_policy(
 	if mode.is_empty():
 		return
 
-	if not WorldData.is_valid_workplace_resource_source_mode(mode):
+	if not CityObjectCatalog.is_valid_workplace_resource_source_mode(mode):
 		errors.append(
 			"Workplace "
 				+ str(object_id)
@@ -1731,7 +1730,7 @@ static func _validate_workplace_resource_source_policy(
 
 	if (
 		mode
-		== WorldData.WORKPLACE_RESOURCE_SOURCE_MODE_FOOTPRINT_REACH
+		== CityObjectCatalog.WORKPLACE_RESOURCE_SOURCE_MODE_FOOTPRINT_REACH
 	):
 		_validate_known_workplace_policy_resource({
 		"errors": errors,
@@ -1765,7 +1764,7 @@ static func _validate_workplace_resource_source_policy(
 		if (
 			typeof(raw_full_density) == TYPE_INT
 			and int(raw_full_density)
-			> WorldData.PRODUCTIVITY_BASIS_POINTS_SCALE
+			> CityObjectCatalog.PRODUCTIVITY_BASIS_POINTS_SCALE
 		):
 			errors.append(
 				"Workplace "
@@ -1777,7 +1776,7 @@ static func _validate_workplace_resource_source_policy(
 			)
 		return
 
-	if mode != WorldData.WORKPLACE_RESOURCE_SOURCE_MODE_RADIUS:
+	if mode != CityObjectCatalog.WORKPLACE_RESOURCE_SOURCE_MODE_RADIUS:
 		return
 
 	_validate_known_workplace_policy_resource({
@@ -1816,7 +1815,7 @@ static func _validate_workplace_resource_source_policy(
 
 	var anchor_mode: String = raw_anchor_mode
 
-	if not WorldData.is_valid_workplace_anchor_mode(anchor_mode):
+	if not CityObjectCatalog.is_valid_workplace_anchor_mode(anchor_mode):
 		errors.append(
 			"Workplace "
 				+ str(object_id)
@@ -1840,7 +1839,7 @@ static func _validate_workplace_work_location_policy(
 	if mode.is_empty():
 		return
 
-	if not WorldData.is_valid_workplace_work_location_mode(mode):
+	if not CityObjectCatalog.is_valid_workplace_work_location_mode(mode):
 		errors.append(
 			"Workplace "
 				+ str(object_id)
@@ -1865,7 +1864,7 @@ static func _validate_workplace_movement_policy(
 	if mode.is_empty():
 		return
 
-	if not WorldData.is_valid_workplace_movement_mode(mode):
+	if not CityObjectCatalog.is_valid_workplace_movement_mode(mode):
 		errors.append(
 			"Workplace "
 				+ str(object_id)
@@ -1890,7 +1889,7 @@ static func _validate_workplace_break_location_policy(
 	if mode.is_empty():
 		return
 
-	if not WorldData.is_valid_workplace_break_location_mode(mode):
+	if not CityObjectCatalog.is_valid_workplace_break_location_mode(mode):
 		errors.append(
 			"Workplace "
 				+ str(object_id)
@@ -1900,7 +1899,7 @@ static func _validate_workplace_break_location_policy(
 		)
 		return
 
-	if mode == WorldData.WORKPLACE_BREAK_LOCATION_MODE_FOOTPRINT_RADIUS:
+	if mode == CityObjectCatalog.WORKPLACE_BREAK_LOCATION_MODE_FOOTPRINT_RADIUS:
 		_validate_positive_workplace_policy_integer({
 		"errors": errors,
 		"object_id": object_id,
@@ -1925,7 +1924,7 @@ static func _validate_workplace_overflow_policy(
 	if mode.is_empty():
 		return
 
-	if not WorldData.is_valid_workplace_overflow_mode(mode):
+	if not CityObjectCatalog.is_valid_workplace_overflow_mode(mode):
 		errors.append(
 			"Workplace "
 				+ str(object_id)
@@ -1935,7 +1934,7 @@ static func _validate_workplace_overflow_policy(
 		)
 		return
 
-	if mode == WorldData.WORKPLACE_OVERFLOW_MODE_FOOTPRINT_RADIUS:
+	if mode == CityObjectCatalog.WORKPLACE_OVERFLOW_MODE_FOOTPRINT_RADIUS:
 		_validate_positive_workplace_policy_integer({
 		"errors": errors,
 		"object_id": object_id,
@@ -2013,7 +2012,7 @@ static func _validate_known_workplace_policy_resource(
 
 	var resource: String = raw_resource
 
-	if not WorldData.is_city_resource_type(resource):
+	if not CityResourceCatalog.is_city_resource_type(resource):
 		errors.append(
 			"Workplace "
 				+ str(object_id)

@@ -75,7 +75,7 @@ func synchronize() -> void:
 
 	var object_type := str(city_object.get("type", ""))
 
-	if object_type == WorldData.CITY_OBJECT_ROAD:
+	if object_type == CityObjectCatalog.CITY_OBJECT_ROAD:
 		_suppress_road_object_panels(object_info_panel)
 		return
 

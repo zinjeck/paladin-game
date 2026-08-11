@@ -115,9 +115,9 @@ func _exercise_city(city_id: int, world_seed: int) -> Dictionary:
 	WorldPoliticalState.set_current_city_world(city_world)
 	WorldPoliticalState.set_current_city_seed(world_seed)
 	var city_object := CityObjectSystem.register_completed_city_object({
-		"object_type": WorldData.CITY_OBJECT_HOUSE,
+		"object_type": CityObjectCatalog.CITY_OBJECT_HOUSE,
 		"top_left": SHARED_OBJECT_TOP_LEFT,
-		"size_tiles": WorldData.get_city_object_size_for_type(WorldData.CITY_OBJECT_HOUSE),
+		"size_tiles": CityObjectCatalog.get_city_object_size_for_type(CityObjectCatalog.CITY_OBJECT_HOUSE),
 		"object_owner": "player",
 		"city_world": city_world,
 	})

@@ -91,17 +91,17 @@ var debug_navigation_status: String = (
 	CityNavigationSystemScript.PATH_STATUS_NOT_REQUESTED
 )
 var debug_navigation_start_tile: Vector2i = (
-	WorldData.INVALID_CITY_TILE_POSITION
+	CityCitizens.INVALID_CITY_TILE_POSITION
 )
 var debug_navigation_destination_tile: Vector2i = (
-	WorldData.INVALID_CITY_TILE_POSITION
+	CityCitizens.INVALID_CITY_TILE_POSITION
 )
 var debug_navigation_candidate_count: int = 0
 var debug_navigation_expanded_nodes: int = 0
 var debug_navigation_path_cost: int = 0
 var debug_navigation_duration_usec: int = 0
 var debug_selected_city_tile: Vector2i = (
-	WorldData.INVALID_CITY_TILE_POSITION
+	CityCitizens.INVALID_CITY_TILE_POSITION
 )
 var citizen_debug_ui = CitizenDebugPanelScript.new()
 const DEFAULT_CITY_OBJECT_FRAME_COLOR: Color = Color(0.32, 0.30, 0.24, 0.95)
@@ -344,7 +344,7 @@ func _ready() -> void:
 	CityCitizenSpatialSystem.ensure_city_citizen_spatial_state(
 		city_world
 	)
-	WorldData.ensure_city_citizen_demographic_state()
+	CityCitizenRegistrySystem.ensure_city_citizen_demographic_state()
 	CityCitizenInventorySystem.ensure_city_citizen_inventory_state()
 	CitizenNeedsSystem.ensure_city_citizen_need_state()
 	CityCitizenTaskRuntimeSystem.ensure_city_citizen_task_state()
@@ -1414,11 +1414,11 @@ func create_city_ui() -> void:
 
 	create_city_information_panel()
 	create_bottom_city_buttons()
-	create_city_object_option_button(WorldData.CITY_OBJECT_CITY_CENTER)
+	create_city_object_option_button(CityObjectCatalog.CITY_OBJECT_CITY_CENTER)
 	create_build_option_button()
-	create_city_object_option_button(WorldData.CITY_OBJECT_HOUSE)
-	create_city_object_option_button(WorldData.CITY_OBJECT_STOCKPILE)
-	create_city_object_option_button(WorldData.CITY_OBJECT_FISHING_GROUNDS)
+	create_city_object_option_button(CityObjectCatalog.CITY_OBJECT_HOUSE)
+	create_city_object_option_button(CityObjectCatalog.CITY_OBJECT_STOCKPILE)
+	create_city_object_option_button(CityObjectCatalog.CITY_OBJECT_FISHING_GROUNDS)
 	create_city_player_command_menu()
 	create_resource_bar()
 	create_city_maps_menu()
@@ -1447,7 +1447,7 @@ func create_road_cursor_icon() -> void:
 	road_cursor_icon.visible = false
 
 	var visual_style := get_city_object_visual_style(
-		WorldData.CITY_OBJECT_ROAD
+		CityObjectCatalog.CITY_OBJECT_ROAD
 	)
 	var road_style := create_flat_ui_style(
 		visual_style.get("fill_color", Color(0.56, 0.25, 0.10, 0.96)),
@@ -1518,7 +1518,7 @@ func set_road_option_selected(is_selected: bool) -> void:
 		return
 
 	var visual_style := get_city_object_visual_style(
-		WorldData.CITY_OBJECT_ROAD
+		CityObjectCatalog.CITY_OBJECT_ROAD
 	)
 	var fill_color: Color = visual_style.get(
 		"fill_color",
@@ -1568,7 +1568,7 @@ func create_bottom_city_buttons() -> void:
 	bottom_button_one.custom_minimum_size = Vector2(58.0, 58.0)
 	bottom_button_one.mouse_filter = Control.MOUSE_FILTER_STOP
 	ui_root.add_child(bottom_button_one)
-	bottom_button_one.pressed.connect(on_city_object_menu_button_pressed.bind(WorldData.CITY_OBJECT_CITY_CENTER))
+	bottom_button_one.pressed.connect(on_city_object_menu_button_pressed.bind(CityObjectCatalog.CITY_OBJECT_CITY_CENTER))
 
 	bottom_button_two = Button.new()
 	bottom_button_two.text = "2"
@@ -1584,7 +1584,7 @@ func create_bottom_city_buttons() -> void:
 	bottom_button_three.custom_minimum_size = Vector2(58.0, 58.0)
 	bottom_button_three.mouse_filter = Control.MOUSE_FILTER_STOP
 	ui_root.add_child(bottom_button_three)
-	bottom_button_three.pressed.connect(on_city_object_menu_button_pressed.bind(WorldData.CITY_OBJECT_HOUSE))
+	bottom_button_three.pressed.connect(on_city_object_menu_button_pressed.bind(CityObjectCatalog.CITY_OBJECT_HOUSE))
 
 	bottom_button_four = Button.new()
 	bottom_button_four.text = "4"
@@ -1592,7 +1592,7 @@ func create_bottom_city_buttons() -> void:
 	bottom_button_four.custom_minimum_size = Vector2(58.0, 58.0)
 	bottom_button_four.mouse_filter = Control.MOUSE_FILTER_STOP
 	ui_root.add_child(bottom_button_four)
-	bottom_button_four.pressed.connect(on_city_object_menu_button_pressed.bind(WorldData.CITY_OBJECT_STOCKPILE))
+	bottom_button_four.pressed.connect(on_city_object_menu_button_pressed.bind(CityObjectCatalog.CITY_OBJECT_STOCKPILE))
 
 	bottom_button_five = Button.new()
 	bottom_button_five.text = "5"
@@ -1600,7 +1600,7 @@ func create_bottom_city_buttons() -> void:
 	bottom_button_five.custom_minimum_size = Vector2(58.0, 58.0)
 	bottom_button_five.mouse_filter = Control.MOUSE_FILTER_STOP
 	ui_root.add_child(bottom_button_five)
-	bottom_button_five.pressed.connect(on_city_object_menu_button_pressed.bind(WorldData.CITY_OBJECT_FISHING_GROUNDS))
+	bottom_button_five.pressed.connect(on_city_object_menu_button_pressed.bind(CityObjectCatalog.CITY_OBJECT_FISHING_GROUNDS))
 
 	bottom_button_six = Button.new()
 	bottom_button_six.text = "6"
@@ -1816,7 +1816,7 @@ func layout_city_player_command_menu(viewport_size: Vector2) -> void:
 	city_command_cancel_task_button.size = button_size
 
 func create_city_object_option_button(object_type: String) -> void:
-	var definition := WorldData.get_city_object_definition(object_type)
+	var definition := CityObjectCatalog.get_city_object_definition(object_type)
 
 	if definition.is_empty():
 		push_error("Missing city object definition for: " + object_type)
@@ -1835,7 +1835,7 @@ func create_city_object_option_button(object_type: String) -> void:
 	var icon := Panel.new()
 	icon.mouse_filter = Control.MOUSE_FILTER_IGNORE
 
-	var visual_style := WorldData.get_city_object_visual_style_for_type(object_type)
+	var visual_style := CityObjectCatalog.get_city_object_visual_style_for_type(object_type)
 
 	var icon_style := create_flat_ui_style(
 		Color(
@@ -1880,7 +1880,7 @@ func layout_city_object_option_button(object_type: String, _viewport_size: Vecto
 	if not city_object_option_buttons.has(object_type):
 		return
 
-	var definition := WorldData.get_city_object_definition(object_type)
+	var definition := CityObjectCatalog.get_city_object_definition(object_type)
 
 	if definition.is_empty():
 		return
@@ -2001,7 +2001,7 @@ func create_resource_bar() -> void:
 		resource_amount_labels.append(amount_label)
 
 func get_city_resource_order() -> Array[String]:
-	return WorldData.get_city_resource_types()
+	return CityResourceCatalog.get_city_resource_types()
 
 func update_resource_bar_values() -> void:
 	var resource_order := get_city_resource_order()
@@ -2287,7 +2287,7 @@ func has_open_city_object_menu() -> bool:
 
 
 func on_city_object_menu_button_pressed(object_type: String) -> void:
-	if not WorldData.can_use_city_object_definition(object_type):
+	if not CityObjectSystem.can_use_city_object_definition(object_type):
 		print("City object menu blocked: ", object_type)
 		update_city_object_button_states()
 		return
@@ -2318,7 +2318,7 @@ func on_city_object_menu_button_pressed(object_type: String) -> void:
 	update_city_object_button_states()
 
 func on_city_object_option_button_pressed(object_type: String) -> void:
-	if not WorldData.can_use_city_object_definition(object_type):
+	if not CityObjectSystem.can_use_city_object_definition(object_type):
 		print("City object placement blocked: ", object_type)
 		update_city_object_button_states()
 		return
@@ -2329,13 +2329,13 @@ func on_city_object_option_button_pressed(object_type: String) -> void:
 		start_city_object_placement_from_definition(object_type)
 
 func start_city_object_placement_from_definition(object_type: String) -> void:
-	var definition := WorldData.get_city_object_definition(object_type)
+	var definition := CityObjectCatalog.get_city_object_definition(object_type)
 
 	if definition.is_empty():
 		push_error("Cannot start placement. Missing city object definition: " + object_type)
 		return
 
-	if not WorldData.can_use_city_object_definition(object_type):
+	if not CityObjectSystem.can_use_city_object_definition(object_type):
 		print("Cannot place locked city object: ", object_type)
 		update_city_object_button_states()
 		return
@@ -2383,7 +2383,7 @@ func set_city_object_option_selected(object_type: String, is_selected: bool) -> 
 		return
 
 	var icon: Panel = city_object_option_icons[object_type]
-	var visual_style := WorldData.get_city_object_visual_style_for_type(object_type)
+	var visual_style := CityObjectCatalog.get_city_object_visual_style_for_type(object_type)
 
 	var fill_color: Color = visual_style["fill_color"]
 	var border_color: Color = visual_style["frame_color"]
@@ -2404,21 +2404,21 @@ func set_city_object_option_selected(object_type: String, is_selected: bool) -> 
 
 func update_city_object_button_states() -> void:
 	var city_object_main_buttons := {
-		WorldData.CITY_OBJECT_CITY_CENTER: bottom_button_one,
-		WorldData.CITY_OBJECT_HOUSE: bottom_button_three,
-		WorldData.CITY_OBJECT_STOCKPILE: bottom_button_four,
-		WorldData.CITY_OBJECT_FISHING_GROUNDS: bottom_button_five
+		CityObjectCatalog.CITY_OBJECT_CITY_CENTER: bottom_button_one,
+		CityObjectCatalog.CITY_OBJECT_HOUSE: bottom_button_three,
+		CityObjectCatalog.CITY_OBJECT_STOCKPILE: bottom_button_four,
+		CityObjectCatalog.CITY_OBJECT_FISHING_GROUNDS: bottom_button_five
 	}
 
 	for object_type in city_object_main_buttons.keys():
 		var object_type_string := str(object_type)
-		var definition := WorldData.get_city_object_definition(object_type_string)
+		var definition := CityObjectCatalog.get_city_object_definition(object_type_string)
 		var main_button: Button = city_object_main_buttons[object_type_string]
 
 		if definition.is_empty() or main_button == null:
 			continue
 
-		main_button.disabled = not WorldData.can_use_city_object_definition(object_type_string)
+		main_button.disabled = not CityObjectSystem.can_use_city_object_definition(object_type_string)
 		main_button.text = str(int(definition.get("button_slot", 0)))
 
 	if bottom_button_six != null:
@@ -2428,7 +2428,7 @@ func update_city_object_button_states() -> void:
 	for object_type in city_object_option_buttons.keys():
 		var object_type_string := str(object_type)
 		var option_button: Button = city_object_option_buttons[object_type_string]
-		var can_use := WorldData.can_use_city_object_definition(object_type_string)
+		var can_use := CityObjectSystem.can_use_city_object_definition(object_type_string)
 
 		option_button.disabled = not can_use
 
@@ -2542,7 +2542,7 @@ func create_object_info_storage_rows() -> void:
 
 	for i in range(
 		maxi(
-			WorldData.get_city_resource_types().size(),
+			CityResourceCatalog.get_city_resource_types().size(),
 			1
 		)
 	):
@@ -2902,15 +2902,15 @@ func layout_object_info_storage_rows(panel_width: float) -> void:
 
 func get_container_type_display_name(container_type: String) -> String:
 	match container_type:
-		WorldData.CONTAINER_TYPE_PUBLIC_CITY_STORAGE:
+		CityObjectCatalog.CONTAINER_TYPE_PUBLIC_CITY_STORAGE:
 			return "Public city storage"
-		WorldData.CONTAINER_TYPE_PRIVATE_HOME_STORAGE:
+		CityObjectCatalog.CONTAINER_TYPE_PRIVATE_HOME_STORAGE:
 			return "Private home storage"
-		WorldData.CONTAINER_TYPE_WORKPLACE_STORAGE:
+		CityObjectCatalog.CONTAINER_TYPE_WORKPLACE_STORAGE:
 			return "Workplace output buffer"
-		WorldData.CONTAINER_TYPE_PERSONAL_INVENTORY:
+		CityObjectCatalog.CONTAINER_TYPE_PERSONAL_INVENTORY:
 			return "Personal inventory"
-		WorldData.CONTAINER_TYPE_GROUND_PILE:
+		CityObjectCatalog.CONTAINER_TYPE_GROUND_PILE:
 			return "Ground pile"
 		_:
 			return "None"
@@ -2920,15 +2920,15 @@ func get_storage_panel_title_for_object(city_object: Dictionary) -> String:
 	var container_type := CityResourceContainerSystem.get_city_object_container_type(city_object)
 
 	match container_type:
-		WorldData.CONTAINER_TYPE_PUBLIC_CITY_STORAGE:
+		CityObjectCatalog.CONTAINER_TYPE_PUBLIC_CITY_STORAGE:
 			return "Public Storage"
-		WorldData.CONTAINER_TYPE_PRIVATE_HOME_STORAGE:
+		CityObjectCatalog.CONTAINER_TYPE_PRIVATE_HOME_STORAGE:
 			return "Private Storage"
-		WorldData.CONTAINER_TYPE_WORKPLACE_STORAGE:
+		CityObjectCatalog.CONTAINER_TYPE_WORKPLACE_STORAGE:
 			return "Workplace Output Buffer"
-		WorldData.CONTAINER_TYPE_PERSONAL_INVENTORY:
+		CityObjectCatalog.CONTAINER_TYPE_PERSONAL_INVENTORY:
 			return "Personal Inventory"
-		WorldData.CONTAINER_TYPE_GROUND_PILE:
+		CityObjectCatalog.CONTAINER_TYPE_GROUND_PILE:
 			return "Ground Pile"
 		_:
 			return "Storage"
@@ -2937,17 +2937,17 @@ func get_workplace_production_status_display_name(
 	production_status: String
 ) -> String:
 	match production_status:
-		WorldData.WORKPLACE_PRODUCTION_STATUS_WORKING:
+		CityObjectCatalog.WORKPLACE_PRODUCTION_STATUS_WORKING:
 			return "Working"
-		WorldData.WORKPLACE_PRODUCTION_STATUS_IDLE_NO_WORKERS:
+		CityObjectCatalog.WORKPLACE_PRODUCTION_STATUS_IDLE_NO_WORKERS:
 			return "Idle - No Workers Present"
-		WorldData.WORKPLACE_PRODUCTION_STATUS_BLOCKED_OUTPUT_FULL:
+		CityObjectCatalog.WORKPLACE_PRODUCTION_STATUS_BLOCKED_OUTPUT_FULL:
 			return "Blocked - Output Storage Full"
-		WorldData.WORKPLACE_PRODUCTION_STATUS_BLOCKED_MISSING_INPUT:
+		CityObjectCatalog.WORKPLACE_PRODUCTION_STATUS_BLOCKED_MISSING_INPUT:
 			return "Blocked - Missing Input"
-		WorldData.WORKPLACE_PRODUCTION_STATUS_BLOCKED_NO_RESOURCE_SOURCE:
+		CityObjectCatalog.WORKPLACE_PRODUCTION_STATUS_BLOCKED_NO_RESOURCE_SOURCE:
 			return "Blocked - No Resource Source"
-		WorldData.WORKPLACE_PRODUCTION_STATUS_INACTIVE:
+		CityObjectCatalog.WORKPLACE_PRODUCTION_STATUS_INACTIVE:
 			return "Inactive"
 		_:
 			return production_status.capitalize()
@@ -2992,7 +2992,7 @@ func update_selected_city_citizen_panel() -> void:
 	)
 	var raw_position = citizen.get(
 		"city_tile_position",
-		WorldData.INVALID_CITY_TILE_POSITION
+		CityCitizens.INVALID_CITY_TILE_POSITION
 	)
 	var position_text := "invalid"
 
@@ -3013,20 +3013,20 @@ func update_selected_city_citizen_panel() -> void:
 	if raw_current_task is Dictionary:
 		var raw_task_target_tile = raw_current_task.get(
 			"target_tile",
-			WorldData.INVALID_CITY_TILE_POSITION
+			CityCitizens.INVALID_CITY_TILE_POSITION
 		)
 
 		if (
 			raw_task_target_tile is Vector2i
 			and raw_task_target_tile
-			!= WorldData.INVALID_CITY_TILE_POSITION
+			!= CityCitizens.INVALID_CITY_TILE_POSITION
 		):
 			task_target_text = str(raw_task_target_tile)
 	object_info_title_label.text = citizen_name
 	var movement_state_text := str(
 		citizen.get(
 			"movement_state",
-			WorldData.CITY_CITIZEN_MOVEMENT_STATE_IDLE
+			CityCitizens.CITY_CITIZEN_MOVEMENT_STATE_IDLE
 		)
 	)
 
@@ -3034,14 +3034,14 @@ func update_selected_city_citizen_panel() -> void:
 
 	if (
 		movement_state_text
-		== WorldData.CITY_CITIZEN_MOVEMENT_STATE_MOVING
+		== CityCitizens.CITY_CITIZEN_MOVEMENT_STATE_MOVING
 	):
 		movement_text += (
 			" -> "
 			+ str(
 				citizen.get(
 					"movement_destination_tile",
-					WorldData.INVALID_CITY_TILE_POSITION
+					CityCitizens.INVALID_CITY_TILE_POSITION
 				)
 			)
 		)
@@ -3131,7 +3131,7 @@ func get_citizen_haul_status_lines(
 	var haul_phase := str(
 		haul.get(
 			"phase",
-			WorldData.CITY_CITIZEN_HAUL_PHASE_NONE
+			CityCitizens.CITY_CITIZEN_HAUL_PHASE_NONE
 		)
 	).replace("_", " ").capitalize()
 	var lines: Array = [
@@ -3159,7 +3159,7 @@ func get_citizen_haul_status_lines(
 	var reservation_id := int(
 		haul.get(
 			"reservation_id",
-			WorldData.INVALID_CITY_CITIZEN_HAUL_RESERVATION_ID
+			CityCitizens.INVALID_CITY_CITIZEN_HAUL_RESERVATION_ID
 		)
 	)
 
@@ -3388,7 +3388,7 @@ func on_workplace_details_button_pressed() -> void:
 
 	if (
 		city_object.is_empty()
-		or not WorldData.city_object_is_workplace(
+		or not CityObjectCatalog.city_object_is_workplace(
 			city_object
 		)
 	):
@@ -3452,7 +3452,7 @@ func update_selected_city_construction_site_panel() -> void:
 	var material_recipe = site.get("material_recipe", {})
 
 	if material_recipe is Dictionary:
-		for resource in WorldData.get_city_resource_types():
+		for resource in CityResourceCatalog.get_city_resource_types():
 			var required_amount := maxi(
 				int(material_recipe.get(resource, 0)),
 				0
@@ -3534,7 +3534,7 @@ func _update_selected_city_object_panel(
 
 	var object_type: String = str(city_object["type"])
 
-	if object_type == WorldData.CITY_OBJECT_CITY_CENTER:
+	if object_type == CityObjectCatalog.CITY_OBJECT_CITY_CENTER:
 		object_info_title_label.text = "City Keep"
 	else:
 		object_info_title_label.text = get_city_object_display_name(
@@ -3545,13 +3545,13 @@ func _update_selected_city_object_panel(
 		"Object: " + get_city_object_display_name(city_object)
 	]
 	var workplace_detail_lines: Array = []
-	var is_workplace := WorldData.city_object_is_workplace(
+	var is_workplace := CityObjectCatalog.city_object_is_workplace(
 		city_object
 	)
 
-	if object_type == WorldData.CITY_OBJECT_CITY_CENTER:
+	if object_type == CityObjectCatalog.CITY_OBJECT_CITY_CENTER:
 		_append_city_center_object_info(body_lines)
-	elif object_type == WorldData.CITY_OBJECT_HOUSE:
+	elif object_type == CityObjectCatalog.CITY_OBJECT_HOUSE:
 		_append_house_object_info({
 			"city_object": city_object,
 			"body_lines": body_lines,
@@ -3597,14 +3597,14 @@ func _append_city_center_object_info(body_lines: Array) -> void:
 	body_lines.append(
 		"Male: "
 		+ str(
-			WorldData.get_city_citizen_count_by_sex(
-				WorldData.CITY_CITIZEN_SEX_MALE
+			CityCitizenRegistrySystem.get_city_citizen_count_by_sex(
+				CityCitizens.CITY_CITIZEN_SEX_MALE
 			)
 		)
 		+ " | Female: "
 		+ str(
-			WorldData.get_city_citizen_count_by_sex(
-				WorldData.CITY_CITIZEN_SEX_FEMALE
+			CityCitizenRegistrySystem.get_city_citizen_count_by_sex(
+				CityCitizens.CITY_CITIZEN_SEX_FEMALE
 			)
 		)
 	)
@@ -3628,7 +3628,7 @@ func _append_house_object_info(values: Dictionary) -> void:
 		"Residents: "
 		+ str(CityAssignmentSystem.get_city_object_resident_count(city_object))
 		+ " / "
-		+ str(WorldData.get_city_object_resident_capacity(city_object))
+		+ str(CityObjectCatalog.get_city_object_resident_capacity(city_object))
 	)
 	var food_supply := CityResourceMatcher.get_city_home_food_supply_status(
 		city_object
@@ -3662,7 +3662,7 @@ func _append_workplace_object_info(values: Dictionary) -> void:
 		"workplace_detail_lines",
 		[]
 	)
-	var production_status := WorldData.get_city_object_production_status(
+	var production_status := CityObjectCatalog.get_city_object_production_status(
 		city_object
 	)
 
@@ -3676,7 +3676,7 @@ func _append_workplace_object_info(values: Dictionary) -> void:
 		"Assigned: "
 		+ str(CityEmploymentSystem.get_city_object_worker_count(city_object))
 		+ " / "
-		+ str(WorldData.get_city_object_worker_capacity(city_object))
+		+ str(CityObjectCatalog.get_city_object_worker_capacity(city_object))
 	)
 	body_lines.append(
 		"Present: "
@@ -3689,7 +3689,7 @@ func _append_workplace_object_info(values: Dictionary) -> void:
 	body_lines.append(
 		"Productive: "
 		+ str(
-			WorldData.get_city_object_productive_worker_count(
+			CityObjectCatalog.get_city_object_productive_worker_count(
 				city_object
 			)
 		)
@@ -3702,7 +3702,7 @@ func _append_workplace_object_info(values: Dictionary) -> void:
 	for worker_name in worker_names:
 		body_lines.append("- " + str(worker_name))
 
-	var output_resources := WorldData.get_city_object_output_resources(
+	var output_resources := CityObjectCatalog.get_city_object_output_resources(
 		city_object
 	)
 
@@ -3716,14 +3716,14 @@ func _append_workplace_object_info(values: Dictionary) -> void:
 			"Output: " + ", ".join(output_names)
 		)
 
-	var production_recipe := WorldData.get_city_object_production_recipe(
+	var production_recipe := CityObjectCatalog.get_city_object_production_recipe(
 		city_object
 	)
 	var work_units_per_batch := int(
 		production_recipe.get("work_units_per_batch", 0)
 	)
 	var progress_work_units := (
-		WorldData.get_city_object_production_progress_work_units(
+		CityObjectCatalog.get_city_object_production_progress_work_units(
 			city_object
 		)
 	)
@@ -4350,7 +4350,7 @@ func create_build_option_button() -> void:
 	build_option_icon.mouse_filter = Control.MOUSE_FILTER_IGNORE
 
 	var visual_style := get_city_object_visual_style(
-		WorldData.CITY_OBJECT_ROAD
+		CityObjectCatalog.CITY_OBJECT_ROAD
 	)
 	var icon_style := create_flat_ui_style(
 		visual_style.get("fill_color", Color(0.56, 0.25, 0.10, 0.96)),
@@ -4548,15 +4548,15 @@ func after_city_object_placed(city_object: Dictionary) -> void:
 		return
 
 	var object_type: String = str(city_object.get("type", ""))
-	var definition := WorldData.get_city_object_definition(object_type)
+	var definition := CityObjectCatalog.get_city_object_definition(object_type)
 
 	if definition.is_empty():
 		return
 
-	var placement_effect: String = str(definition.get("placement_effect", WorldData.CITY_OBJECT_PLACEMENT_EFFECT_NONE))
+	var placement_effect: String = str(definition.get("placement_effect", CityObjectCatalog.CITY_OBJECT_PLACEMENT_EFFECT_NONE))
 
 	match placement_effect:
-		WorldData.CITY_OBJECT_PLACEMENT_EFFECT_FOUND_CITY:
+		CityObjectCatalog.CITY_OBJECT_PLACEMENT_EFFECT_FOUND_CITY:
 			after_city_center_placed(city_object)
 
 func after_city_center_placed(city_object: Dictionary) -> void:
@@ -4820,7 +4820,7 @@ func has_debug_selected_city_tile() -> bool:
 
 	if (
 		debug_selected_city_tile
-		== WorldData.INVALID_CITY_TILE_POSITION
+		== CityCitizens.INVALID_CITY_TILE_POSITION
 	):
 		return false
 
@@ -4863,7 +4863,7 @@ func clear_debug_selected_city_tile() -> void:
 		return
 
 	debug_selected_city_tile = (
-		WorldData.INVALID_CITY_TILE_POSITION
+		CityCitizens.INVALID_CITY_TILE_POSITION
 	)
 	clear_debug_navigation_result()
 	update_debug_panel_text()
@@ -5051,7 +5051,7 @@ func get_city_object_display_name(city_object: Dictionary) -> String:
 
 	var object_type: String = str(city_object.get("type", ""))
 
-	return WorldData.get_city_object_display_name_for_type(object_type)
+	return CityObjectCatalog.get_city_object_display_name_for_type(object_type)
 
 func get_city_object_world_rect(city_object: Dictionary) -> Rect2:
 	if city_object.is_empty():
@@ -5773,7 +5773,7 @@ func apply_city_surface_feature_changes(
 	for change in changes:
 		var raw_tile_position = change.get(
 			"tile_position",
-			WorldData.INVALID_CITY_TILE_POSITION
+			CityCitizens.INVALID_CITY_TILE_POSITION
 		)
 		var previous_feature := str(
 			change.get(
@@ -5965,7 +5965,7 @@ func draw_city_player_command_overlay(draw_target: CanvasItem) -> void:
 
 			var raw_command_tile = raw_command.get(
 				"tile_position",
-				WorldData.INVALID_CITY_TILE_POSITION
+				CityCitizens.INVALID_CITY_TILE_POSITION
 			)
 
 			if not raw_command_tile is Vector2i:
@@ -6039,7 +6039,7 @@ func draw_city_player_command_overlay(draw_target: CanvasItem) -> void:
 
 		var raw_tile_position = command.get(
 			"tile_position",
-			WorldData.INVALID_CITY_TILE_POSITION
+			CityCitizens.INVALID_CITY_TILE_POSITION
 		)
 
 		if not raw_tile_position is Vector2i:
@@ -6066,7 +6066,7 @@ func draw_city_player_command_overlay(draw_target: CanvasItem) -> void:
 
 		var raw_tile_position = command.get(
 			"tile_position",
-			WorldData.INVALID_CITY_TILE_POSITION
+			CityCitizens.INVALID_CITY_TILE_POSITION
 		)
 
 		if not raw_tile_position is Vector2i:
@@ -6189,7 +6189,7 @@ func get_city_citizen_world_rect(
 
 	var raw_position = citizen.get(
 		"city_tile_position",
-		WorldData.INVALID_CITY_TILE_POSITION
+		CityCitizens.INVALID_CITY_TILE_POSITION
 	)
 
 	if not raw_position is Vector2i:
@@ -6363,7 +6363,7 @@ func draw_city_ground_piles(draw_target: CanvasItem) -> void:
 
 		var raw_tile_position = raw_ground_pile.get(
 			"tile_position",
-			WorldData.INVALID_CITY_TILE_POSITION
+			CityCitizens.INVALID_CITY_TILE_POSITION
 		)
 
 		if not raw_tile_position is Vector2i:
@@ -6388,7 +6388,7 @@ func draw_city_ground_piles(draw_target: CanvasItem) -> void:
 		var ground_pile: Dictionary = raw_ground_pile
 		var raw_tile_position = ground_pile.get(
 			"tile_position",
-			WorldData.INVALID_CITY_TILE_POSITION
+			CityCitizens.INVALID_CITY_TILE_POSITION
 		)
 		var resource := str(
 			ground_pile.get("resource_type", WorldData.RESOURCE_NONE)
@@ -6396,7 +6396,7 @@ func draw_city_ground_piles(draw_target: CanvasItem) -> void:
 
 		if (
 			not raw_tile_position is Vector2i
-			or not WorldData.is_city_resource_type(resource)
+			or not CityResourceCatalog.is_city_resource_type(resource)
 		):
 			continue
 
@@ -6504,7 +6504,7 @@ func draw_city_object_debug_names(
 
 		var object_type: String = str(city_object.get("type", ""))
 
-		if object_type == WorldData.CITY_OBJECT_ROAD:
+		if object_type == CityObjectCatalog.CITY_OBJECT_ROAD:
 			continue
 
 		var rect: Rect2 = get_city_object_world_rect(city_object)
@@ -6691,7 +6691,7 @@ func get_city_object_debug_footprint_tiles(city_object: Dictionary) -> Array:
 	return []
 
 func get_city_object_visual_style(object_type: String) -> Dictionary:
-	return WorldData.get_city_object_visual_style_for_type(object_type)
+	return CityObjectCatalog.get_city_object_visual_style_for_type(object_type)
 
 func with_alpha_multiplier(color: Color, alpha_multiplier: float) -> Color:
 	return Color(
@@ -6713,7 +6713,7 @@ func draw_city_object_visual(
 
 	var object_type: String = str(city_object.get("type", ""))
 
-	if object_type == WorldData.CITY_OBJECT_ROAD:
+	if object_type == CityObjectCatalog.CITY_OBJECT_ROAD:
 		return
 
 	var rect: Rect2 = get_city_object_world_rect(city_object)
@@ -6750,7 +6750,7 @@ func draw_city_objects(draw_target: CanvasItem) -> void:
 
 		var object_type: String = str(city_object.get("type", ""))
 
-		if object_type == WorldData.CITY_OBJECT_ROAD:
+		if object_type == CityObjectCatalog.CITY_OBJECT_ROAD:
 			continue
 
 		draw_city_object_visual(
@@ -6776,12 +6776,12 @@ func draw_city_construction_sites(draw_target: CanvasItem) -> void:
 		if not footprint_tiles is Array:
 			continue
 
-		if object_type != WorldData.CITY_OBJECT_ROAD:
+		if object_type != CityObjectCatalog.CITY_OBJECT_ROAD:
 			var preview_object := {
 				"type": object_type,
 				"top_left": site.get(
 					"top_left",
-					WorldData.INVALID_CITY_TILE_POSITION
+					CityCitizens.INVALID_CITY_TILE_POSITION
 				),
 				"size": site.get("size", Vector2i.ZERO),
 			}
@@ -6794,9 +6794,9 @@ func draw_city_construction_sites(draw_target: CanvasItem) -> void:
 
 		var blueprint_fill := CITY_CONSTRUCTION_BLUEPRINT_FILL
 
-		if object_type == WorldData.CITY_OBJECT_ROAD:
+		if object_type == CityObjectCatalog.CITY_OBJECT_ROAD:
 			var road_style := get_city_object_visual_style(
-				WorldData.CITY_OBJECT_ROAD
+				CityObjectCatalog.CITY_OBJECT_ROAD
 			)
 			var road_fill: Color = road_style.get(
 				"fill_color",
@@ -7169,7 +7169,7 @@ func draw_selected_city_construction_site_highlight(
 
 func draw_city_roads(draw_target: CanvasItem) -> void:
 	var road_style := get_city_object_visual_style(
-		WorldData.CITY_OBJECT_ROAD
+		CityObjectCatalog.CITY_OBJECT_ROAD
 	)
 	var road_fill_color: Color = road_style.get(
 		"fill_color",
@@ -7179,7 +7179,7 @@ func draw_city_roads(draw_target: CanvasItem) -> void:
 	for city_object in CityObjectSystem.get_city_objects():
 		var object_type: String = str(city_object["type"])
 
-		if object_type != WorldData.CITY_OBJECT_ROAD:
+		if object_type != CityObjectCatalog.CITY_OBJECT_ROAD:
 			continue
 
 		if not city_object.has("tiles"):
@@ -7269,7 +7269,7 @@ func get_city_hover_highlight_tiles(
 	if not construction_site.is_empty():
 		if (
 			str(construction_site.get("object_type", ""))
-			== WorldData.CITY_OBJECT_ROAD
+			== CityObjectCatalog.CITY_OBJECT_ROAD
 		):
 			return fallback_tiles
 
@@ -7388,7 +7388,7 @@ func ensure_city_foundation_object_exists() -> void:
 	if not WorldData.has_player_city_foundation():
 		return
 
-	if CityObjectSystem.has_city_object_type(WorldData.CITY_OBJECT_CITY_CENTER):
+	if CityObjectSystem.has_city_object_type(CityObjectCatalog.CITY_OBJECT_CITY_CENTER):
 		return
 
 	var top_left: Vector2i = WorldData.player_city_foundation_top_left
@@ -7398,13 +7398,13 @@ func ensure_city_foundation_object_exists() -> void:
 		city_world,
 		top_left,
 		size_tiles,
-		WorldData.CITY_OBJECT_CITY_CENTER
+		CityObjectCatalog.CITY_OBJECT_CITY_CENTER
 	):
 		print("Could not recover city foundation object.")
 		return
 
 	var foundation_object := CityObjectSystem.register_completed_city_object({
-		"object_type": WorldData.CITY_OBJECT_CITY_CENTER,
+		"object_type": CityObjectCatalog.CITY_OBJECT_CITY_CENTER,
 		"top_left": top_left,
 		"size_tiles": size_tiles,
 		"object_owner": "player",
@@ -7484,7 +7484,7 @@ func get_first_living_debug_citizen() -> Dictionary:
 
 		var raw_position = citizen.get(
 			"city_tile_position",
-			WorldData.INVALID_CITY_TILE_POSITION
+			CityCitizens.INVALID_CITY_TILE_POSITION
 		)
 
 		if not raw_position is Vector2i:
@@ -7522,10 +7522,10 @@ func clear_debug_navigation_result() -> void:
 		.PATH_STATUS_NOT_REQUESTED
 	)
 	debug_navigation_start_tile = (
-		WorldData.INVALID_CITY_TILE_POSITION
+		CityCitizens.INVALID_CITY_TILE_POSITION
 	)
 	debug_navigation_destination_tile = (
-		WorldData.INVALID_CITY_TILE_POSITION
+		CityCitizens.INVALID_CITY_TILE_POSITION
 	)
 	debug_navigation_candidate_count = 0
 	debug_navigation_expanded_nodes = 0
@@ -7561,7 +7561,7 @@ func request_debug_navigation_path() -> void:
 
 	var raw_start_tile = citizen.get(
 		"city_tile_position",
-		WorldData.INVALID_CITY_TILE_POSITION
+		CityCitizens.INVALID_CITY_TILE_POSITION
 	)
 
 	if not raw_start_tile is Vector2i:
@@ -7599,7 +7599,7 @@ func request_debug_navigation_path() -> void:
 	if (
 		not target_object.is_empty()
 		and str(target_object.get("type", ""))
-		!= WorldData.CITY_OBJECT_ROAD
+		!= CityObjectCatalog.CITY_OBJECT_ROAD
 	):
 		destination_tiles = (
 			CityNavigationSystem.get_city_object_access_tiles(
@@ -7629,7 +7629,7 @@ func request_debug_navigation_path() -> void:
 	debug_navigation_start_tile = start_tile
 	debug_navigation_destination_tile = result.get(
 		"destination_tile",
-		WorldData.INVALID_CITY_TILE_POSITION
+		CityCitizens.INVALID_CITY_TILE_POSITION
 	)
 	debug_navigation_candidate_count = int(
 		result.get(
@@ -7708,7 +7708,7 @@ func assign_debug_navigation_path_to_selected_citizen() -> void:
 
 	var current_position = citizen.get(
 		"city_tile_position",
-		WorldData.INVALID_CITY_TILE_POSITION
+		CityCitizens.INVALID_CITY_TILE_POSITION
 	)
 
 	if not current_position is Vector2i:

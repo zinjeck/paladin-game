@@ -38,11 +38,11 @@ static func get_navigation_text(values: Dictionary) -> String:
 
 	var start_tile: Vector2i = values.get(
 		"navigation_start_tile",
-		WorldData.INVALID_CITY_TILE_POSITION
+		CityCitizens.INVALID_CITY_TILE_POSITION
 	)
 	var destination_tile: Vector2i = values.get(
 		"navigation_destination_tile",
-		WorldData.INVALID_CITY_TILE_POSITION
+		CityCitizens.INVALID_CITY_TILE_POSITION
 	)
 	var path_cost := int(values.get("navigation_path_cost", 0))
 	var candidate_count := int(
@@ -84,7 +84,7 @@ static func format_navigation_path_cost(path_cost: int) -> String:
 		% (
 			float(maxi(path_cost, 0))
 			/ float(
-				WorldData.CITY_CITIZEN_CARDINAL_MOVEMENT_COST
+				CityCitizens.CITY_CITIZEN_CARDINAL_MOVEMENT_COST
 			)
 		)
 	)
@@ -141,7 +141,7 @@ static func get_panel_text(values: Dictionary) -> String:
 	)
 	var selected_debug_tile: Vector2i = values.get(
 		"debug_selected_city_tile",
-		WorldData.INVALID_CITY_TILE_POSITION
+		CityCitizens.INVALID_CITY_TILE_POSITION
 	)
 	var inspected_tile := hovered_tile
 	var inspector_source := "Cursor hover"
@@ -308,7 +308,7 @@ static func get_object_text(city_object: Dictionary) -> String:
 		+ "\n"
 		+ "Workplace: "
 		+ DebugPanel.bool_to_yes_no(
-			WorldData.city_object_is_workplace(city_object)
+			CityObjectCatalog.city_object_is_workplace(city_object)
 		)
 		+ "\n"
 		+ "Owner: "
@@ -381,7 +381,7 @@ static func get_ground_pile_text(tile_position: Vector2i) -> String:
 static func get_resource_conservation_text() -> String:
 	var resource_descriptions: Array[String] = []
 
-	for resource in WorldData.get_city_resource_types():
+	for resource in CityResourceCatalog.get_city_resource_types():
 		resource_descriptions.append(
 			resource
 			+ " "
@@ -406,11 +406,11 @@ static func get_resource_conservation_text() -> String:
 static func get_tile_citizen_text(values: Dictionary) -> String:
 	var tile_position: Vector2i = values.get(
 		"tile_position",
-		WorldData.INVALID_CITY_TILE_POSITION
+		CityCitizens.INVALID_CITY_TILE_POSITION
 	)
 	var selected_debug_tile: Vector2i = values.get(
 		"debug_selected_city_tile",
-		WorldData.INVALID_CITY_TILE_POSITION
+		CityCitizens.INVALID_CITY_TILE_POSITION
 	)
 	var standing_ids := CityCitizenSpatialSystem.get_city_citizen_ids_at_tile(
 		tile_position
@@ -430,7 +430,7 @@ static func get_tile_citizen_text(values: Dictionary) -> String:
 			if (
 				current_task.get(
 					"target_tile",
-					WorldData.INVALID_CITY_TILE_POSITION
+					CityCitizens.INVALID_CITY_TILE_POSITION
 				)
 				== tile_position
 			):
@@ -473,46 +473,46 @@ static func get_selection_text(values: Dictionary) -> String:
 		var task_target_text := "none"
 		var raw_task_target = current_task.get(
 			"target_tile",
-			WorldData.INVALID_CITY_TILE_POSITION
+			CityCitizens.INVALID_CITY_TILE_POSITION
 		)
 
 		if (
 			raw_task_target is Vector2i
 			and raw_task_target
-			!= WorldData.INVALID_CITY_TILE_POSITION
+			!= CityCitizens.INVALID_CITY_TILE_POSITION
 		):
 			task_target_text = str(raw_task_target)
 
 		var movement_destination_text := "none"
 		var raw_destination = citizen.get(
 			"movement_destination_tile",
-			WorldData.INVALID_CITY_TILE_POSITION
+			CityCitizens.INVALID_CITY_TILE_POSITION
 		)
 
 		if (
 			raw_destination is Vector2i
 			and raw_destination
-			!= WorldData.INVALID_CITY_TILE_POSITION
+			!= CityCitizens.INVALID_CITY_TILE_POSITION
 		):
 			movement_destination_text = str(raw_destination)
 
 		var failure_text := str(
 			citizen.get(
 				"movement_failure_reason",
-				WorldData.CITY_CITIZEN_MOVEMENT_FAILURE_NONE
+				CityCitizens.CITY_CITIZEN_MOVEMENT_FAILURE_NONE
 			)
 		)
 		var task_phase := str(
 			current_task.get(
 				"phase",
-				WorldData.CITY_CITIZEN_TASK_PHASE_NONE
+				CityCitizens.CITY_CITIZEN_TASK_PHASE_NONE
 			)
 		)
 
 		if (
-			task_phase == WorldData.CITY_CITIZEN_TASK_PHASE_BLOCKED
+			task_phase == CityCitizens.CITY_CITIZEN_TASK_PHASE_BLOCKED
 			and failure_text
-			== WorldData.CITY_CITIZEN_MOVEMENT_FAILURE_NONE
+			== CityCitizens.CITY_CITIZEN_MOVEMENT_FAILURE_NONE
 		):
 			failure_text = (
 				"task_blocked "
@@ -607,7 +607,7 @@ static func _get_city_object_display_name(
 	if city_object.is_empty():
 		return "Unknown"
 
-	return WorldData.get_city_object_display_name_for_type(
+	return CityObjectCatalog.get_city_object_display_name_for_type(
 		str(city_object.get("type", ""))
 	)
 
@@ -616,15 +616,15 @@ static func _get_container_type_display_name(
 	container_type: String
 ) -> String:
 	match container_type:
-		WorldData.CONTAINER_TYPE_PUBLIC_CITY_STORAGE:
+		CityObjectCatalog.CONTAINER_TYPE_PUBLIC_CITY_STORAGE:
 			return "Public city storage"
-		WorldData.CONTAINER_TYPE_PRIVATE_HOME_STORAGE:
+		CityObjectCatalog.CONTAINER_TYPE_PRIVATE_HOME_STORAGE:
 			return "Private home storage"
-		WorldData.CONTAINER_TYPE_WORKPLACE_STORAGE:
+		CityObjectCatalog.CONTAINER_TYPE_WORKPLACE_STORAGE:
 			return "Workplace output buffer"
-		WorldData.CONTAINER_TYPE_PERSONAL_INVENTORY:
+		CityObjectCatalog.CONTAINER_TYPE_PERSONAL_INVENTORY:
 			return "Personal inventory"
-		WorldData.CONTAINER_TYPE_GROUND_PILE:
+		CityObjectCatalog.CONTAINER_TYPE_GROUND_PILE:
 			return "Ground pile"
 		_:
 			return "None"

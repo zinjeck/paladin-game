@@ -99,7 +99,7 @@ func _test_normal_order_preempts_before_pickup() -> void:
 
 	_expect(
 		str(assigned_task.get("kind", ""))
-		== WorldData.CITY_CITIZEN_TASK_KIND_PLAYER_COMMAND
+		== CityCitizens.CITY_CITIZEN_TASK_KIND_PLAYER_COMMAND
 		and int(assigned_task.get("target_object_id", -1)) == command_id,
 		"A Normal tree order must replace the autonomous haul before pickup."
 	)
@@ -121,7 +121,7 @@ func _test_normal_order_preempts_before_pickup() -> void:
 	var performing_task := CityCitizenTaskRuntimeSystem.get_city_citizen_current_task(citizen_id)
 	_expect(
 		str(performing_task.get("phase", ""))
-		== WorldData.CITY_CITIZEN_TASK_PHASE_PERFORMING,
+		== CityCitizens.CITY_CITIZEN_TASK_PHASE_PERFORMING,
 		"The commanded tree must enter its real performing phase."
 	)
 	SimulationClock.absolute_world_minutes += (
@@ -170,9 +170,9 @@ func _test_normal_order_waits_for_picked_up_cargo_delivery() -> void:
 			WorldData.RESOURCE_STONE
 		) == 2
 		and str(haul_after_pickup.get("phase", "")) in [
-			WorldData.CITY_CITIZEN_HAUL_PHASE_PENDING_DESTINATION,
-			WorldData.CITY_CITIZEN_HAUL_PHASE_TRAVELING_TO_DESTINATION,
-			WorldData.CITY_CITIZEN_HAUL_PHASE_DEPOSITING,
+			CityCitizens.CITY_CITIZEN_HAUL_PHASE_PENDING_DESTINATION,
+			CityCitizens.CITY_CITIZEN_HAUL_PHASE_TRAVELING_TO_DESTINATION,
+			CityCitizens.CITY_CITIZEN_HAUL_PHASE_DEPOSITING,
 		],
 		"The real pickup executor must move both stone units into cargo."
 	)
@@ -192,7 +192,7 @@ func _test_normal_order_waits_for_picked_up_cargo_delivery() -> void:
 
 	_expect(
 		str(task_after_order.get("kind", ""))
-		== WorldData.CITY_CITIZEN_TASK_KIND_HAUL
+		== CityCitizens.CITY_CITIZEN_TASK_KIND_HAUL
 		and CityCitizenInventorySystem.get_city_citizen_haul_cargo_resource_amount(
 			citizen_id,
 			WorldData.RESOURCE_STONE
@@ -221,7 +221,7 @@ func _test_normal_order_waits_for_picked_up_cargo_delivery() -> void:
 
 		if (
 			str(current_task.get("kind", ""))
-			== WorldData.CITY_CITIZEN_TASK_KIND_PLAYER_COMMAND
+			== CityCitizens.CITY_CITIZEN_TASK_KIND_PLAYER_COMMAND
 			and int(current_task.get("target_object_id", -1)) == command_id
 		):
 			assigned_command_after_delivery = true
@@ -253,10 +253,10 @@ func _test_chained_pickup_respects_near_full_destination() -> void:
 	var citizen := _add_citizen(Vector2i(5, 5))
 	var citizen_id := int(citizen.get("id", -1))
 	var keep := CityObjectSystem.add_city_object({
-		"object_type": WorldData.CITY_OBJECT_CITY_CENTER,
+		"object_type": CityObjectCatalog.CITY_OBJECT_CITY_CENTER,
 		"top_left": Vector2i(20, 10),
-		"size_tiles": WorldData.get_city_object_size_for_type(
-			WorldData.CITY_OBJECT_CITY_CENTER
+		"size_tiles": CityObjectCatalog.get_city_object_size_for_type(
+			CityObjectCatalog.CITY_OBJECT_CITY_CENTER
 		),
 		"object_owner": "player",
 		"city_world": city_world,
@@ -463,10 +463,10 @@ func _test_public_storage_keep_fallback() -> void:
 	var citizen := _add_citizen(Vector2i(5, 5))
 	var citizen_id := int(citizen.get("id", -1))
 	var keep := CityObjectSystem.add_city_object({
-		"object_type": WorldData.CITY_OBJECT_CITY_CENTER,
+		"object_type": CityObjectCatalog.CITY_OBJECT_CITY_CENTER,
 		"top_left": Vector2i(20, 10),
-		"size_tiles": WorldData.get_city_object_size_for_type(
-			WorldData.CITY_OBJECT_CITY_CENTER
+		"size_tiles": CityObjectCatalog.get_city_object_size_for_type(
+			CityObjectCatalog.CITY_OBJECT_CITY_CENTER
 		),
 		"object_owner": "player",
 		"city_world": city_world,
@@ -521,7 +521,7 @@ func _test_public_storage_keep_fallback() -> void:
 	_expect(
 		CityCitizenTaskRuntimeSystem.clear_city_citizen_task(
 			citizen_id,
-			WorldData.CITY_CITIZEN_TASK_SOURCE_AUTONOMY
+			CityCitizens.CITY_CITIZEN_TASK_SOURCE_AUTONOMY
 		)
 		and CityLogisticsSystem.get_city_haul_reservation(
 			stockpile_probe_reservation_id
@@ -667,11 +667,11 @@ func _test_critical_hunger_interrupts_cargo_safely() -> void:
 	var citizen := _add_citizen(Vector2i(5, 5))
 	var citizen_id := int(citizen.get("id", -1))
 	_add_stockpile(city_world, Vector2i(10, 4))
-	var fishery_size := WorldData.get_city_object_size_for_type(
-		WorldData.CITY_OBJECT_FISHING_GROUNDS
+	var fishery_size := CityObjectCatalog.get_city_object_size_for_type(
+		CityObjectCatalog.CITY_OBJECT_FISHING_GROUNDS
 	)
 	var fishery := CityObjectSystem.add_city_object({
-		"object_type": WorldData.CITY_OBJECT_FISHING_GROUNDS,
+		"object_type": CityObjectCatalog.CITY_OBJECT_FISHING_GROUNDS,
 		"top_left": Vector2i(12, 9),
 		"size_tiles": fishery_size,
 		"object_owner": "player",
@@ -739,7 +739,7 @@ func _test_critical_hunger_interrupts_cargo_safely() -> void:
 
 	_expect(
 		str(food_task.get("kind", ""))
-		== WorldData.CITY_CITIZEN_TASK_KIND_ACQUIRE_FOOD
+		== CityCitizens.CITY_CITIZEN_TASK_KIND_ACQUIRE_FOOD
 		and int(food_task.get("target_object_id", -1)) == fishery_id,
 		"Critical hunger must replace an in-flight haul with workplace-food acquisition."
 	)
@@ -762,11 +762,11 @@ func _test_critical_hunger_interrupts_cargo_safely() -> void:
 func _test_construction_labor_releases_at_atomic_boundary() -> void:
 	print("Boundary test: construction labor atomic boundary")
 	var city_world := _reset_fixture()
-	var house_size := WorldData.get_city_object_size_for_type(
-		WorldData.CITY_OBJECT_HOUSE
+	var house_size := CityObjectCatalog.get_city_object_size_for_type(
+		CityObjectCatalog.CITY_OBJECT_HOUSE
 	)
 	var house_site := CityConstructionSystemScript.create_rectangular_site({
-		"object_type": WorldData.CITY_OBJECT_HOUSE,
+		"object_type": CityObjectCatalog.CITY_OBJECT_HOUSE,
 		"top_left": Vector2i(10, 8),
 		"size_tiles": house_size,
 		"object_owner": "player",
@@ -821,7 +821,7 @@ func _test_construction_labor_releases_at_atomic_boundary() -> void:
 	var assigned_task := CityCitizenTaskRuntimeSystem.get_city_citizen_current_task(citizen_id)
 	_expect(
 		str(assigned_task.get("kind", ""))
-		== WorldData.CITY_CITIZEN_TASK_KIND_CONSTRUCTION
+		== CityCitizens.CITY_CITIZEN_TASK_KIND_CONSTRUCTION
 		and int(assigned_task.get("target_object_id", -1)) == site_id,
 		"The unified scheduler must assign the nearby construction labor job."
 	)
@@ -831,12 +831,12 @@ func _test_construction_labor_releases_at_atomic_boundary() -> void:
 	var boundary_minute := int(
 		performing_task.get(
 			"next_action_world_minute",
-			WorldData.INVALID_CITY_CITIZEN_TASK_ACTION_WORLD_MINUTE
+			CityCitizens.INVALID_CITY_CITIZEN_TASK_ACTION_WORLD_MINUTE
 		)
 	)
 	_expect(
 		str(performing_task.get("phase", ""))
-		== WorldData.CITY_CITIZEN_TASK_PHASE_PERFORMING
+		== CityCitizens.CITY_CITIZEN_TASK_PHASE_PERFORMING
 		and boundary_minute
 		== SimulationClock.absolute_world_minutes
 		+ CityConstructionSystem.CITY_CONSTRUCTION_LABOR_ATOMIC_MINUTES,
@@ -850,7 +850,7 @@ func _test_construction_labor_releases_at_atomic_boundary() -> void:
 	)
 	_expect(
 		str(before_boundary_task.get("kind", ""))
-		== WorldData.CITY_CITIZEN_TASK_KIND_CONSTRUCTION
+		== CityCitizens.CITY_CITIZEN_TASK_KIND_CONSTRUCTION
 		and int(
 			CityConstructionSystem.get_city_construction_site_by_id(site_id).get(
 				"completed_labor_minutes",
@@ -866,7 +866,7 @@ func _test_construction_labor_releases_at_atomic_boundary() -> void:
 	var released_task := CityCitizenTaskRuntimeSystem.get_city_citizen_current_task(citizen_id)
 	_expect(
 		str(released_task.get("kind", ""))
-		== WorldData.CITY_CITIZEN_TASK_KIND_NONE
+		== CityCitizens.CITY_CITIZEN_TASK_KIND_NONE
 		and int(
 			CityConstructionSystem.get_city_construction_site_by_id(site_id).get(
 				"completed_labor_minutes",
@@ -889,7 +889,7 @@ func _test_construction_labor_releases_at_atomic_boundary() -> void:
 	var reassigned_task := CityCitizenTaskRuntimeSystem.get_city_citizen_current_task(citizen_id)
 	_expect(
 		str(reassigned_task.get("source", ""))
-		== WorldData.CITY_CITIZEN_TASK_SOURCE_PLAYER
+		== CityCitizens.CITY_CITIZEN_TASK_SOURCE_PLAYER
 		and int(reassigned_task.get("work_order_id", -1)) > 0
 		and not str(reassigned_task.get("job_id", "")).is_empty(),
 		"The next decision pass must assign a real unified-board job after the boundary."
@@ -900,7 +900,7 @@ func _test_culture_identity_validation() -> void:
 	print("Boundary test: citizen culture identity")
 	_reset_fixture()
 
-	for founder_index in range(WorldData.STARTING_CITY_POPULATION):
+	for founder_index in range(CityCitizenRegistrySystem.STARTING_CITY_POPULATION):
 		var founder := _add_citizen(
 			Vector2i(3 + founder_index, 4)
 		)
@@ -915,10 +915,10 @@ func _test_culture_identity_validation() -> void:
 	var alternate_culture_id := int(
 		alternate_culture.get("id", -1)
 	)
-	var citizen := WorldData.add_city_citizen(
+	var citizen := CityCitizenRegistrySystem.add_city_citizen(
 		"",
 		Vector2i(5, 5),
-		WorldData.CITY_CITIZEN_SEX_FEMALE,
+		CityCitizens.CITY_CITIZEN_SEX_FEMALE,
 		alternate_culture_id
 	)
 
@@ -1153,10 +1153,10 @@ func _reset_fixture() -> WorldData:
 
 
 func _add_citizen(tile_position: Vector2i) -> Dictionary:
-	return WorldData.add_city_citizen(
+	return CityCitizenRegistrySystem.add_city_citizen(
 		"",
 		tile_position,
-		WorldData.CITY_CITIZEN_SEX_FEMALE,
+		CityCitizens.CITY_CITIZEN_SEX_FEMALE,
 		test_primary_culture_id
 	)
 
@@ -1166,10 +1166,10 @@ func _add_stockpile(
 	top_left: Vector2i
 ) -> Dictionary:
 	return CityObjectSystem.add_city_object({
-		"object_type": WorldData.CITY_OBJECT_STOCKPILE,
+		"object_type": CityObjectCatalog.CITY_OBJECT_STOCKPILE,
 		"top_left": top_left,
-		"size_tiles": WorldData.get_city_object_size_for_type(
-						WorldData.CITY_OBJECT_STOCKPILE
+		"size_tiles": CityObjectCatalog.get_city_object_size_for_type(
+						CityObjectCatalog.CITY_OBJECT_STOCKPILE
 					),
 		"object_owner": "player",
 		"city_world": city_world,
@@ -1212,14 +1212,14 @@ func _make_cleanup_haul_request(
 			)
 		),
 		"requested_amount": CityCitizens.DEFAULT_CITIZEN_CARRY_CAPACITY,
-		"reason": WorldData.CITY_CITIZEN_HAUL_REASON_GROUND_PILE_CLEANUP,
+		"reason": CityCitizens.CITY_CITIZEN_HAUL_REASON_GROUND_PILE_CLEANUP,
 		"source_access_purpose": (
-			WorldData.CONTAINER_HAUL_PURPOSE_GROUND_PILE_CLEANUP
+			CityObjectCatalog.CONTAINER_HAUL_PURPOSE_GROUND_PILE_CLEANUP
 		),
 		"destination_access_purpose": (
-			WorldData.CONTAINER_HAUL_PURPOSE_PUBLIC_STORAGE
+			CityObjectCatalog.CONTAINER_HAUL_PURPOSE_PUBLIC_STORAGE
 		),
-		"task_source": WorldData.CITY_CITIZEN_TASK_SOURCE_AUTONOMY,
+		"task_source": CityCitizens.CITY_CITIZEN_TASK_SOURCE_AUTONOMY,
 		"task_priority": AUTONOMOUS_CLEANUP_PRIORITY,
 	})
 

@@ -53,10 +53,10 @@ func _test_real_founding_records_and_clean_ensures() -> void:
 	var city_world := _make_world(20, 20, 98_902)
 	WorldData.store_city_world_save(city_world, 98_902)
 	var keep := CityObjectSystem.add_city_object({
-		"object_type": WorldData.CITY_OBJECT_CITY_CENTER,
+		"object_type": CityObjectCatalog.CITY_OBJECT_CITY_CENTER,
 		"top_left": Vector2i(6, 6),
-		"size_tiles": WorldData.get_city_object_size_for_type(
-			WorldData.CITY_OBJECT_CITY_CENTER
+		"size_tiles": CityObjectCatalog.get_city_object_size_for_type(
+			CityObjectCatalog.CITY_OBJECT_CITY_CENTER
 		),
 		"object_owner": "player",
 		"city_world": city_world,
@@ -114,8 +114,8 @@ func _test_real_founding_records_and_clean_ensures() -> void:
 
 	_expect(
 		WorldData.has_player_city()
-		and registry_array.size() == WorldData.STARTING_CITY_POPULATION
-		and registry_version_before == WorldData.STARTING_CITY_POPULATION
+		and registry_array.size() == CityCitizenRegistrySystem.STARTING_CITY_POPULATION
+		and registry_version_before == CityCitizenRegistrySystem.STARTING_CITY_POPULATION
 		and complete_records,
 		"Founding must create eight complete default inventory, cargo, and need records."
 	)
@@ -160,7 +160,7 @@ func _test_lossless_legacy_repair_and_identity() -> void:
 
 	WorldPoliticalState.set_current_city_world(_make_world(16, 16, 98_903))
 	WorldPoliticalState.set_current_city_seed(98_903)
-	var created := WorldData.add_city_citizen(
+	var created := CityCitizenRegistrySystem.add_city_citizen(
 		"",
 		Vector2i(5, 5),
 		CityCitizens.CITY_CITIZEN_SEX_MALE,
@@ -322,7 +322,7 @@ func _test_headless_simulation_bootstrap_and_canonical_setters() -> void:
 
 	WorldPoliticalState.set_current_city_world(_make_world(16, 16, 98_904))
 	WorldPoliticalState.set_current_city_seed(98_904)
-	var created := WorldData.add_city_citizen(
+	var created := CityCitizenRegistrySystem.add_city_citizen(
 		"",
 		Vector2i(5, 5),
 		CityCitizens.CITY_CITIZEN_SEX_FEMALE,

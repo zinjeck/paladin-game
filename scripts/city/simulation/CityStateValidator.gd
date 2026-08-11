@@ -519,8 +519,8 @@ static func _validate_city_object_index(
 				+ " has no object type."
 			)
 		elif (
-			object_type != WorldData.CITY_OBJECT_ROAD
-			and WorldData.get_city_object_definition(
+			object_type != CityObjectCatalog.CITY_OBJECT_ROAD
+			and CityObjectCatalog.get_city_object_definition(
 				object_type
 			).is_empty()
 		):

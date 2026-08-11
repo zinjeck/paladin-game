@@ -445,20 +445,20 @@ func _get_workload_debug_text() -> String:
 
 		var city_object: Dictionary = raw_city_object
 
-		if not WorldData.city_object_is_workplace(city_object):
+		if not CityObjectCatalog.city_object_is_workplace(city_object):
 			continue
 
 		workplace_count += 1
 
 		var production_status := (
-			WorldData.get_city_object_production_status(
+			CityObjectCatalog.get_city_object_production_status(
 				city_object
 			)
 		)
 
 		if (
 			production_status
-			== WorldData.WORKPLACE_PRODUCTION_STATUS_WORKING
+			== CityObjectCatalog.WORKPLACE_PRODUCTION_STATUS_WORKING
 		):
 			working_workplace_count += 1
 		elif production_status.begins_with("blocked_"):

@@ -1,6 +1,13 @@
 extends RefCounted
 class_name CityNavigationSystem
 
+const CITY_CARDINAL_TILE_OFFSETS := [
+	Vector2i(0, -1),
+	Vector2i(-1, 0),
+	Vector2i(1, 0),
+	Vector2i(0, 1),
+]
+
 const PATH_STATUS_NOT_REQUESTED := "not_requested"
 const PATH_STATUS_SUCCESS := "success"
 const PATH_STATUS_INVALID_WORLD := "invalid_world"
@@ -84,7 +91,7 @@ static func get_city_object_access_tiles(
 		if not raw_footprint_tile is Vector2i:
 			continue
 		var footprint_tile: Vector2i = raw_footprint_tile
-		for offset in WorldData.CITY_CARDINAL_TILE_OFFSETS:
+		for offset in CityNavigationSystem.CITY_CARDINAL_TILE_OFFSETS:
 			var candidate_tile: Vector2i = footprint_tile + offset
 			if footprint_lookup.has(candidate_tile):
 				continue
@@ -156,7 +163,7 @@ static func city_citizen_can_access_object_interior(
 	)
 
 	match access_mode:
-		WorldData.CITY_OBJECT_INTERIOR_ACCESS_RESIDENTS:
+		CityObjectCatalog.CITY_OBJECT_INTERIOR_ACCESS_RESIDENTS:
 			return (
 				int(citizen.get("home_object_id", -1))
 				== object_id
@@ -165,7 +172,7 @@ static func city_citizen_can_access_object_interior(
 				).has(citizen_id)
 			)
 
-		WorldData.CITY_OBJECT_INTERIOR_ACCESS_ASSIGNED_WORKERS:
+		CityObjectCatalog.CITY_OBJECT_INTERIOR_ACCESS_ASSIGNED_WORKERS:
 			return (
 				int(citizen.get("job_object_id", -1))
 				== object_id
@@ -174,7 +181,7 @@ static func city_citizen_can_access_object_interior(
 				).has(citizen_id)
 			)
 
-		WorldData.CITY_OBJECT_INTERIOR_ACCESS_TASK_TARGET:
+		CityObjectCatalog.CITY_OBJECT_INTERIOR_ACCESS_TASK_TARGET:
 			var raw_current_task = citizen.get("current_task", {})
 			var current_task: Dictionary = (
 				raw_current_task
@@ -184,7 +191,7 @@ static func city_citizen_can_access_object_interior(
 			var task_kind := str(
 				current_task.get(
 					"kind",
-					WorldData.CITY_CITIZEN_TASK_KIND_NONE
+					CityCitizens.CITY_CITIZEN_TASK_KIND_NONE
 				)
 			)
 
@@ -192,7 +199,7 @@ static func city_citizen_can_access_object_interior(
 			# unrelated city-object ID. For hauling, authorize only city-object
 			# endpoints instead of treating the legacy numeric task target as an
 			# object reference.
-			if task_kind == WorldData.CITY_CITIZEN_TASK_KIND_HAUL:
+			if task_kind == CityCitizens.CITY_CITIZEN_TASK_KIND_HAUL:
 				var raw_haul = citizen.get("current_haul", {})
 				var haul: Dictionary = (
 					raw_haul
@@ -212,10 +219,10 @@ static func city_citizen_can_access_object_interior(
 						str(
 							endpoint.get(
 								"kind",
-								WorldData.CITY_CITIZEN_HAUL_ENDPOINT_KIND_NONE
+								CityCitizens.CITY_CITIZEN_HAUL_ENDPOINT_KIND_NONE
 							)
 						)
-						== WorldData.CITY_CITIZEN_HAUL_ENDPOINT_KIND_CITY_OBJECT_CONTAINER
+						== CityCitizens.CITY_CITIZEN_HAUL_ENDPOINT_KIND_CITY_OBJECT_CONTAINER
 						and int(endpoint.get("id", -1)) == object_id
 					):
 						return true
@@ -227,7 +234,7 @@ static func city_citizen_can_access_object_interior(
 				== object_id
 			)
 
-		WorldData.CITY_OBJECT_INTERIOR_ACCESS_PUBLIC:
+		CityObjectCatalog.CITY_OBJECT_INTERIOR_ACCESS_PUBLIC:
 			return true
 
 	return false
@@ -251,14 +258,14 @@ static func get_city_citizen_movement_step_cost(
 
 	if delta_x == 1 and delta_y == 1:
 		if destination_is_road:
-			return WorldData.CITY_CITIZEN_ROAD_DIAGONAL_MOVEMENT_COST
+			return CityCitizens.CITY_CITIZEN_ROAD_DIAGONAL_MOVEMENT_COST
 
-		return WorldData.CITY_CITIZEN_DIAGONAL_MOVEMENT_COST
+		return CityCitizens.CITY_CITIZEN_DIAGONAL_MOVEMENT_COST
 
 	if destination_is_road:
-		return WorldData.CITY_CITIZEN_ROAD_CARDINAL_MOVEMENT_COST
+		return CityCitizens.CITY_CITIZEN_ROAD_CARDINAL_MOVEMENT_COST
 
-	return WorldData.CITY_CITIZEN_CARDINAL_MOVEMENT_COST
+	return CityCitizens.CITY_CITIZEN_CARDINAL_MOVEMENT_COST
 
 static func can_city_citizen_traverse_step(
 	city_world: WorldData,
@@ -410,7 +417,7 @@ static func is_city_tile_walkable_for_citizen(
 
 	if (
 		str(occupying_object.get("type", ""))
-		== WorldData.CITY_OBJECT_ROAD
+		== CityObjectCatalog.CITY_OBJECT_ROAD
 	):
 		return true
 
@@ -427,7 +434,7 @@ static func is_city_tile_walkable_for_citizen(
 
 	var current_position = citizen.get(
 		"city_tile_position",
-		WorldData.INVALID_CITY_TILE_POSITION
+		CityCitizens.INVALID_CITY_TILE_POSITION
 	)
 
 	# Recovery invariant: a citizen already caught inside an occupied footprint
@@ -453,7 +460,7 @@ static func find_path_to_any_city_tile(values: Dictionary) -> Dictionary:
 	var city_world: WorldData = values.get("city_world")
 	var start_tile: Vector2i = values.get(
 		"start_tile",
-		WorldData.INVALID_CITY_TILE_POSITION
+		CityCitizens.INVALID_CITY_TILE_POSITION
 	)
 	var raw_destination_tiles: Array = values.get("destination_tiles", [])
 	var max_expanded_nodes := maxi(
@@ -473,7 +480,7 @@ static func find_path_to_any_city_tile(values: Dictionary) -> Dictionary:
 		"path": [],
 		"start_tile": start_tile,
 		"destination_tile": (
-			WorldData.INVALID_CITY_TILE_POSITION
+			CityCitizens.INVALID_CITY_TILE_POSITION
 		),
 		"destination_candidate_count": 0,
 		"expanded_node_count": 0,
@@ -847,9 +854,9 @@ static func _get_octile_road_cost(delta_x: int, delta_y: int) -> int:
 	# both the exact and bounding-box heuristics admissible.
 	return (
 		diagonal_steps
-		* WorldData.CITY_CITIZEN_ROAD_DIAGONAL_MOVEMENT_COST
+		* CityCitizens.CITY_CITIZEN_ROAD_DIAGONAL_MOVEMENT_COST
 		+ straight_steps
-		* WorldData.CITY_CITIZEN_ROAD_CARDINAL_MOVEMENT_COST
+		* CityCitizens.CITY_CITIZEN_ROAD_CARDINAL_MOVEMENT_COST
 	)
 
 

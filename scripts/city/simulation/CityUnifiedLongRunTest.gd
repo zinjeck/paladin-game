@@ -141,11 +141,11 @@ func _prepare_dev_city_region() -> void:
 	)
 
 	_expect(
-		region_top_left != WorldData.INVALID_CITY_TILE_POSITION,
+		region_top_left != CityCitizens.INVALID_CITY_TILE_POSITION,
 		"A deterministic dev-city region must be available."
 	)
 
-	if region_top_left == WorldData.INVALID_CITY_TILE_POSITION:
+	if region_top_left == CityCitizens.INVALID_CITY_TILE_POSITION:
 		return
 
 	SimulationClock.start_new_game()
@@ -168,25 +168,25 @@ func _prepare_dev_city_region() -> void:
 
 func _create_mixed_work_fixture(renderer: CityRenderer) -> Dictionary:
 	var city_world: WorldData = renderer.city_world
-	var keep_size := WorldData.get_city_object_size_for_type(
-		WorldData.CITY_OBJECT_CITY_CENTER
+	var keep_size := CityObjectCatalog.get_city_object_size_for_type(
+		CityObjectCatalog.CITY_OBJECT_CITY_CENTER
 	)
 	var keep_top_left := _find_placeable_rectangle(
 		city_world,
 		keep_size,
-		WorldData.CITY_OBJECT_CITY_CENTER
+		CityObjectCatalog.CITY_OBJECT_CITY_CENTER
 	)
 
 	_expect(
-		keep_top_left != WorldData.INVALID_CITY_TILE_POSITION,
+		keep_top_left != CityCitizens.INVALID_CITY_TILE_POSITION,
 		"The long-run fixture requires a placeable City Keep."
 	)
 
-	if keep_top_left == WorldData.INVALID_CITY_TILE_POSITION:
+	if keep_top_left == CityCitizens.INVALID_CITY_TILE_POSITION:
 		return {}
 
 	var keep := CityObjectSystem.add_city_object({
-		"object_type": WorldData.CITY_OBJECT_CITY_CENTER,
+		"object_type": CityObjectCatalog.CITY_OBJECT_CITY_CENTER,
 		"top_left": keep_top_left,
 		"size_tiles": keep_size,
 		"object_owner": "player",
@@ -196,7 +196,7 @@ func _create_mixed_work_fixture(renderer: CityRenderer) -> Dictionary:
 
 	_expect(
 		CityCitizenRegistrySystem.get_city_population_count()
-		== WorldData.STARTING_CITY_POPULATION,
+		== CityCitizenRegistrySystem.STARTING_CITY_POPULATION,
 		"Founding must create the complete starting population."
 	)
 
@@ -207,26 +207,26 @@ func _create_mixed_work_fixture(renderer: CityRenderer) -> Dictionary:
 	var citizen := CityCitizenRegistrySystem.get_city_citizen_by_id(citizen_id)
 	var citizen_tile: Vector2i = citizen.get(
 		"city_tile_position",
-		WorldData.INVALID_CITY_TILE_POSITION
+		CityCitizens.INVALID_CITY_TILE_POSITION
 	)
 
-	var fishery_size := WorldData.get_city_object_size_for_type(
-		WorldData.CITY_OBJECT_FISHING_GROUNDS
+	var fishery_size := CityObjectCatalog.get_city_object_size_for_type(
+		CityObjectCatalog.CITY_OBJECT_FISHING_GROUNDS
 	)
 	var fishery_top_left := _find_and_prepare_reachable_rectangle(
 		city_world,
 		fishery_size,
-		WorldData.CITY_OBJECT_FISHING_GROUNDS,
+		CityObjectCatalog.CITY_OBJECT_FISHING_GROUNDS,
 		citizen_id,
 		false
 	)
 
 	_expect(
-		fishery_top_left != WorldData.INVALID_CITY_TILE_POSITION,
+		fishery_top_left != CityCitizens.INVALID_CITY_TILE_POSITION,
 		"The fixture requires a reachable Fishing Grounds."
 	)
 
-	if fishery_top_left == WorldData.INVALID_CITY_TILE_POSITION:
+	if fishery_top_left == CityCitizens.INVALID_CITY_TILE_POSITION:
 		return {}
 
 	var fishery_footprint := (
@@ -241,7 +241,7 @@ func _create_mixed_work_fixture(renderer: CityRenderer) -> Dictionary:
 	)
 
 	var fishery := CityObjectSystem.add_city_object({
-		"object_type": WorldData.CITY_OBJECT_FISHING_GROUNDS,
+		"object_type": CityObjectCatalog.CITY_OBJECT_FISHING_GROUNDS,
 		"top_left": fishery_top_left,
 		"size_tiles": fishery_size,
 		"object_owner": "player",
@@ -298,23 +298,23 @@ func _create_mixed_work_fixture(renderer: CityRenderer) -> Dictionary:
 			current_citizen_id
 		] = 45
 
-	var house_size := WorldData.get_city_object_size_for_type(
-		WorldData.CITY_OBJECT_HOUSE
+	var house_size := CityObjectCatalog.get_city_object_size_for_type(
+		CityObjectCatalog.CITY_OBJECT_HOUSE
 	)
 	var house_top_left := _find_and_prepare_reachable_rectangle(
 		city_world,
 		house_size,
-		WorldData.CITY_OBJECT_HOUSE,
+		CityObjectCatalog.CITY_OBJECT_HOUSE,
 		citizen_id,
 		true
 	)
 
 	_expect(
-		house_top_left != WorldData.INVALID_CITY_TILE_POSITION,
+		house_top_left != CityCitizens.INVALID_CITY_TILE_POSITION,
 		"The fixture requires a reachable House construction footprint."
 	)
 
-	if house_top_left == WorldData.INVALID_CITY_TILE_POSITION:
+	if house_top_left == CityCitizens.INVALID_CITY_TILE_POSITION:
 		return {}
 
 	var footprint_tiles := (
@@ -338,7 +338,7 @@ func _create_mixed_work_fixture(renderer: CityRenderer) -> Dictionary:
 	)
 
 	var house_site := CityConstructionSystemScript.create_rectangular_site({
-		"object_type": WorldData.CITY_OBJECT_HOUSE,
+		"object_type": CityObjectCatalog.CITY_OBJECT_HOUSE,
 		"top_left": house_top_left,
 		"size_tiles": house_size,
 		"object_owner": "player",
@@ -369,7 +369,7 @@ func _create_mixed_work_fixture(renderer: CityRenderer) -> Dictionary:
 		citizen_id
 	)
 	_expect(
-		open_relocation_tile != WorldData.INVALID_CITY_TILE_POSITION,
+		open_relocation_tile != CityCitizens.INVALID_CITY_TILE_POSITION,
 		"Open reachable ground must exist outside the blueprint."
 	)
 
@@ -380,7 +380,7 @@ func _create_mixed_work_fixture(renderer: CityRenderer) -> Dictionary:
 		citizen_id
 	)
 	_expect(
-		lumber_source_tile != WorldData.INVALID_CITY_TILE_POSITION,
+		lumber_source_tile != CityCitizens.INVALID_CITY_TILE_POSITION,
 		"A reachable source tile must exist for construction lumber."
 	)
 
@@ -553,7 +553,7 @@ func _record_validation(validation: Dictionary, elapsed_minutes: int) -> void:
 
 
 func _check_nonnegative_state(elapsed_minutes: int) -> void:
-	for resource in WorldData.get_city_resource_types():
+	for resource in CityResourceCatalog.get_city_resource_types():
 		_expect(
 			CityResourceAccountingSystem.get_total_physical_city_resource_amount(resource) >= 0,
 			"Physical " + resource + " became negative after "
@@ -574,7 +574,7 @@ func _check_nonnegative_state(elapsed_minutes: int) -> void:
 			+ " minutes."
 		)
 
-		for resource in WorldData.get_city_resource_types():
+		for resource in CityResourceCatalog.get_city_resource_types():
 			_expect(
 				CityCitizenInventorySystem.get_city_citizen_inventory_resource_amount(
 					citizen_id,
@@ -599,10 +599,10 @@ func _assert_long_run_outcomes(fixture: Dictionary) -> void:
 			CityObjectSystem.get_city_object_at_tile(
 				fixture.get(
 					"house_top_left",
-					WorldData.INVALID_CITY_TILE_POSITION
+					CityCitizens.INVALID_CITY_TILE_POSITION
 				)
 			).get("type", "")
-		) == WorldData.CITY_OBJECT_HOUSE,
+		) == CityObjectCatalog.CITY_OBJECT_HOUSE,
 		"Completed construction must leave an operational House."
 	)
 
@@ -702,7 +702,7 @@ func _assert_material_conservation(
 func _capture_physical_resource_totals() -> Dictionary:
 	var totals: Dictionary = {}
 
-	for resource in WorldData.get_city_resource_types():
+	for resource in CityResourceCatalog.get_city_resource_types():
 		totals[resource] = CityResourceAccountingSystem.get_total_physical_city_resource_amount(
 			resource
 		)
@@ -726,7 +726,7 @@ func _ordinary_resource_exists_inside_footprint(
 			and raw_footprint_tiles.has(
 				pile.get(
 					"tile_position",
-					WorldData.INVALID_CITY_TILE_POSITION
+					CityCitizens.INVALID_CITY_TILE_POSITION
 				)
 			)
 		):
@@ -756,7 +756,7 @@ func _citizen_can_reach_tiles(
 	var citizen := CityCitizenRegistrySystem.get_city_citizen_by_id(citizen_id)
 	var raw_tile = citizen.get(
 		"city_tile_position",
-		WorldData.INVALID_CITY_TILE_POSITION
+		CityCitizens.INVALID_CITY_TILE_POSITION
 	)
 
 	if not raw_tile is Vector2i:
@@ -785,7 +785,7 @@ func _prepare_fixture_access_for_all_citizens(
 		var citizen_id := int(raw_citizen.get("id", -1))
 		var raw_start_tile = raw_citizen.get(
 			"city_tile_position",
-			WorldData.INVALID_CITY_TILE_POSITION
+			CityCitizens.INVALID_CITY_TILE_POSITION
 		)
 
 		if not raw_start_tile is Vector2i:
@@ -797,7 +797,7 @@ func _prepare_fixture_access_for_all_citizens(
 			raw_start_tile
 		)
 
-		if access_target == WorldData.INVALID_CITY_TILE_POSITION:
+		if access_target == CityCitizens.INVALID_CITY_TILE_POSITION:
 			continue
 
 		var corridor := _find_clear_fixture_corridor(
@@ -927,7 +927,7 @@ func _find_open_ground_tile_outside_footprint(
 				if bool(path_result.get("success", false)):
 					return tile_position
 
-	return WorldData.INVALID_CITY_TILE_POSITION
+	return CityCitizens.INVALID_CITY_TILE_POSITION
 
 
 func _find_and_prepare_reachable_rectangle(
@@ -940,11 +940,11 @@ func _find_and_prepare_reachable_rectangle(
 	var citizen := CityCitizenRegistrySystem.get_city_citizen_by_id(citizen_id)
 	var raw_citizen_tile = citizen.get(
 		"city_tile_position",
-		WorldData.INVALID_CITY_TILE_POSITION
+		CityCitizens.INVALID_CITY_TILE_POSITION
 	)
 
 	if not raw_citizen_tile is Vector2i:
-		return WorldData.INVALID_CITY_TILE_POSITION
+		return CityCitizens.INVALID_CITY_TILE_POSITION
 
 	var citizen_tile: Vector2i = raw_citizen_tile
 
@@ -984,7 +984,7 @@ func _find_and_prepare_reachable_rectangle(
 					citizen_tile
 				)
 
-				if access_target == WorldData.INVALID_CITY_TILE_POSITION:
+				if access_target == CityCitizens.INVALID_CITY_TILE_POSITION:
 					continue
 
 				var corridor_tiles := _make_cardinal_fixture_path(
@@ -1064,7 +1064,7 @@ func _find_and_prepare_reachable_rectangle(
 				if can_place:
 					return top_left
 
-	return WorldData.INVALID_CITY_TILE_POSITION
+	return CityCitizens.INVALID_CITY_TILE_POSITION
 
 
 func _select_external_access_target(
@@ -1106,7 +1106,7 @@ func _select_external_access_target(
 			candidates.append(candidate)
 
 	if candidates.is_empty():
-		return WorldData.INVALID_CITY_TILE_POSITION
+		return CityCitizens.INVALID_CITY_TILE_POSITION
 
 	candidates.sort_custom(func(tile_a: Vector2i, tile_b: Vector2i) -> bool:
 		var distance_a := start_tile.distance_squared_to(tile_a)
@@ -1357,7 +1357,7 @@ func _find_placeable_rectangle(
 			):
 				return top_left
 
-	return WorldData.INVALID_CITY_TILE_POSITION
+	return CityCitizens.INVALID_CITY_TILE_POSITION
 
 
 func _expect(condition: bool, message: String) -> void:

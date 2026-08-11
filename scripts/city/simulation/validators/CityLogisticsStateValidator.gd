@@ -220,7 +220,7 @@ static func _validate_city_construction_state(
 			for raw_resource in raw_recipe.keys():
 				if (
 					typeof(raw_resource) != TYPE_STRING
-					or not WorldData.is_city_resource_type(
+					or not CityResourceCatalog.is_city_resource_type(
 						str(raw_resource)
 					)
 					or typeof(raw_recipe[raw_resource]) != TYPE_INT
@@ -303,7 +303,7 @@ static func _validate_city_ground_pile_state(
 		var ground_pile_id := int(ground_pile.get("id", -1))
 		var raw_tile_position = ground_pile.get(
 			"tile_position",
-			WorldData.INVALID_CITY_TILE_POSITION
+			CityCitizens.INVALID_CITY_TILE_POSITION
 		)
 		var resource := str(
 			ground_pile.get("resource_type", WorldData.RESOURCE_NONE)
@@ -363,7 +363,7 @@ static func _validate_city_ground_pile_state(
 					+ "."
 				)
 
-		if not WorldData.is_city_resource_type(resource):
+		if not CityResourceCatalog.is_city_resource_type(resource):
 			errors.append(
 				"Ground pile "
 				+ str(ground_pile_id)
@@ -421,7 +421,7 @@ static func _validate_city_ground_pile_state(
 			)
 		elif (
 			raw_tile_position is Vector2i
-			and WorldData.is_city_resource_type(resource)
+			and CityResourceCatalog.is_city_resource_type(resource)
 			and int(raw_amount) < CityLogisticsSystem.CITY_GROUND_PILE_CAPACITY
 		):
 			var tile_position: Vector2i = raw_tile_position
@@ -1301,7 +1301,7 @@ static func _validate_city_haul_reservations(
 		var destination_kind := str(
 			destination.get(
 				"kind",
-				WorldData.CITY_CITIZEN_HAUL_ENDPOINT_KIND_NONE
+				CityCitizens.CITY_CITIZEN_HAUL_ENDPOINT_KIND_NONE
 			)
 		)
 		var city_object := CityObjectSystem.get_city_object_by_id(
@@ -1313,13 +1313,12 @@ static func _validate_city_haul_reservations(
 
 		if (
 			destination_kind
-			== WorldData
-			.CITY_CITIZEN_HAUL_ENDPOINT_KIND_CONSTRUCTION_SITE
+			== CityCitizens.CITY_CITIZEN_HAUL_ENDPOINT_KIND_CONSTRUCTION_SITE
 		):
 			var site_id := int(destination.get("id", -1))
 			var remaining_capacity := 0
 
-			for resource in WorldData.get_city_resource_types():
+			for resource in CityResourceCatalog.get_city_resource_types():
 				remaining_capacity += (
 					CityConstructionSystem.get_city_construction_site_remaining_resource_amount(
 						site_id,
@@ -1336,7 +1335,7 @@ static func _validate_city_haul_reservations(
 				)
 		elif (
 			destination_kind
-			== WorldData.CITY_CITIZEN_HAUL_ENDPOINT_KIND_GROUND_TILE
+			== CityCitizens.CITY_CITIZEN_HAUL_ENDPOINT_KIND_GROUND_TILE
 			and reserved_amount
 			> CityLogisticsSystem.CITY_GROUND_DROP_RESERVATION_CAPACITY
 		):
@@ -1549,7 +1548,7 @@ static func _validate_city_haul_reservation_entry(
 	else:
 		expected_citizen_lookup[citizen_id] = reservation_id
 
-	if not WorldData.is_city_resource_type(resource):
+	if not CityResourceCatalog.is_city_resource_type(resource):
 		errors.append(
 			"Haul reservation "
 			+ str(reservation_id)
@@ -1572,7 +1571,7 @@ static func _validate_city_haul_reservation_entry(
 		CityCitizens.is_valid_city_citizen_haul_endpoint(source)
 		and _city_haul_endpoint_schema_is_valid(source)
 		and str(source.get("kind", ""))
-		!= WorldData.CITY_CITIZEN_HAUL_ENDPOINT_KIND_GROUND_TILE
+		!= CityCitizens.CITY_CITIZEN_HAUL_ENDPOINT_KIND_GROUND_TILE
 	)
 	var destination_is_valid := (
 		CityCitizens.is_valid_city_citizen_haul_endpoint(
@@ -1689,7 +1688,7 @@ static func _validate_city_haul_reservation_citizen_state(
 
 	if (
 		str(current_task.get("kind", ""))
-		!= WorldData.CITY_CITIZEN_TASK_KIND_HAUL
+		!= CityCitizens.CITY_CITIZEN_TASK_KIND_HAUL
 	):
 		errors.append(
 			"Haul reservation "
@@ -1700,7 +1699,7 @@ static func _validate_city_haul_reservation_citizen_state(
 	if int(
 		current_haul.get(
 			"reservation_id",
-			WorldData.INVALID_CITY_CITIZEN_HAUL_RESERVATION_ID
+			CityCitizens.INVALID_CITY_CITIZEN_HAUL_RESERVATION_ID
 		)
 	) != reservation_id:
 		errors.append(
@@ -1748,11 +1747,11 @@ static func _validate_city_haul_reservation_citizen_state(
 			or str(
 				current_haul.get(
 					"phase",
-					WorldData.CITY_CITIZEN_HAUL_PHASE_NONE
+					CityCitizens.CITY_CITIZEN_HAUL_PHASE_NONE
 				)
 			) not in [
-				WorldData.CITY_CITIZEN_HAUL_PHASE_RETARGETING,
-				WorldData.CITY_CITIZEN_HAUL_PHASE_PENDING_DESTINATION,
+				CityCitizens.CITY_CITIZEN_HAUL_PHASE_RETARGETING,
+				CityCitizens.CITY_CITIZEN_HAUL_PHASE_PENDING_DESTINATION,
 			]
 		)
 	):
@@ -1860,7 +1859,7 @@ static func _build_destination_reserved_resource_manifest(
 		if (
 			typeof(raw_reserved_resource_amount) != TYPE_INT
 			or int(raw_reserved_resource_amount) <= 0
-			or not WorldData.is_city_resource_type(reserved_resource)
+			or not CityResourceCatalog.is_city_resource_type(reserved_resource)
 		):
 			errors.append(
 				"Haul reservation "
@@ -1920,7 +1919,7 @@ static func _validate_city_haul_reservation_source(
 			"withdrawal_purpose": str(
 								reservation.get(
 									"source_access_purpose",
-									WorldData.CONTAINER_HAUL_PURPOSE_NONE
+									CityObjectCatalog.CONTAINER_HAUL_PURPOSE_NONE
 								)
 							),
 			"require_unreserved_amount": false,
@@ -2004,14 +2003,14 @@ static func _validate_city_haul_reservation_destination(
 		var destination_kind := str(
 			destination.get(
 				"kind",
-				WorldData.CITY_CITIZEN_HAUL_ENDPOINT_KIND_NONE
+				CityCitizens.CITY_CITIZEN_HAUL_ENDPOINT_KIND_NONE
 			)
 		)
 
 		var destination_access_purpose := str(
 			reservation.get(
 				"destination_access_purpose",
-				WorldData.CONTAINER_HAUL_PURPOSE_NONE
+				CityObjectCatalog.CONTAINER_HAUL_PURPOSE_NONE
 			)
 		)
 		var destination_policy_is_valid := true
@@ -2029,16 +2028,16 @@ static func _validate_city_haul_reservation_destination(
 
 		if (
 			destination_access_purpose
-			== WorldData.CONTAINER_HAUL_PURPOSE_PUBLIC_STORAGE
+			== CityObjectCatalog.CONTAINER_HAUL_PURPOSE_PUBLIC_STORAGE
 			and CityResourceContainerSystem.get_city_object_public_storage_tier(
 				destination_object
 			)
-			== WorldData.PUBLIC_CITY_STORAGE_TIER_NONE
+			== CityObjectCatalog.PUBLIC_CITY_STORAGE_TIER_NONE
 		):
 			destination_policy_is_valid = false
 		elif (
 			destination_access_purpose
-			== WorldData.CONTAINER_HAUL_PURPOSE_HOME_DELIVERY
+			== CityObjectCatalog.CONTAINER_HAUL_PURPOSE_HOME_DELIVERY
 			and not CityResourceMatcher.city_object_is_household_home(
 				destination_object
 			)
@@ -2046,10 +2045,9 @@ static func _validate_city_haul_reservation_destination(
 			destination_policy_is_valid = false
 		elif (
 			destination_kind
-			== WorldData
-			.CITY_CITIZEN_HAUL_ENDPOINT_KIND_CONSTRUCTION_SITE
+			== CityCitizens.CITY_CITIZEN_HAUL_ENDPOINT_KIND_CONSTRUCTION_SITE
 			and destination_access_purpose
-			!= WorldData.CONTAINER_HAUL_PURPOSE_CONSTRUCTION
+			!= CityObjectCatalog.CONTAINER_HAUL_PURPOSE_CONSTRUCTION
 		):
 			destination_policy_is_valid = false
 
@@ -2082,23 +2080,23 @@ static func _city_haul_endpoint_exists(
 	match str(
 		endpoint.get(
 			"kind",
-			WorldData.CITY_CITIZEN_HAUL_ENDPOINT_KIND_NONE
+			CityCitizens.CITY_CITIZEN_HAUL_ENDPOINT_KIND_NONE
 		)
 	):
-		WorldData.CITY_CITIZEN_HAUL_ENDPOINT_KIND_CITY_OBJECT_CONTAINER:
+		CityCitizens.CITY_CITIZEN_HAUL_ENDPOINT_KIND_CITY_OBJECT_CONTAINER:
 			return not CityObjectSystem.get_city_object_by_id(
 				int(endpoint.get("id", -1))
 			).is_empty()
 
-		WorldData.CITY_CITIZEN_HAUL_ENDPOINT_KIND_GROUND_PILE:
+		CityCitizens.CITY_CITIZEN_HAUL_ENDPOINT_KIND_GROUND_PILE:
 			return ground_pile_lookup.has(
 				int(endpoint.get("id", -1))
 			)
 
-		WorldData.CITY_CITIZEN_HAUL_ENDPOINT_KIND_GROUND_TILE:
+		CityCitizens.CITY_CITIZEN_HAUL_ENDPOINT_KIND_GROUND_TILE:
 			var raw_tile = endpoint.get(
 				"tile_position",
-				WorldData.INVALID_CITY_TILE_POSITION
+				CityCitizens.INVALID_CITY_TILE_POSITION
 			)
 			return (
 				raw_tile is Vector2i
@@ -2109,7 +2107,7 @@ static func _city_haul_endpoint_exists(
 				)
 			)
 
-		WorldData.CITY_CITIZEN_HAUL_ENDPOINT_KIND_CONSTRUCTION_SITE:
+		CityCitizens.CITY_CITIZEN_HAUL_ENDPOINT_KIND_CONSTRUCTION_SITE:
 			return not CityConstructionSystem.get_city_construction_site_by_id(
 				int(endpoint.get("id", -1))
 			).is_empty()
@@ -2157,26 +2155,26 @@ static func _city_haul_endpoint_schema_is_valid(
 
 		previous_excluded_id = int(raw_excluded_id)
 
-	if endpoint_kind == WorldData.CITY_CITIZEN_HAUL_ENDPOINT_KIND_NONE:
+	if endpoint_kind == CityCitizens.CITY_CITIZEN_HAUL_ENDPOINT_KIND_NONE:
 		return (
 			allow_none
 			and endpoint_id == -1
-			and tile == WorldData.INVALID_CITY_TILE_POSITION
+			and tile == CityCitizens.INVALID_CITY_TILE_POSITION
 			and raw_excluded_ids.is_empty()
 		)
 
 	if (
 		endpoint_kind
-		== WorldData.CITY_CITIZEN_HAUL_ENDPOINT_KIND_GROUND_TILE
+		== CityCitizens.CITY_CITIZEN_HAUL_ENDPOINT_KIND_GROUND_TILE
 	):
 		return (
 			endpoint_id == -1
-			and tile != WorldData.INVALID_CITY_TILE_POSITION
+			and tile != CityCitizens.INVALID_CITY_TILE_POSITION
 		)
 
 	return (
 		endpoint_id > 0
-		and tile == WorldData.INVALID_CITY_TILE_POSITION
+		and tile == CityCitizens.INVALID_CITY_TILE_POSITION
 		and raw_excluded_ids.is_empty()
 	)
 
@@ -2187,17 +2185,17 @@ static func _get_validation_endpoint_key(
 	var endpoint_kind := str(
 		endpoint.get(
 			"kind",
-			WorldData.CITY_CITIZEN_HAUL_ENDPOINT_KIND_NONE
+			CityCitizens.CITY_CITIZEN_HAUL_ENDPOINT_KIND_NONE
 		)
 	)
 
 	if (
 		endpoint_kind
-		== WorldData.CITY_CITIZEN_HAUL_ENDPOINT_KIND_GROUND_TILE
+		== CityCitizens.CITY_CITIZEN_HAUL_ENDPOINT_KIND_GROUND_TILE
 	):
 		var raw_tile = endpoint.get(
 			"tile_position",
-			WorldData.INVALID_CITY_TILE_POSITION
+			CityCitizens.INVALID_CITY_TILE_POSITION
 		)
 
 		if raw_tile is Vector2i:

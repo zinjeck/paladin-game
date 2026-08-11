@@ -303,7 +303,7 @@ static func get_debug_line(citizen: Dictionary) -> String:
 	var state_text := str(citizen.get("state", "unknown"))
 	var raw_position = citizen.get(
 		"city_tile_position",
-		WorldData.INVALID_CITY_TILE_POSITION
+		CityCitizens.INVALID_CITY_TILE_POSITION
 	)
 	var position_text := "invalid"
 
@@ -358,7 +358,7 @@ static func get_haul_text(citizen: Dictionary) -> String:
 	var phase := str(
 		haul.get(
 			"phase",
-			WorldData.CITY_CITIZEN_HAUL_PHASE_NONE
+			CityCitizens.CITY_CITIZEN_HAUL_PHASE_NONE
 		)
 	)
 
@@ -379,7 +379,7 @@ static func get_haul_text(citizen: Dictionary) -> String:
 			int(
 				haul.get(
 					"reservation_id",
-					WorldData.INVALID_CITY_CITIZEN_HAUL_RESERVATION_ID
+					CityCitizens.INVALID_CITY_CITIZEN_HAUL_RESERVATION_ID
 				)
 			)
 		)
@@ -426,29 +426,29 @@ static func get_task_text(citizen: Dictionary) -> String:
 	var task_kind := str(
 		current_task.get(
 			"kind",
-			WorldData.CITY_CITIZEN_TASK_KIND_NONE
+			CityCitizens.CITY_CITIZEN_TASK_KIND_NONE
 		)
 	)
 
-	if task_kind == WorldData.CITY_CITIZEN_TASK_KIND_NONE:
+	if task_kind == CityCitizens.CITY_CITIZEN_TASK_KIND_NONE:
 		return "None"
 
 	var task_phase := str(
 		current_task.get(
 			"phase",
-			WorldData.CITY_CITIZEN_TASK_PHASE_NONE
+			CityCitizens.CITY_CITIZEN_TASK_PHASE_NONE
 		)
 	)
 	var task_text := task_kind.capitalize()
 
-	if task_phase != WorldData.CITY_CITIZEN_TASK_PHASE_NONE:
+	if task_phase != CityCitizens.CITY_CITIZEN_TASK_PHASE_NONE:
 		task_text += " (" + task_phase.capitalize() + ")"
 
 	var target_object_id := int(
 		current_task.get("target_object_id", -1)
 	)
 
-	if task_kind == WorldData.CITY_CITIZEN_TASK_KIND_ACQUIRE_FOOD:
+	if task_kind == CityCitizens.CITY_CITIZEN_TASK_KIND_ACQUIRE_FOOD:
 		var food_resource := str(
 			current_task.get(
 				"food_resource_type",
@@ -469,7 +469,7 @@ static func get_task_text(citizen: Dictionary) -> String:
 				+ "]"
 			)
 
-	if task_kind == WorldData.CITY_CITIZEN_TASK_KIND_HAUL:
+	if task_kind == CityCitizens.CITY_CITIZEN_TASK_KIND_HAUL:
 		var raw_current_haul = citizen.get("current_haul", {})
 
 		if raw_current_haul is Dictionary:
@@ -484,7 +484,7 @@ static func get_task_text(citizen: Dictionary) -> String:
 
 	if (
 		task_kind
-		== WorldData.CITY_CITIZEN_TASK_KIND_CONSTRUCTION
+		== CityCitizens.CITY_CITIZEN_TASK_KIND_CONSTRUCTION
 		and target_object_id > 0
 	):
 		var construction_site := (
@@ -503,7 +503,7 @@ static func get_task_text(citizen: Dictionary) -> String:
 		return (
 			task_text
 			+ " -> "
-			+ WorldData.get_city_object_display_name_for_type(
+			+ CityObjectCatalog.get_city_object_display_name_for_type(
 				str(construction_site.get("object_type", ""))
 			)
 			+ " Blueprint #"
@@ -565,17 +565,17 @@ static func format_haul_endpoint(raw_endpoint) -> String:
 	var endpoint_kind := str(
 		endpoint.get(
 			"kind",
-			WorldData.CITY_CITIZEN_HAUL_ENDPOINT_KIND_NONE
+			CityCitizens.CITY_CITIZEN_HAUL_ENDPOINT_KIND_NONE
 		)
 	)
 	var endpoint_id := int(endpoint.get("id", -1))
 
-	if endpoint_kind == WorldData.CITY_CITIZEN_HAUL_ENDPOINT_KIND_NONE:
+	if endpoint_kind == CityCitizens.CITY_CITIZEN_HAUL_ENDPOINT_KIND_NONE:
 		return "none"
 
 	if (
 		endpoint_kind
-		== WorldData.CITY_CITIZEN_HAUL_ENDPOINT_KIND_GROUND_PILE
+		== CityCitizens.CITY_CITIZEN_HAUL_ENDPOINT_KIND_GROUND_PILE
 	):
 		var ground_pile := CityLogisticsSystem.get_city_ground_pile_by_id(
 			endpoint_id
@@ -601,7 +601,7 @@ static func format_haul_endpoint(raw_endpoint) -> String:
 
 	if (
 		endpoint_kind
-		== WorldData.CITY_CITIZEN_HAUL_ENDPOINT_KIND_CONSTRUCTION_SITE
+		== CityCitizens.CITY_CITIZEN_HAUL_ENDPOINT_KIND_CONSTRUCTION_SITE
 	):
 		var site := CityConstructionSystem.get_city_construction_site_by_id(
 			endpoint_id
@@ -611,7 +611,7 @@ static func format_haul_endpoint(raw_endpoint) -> String:
 			return "missing construction site #" + str(endpoint_id)
 
 		return (
-			WorldData.get_city_object_display_name_for_type(
+			CityObjectCatalog.get_city_object_display_name_for_type(
 				str(site.get("object_type", ""))
 			)
 			+ " Blueprint #"
@@ -620,7 +620,7 @@ static func format_haul_endpoint(raw_endpoint) -> String:
 
 	if (
 		endpoint_kind
-		!= WorldData.CITY_CITIZEN_HAUL_ENDPOINT_KIND_CITY_OBJECT_CONTAINER
+		!= CityCitizens.CITY_CITIZEN_HAUL_ENDPOINT_KIND_CITY_OBJECT_CONTAINER
 	):
 		return endpoint_kind + " #" + str(endpoint_id)
 
@@ -642,7 +642,7 @@ static func _get_city_object_display_name(
 	if city_object.is_empty():
 		return "Unknown"
 
-	return WorldData.get_city_object_display_name_for_type(
+	return CityObjectCatalog.get_city_object_display_name_for_type(
 		str(city_object.get("type", ""))
 	)
 
