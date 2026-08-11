@@ -1893,7 +1893,6 @@ def main() -> int:
             "func get_current_city_resource_accounting_state() -> "
             "CityResourceAccountingState:",
             "capital_state.resource_accounting_state =",
-            "city_state.resource_accounting_state =",
         )
         for required_surface in required_political_accounting_surfaces:
             if required_surface not in political_state_text:
@@ -2306,10 +2305,6 @@ def main() -> int:
                 "founding adoption",
                 r"^\s*capital_state\.citizen_registry_state\s*=",
             ),
-            (
-                "legacy adoption",
-                r"^\s*city_state\.citizen_registry_state\s*=",
-            ),
         )
         for surface_description, required_pattern in (
             required_political_registry_surfaces
@@ -2324,11 +2319,10 @@ def main() -> int:
                     "citizen-registry ownership surface: "
                     f"{surface_description}"
                 )
-        if political_state_text.count("CityCitizenRegistryStateScript.new()") < 3:
+        if political_state_text.count("CityCitizenRegistryStateScript.new()") < 2:
             errors.append(
                 "scripts/world/simulation/WorldPoliticalState.gd: citizen "
-                "registry fallback must be created initially, on reset, and "
-                "after legacy adoption"
+                "registry fallback must be created initially and on reset"
             )
         if not re.search(
             r"^func\s+get_city_citizen_registry_state\s*\(\s*\)\s*:",
@@ -2541,10 +2535,6 @@ def main() -> int:
                 "founding adoption",
                 r"^\s*capital_state\.citizen_spatial_state\s*=",
             ),
-            (
-                "legacy adoption",
-                r"^\s*city_state\.citizen_spatial_state\s*=",
-            ),
         )
         for surface_description, required_pattern in (
             required_political_spatial_surfaces
@@ -2559,11 +2549,10 @@ def main() -> int:
                     "citizen-spatial ownership surface: "
                     f"{surface_description}"
                 )
-        if political_state_text.count("CityCitizenSpatialStateScript.new()") < 3:
+        if political_state_text.count("CityCitizenSpatialStateScript.new()") < 2:
             errors.append(
                 "scripts/world/simulation/WorldPoliticalState.gd: citizen "
-                "spatial fallback must be created initially, on reset, and "
-                "after legacy adoption"
+                "spatial fallback must be created initially and on reset"
             )
         if not re.search(
             r"^func\s+get_city_citizen_spatial_state\s*\(\s*\)\s*:",
@@ -2816,10 +2805,6 @@ def main() -> int:
                 "founding adoption",
                 r"^\s*capital_state\.citizen_movement_runtime_state\s*=",
             ),
-            (
-                "legacy adoption",
-                r"^\s*city_state\.citizen_movement_runtime_state\s*=",
-            ),
         )
         for surface_description, required_pattern in (
             required_political_movement_runtime_surfaces
@@ -3069,10 +3054,6 @@ def main() -> int:
                 "founding adoption",
                 r"^\s*capital_state\.citizen_task_runtime_state\s*=",
             ),
-            (
-                "legacy adoption",
-                r"^\s*city_state\.citizen_task_runtime_state\s*=",
-            ),
         )
         for surface_description, required_pattern in (
             required_political_task_runtime_surfaces
@@ -3087,11 +3068,10 @@ def main() -> int:
                     "citizen task-runtime ownership surface: "
                     f"{surface_description}"
                 )
-        if political_state_text.count("CityCitizenTaskRuntimeStateScript.new()") < 3:
+        if political_state_text.count("CityCitizenTaskRuntimeStateScript.new()") < 2:
             errors.append(
                 "scripts/world/simulation/WorldPoliticalState.gd: citizen "
-                "task-runtime fallback must be created initially, on reset, and "
-                "after legacy adoption"
+                "task-runtime fallback must be created initially and on reset"
             )
         if not re.search(
             r"^func\s+get_city_citizen_task_runtime_state\s*\(\s*\)\s*:",
