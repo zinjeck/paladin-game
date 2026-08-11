@@ -71,6 +71,9 @@ var _unbound_city_runtime_data: Dictionary = {}
 var _unbound_city_world = null
 var _unbound_city_seed: int = 0
 var _unbound_city_runtime_data: Dictionary = {}
+var _unbound_city_world = null
+var _unbound_city_seed: int = 0
+var _unbound_city_runtime_data: Dictionary = {}
 var _unbound_city_object_state = CityObjectStateScript.new()
 var _unbound_city_resource_accounting_state = (
 	CityResourceAccountingStateScript.new()
@@ -105,6 +108,9 @@ func reset_state() -> void:
 	player_polity_id = PolityDataScript.INVALID_POLITY_ID
 	active_settlement_id = SettlementDataScript.INVALID_SETTLEMENT_ID
 	_foundation_world_fingerprint = ""
+	_unbound_city_world = null
+	_unbound_city_seed = 0
+	_unbound_city_runtime_data = {}
 	_unbound_city_world = null
 	_unbound_city_seed = 0
 	_unbound_city_runtime_data = {}
@@ -150,6 +156,9 @@ func synchronize_foundation_with_world_data() -> bool:
 	# when the first City settlement adopts the current city simulation. Never
 	# carry it across an already-live political registry into another world.
 	var should_adopt_unbound_city_state := not _has_live_foundation_registry()
+	var unbound_city_world_to_adopt = _unbound_city_world
+	var unbound_city_seed_to_adopt: int = _unbound_city_seed
+	var unbound_city_runtime_data_to_adopt: Dictionary = _unbound_city_runtime_data
 	var unbound_city_world_to_adopt = _unbound_city_world
 	var unbound_city_seed_to_adopt: int = _unbound_city_seed
 	var unbound_city_runtime_data_to_adopt: Dictionary = _unbound_city_runtime_data
@@ -230,6 +239,9 @@ func synchronize_foundation_with_world_data() -> bool:
 		reset_state()
 		return false
 	if should_adopt_unbound_city_state:
+		capital_state.city_world = unbound_city_world_to_adopt
+		capital_state.city_seed = unbound_city_seed_to_adopt
+		capital_state.city_runtime_data = unbound_city_runtime_data_to_adopt
 		capital_state.city_world = unbound_city_world_to_adopt
 		capital_state.city_seed = unbound_city_seed_to_adopt
 		capital_state.city_runtime_data = unbound_city_runtime_data_to_adopt
@@ -506,6 +518,12 @@ func set_settlement_simulation_backend(
 			_unbound_city_world = null
 			_unbound_city_seed = 0
 			_unbound_city_runtime_data = {}
+			city_state.city_world = _unbound_city_world
+			city_state.city_seed = _unbound_city_seed
+			city_state.city_runtime_data = _unbound_city_runtime_data
+			_unbound_city_world = null
+			_unbound_city_seed = 0
+			_unbound_city_runtime_data = {}
 
 		settlement_city_state_by_id[settlement_id] = city_state
 
@@ -728,6 +746,79 @@ func set_current_city_seed(city_seed: int) -> void:
 		active_city_state.city_seed = city_seed
 		return
 	_unbound_city_seed = city_seed
+
+
+func set_current_city_world(city_world) -> void:
+	var active_city_state = get_active_city_simulation_state()
+	if active_city_state != null:
+		active_city_state.city_world = city_world
+		return
+	_unbound_city_world = city_world
+
+
+func set_current_city_seed(city_seed: int) -> void:
+	var active_city_state = get_active_city_simulation_state()
+	if active_city_state != null:
+		active_city_state.city_seed = city_seed
+		return
+	_unbound_city_seed = city_seed
+
+
+func store_current_city_world(city_world, city_seed: int) -> void:
+	var active_city_state = get_active_city_simulation_state()
+	if active_city_state != null:
+		active_city_state.city_world = city_world
+		active_city_state.city_seed = city_seed
+		return
+	_unbound_city_world = city_world
+	_unbound_city_seed = city_seed
+
+
+func replace_current_city_runtime_data(values: Dictionary) -> void:
+	var active_city_state = get_active_city_simulation_state()
+	if active_city_state != null:
+		active_city_state.city_runtime_data = values
+		return
+	_unbound_city_runtime_data = values
+
+
+func clear_current_city_world() -> void:
+	var active_city_state = get_active_city_simulation_state()
+	if active_city_state != null:
+		active_city_state.city_world = null
+		active_city_state.city_seed = 0
+		return
+	_unbound_city_world = null
+	_unbound_city_seed = 0
+
+
+func clear_current_city_runtime_data() -> void:
+	var active_city_state = get_active_city_simulation_state()
+	if active_city_state != null:
+		active_city_state.city_runtime_data = {}
+		return
+	_unbound_city_runtime_data = {}
+
+
+func get_current_city_world():
+	var active_city_state = get_active_city_simulation_state()
+	if active_city_state != null:
+		return active_city_state.city_world
+	return _unbound_city_world
+
+
+func get_current_city_seed() -> int:
+	var active_city_state = get_active_city_simulation_state()
+	if active_city_state != null:
+		return active_city_state.city_seed
+	return _unbound_city_seed
+
+
+func get_current_city_runtime_data() -> Dictionary:
+	var active_city_state = get_active_city_simulation_state()
+	if active_city_state != null:
+		return active_city_state.city_runtime_data
+	return _unbound_city_runtime_data
 
 
 func store_current_city_world(city_world, city_seed: int) -> void:
