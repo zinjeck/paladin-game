@@ -1,0 +1,123 @@
+name: Pass 13 Refactor
+
+on:
+  push:
+    branches:
+      - agent/pass13-remove-legacy-city-backend
+
+permissions:
+  contents: write
+
+jobs:
+  refactor:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/pass13-remove-legacy-city-backend
+          fetch-depth: 0
+
+      - name: Remove legacy city backend
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+
+          # SettlementSimulationContext: City simulation now has exactly one backend.
+          p = Path('scripts/world/simulation/SettlementSimulationContext.gd')
+          t = p.read_text(encoding='utf-8')
+          t = t.replace('const BACKEND_LEGACY_CITY_WORLD_DATA := "legacy_city_world_data"\n', '')
+          old = '''\tif backend_kind == BACKEND_CITY_SETTLEMENT_STATE:\n\t\treturn local_state is CitySettlementSimulationState\n\n\t# Kept only as a compatibility backend for records created by the previous\n\t# foundation pass. New city settlements use BACKEND_CITY_SETTLEMENT_STATE.\n\treturn backend_kind == BACKEND_LEGACY_CITY_WORLD_DATA\n'''
+          new = '''\treturn (\n\t\tbackend_kind == BACKEND_CITY_SETTLEMENT_STATE\n\t\tand local_state is CitySettlementSimulationState\n\t)\n'''
+          assert old in t
+          t = t.replace(old, new, 1)
+          p.write_text(t, encoding='utf-8')
+
+          # WorldPoliticalState: delete the conversion path. City state is allocated
+          # when a City is created with the sole supported city backend.
+          p = Path('scripts/world/simulation/WorldPoliticalState.gd')
+          t = p.read_text(encoding='utf-8')
+          t = t.replace(
+              '# Authoritative runtime registry for polity and settlement identity plus each\n# settlement\'s local simulation state. WorldData remains the compatibility\n# execution workspace while city systems are migrated, but it is no longer the\n# only place where a city\'s mutable state can live.\n',
+              '# Authoritative runtime registry for polity and settlement identity plus each\n# settlement\'s local simulation state. City settlements use instance-owned\n# CitySettlementSimulationState as their only simulation backend.\n'
+          )
+          # Remove previous-backend lookup and legacy conversion/adoption block.
+          t = re.sub(
+              r'\n\tvar previous_backend_kind := str\(.*?\n\tsettlement_backend_kind_by_id\[settlement_id\] = backend_kind\n',
+              '\n\tsettlement_backend_kind_by_id[settlement_id] = backend_kind\n',
+              t,
+              count=1,
+              flags=re.S,
+          )
+          old_start = '''\tif (\n\t\tbackend_kind\n\t\t== SettlementSimulationContextScript.BACKEND_CITY_SETTLEMENT_STATE\n\t\tand not settlement_city_state_by_id.has(settlement_id)\n\t):\n\t\tvar city_state := CitySettlementSimulationStateScript.new()\n'''
+          start = t.find(old_start)
+          assert start >= 0
+          end_marker = '\n\t\tsettlement_city_state_by_id[settlement_id] = city_state\n'
+          end = t.find(end_marker, start)
+          assert end >= 0
+          end += len(end_marker)
+          replacement = '''\tif (\n\t\tbackend_kind\n\t\t== SettlementSimulationContextScript.BACKEND_CITY_SETTLEMENT_STATE\n\t\tand not settlement_city_state_by_id.has(settlement_id)\n\t):\n\t\tsettlement_city_state_by_id[settlement_id] = (\n\t\t\tCitySettlementSimulationStateScript.new()\n\t\t)\n'''
+          t = t[:start] + replacement + t[end:]
+          t = t.replace(
+              '''\treturn (\n\t\tbackend_kind == SettlementSimulationContextScript.BACKEND_NONE\n\t\tor backend_kind\n\t\t== SettlementSimulationContextScript.BACKEND_LEGACY_CITY_WORLD_DATA\n\t\tor backend_kind\n\t\t== SettlementSimulationContextScript.BACKEND_CITY_SETTLEMENT_STATE\n\t)\n''',
+              '''\treturn (\n\t\tbackend_kind == SettlementSimulationContextScript.BACKEND_NONE\n\t\tor backend_kind\n\t\t== SettlementSimulationContextScript.BACKEND_CITY_SETTLEMENT_STATE\n\t)\n''',
+              1,
+          )
+          p.write_text(t, encoding='utf-8')
+
+          # The old bootstrap suites contained a second half whose only purpose was
+          # exercising legacy->instance conversion. Founding adoption remains and is
+          # still the supported pre-context bootstrap behavior.
+          for p in Path('scripts/city/simulation').glob('*BootstrapTest.gd'):
+              t = p.read_text(encoding='utf-8')
+              t = re.sub(r'^\s*_test_legacy_backend_conversion_adopts_state\(\)\n', '', t, flags=re.M)
+              t = re.sub(
+                  r'\nfunc _test_legacy_backend_conversion_adopts_state\(\) -> void:.*?(?=\nfunc [A-Za-z0-9_]+\()',
+                  '\n',
+                  t,
+                  count=1,
+                  flags=re.S,
+              )
+              p.write_text(t, encoding='utf-8')
+
+          # Architecture guard: the retired backend may not return anywhere in code.
+          p = Path('ci/audit_gdscript.py')
+          t = p.read_text(encoding='utf-8')
+          anchor = 'WORLD_DATA_FORBIDDEN_CITY_NAVIGATION_SYMBOLS = ('
+          assert anchor in t
+          guard_const = '''RETIRED_LEGACY_CITY_BACKEND_SYMBOLS = (\n    "BACKEND_LEGACY_CITY_WORLD_DATA",\n    "legacy_city_world_data",\n)\n\n'''
+          if 'RETIRED_LEGACY_CITY_BACKEND_SYMBOLS' not in t:
+              t = t.replace(anchor, guard_const + anchor, 1)
+          main_anchor = '        for symbol in WORLD_DATA_FORBIDDEN_CITY_NAVIGATION_SYMBOLS:'
+          assert main_anchor in t
+          guard = '''        for path in scripts:\n            relative = str(path.relative_to(ROOT))\n            source_text = path.read_text(encoding="utf-8")\n            for symbol in RETIRED_LEGACY_CITY_BACKEND_SYMBOLS:\n                if symbol in source_text:\n                    errors.append(\n                        f"{relative}: retired Pass 13 legacy city backend symbol remains: {symbol}"\n                    )\n\n'''
+          if 'retired Pass 13 legacy city backend symbol remains' not in t:
+              t = t.replace(main_anchor, guard + main_anchor, 1)
+          p.write_text(t, encoding='utf-8')
+
+          # Dedicated Pass 13 contract test: invalid legacy string is rejected and
+          # City instance-owned state remains isolated across A/B/A selection.
+          test = '''extends Node\n\nvar failure_count: int = 0\n\nfunc _ready() -> void:\n\t_test_single_city_backend_contract()\n\tWorldData.reset_runtime_session_state()\n\tif failure_count > 0:\n\t\tpush_error("Legacy city backend removal test failed: " + str(failure_count))\n\t\tget_tree().quit(1)\n\t\treturn\n\tprint("Legacy city backend removal test passed.")\n\tget_tree().quit(0)\n\nfunc _test_single_city_backend_contract() -> void:\n\tWorldData.reset_runtime_session_state()\n\tvar culture := WorldData.create_culture("Pass 13 Culture")\n\tvar polity := WorldPoliticalState.create_polity({\n\t\t"name": "Pass 13 Realm",\n\t\t"polity_type": PolityData.POLITY_TYPE_KINGDOM,\n\t\t"primary_culture_id": int(culture.get("id", -1)),\n\t})\n\tvar invalid := WorldPoliticalState.create_settlement({\n\t\t"name": "Retired Backend City",\n\t\t"settlement_type": SettlementData.SETTLEMENT_TYPE_CITY,\n\t\t"polity_id": int(polity.get("id", -1)),\n\t\t"world_region_top_left": Vector2i.ZERO,\n\t\t"world_region_center": Vector2i.ZERO,\n\t\t"world_region_size": 1,\n\t\t"simulation_backend_kind": "legacy_" + "city_world_data",\n\t})\n\t_expect(invalid.is_empty(), "The retired legacy backend string must be rejected.")\n\tvar a := _create_city("Pass 13 A", int(polity.get("id", -1)), Vector2i(1, 1))\n\tvar b := _create_city("Pass 13 B", int(polity.get("id", -1)), Vector2i(2, 2))\n\t_expect(not a.is_empty() and not b.is_empty(), "Both instance-owned Cities must be created.")\n\tif a.is_empty() or b.is_empty():\n\t\treturn\n\tvar state_a = WorldPoliticalState.get_city_simulation_state(int(a["id"]))\n\tvar state_b = WorldPoliticalState.get_city_simulation_state(int(b["id"]))\n\t_expect(state_a is CitySettlementSimulationState and state_b is CitySettlementSimulationState and not is_same(state_a, state_b), "Every City must receive its own state owner.")\n\tstate_a.city_runtime_data["marker"] = "A"\n\tstate_b.city_runtime_data["marker"] = "B"\n\t_expect(WorldPoliticalState.set_active_settlement(int(a["id"])), "City A must activate.")\n\t_expect(WorldPoliticalState.get_active_settlement_context().supports_city_simulation() and WorldPoliticalState.get_current_city_runtime_data().get("marker") == "A", "City A must resolve through the sole city backend.")\n\t_expect(WorldPoliticalState.set_active_settlement(int(b["id"])), "City B must activate.")\n\t_expect(WorldPoliticalState.get_active_settlement_context().supports_city_simulation() and WorldPoliticalState.get_current_city_runtime_data().get("marker") == "B", "City B must resolve independently.")\n\t_expect(WorldPoliticalState.set_active_settlement(int(a["id"])) and WorldPoliticalState.get_current_city_runtime_data().get("marker") == "A", "A/B/A selection must preserve direct owner isolation.")\n\nfunc _create_city(name: String, polity_id: int, tile: Vector2i) -> Dictionary:\n\treturn WorldPoliticalState.create_settlement({\n\t\t"name": name,\n\t\t"settlement_type": SettlementData.SETTLEMENT_TYPE_CITY,\n\t\t"polity_id": polity_id,\n\t\t"world_region_top_left": tile,\n\t\t"world_region_center": tile,\n\t\t"world_region_size": 1,\n\t\t"simulation_backend_kind": SettlementSimulationContext.BACKEND_CITY_SETTLEMENT_STATE,\n\t})\n\nfunc _expect(condition: bool, message: String) -> void:\n\tif condition:\n\t\treturn\n\tfailure_count += 1\n\tpush_error("Legacy city backend removal test: " + message)\n'''
+          Path('scripts/city/simulation/CityLegacyBackendRemovalTest.gd').write_text(test, encoding='utf-8')
+          Path('scripts/city/simulation/CityLegacyBackendRemovalTest.tscn').write_text('''[gd_scene load_steps=2 format=3]\n\n[ext_resource path="res://scripts/city/simulation/CityLegacyBackendRemovalTest.gd" type="Script" id="1"]\n\n[node name="CityLegacyBackendRemovalTest" type="Node"]\nscript = ExtResource("1")\n''', encoding='utf-8')
+
+          # Hard fail if any executable GDScript still names the retired backend.
+          bad = []
+          for p in Path('scripts').glob('**/*.gd'):
+              s = p.read_text(encoding='utf-8')
+              if 'BACKEND_LEGACY_CITY_WORLD_DATA' in s or 'legacy_city_world_data' in s:
+                  bad.append(str(p))
+          assert not bad, '\n'.join(bad)
+          PY
+
+      - name: Commit Pass 13 implementation
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add scripts ci/audit_gdscript.py
+          git commit -m "Pass 13: remove legacy city backend"
+          git push origin HEAD:agent/pass13-remove-legacy-city-backend
