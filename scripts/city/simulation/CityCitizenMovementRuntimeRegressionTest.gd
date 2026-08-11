@@ -370,8 +370,8 @@ func _lookup_matches_ids(lookup: Dictionary, expected_ids: Array) -> bool:
 func _reset_fixture(seed_value: int) -> Dictionary:
 	WorldData.reset_runtime_session_state()
 	var city_world := _make_world(12, 12, seed_value)
-	WorldData.official_city_world = city_world
-	WorldData.official_city_seed = seed_value
+	WorldPoliticalState.set_current_city_world(city_world)
+	WorldPoliticalState.set_current_city_seed(seed_value)
 	var culture := WorldData.create_culture(
 		"Movement Runtime Regression Culture " + str(seed_value)
 	)

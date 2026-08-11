@@ -145,7 +145,7 @@ static func get_city_player_command_by_id(command_id: int) -> Dictionary:
 static func is_city_player_command_target_valid(command: Dictionary) -> bool:
 	return _work_state().is_player_command_target_valid(
 		command,
-		WorldData.official_city_world,
+		WorldPoliticalState.get_current_city_world(),
 		WorldData.INVALID_CITY_TILE_POSITION
 	)
 
@@ -255,7 +255,7 @@ static func can_designate_city_player_command_at_tile(
 	command_type: String,
 	tile_position: Vector2i
 ) -> bool:
-	var city_world: WorldData = WorldData.official_city_world
+	var city_world: WorldData = WorldPoliticalState.get_current_city_world()
 
 	if (
 		city_world == null
@@ -277,7 +277,7 @@ static func add_city_player_command_targets(
 	raw_tile_positions: Array
 ) -> int:
 	if (
-		WorldData.official_city_world == null
+		WorldPoliticalState.get_current_city_world() == null
 		or not is_valid_city_player_command_type(command_type)
 	):
 		return 0
@@ -660,7 +660,7 @@ static func get_city_player_command_work_tiles(
 		WorldData.INVALID_CITY_TILE_POSITION
 	)
 
-	if WorldData.official_city_world == null or not raw_command_tile is Vector2i:
+	if WorldPoliticalState.get_current_city_world() == null or not raw_command_tile is Vector2i:
 		return work_tiles
 
 	var command_tile: Vector2i = raw_command_tile
@@ -672,7 +672,7 @@ static func get_city_player_command_work_tiles(
 			)
 
 			if CityNavigationSystem.is_city_tile_walkable_for_citizen(
-				WorldData.official_city_world,
+				WorldPoliticalState.get_current_city_world(),
 				candidate_tile,
 				citizen_id
 			):
@@ -792,7 +792,7 @@ static func complete_city_player_command(
 	):
 		return false
 
-	var city_world: WorldData = WorldData.official_city_world
+	var city_world: WorldData = WorldPoliticalState.get_current_city_world()
 	var command_type := str(command.get("type", ""))
 	var tile_position: Vector2i = command["tile_position"]
 	var expected_feature := get_city_player_command_surface_feature(
@@ -1304,11 +1304,11 @@ static func _get_best_command_candidate_for_construction_sites(
 	var work_tiles: Array = work_tile_lookup.keys()
 	work_tiles.sort_custom(CityObjectSystem._sort_city_tiles_y_then_x)
 	var path_result := CityNavigationSystemScript.find_path_to_any_city_tile({
-		"city_world": WorldData.official_city_world,
+		"city_world": WorldPoliticalState.get_current_city_world(),
 		"start_tile": citizen_tile,
 		"destination_tiles": work_tiles,
 		"max_expanded_nodes": CityNavigationSystemScript.get_city_wide_path_expansion_limit(
-			WorldData.official_city_world
+			WorldPoliticalState.get_current_city_world()
 		),
 		"citizen_id": citizen_id,
 		"heuristic_weight": EXACT_COMMAND_PATH_HEURISTIC_WEIGHT,
@@ -2391,7 +2391,7 @@ static func _build_progress_signature(
 
 	var obstruction_count := 0
 	var footprint_tiles: Array = site.get("footprint_tiles", [])
-	var city_world: WorldData = WorldData.official_city_world
+	var city_world: WorldData = WorldPoliticalState.get_current_city_world()
 
 	if city_world != null:
 		for raw_tile in footprint_tiles:
@@ -2564,11 +2564,11 @@ static func _get_best_command_candidate(
 	var work_tiles: Array = work_tile_lookup.keys()
 	work_tiles.sort_custom(CityObjectSystem._sort_city_tiles_y_then_x)
 	var path_result := CityNavigationSystemScript.find_path_to_any_city_tile({
-		"city_world": WorldData.official_city_world,
+		"city_world": WorldPoliticalState.get_current_city_world(),
 		"start_tile": citizen_tile,
 		"destination_tiles": work_tiles,
 		"max_expanded_nodes": CityNavigationSystemScript.get_city_wide_path_expansion_limit(
-			WorldData.official_city_world
+			WorldPoliticalState.get_current_city_world()
 		),
 		"citizen_id": citizen_id,
 		"heuristic_weight": EXACT_COMMAND_PATH_HEURISTIC_WEIGHT,

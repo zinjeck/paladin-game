@@ -158,8 +158,8 @@ func _test_lossless_legacy_repair_and_identity() -> void:
 	if city.is_empty():
 		return
 
-	WorldData.official_city_world = _make_world(16, 16, 98_903)
-	WorldData.official_city_seed = 98_903
+	WorldPoliticalState.set_current_city_world(_make_world(16, 16, 98_903))
+	WorldPoliticalState.set_current_city_seed(98_903)
 	var created := WorldData.add_city_citizen(
 		"",
 		Vector2i(5, 5),
@@ -320,8 +320,8 @@ func _test_headless_simulation_bootstrap_and_canonical_setters() -> void:
 	if city_a_id <= 0:
 		return
 
-	WorldData.official_city_world = _make_world(16, 16, 98_904)
-	WorldData.official_city_seed = 98_904
+	WorldPoliticalState.set_current_city_world(_make_world(16, 16, 98_904))
+	WorldPoliticalState.set_current_city_seed(98_904)
 	var created := WorldData.add_city_citizen(
 		"",
 		Vector2i(5, 5),

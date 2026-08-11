@@ -57,8 +57,8 @@ func _test_equal_version_city_isolation() -> void:
 		WorldPoliticalState.set_active_settlement(city_a_id),
 		"City A must become active."
 	)
-	WorldData.official_city_world = _make_world(16, 16, 97_101)
-	WorldData.official_city_seed = 97_101
+	WorldPoliticalState.set_current_city_world(_make_world(16, 16, 97_101))
+	WorldPoliticalState.set_current_city_seed(97_101)
 	var citizen_a := WorldData.add_city_citizen(
 		"",
 		SHARED_CITIZEN_TILE,
@@ -106,8 +106,8 @@ func _test_equal_version_city_isolation() -> void:
 		WorldPoliticalState.set_active_settlement(city_b_id),
 		"City B must become active."
 	)
-	WorldData.official_city_world = _make_world(16, 16, 97_202)
-	WorldData.official_city_seed = 97_202
+	WorldPoliticalState.set_current_city_world(_make_world(16, 16, 97_202))
+	WorldPoliticalState.set_current_city_seed(97_202)
 	var citizen_b := WorldData.add_city_citizen(
 		"",
 		SHARED_CITIZEN_TILE,

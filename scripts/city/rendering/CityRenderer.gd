@@ -1309,8 +1309,8 @@ func generate_city_world() -> void:
 		return
 
 	if WorldData.has_active_city_save():
-		city_world = WorldData.official_city_world
-		city_seed = WorldData.official_city_seed
+		city_world = WorldPoliticalState.get_current_city_world()
+		city_seed = WorldPoliticalState.get_current_city_seed()
 		print("Loaded existing city world.")
 		return
 
@@ -4581,7 +4581,7 @@ func after_city_center_placed(city_object: Dictionary) -> void:
 	update_build_button_state()
 
 	print("Founded city at: ", top_left)
-	print("City data: ", WorldData.player_city_data)
+	print("City data: ", WorldPoliticalState.get_current_city_runtime_data())
 
 func start_object_selection_drag(screen_position: Vector2) -> void:
 	is_object_selection_dragging = true

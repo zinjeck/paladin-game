@@ -76,10 +76,7 @@ static var save_locked: bool = false
 static var player_city_foundation_top_left: Vector2i = Vector2i(-1, -1)
 static var player_city_foundation_size: Vector2i = Vector2i.ZERO
 static var official_world = null
-static var official_city_world = null
-static var official_city_seed: int = 0
 static var player_city_founded: bool = false
-static var player_city_data: Dictionary = {}
 static var debug_mode_enabled: bool = false
 
 const INVALID_CULTURE_ID: int = CultureDataScript.INVALID_CULTURE_ID
@@ -1218,13 +1215,12 @@ static func has_active_world_save() -> bool:
 
 
 static func has_active_city_save() -> bool:
-	return official_city_world != null
+	return WorldPoliticalState.get_current_city_world() != null
 
 
 static func store_city_world_save(city_world: WorldData, city_seed: int) -> void:
 	WorkplaceProductionSystem.clear_resource_source_evaluation_cache()
-	official_city_world = city_world
-	official_city_seed = city_seed
+	WorldPoliticalState.store_current_city_world(city_world, city_seed)
 	MapTextureCacheStateScript.clear_city_cache()
 
 static func found_player_city(values: Dictionary) -> void:
@@ -1294,7 +1290,7 @@ static func found_player_city(values: Dictionary) -> void:
 	player_city_foundation_top_left = foundation_top_left
 	player_city_foundation_size = foundation_size
 
-	player_city_data = {
+	WorldPoliticalState.replace_current_city_runtime_data({
 		"id": 1,
 		"name": official_city_name,
 		"primary_culture_id": primary_culture_id,
@@ -1304,7 +1300,7 @@ static func found_player_city(values: Dictionary) -> void:
 		"foundation_size": foundation_size,
 		"can_build": true,
 		"founded": true
-	}
+	})
 
 	initialize_starting_city_population()
 
@@ -1324,10 +1320,10 @@ static func can_build_in_city() -> bool:
 	if not player_city_founded:
 		return false
 
-	if not player_city_data.has("can_build"):
+	if not WorldPoliticalState.get_current_city_runtime_data().has("can_build"):
 		return false
 
-	return bool(player_city_data["can_build"])
+	return bool(WorldPoliticalState.get_current_city_runtime_data()["can_build"])
 
 #endregion
 
@@ -1850,7 +1846,7 @@ static func commit_city_haul_destination_reservation(
 #region Citizen Identity and Population Creation
 
 static func get_city_citizen_name_seed() -> int:
-	var name_seed := int(official_city_seed)
+	var name_seed := int(WorldPoliticalState.get_current_city_seed())
 
 	if name_seed == 0:
 		name_seed = int(city_start_world_seed)
@@ -1925,7 +1921,7 @@ static func resolve_city_citizen_culture_id(
 	if not player_city_founded:
 		return INVALID_CULTURE_ID
 
-	var primary_culture_value = player_city_data.get(
+	var primary_culture_value = WorldPoliticalState.get_current_city_runtime_data().get(
 		"primary_culture_id",
 		INVALID_CULTURE_ID
 	)
@@ -2040,7 +2036,7 @@ static func initialize_starting_city_population() -> int:
 		)
 		return 0
 
-	var primary_culture_value = player_city_data.get(
+	var primary_culture_value = WorldPoliticalState.get_current_city_runtime_data().get(
 		"primary_culture_id",
 		INVALID_CULTURE_ID
 	)
@@ -2061,7 +2057,7 @@ static func initialize_starting_city_population() -> int:
 		)
 		return 0
 
-	var city_world: WorldData = official_city_world
+	var city_world: WorldData = WorldPoliticalState.get_current_city_world()
 
 	if city_world == null:
 		push_error(
@@ -2342,7 +2338,7 @@ static func get_city_object_output_resources(
 
 static func reset_player_city_state() -> void:
 	player_city_founded = false
-	player_city_data.clear()
+	WorldPoliticalState.clear_current_city_runtime_data()
 	player_city_foundation_top_left = Vector2i(-1, -1)
 	player_city_foundation_size = Vector2i.ZERO
 	WorldPoliticalState.reset_extracted_city_state()
@@ -2423,8 +2419,7 @@ static func reset_world_session_state() -> void:
 
 
 static func reset_city_session_state() -> void:
-	official_city_world = null
-	official_city_seed = 0
+	WorldPoliticalState.clear_current_city_world()
 
 	reset_city_camera_state()
 	MapTextureCacheStateScript.clear_city_cache()

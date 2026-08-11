@@ -172,8 +172,8 @@ static func _validate_city_construction_state(
 					expected_tile_lookup[tile_position] = site_id
 
 				if (
-					WorldData.official_city_world != null
-					and not WorldData.official_city_world.is_in_bounds(
+					WorldPoliticalState.get_current_city_world() != null
+					and not WorldPoliticalState.get_current_city_world().is_in_bounds(
 						tile_position.x,
 						tile_position.y
 					)
@@ -349,9 +349,9 @@ static func _validate_city_ground_pile_state(
 			var tile_position: Vector2i = raw_tile_position
 
 			if (
-				WorldData.official_city_world != null
+				WorldPoliticalState.get_current_city_world() != null
 				and not CityLogisticsSystem.can_city_ground_pile_exist_at_tile(
-					WorldData.official_city_world,
+					WorldPoliticalState.get_current_city_world(),
 					tile_position
 				)
 			):
@@ -2102,9 +2102,9 @@ static func _city_haul_endpoint_exists(
 			)
 			return (
 				raw_tile is Vector2i
-				and WorldData.official_city_world != null
+				and WorldPoliticalState.get_current_city_world() != null
 				and CityLogisticsSystem.can_city_ground_pile_exist_at_tile(
-					WorldData.official_city_world,
+					WorldPoliticalState.get_current_city_world(),
 					raw_tile
 				)
 			)

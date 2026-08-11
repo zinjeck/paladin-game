@@ -255,7 +255,7 @@ static func _get_city_citizen_direct_food_withdrawal_target_tiles(
 				.city_object_container_is_publicly_usable(city_object)
 			):
 				return CityNavigationSystem.get_city_object_access_tiles(
-					WorldData.official_city_world,
+					WorldPoliticalState.get_current_city_world(),
 					city_object
 				)
 
@@ -266,7 +266,7 @@ static func _get_city_citizen_direct_food_withdrawal_target_tiles(
 				and WorldData.city_object_is_workplace(city_object)
 			):
 				return CityNavigationSystem.get_city_object_access_tiles(
-					WorldData.official_city_world,
+					WorldPoliticalState.get_current_city_world(),
 					city_object
 				)
 
@@ -353,7 +353,7 @@ static func get_city_citizen_food_endpoint_target_tiles(
 				)
 				and raw_tile is Vector2i
 				and CityNavigationSystem.is_city_tile_walkable_for_citizen(
-					WorldData.official_city_world,
+					WorldPoliticalState.get_current_city_world(),
 					raw_tile,
 					citizen_id
 				)
@@ -531,7 +531,7 @@ static func run_tick(
 ) -> void:
 	if (
 		minutes_advanced <= 0
-		or WorldData.official_city_world == null
+		or WorldPoliticalState.get_current_city_world() == null
 		or not WorldData.player_city_founded
 		or CityCitizenRegistrySystem.get_current_state().citizens.is_empty()
 	):

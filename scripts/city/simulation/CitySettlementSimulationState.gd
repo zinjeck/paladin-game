@@ -3,9 +3,8 @@ class_name CitySettlementSimulationState
 
 # Instance-owned mutable state for one CITY settlement.
 #
-# WorldData still exposes historical compatibility fields while the remaining
-# city systems are migrated, but extracted subsystems are not captured into or
-# restored from that workspace anymore.
+# City runtime identity and mutable simulation state live directly on this
+# settlement owner. No state is copied through WorldData when settlements switch.
 #
 # Do not add world/polity identity here. SettlementData and PolityData own that
 # information. This class is only local city-simulation state.
@@ -40,24 +39,3 @@ var construction_state: CityConstructionState = CityConstructionState.new()
 var navigation_state: CityNavigationState = CityNavigationState.new()
 
 
-func capture_from_world_data() -> void:
-	city_world = WorldData.official_city_world
-	city_seed = WorldData.official_city_seed
-	city_runtime_data = WorldData.player_city_data
-
-
-
-
-func apply_to_world_data() -> void:
-	WorldData.official_city_world = city_world
-	WorldData.official_city_seed = city_seed
-	WorldData.player_city_data = city_runtime_data
-
-
-
-
-func is_bound_to_world_data_workspace() -> bool:
-	return is_same(
-		WorldData.player_city_data,
-		city_runtime_data
-	)

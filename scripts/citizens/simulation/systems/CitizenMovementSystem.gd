@@ -17,7 +17,7 @@ static func run_tick(
 	if minutes_advanced <= 0:
 		return
 
-	var city_world: WorldData = WorldData.official_city_world
+	var city_world: WorldData = WorldPoliticalState.get_current_city_world()
 
 	if city_world == null:
 		return

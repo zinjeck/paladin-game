@@ -1213,13 +1213,13 @@ func _place_and_validate_city_fixture(
 	renderer.after_city_center_placed(keep)
 
 	var primary_culture_id := int(
-		WorldData.player_city_data.get(
+		WorldPoliticalState.get_current_city_runtime_data().get(
 			"primary_culture_id",
 			WorldData.INVALID_CULTURE_ID
 		)
 	)
 	_expect(
-		str(WorldData.player_city_data.get("name", ""))
+		str(WorldPoliticalState.get_current_city_runtime_data().get("name", ""))
 		== TEST_CITY_NAME,
 		"City Keep placement must use the committed official city name."
 	)

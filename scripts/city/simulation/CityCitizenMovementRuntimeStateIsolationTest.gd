@@ -349,8 +349,8 @@ func _prepare_active_city_movement(values: Dictionary) -> Dictionary:
 		"The requested isolation City must become active."
 	)
 	var city_world := _make_world(12, 12, seed_value)
-	WorldData.official_city_world = city_world
-	WorldData.official_city_seed = seed_value
+	WorldPoliticalState.set_current_city_world(city_world)
+	WorldPoliticalState.set_current_city_seed(seed_value)
 	var citizen := WorldData.add_city_citizen(
 		"",
 		SHARED_CITIZEN_TILE,

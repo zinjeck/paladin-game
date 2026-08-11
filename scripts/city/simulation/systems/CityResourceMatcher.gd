@@ -2337,11 +2337,11 @@ static func _find_best_reachable_source_candidate(
 		return {}
 
 	var path_result := CityNavigationSystemScript.find_path_to_any_city_tile({
-		"city_world": WorldData.official_city_world,
+		"city_world": WorldPoliticalState.get_current_city_world(),
 		"start_tile": current_tile,
 		"destination_tiles": target_tiles,
 		"max_expanded_nodes": CityNavigationSystemScript.get_city_wide_path_expansion_limit(
-			WorldData.official_city_world
+			WorldPoliticalState.get_current_city_world()
 		),
 		"citizen_id": citizen_id,
 		"heuristic_weight": EXACT_PATH_HEURISTIC_WEIGHT,
@@ -2391,7 +2391,7 @@ static func _get_endpoint_access_tiles(
 	match str(endpoint.get("kind", "")):
 		WorldData.CITY_CITIZEN_HAUL_ENDPOINT_KIND_CITY_OBJECT_CONTAINER:
 			return CityNavigationSystem.get_city_object_access_tiles(
-				WorldData.official_city_world,
+				WorldPoliticalState.get_current_city_world(),
 				CityObjectSystem.get_city_object_by_id(int(endpoint.get("id", -1)))
 			)
 
@@ -2407,7 +2407,7 @@ static func _get_endpoint_access_tiles(
 			if (
 				raw_tile is Vector2i
 				and CityNavigationSystem.is_city_tile_walkable_for_citizen(
-					WorldData.official_city_world,
+					WorldPoliticalState.get_current_city_world(),
 					raw_tile,
 					citizen_id
 				)

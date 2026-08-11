@@ -312,7 +312,7 @@ static func assign_city_citizen_movement_order(
 	citizen_id: int,
 	raw_path: Array
 ) -> bool:
-	var city_world: WorldData = WorldData.official_city_world
+	var city_world: WorldData = WorldPoliticalState.get_current_city_world()
 
 	if city_world == null:
 		return false

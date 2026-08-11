@@ -480,7 +480,7 @@ static func create_city_construction_site(
 		return {}
 
 	if not can_place_city_construction_footprint(
-		WorldData.official_city_world,
+		WorldPoliticalState.get_current_city_world(),
 		footprint_tiles,
 		bool(values.get("require_external_access", false)),
 		allowed_occupied_object_id
@@ -672,7 +672,7 @@ static func _can_update_city_construction_site_footprint(
 	site: Dictionary,
 	updated_footprint: Array[Vector2i]
 ) -> bool:
-	if WorldData.official_city_world == null:
+	if WorldPoliticalState.get_current_city_world() == null:
 		return false
 
 	var target_kind := str(
@@ -692,7 +692,7 @@ static func _can_update_city_construction_site_footprint(
 		return false
 
 	for tile_position in updated_footprint:
-		if not WorldData.official_city_world.is_in_bounds(
+		if not WorldPoliticalState.get_current_city_world().is_in_bounds(
 			tile_position.x,
 			tile_position.y
 		):
@@ -720,7 +720,7 @@ static func _can_update_city_construction_site_footprint(
 			):
 				return false
 
-		var tile: Dictionary = WorldData.official_city_world.get_tile(
+		var tile: Dictionary = WorldPoliticalState.get_current_city_world().get_tile(
 			tile_position.x,
 			tile_position.y
 		)
@@ -842,7 +842,7 @@ static func _get_city_construction_material_deposit_tile(
 		if (
 			raw_tile is Vector2i
 			and CityLogisticsSystem.can_city_ground_pile_exist_at_tile(
-				WorldData.official_city_world,
+				WorldPoliticalState.get_current_city_world(),
 				raw_tile
 			)
 		):
@@ -1091,7 +1091,7 @@ static func create_rectangular_site(values: Dictionary) -> Dictionary:
 	var resolved_world := city_world
 
 	if resolved_world == null:
-		resolved_world = WorldData.official_city_world
+		resolved_world = WorldPoliticalState.get_current_city_world()
 
 	if not can_place_city_object_construction(
 		resolved_world,
@@ -1161,7 +1161,7 @@ static func create_road_sites(
 	var resolved_world := city_world
 
 	if resolved_world == null:
-		resolved_world = WorldData.official_city_world
+		resolved_world = WorldPoliticalState.get_current_city_world()
 
 	if resolved_world == null:
 		return []
@@ -1572,7 +1572,7 @@ static func _ensure_progress_baseline(site_id: int) -> void:
 static func _get_remaining_clearing_work_units(
 	site: Dictionary
 ) -> float:
-	var city_world: WorldData = WorldData.official_city_world
+	var city_world: WorldData = WorldPoliticalState.get_current_city_world()
 
 	if site.is_empty() or city_world == null:
 		return 0.0
@@ -1730,7 +1730,7 @@ static func _reserve_needed_footprint_materials(
 
 static func _ensure_clearing_commands(site_id: int) -> void:
 	var site := get_city_construction_site_by_id(site_id)
-	var city_world: WorldData = WorldData.official_city_world
+	var city_world: WorldData = WorldPoliticalState.get_current_city_world()
 
 	if site.is_empty() or city_world == null:
 		return
@@ -1773,7 +1773,7 @@ static func _ensure_clearing_commands(site_id: int) -> void:
 static func _site_has_surface_obstruction(
 	site: Dictionary
 ) -> bool:
-	var city_world: WorldData = WorldData.official_city_world
+	var city_world: WorldData = WorldPoliticalState.get_current_city_world()
 
 	if city_world == null:
 		return true
@@ -1979,7 +1979,7 @@ static func get_best_assignable_batchable_road_work_for_citizen(
 					if (
 						claimed_positions.has(position)
 						or not CityNavigationSystem.is_city_tile_walkable_for_citizen(
-							WorldData.official_city_world,
+							WorldPoliticalState.get_current_city_world(),
 							position,
 							citizen_id
 						)
@@ -1996,11 +1996,11 @@ static func get_best_assignable_batchable_road_work_for_citizen(
 	labor_positions.sort_custom(CityObjectSystem._sort_city_tiles_y_then_x)
 	var path_result := (
 		CityNavigationSystemScript.find_path_to_any_city_tile({
-			"city_world": WorldData.official_city_world,
+			"city_world": WorldPoliticalState.get_current_city_world(),
 			"start_tile": raw_current_tile,
 			"destination_tiles": labor_positions,
 			"max_expanded_nodes": CityNavigationSystemScript.get_city_wide_path_expansion_limit(
-				WorldData.official_city_world
+				WorldPoliticalState.get_current_city_world()
 			),
 			"citizen_id": citizen_id,
 			"heuristic_weight": EXACT_PATH_HEURISTIC_WEIGHT,
@@ -2120,7 +2120,7 @@ static func _get_best_clearing_cleanup_candidate(
 
 		var task_request := (
 			CitizenHaulingSystemScript.make_public_storage_haul_task_request({
-				"city_world": WorldData.official_city_world,
+				"city_world": WorldPoliticalState.get_current_city_world(),
 				"citizen": citizen,
 				"source": source,
 				"requester": site_endpoint,
@@ -2304,7 +2304,7 @@ static func _make_ground_relocation_task_request(
 	)
 
 	return CitizenHaulingSystemScript.make_directed_haul_task_request({
-		"city_world": WorldData.official_city_world,
+		"city_world": WorldPoliticalState.get_current_city_world(),
 		"citizen": citizen,
 		"source": source,
 		"destination": destination,
@@ -2330,7 +2330,7 @@ static func _find_nearest_ground_relocation_tile(
 	source_tile: Vector2i,
 	citizen_id: int
 ) -> Vector2i:
-	var city_world: WorldData = WorldData.official_city_world
+	var city_world: WorldData = WorldPoliticalState.get_current_city_world()
 
 	if city_world == null:
 		return WorldData.INVALID_CITY_TILE_POSITION
@@ -2452,7 +2452,7 @@ static func _get_best_delivery_candidate(
 
 			var task_request := (
 				CitizenHaulingSystemScript.make_directed_haul_task_request({
-					"city_world": WorldData.official_city_world,
+					"city_world": WorldPoliticalState.get_current_city_world(),
 					"citizen": citizen,
 					"source": source,
 					"destination": destination,
@@ -2544,7 +2544,7 @@ static func _get_labor_candidate(
 		if (
 			claimed_positions.has(position)
 			or not CityNavigationSystem.is_city_tile_walkable_for_citizen(
-				WorldData.official_city_world,
+				WorldPoliticalState.get_current_city_world(),
 				position,
 				citizen_id
 			)
@@ -2558,11 +2558,11 @@ static func _get_labor_candidate(
 
 	var path_result := (
 		CityNavigationSystemScript.find_path_to_any_city_tile({
-			"city_world": WorldData.official_city_world,
+			"city_world": WorldPoliticalState.get_current_city_world(),
 			"start_tile": raw_current_tile,
 			"destination_tiles": candidate_positions,
 			"max_expanded_nodes": CityNavigationSystemScript.get_city_wide_path_expansion_limit(
-				WorldData.official_city_world
+				WorldPoliticalState.get_current_city_world()
 			),
 			"citizen_id": citizen_id,
 			"heuristic_weight": EXACT_PATH_HEURISTIC_WEIGHT
@@ -3043,7 +3043,7 @@ static func _advance_city_construction_finalization(
 	site_id: int
 ) -> Dictionary:
 	var site := get_city_construction_site_by_id(site_id)
-	var city_world: WorldData = WorldData.official_city_world
+	var city_world: WorldData = WorldPoliticalState.get_current_city_world()
 
 	if (
 		site.is_empty()
@@ -3108,7 +3108,7 @@ static func _evacuate_city_construction_footprint(
 	site: Dictionary,
 	citizen_ids: Array[int]
 ) -> void:
-	var city_world: WorldData = WorldData.official_city_world
+	var city_world: WorldData = WorldPoliticalState.get_current_city_world()
 
 	if city_world == null or site.is_empty():
 		return
@@ -3696,7 +3696,7 @@ static func _get_current_construction_path_cost(
 	if (
 		citizen.is_empty()
 		or not raw_current_tile is Vector2i
-		or WorldData.official_city_world == null
+		or WorldPoliticalState.get_current_city_world() == null
 	):
 		return -1
 
@@ -3757,11 +3757,11 @@ static func _get_current_construction_path_cost(
 		return -1
 
 	var path_result := CityNavigationSystemScript.find_path_to_any_city_tile({
-		"city_world": WorldData.official_city_world,
+		"city_world": WorldPoliticalState.get_current_city_world(),
 		"start_tile": raw_current_tile,
 		"destination_tiles": destination_tiles,
 		"max_expanded_nodes": CityNavigationSystemScript.get_city_wide_path_expansion_limit(
-			WorldData.official_city_world
+			WorldPoliticalState.get_current_city_world()
 		),
 		"citizen_id": citizen_id,
 		"heuristic_weight": EXACT_PATH_HEURISTIC_WEIGHT,
@@ -4196,7 +4196,7 @@ static func interrupt_citizen_construction_for_food(
 	return (
 		CitizenHaulingSystemScript
 		.drop_citizen_haul_cargo_for_priority_interrupt(
-			WorldData.official_city_world,
+			WorldPoliticalState.get_current_city_world(),
 			citizen_id,
 			WorldData.CITY_CITIZEN_TASK_SOURCE_PLAYER
 		)

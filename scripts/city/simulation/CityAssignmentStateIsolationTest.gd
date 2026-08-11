@@ -164,8 +164,8 @@ func _exercise_city(
 		return {}
 
 	var city_world := _make_world(32, 32, world_seed)
-	WorldData.official_city_world = city_world
-	WorldData.official_city_seed = world_seed
+	WorldPoliticalState.set_current_city_world(city_world)
+	WorldPoliticalState.set_current_city_seed(world_seed)
 	var house := CityObjectSystem.register_completed_city_object({
 		"object_type": WorldData.CITY_OBJECT_HOUSE,
 		"top_left": SHARED_HOUSE_TOP_LEFT,

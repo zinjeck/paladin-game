@@ -45,7 +45,7 @@ static func run_tick(
 	if minutes_advanced <= 0:
 		return
 
-	var city_world: WorldData = WorldData.official_city_world
+	var city_world: WorldData = WorldPoliticalState.get_current_city_world()
 
 	if city_world == null:
 		return
@@ -293,7 +293,7 @@ static func _release_task_for_normal_food(
 		released = (
 			CitizenHaulingSystemScript
 			.drop_citizen_haul_cargo_for_priority_interrupt(
-				WorldData.official_city_world,
+				WorldPoliticalState.get_current_city_world(),
 				citizen_id,
 				task_source
 			)
@@ -352,7 +352,7 @@ static func prepare_citizen_for_critical_food_interrupt(
 		)
 
 	return CitizenHaulingSystemScript.drop_citizen_haul_cargo_for_priority_interrupt(
-		WorldData.official_city_world,
+		WorldPoliticalState.get_current_city_world(),
 		citizen_id,
 		WorldData.CITY_CITIZEN_TASK_SOURCE_AUTONOMY
 	)
@@ -562,7 +562,7 @@ static func prepare_unemployed_citizen_for_priority_interrupt(
 	return (
 		CitizenHaulingSystemScript
 		.drop_citizen_haul_cargo_for_priority_interrupt(
-			WorldData.official_city_world,
+			WorldPoliticalState.get_current_city_world(),
 			citizen_id,
 			WorldData.CITY_CITIZEN_TASK_SOURCE_PLAYER
 		)

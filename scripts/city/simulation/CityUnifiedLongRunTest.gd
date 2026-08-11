@@ -762,7 +762,7 @@ func _citizen_can_reach_tiles(
 	if not raw_tile is Vector2i:
 		return false
 
-	var city_world: WorldData = WorldData.official_city_world
+	var city_world: WorldData = WorldPoliticalState.get_current_city_world()
 	var path_result := CityNavigationSystemScript.find_path_to_any_city_tile({
 		"city_world": city_world,
 		"start_tile": raw_tile,
@@ -829,7 +829,7 @@ func _prepare_deterministic_natural_targets(
 	maximum_count: int
 ) -> Array[Vector2i]:
 	var results: Array[Vector2i] = []
-	var city_world: WorldData = WorldData.official_city_world
+	var city_world: WorldData = WorldPoliticalState.get_current_city_world()
 	var feature := WorldData.CITY_SURFACE_FEATURE_TREE
 
 	if command_type == CityWorkSystem.CITY_PLAYER_COMMAND_TYPE_COLLECT_ROCK:

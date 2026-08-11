@@ -61,7 +61,7 @@ static func get_resource_source_evaluation(
 	var active_world = source_world
 
 	if active_world == null:
-		active_world = WorldData.official_city_world
+		active_world = WorldPoliticalState.get_current_city_world()
 
 	if active_world == null:
 		return evaluation
@@ -1014,7 +1014,7 @@ static func _get_output_capacity_in_batches(
 static func _find_workplace_overflow_tile(
 	city_object: Dictionary
 ) -> Vector2i:
-	var active_world = WorldData.official_city_world
+	var active_world = WorldPoliticalState.get_current_city_world()
 
 	if active_world == null or city_object.is_empty():
 		return WorldData.INVALID_CITY_TILE_POSITION

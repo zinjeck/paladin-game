@@ -58,8 +58,8 @@ func _test_equal_version_city_isolation() -> void:
 		"City A must become active."
 	)
 	var world_a := _make_world(24, 20, 95_101)
-	WorldData.official_city_world = world_a
-	WorldData.official_city_seed = 95_101
+	WorldPoliticalState.set_current_city_world(world_a)
+	WorldPoliticalState.set_current_city_seed(95_101)
 	var stockpile_a := _register_stockpile(world_a)
 	var stockpile_a_id := int(stockpile_a.get("id", -1))
 	_expect(
@@ -98,8 +98,8 @@ func _test_equal_version_city_isolation() -> void:
 		"City B must become active."
 	)
 	var world_b := _make_world(24, 20, 95_202)
-	WorldData.official_city_world = world_b
-	WorldData.official_city_seed = 95_202
+	WorldPoliticalState.set_current_city_world(world_b)
+	WorldPoliticalState.set_current_city_seed(95_202)
 	var stockpile_b := _register_stockpile(world_b)
 	var stockpile_b_id := int(stockpile_b.get("id", -1))
 	_expect(
