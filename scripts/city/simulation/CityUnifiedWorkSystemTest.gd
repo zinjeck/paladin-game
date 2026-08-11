@@ -103,7 +103,7 @@ func _test_roads_optimize_travel_time() -> void:
 
 	var direct_normal_cost := (
 		(destination_tile.x - start_tile.x)
-		* WorldData.CITY_CITIZEN_CARDINAL_MOVEMENT_COST
+		* CityCitizens.CITY_CITIZEN_CARDINAL_MOVEMENT_COST
 	)
 	_expect(
 		bool(result.get("success", false))
@@ -116,7 +116,7 @@ func _test_roads_optimize_travel_time() -> void:
 		CityNavigationSystem.get_city_citizen_movement_step_cost(
 			start_tile,
 			Vector2i(2, 3)
-		) == WorldData.CITY_CITIZEN_ROAD_CARDINAL_MOVEMENT_COST,
+		) == CityCitizens.CITY_CITIZEN_ROAD_CARDINAL_MOVEMENT_COST,
 		"Completed roads must halve cardinal movement cost."
 	)
 
@@ -176,7 +176,7 @@ func _test_large_destination_heuristic_is_admissible() -> void:
 		and destination_tiles.has(
 			result.get(
 				"destination_tile",
-				WorldData.INVALID_CITY_TILE_POSITION
+				CityCitizens.INVALID_CITY_TILE_POSITION
 			)
 		),
 		"Large destination routing must still return a real requested destination."
@@ -601,24 +601,24 @@ func _test_new_blueprint_rebalances_uncommitted_construction_travel() -> void:
 	_expect(
 		switched_to_near == 1
 		and str(left_after_near_blueprint.get("kind", ""))
-		== WorldData.CITY_CITIZEN_TASK_KIND_HAUL
+		== CityCitizens.CITY_CITIZEN_TASK_KIND_HAUL
 		and int(left_after_near_blueprint.get("work_order_id", -1))
 		== int(near_order.get("id", -2)),
 		"The left-side builder must switch and receive the nearby delivery in the same call."
 	)
 	_expect(
 		str(left_after_near_blueprint.get("phase", ""))
-		== WorldData.CITY_CITIZEN_TASK_PHASE_TRAVELING
+		== CityCitizens.CITY_CITIZEN_TASK_PHASE_TRAVELING
 		and str(left_after_near_haul.get("phase", ""))
-		== WorldData.CITY_CITIZEN_HAUL_PHASE_TRAVELING_TO_SOURCE
+		== CityCitizens.CITY_CITIZEN_HAUL_PHASE_TRAVELING_TO_SOURCE
 		and str(left_after_near_citizen.get("movement_state", ""))
-		== WorldData.CITY_CITIZEN_MOVEMENT_STATE_MOVING
+		== CityCitizens.CITY_CITIZEN_MOVEMENT_STATE_MOVING
 		and left_after_near_citizen.get(
 			"movement_destination_tile",
-			WorldData.INVALID_CITY_TILE_POSITION
+			CityCitizens.INVALID_CITY_TILE_POSITION
 		) == left_after_near_haul.get(
 			"source_tile",
-			WorldData.INVALID_CITY_TILE_POSITION
+			CityCitizens.INVALID_CITY_TILE_POSITION
 		),
 		"A redirected worker must begin the replacement route in the same simulation step."
 	)
@@ -671,7 +671,7 @@ func _test_new_blueprint_rebalances_uncommitted_construction_travel() -> void:
 
 	CityCitizenTaskRuntimeSystem.set_city_citizen_task_phase(
 		right_builder_id,
-		WorldData.CITY_CITIZEN_TASK_PHASE_BLOCKED
+		CityCitizens.CITY_CITIZEN_TASK_PHASE_BLOCKED
 	)
 	var blocked_switch_count := (
 		CityConstructionSystemScript
@@ -687,7 +687,7 @@ func _test_new_blueprint_rebalances_uncommitted_construction_travel() -> void:
 	_expect(
 		blocked_switch_count == 1
 		and str(right_after_blocked_switch.get("kind", ""))
-		!= WorldData.CITY_CITIZEN_TASK_KIND_NONE
+		!= CityCitizens.CITY_CITIZEN_TASK_KIND_NONE
 		and int(right_after_blocked_switch.get("work_order_id", -1))
 		== int(marginal_order.get("id", -2)),
 		"A blocked worker must switch to a reachable site immediately despite the normal distance threshold."
@@ -707,11 +707,11 @@ func _test_new_blueprint_rebalances_uncommitted_construction_travel() -> void:
 
 	CityCitizenTaskRuntimeSystem.set_city_citizen_task_phase(
 		right_builder_id,
-		WorldData.CITY_CITIZEN_TASK_PHASE_PERFORMING
+		CityCitizens.CITY_CITIZEN_TASK_PHASE_PERFORMING
 	)
 	CityCitizenTaskRuntimeSystem.set_city_citizen_task_phase(
 		second_left_builder_id,
-		WorldData.CITY_CITIZEN_TASK_PHASE_PERFORMING
+		CityCitizens.CITY_CITIZEN_TASK_PHASE_PERFORMING
 	)
 	var performing_task := _get_assignment_snapshot(right_builder_id)
 	var second_performing_task := _get_assignment_snapshot(
@@ -799,7 +799,7 @@ func _test_blocked_construction_worker_uses_reachable_existing_alternative() -> 
 	CityCitizenMovementRuntimeSystem.cancel_city_citizen_movement(citizen_id)
 	CityCitizenTaskRuntimeSystem.set_city_citizen_task_phase(
 		citizen_id,
-		WorldData.CITY_CITIZEN_TASK_PHASE_BLOCKED
+		CityCitizens.CITY_CITIZEN_TASK_PHASE_BLOCKED
 	)
 	var material_blocked_site := _create_material_blocked_site(
 		Vector2i(20, 4),
@@ -823,9 +823,9 @@ func _test_blocked_construction_worker_uses_reachable_existing_alternative() -> 
 		and int(reassigned_task.get("work_order_id", -1))
 		== int(alternative_order.get("id", -2))
 		and str(reassigned_task.get("phase", ""))
-		== WorldData.CITY_CITIZEN_TASK_PHASE_TRAVELING
+		== CityCitizens.CITY_CITIZEN_TASK_PHASE_TRAVELING
 		and str(reassigned_citizen.get("movement_state", ""))
-		== WorldData.CITY_CITIZEN_MOVEMENT_STATE_MOVING,
+		== CityCitizens.CITY_CITIZEN_MOVEMENT_STATE_MOVING,
 		"A blocked worker must choose a reachable existing construction alternative even when the new blueprint cannot start."
 	)
 
@@ -861,7 +861,7 @@ func _test_rebalance_preserves_active_construction_clearing() -> void:
 	var performing_task := CityCitizenTaskRuntimeSystem.get_city_citizen_current_task(citizen_id)
 	_expect(
 		str(performing_task.get("phase", ""))
-		== WorldData.CITY_CITIZEN_TASK_PHASE_PERFORMING,
+		== CityCitizens.CITY_CITIZEN_TASK_PHASE_PERFORMING,
 		"The construction clearer must cross the physical performing boundary."
 	)
 	var performing_snapshot := _get_assignment_snapshot(citizen_id)
@@ -1045,10 +1045,10 @@ func _test_workplace_fish_production_accounting() -> void:
 	WorkplaceProductionSystem.clear_resource_source_evaluation_cache()
 
 	var fishery := CityObjectSystem.add_city_object({
-		"object_type": WorldData.CITY_OBJECT_FISHING_GROUNDS,
+		"object_type": CityObjectCatalog.CITY_OBJECT_FISHING_GROUNDS,
 		"top_left": Vector2i(12, 8),
-		"size_tiles": WorldData.get_city_object_size_for_type(
-			WorldData.CITY_OBJECT_FISHING_GROUNDS
+		"size_tiles": CityObjectCatalog.get_city_object_size_for_type(
+			CityObjectCatalog.CITY_OBJECT_FISHING_GROUNDS
 		),
 		"object_owner": "player",
 		"city_world": city_world,
@@ -1069,8 +1069,8 @@ func _test_workplace_fish_production_accounting() -> void:
 	var worker := _add_citizen("Fish producer", access_tiles[0])
 	var worker_id := int(worker.get("id", -1))
 	var work_task := {
-		"kind": WorldData.CITY_CITIZEN_TASK_KIND_WORK,
-		"source": WorldData.CITY_CITIZEN_TASK_SOURCE_SCHEDULE,
+		"kind": CityCitizens.CITY_CITIZEN_TASK_KIND_WORK,
+		"source": CityCitizens.CITY_CITIZEN_TASK_SOURCE_SCHEDULE,
 		"priority": 50,
 		"target_object_id": fishery_id,
 	}
@@ -1080,7 +1080,7 @@ func _test_workplace_fish_production_accounting() -> void:
 		and CityCitizenTaskRuntimeSystem.assign_city_citizen_task(worker_id, work_task)
 		and CityCitizenTaskRuntimeSystem.set_city_citizen_task_phase(
 			worker_id,
-			WorldData.CITY_CITIZEN_TASK_PHASE_PERFORMING
+			CityCitizens.CITY_CITIZEN_TASK_PHASE_PERFORMING
 		),
 		"One assigned worker must be physically attending the Fishery."
 	)
@@ -1106,7 +1106,7 @@ func _test_workplace_fish_production_accounting() -> void:
 	WorkplaceProductionSystem.run_tick(1, 120)
 
 	fishery = CityObjectSystem.get_city_object_by_id(fishery_id)
-	var production_status := WorldData.get_city_object_production_status(
+	var production_status := CityObjectCatalog.get_city_object_production_status(
 		fishery
 	)
 	var cache_is_invalidated := (
@@ -1151,17 +1151,17 @@ func _test_workplace_fish_production_accounting() -> void:
 		"Production must invalidate and restamp owned totals without publishing a public-storage change."
 	)
 	_expect(
-		production_status == WorldData.WORKPLACE_PRODUCTION_STATUS_WORKING
-		and WorldData.is_valid_city_workplace_production_status(
+		production_status == CityObjectCatalog.WORKPLACE_PRODUCTION_STATUS_WORKING
+		and CityObjectCatalog.is_valid_city_workplace_production_status(
 			production_status
 		)
-		and WorldData.get_city_object_production_progress_work_units(
+		and CityObjectCatalog.get_city_object_production_progress_work_units(
 			fishery
 		) == 0
-		and WorldData.get_city_object_productive_worker_count(fishery) == 1
-		and WorldData.get_city_object_site_productivity_basis_points(
+		and CityObjectCatalog.get_city_object_productive_worker_count(fishery) == 1
+		and CityObjectCatalog.get_city_object_site_productivity_basis_points(
 			fishery
-		) == WorldData.PRODUCTIVITY_BASIS_POINTS_SCALE,
+		) == CityObjectCatalog.PRODUCTIVITY_BASIS_POINTS_SCALE,
 		"The completed batch must leave valid full-productivity working state."
 	)
 
@@ -1171,10 +1171,10 @@ func _test_household_and_public_food_reserve_targets() -> void:
 	var first := _add_citizen("Pantry first", Vector2i(8, 8))
 	var second := _add_citizen("Pantry second", Vector2i(9, 8))
 	var house := CityObjectSystem.add_city_object({
-		"object_type": WorldData.CITY_OBJECT_HOUSE,
+		"object_type": CityObjectCatalog.CITY_OBJECT_HOUSE,
 		"top_left": Vector2i(4, 4),
-		"size_tiles": WorldData.get_city_object_size_for_type(
-			WorldData.CITY_OBJECT_HOUSE
+		"size_tiles": CityObjectCatalog.get_city_object_size_for_type(
+			CityObjectCatalog.CITY_OBJECT_HOUSE
 		),
 		"object_owner": "player",
 		"city_world": city_world,
@@ -1205,10 +1205,10 @@ func _test_household_and_public_food_reserve_targets() -> void:
 	)
 
 	var stockpile := CityObjectSystem.add_city_object({
-		"object_type": WorldData.CITY_OBJECT_STOCKPILE,
+		"object_type": CityObjectCatalog.CITY_OBJECT_STOCKPILE,
 		"top_left": Vector2i(12, 6),
-		"size_tiles": WorldData.get_city_object_size_for_type(
-			WorldData.CITY_OBJECT_STOCKPILE
+		"size_tiles": CityObjectCatalog.get_city_object_size_for_type(
+			CityObjectCatalog.CITY_OBJECT_STOCKPILE
 		),
 		"object_owner": "player",
 		"city_world": city_world,
@@ -1289,11 +1289,11 @@ func _test_survival_food_fallback_and_reservation_accounting() -> void:
 	var second := _add_hungry_citizen("Second", Vector2i(8, 10))
 	var third := _add_hungry_citizen("Third", Vector2i(8, 11))
 	var fourth := _add_hungry_citizen("Fourth", Vector2i(8, 12))
-	var fishery_size := WorldData.get_city_object_size_for_type(
-		WorldData.CITY_OBJECT_FISHING_GROUNDS
+	var fishery_size := CityObjectCatalog.get_city_object_size_for_type(
+		CityObjectCatalog.CITY_OBJECT_FISHING_GROUNDS
 	)
 	var fishery := CityObjectSystem.add_city_object({
-		"object_type": WorldData.CITY_OBJECT_FISHING_GROUNDS,
+		"object_type": CityObjectCatalog.CITY_OBJECT_FISHING_GROUNDS,
 		"top_left": Vector2i(10, 9),
 		"size_tiles": fishery_size,
 		"object_owner": "player",
@@ -1325,7 +1325,7 @@ func _test_survival_food_fallback_and_reservation_accounting() -> void:
 	)
 	_expect(
 		str(first_match.get("source_kind", ""))
-		== WorldData.CITY_CITIZEN_HAUL_ENDPOINT_KIND_CITY_OBJECT_CONTAINER
+		== CityCitizens.CITY_CITIZEN_HAUL_ENDPOINT_KIND_CITY_OBJECT_CONTAINER
 		and int(first_match.get("source_id", -1)) == fishery_id,
 		"Survival food must prefer reachable workplace output over an ordinary ground pile."
 	)
@@ -1342,7 +1342,7 @@ func _test_survival_food_fallback_and_reservation_accounting() -> void:
 	)
 	_expect(
 		str(second_match.get("source_kind", ""))
-		== WorldData.CITY_CITIZEN_HAUL_ENDPOINT_KIND_GROUND_PILE
+		== CityCitizens.CITY_CITIZEN_HAUL_ENDPOINT_KIND_GROUND_PILE
 		and int(second_match.get("source_id", -1)) == pile_id,
 		"A competing reservation must make survival food fall back from workplace output to ground food."
 	)
@@ -1359,7 +1359,7 @@ func _test_survival_food_fallback_and_reservation_accounting() -> void:
 	)
 	_expect(
 		str(third_match.get("source_kind", ""))
-		== WorldData.CITY_CITIZEN_HAUL_ENDPOINT_KIND_GROUND_PILE
+		== CityCitizens.CITY_CITIZEN_HAUL_ENDPOINT_KIND_GROUND_PILE
 		and int(third_match.get("source_id", -1)) == pile_id,
 		"One-item allocation must leave the pile's second fish available to a third hungry citizen."
 	)
@@ -1391,8 +1391,8 @@ func _test_survival_food_fallback_and_reservation_accounting() -> void:
 func _test_unreachable_food_tier_does_not_hide_fallbacks() -> void:
 	var city_world := _reset_fixture()
 	var citizen := _add_hungry_citizen("Fallback", Vector2i(20, 10))
-	var stockpile_size := WorldData.get_city_object_size_for_type(
-		WorldData.CITY_OBJECT_STOCKPILE
+	var stockpile_size := CityObjectCatalog.get_city_object_size_for_type(
+		CityObjectCatalog.CITY_OBJECT_STOCKPILE
 	)
 	var stockpile_positions: Array[Vector2i] = [
 		Vector2i(1, 2),
@@ -1407,7 +1407,7 @@ func _test_unreachable_food_tier_does_not_hide_fallbacks() -> void:
 
 	for top_left in stockpile_positions:
 		var stockpile := CityObjectSystem.add_city_object({
-			"object_type": WorldData.CITY_OBJECT_STOCKPILE,
+			"object_type": CityObjectCatalog.CITY_OBJECT_STOCKPILE,
 			"top_left": top_left,
 			"size_tiles": stockpile_size,
 			"object_owner": "player",
@@ -1422,11 +1422,11 @@ func _test_unreachable_food_tier_does_not_hide_fallbacks() -> void:
 			"Every isolated stockpile must contain tempting but unreachable food."
 		)
 
-	var fishery_size := WorldData.get_city_object_size_for_type(
-		WorldData.CITY_OBJECT_FISHING_GROUNDS
+	var fishery_size := CityObjectCatalog.get_city_object_size_for_type(
+		CityObjectCatalog.CITY_OBJECT_FISHING_GROUNDS
 	)
 	var fishery := CityObjectSystem.add_city_object({
-		"object_type": WorldData.CITY_OBJECT_FISHING_GROUNDS,
+		"object_type": CityObjectCatalog.CITY_OBJECT_FISHING_GROUNDS,
 		"top_left": Vector2i(23, 8),
 		"size_tiles": fishery_size,
 		"object_owner": "player",
@@ -1509,7 +1509,7 @@ func _test_unreachable_food_tier_does_not_hide_fallbacks() -> void:
 	)
 	_expect(
 		str(survival_ground_match.get("source_kind", ""))
-		== WorldData.CITY_CITIZEN_HAUL_ENDPOINT_KIND_GROUND_PILE
+		== CityCitizens.CITY_CITIZEN_HAUL_ENDPOINT_KIND_GROUND_PILE
 		and int(survival_ground_match.get("source_id", -1)) == pile_id,
 		"Unreachable storage and empty workplaces must not hide reachable ground food."
 	)
@@ -1524,7 +1524,7 @@ func _test_unreachable_food_tier_does_not_hide_fallbacks() -> void:
 	)
 	_expect(
 		str(household_ground_match.get("endpoint", {}).get("kind", ""))
-		== WorldData.CITY_CITIZEN_HAUL_ENDPOINT_KIND_GROUND_PILE
+		== CityCitizens.CITY_CITIZEN_HAUL_ENDPOINT_KIND_GROUND_PILE
 		and int(
 			household_ground_match.get("endpoint", {}).get("id", -1)
 		) == pile_id,
@@ -1554,31 +1554,31 @@ func _test_unified_food_search_avoids_budget_starvation() -> void:
 	var first_id := int(first.get("id", -1))
 	var second_id := int(second.get("id", -1))
 	var house := CityObjectSystem.add_city_object({
-		"object_type": WorldData.CITY_OBJECT_HOUSE,
+		"object_type": CityObjectCatalog.CITY_OBJECT_HOUSE,
 		"top_left": Vector2i(7, 2),
-		"size_tiles": WorldData.get_city_object_size_for_type(WorldData.CITY_OBJECT_HOUSE),
+		"size_tiles": CityObjectCatalog.get_city_object_size_for_type(CityObjectCatalog.CITY_OBJECT_HOUSE),
 		"object_owner": "player",
 		"city_world": city_world,
 	})
 	var stockpile := CityObjectSystem.add_city_object({
-		"object_type": WorldData.CITY_OBJECT_STOCKPILE,
+		"object_type": CityObjectCatalog.CITY_OBJECT_STOCKPILE,
 		"top_left": Vector2i(11, 2),
-		"size_tiles": WorldData.get_city_object_size_for_type(WorldData.CITY_OBJECT_STOCKPILE),
+		"size_tiles": CityObjectCatalog.get_city_object_size_for_type(CityObjectCatalog.CITY_OBJECT_STOCKPILE),
 		"object_owner": "player",
 		"city_world": city_world,
 	})
 	var keep := CityObjectSystem.add_city_object({
-		"object_type": WorldData.CITY_OBJECT_CITY_CENTER,
+		"object_type": CityObjectCatalog.CITY_OBJECT_CITY_CENTER,
 		"top_left": Vector2i(15, 1),
-		"size_tiles": WorldData.get_city_object_size_for_type(WorldData.CITY_OBJECT_CITY_CENTER),
+		"size_tiles": CityObjectCatalog.get_city_object_size_for_type(CityObjectCatalog.CITY_OBJECT_CITY_CENTER),
 		"object_owner": "player",
 		"city_world": city_world,
 	})
 	var fishery := CityObjectSystem.add_city_object({
-		"object_type": WorldData.CITY_OBJECT_FISHING_GROUNDS,
+		"object_type": CityObjectCatalog.CITY_OBJECT_FISHING_GROUNDS,
 		"top_left": Vector2i(21, 2),
-		"size_tiles": WorldData.get_city_object_size_for_type(
-			WorldData.CITY_OBJECT_FISHING_GROUNDS
+		"size_tiles": CityObjectCatalog.get_city_object_size_for_type(
+			CityObjectCatalog.CITY_OBJECT_FISHING_GROUNDS
 		),
 		"object_owner": "player",
 		"city_world": city_world,
@@ -1646,7 +1646,7 @@ func _test_unified_food_search_avoids_budget_starvation() -> void:
 	)
 	_expect(
 		str(second_probe.get("source_kind", ""))
-		== WorldData.CITY_CITIZEN_HAUL_ENDPOINT_KIND_GROUND_PILE
+		== CityCitizens.CITY_CITIZEN_HAUL_ENDPOINT_KIND_GROUND_PILE
 		and int(second_probe.get("source_id", -1)) == pile_id
 		and int(second_probe.get("path_requests_used", 0)) == 1,
 		"A reachable later citizen must find ground food without tier-budget starvation."
@@ -1657,9 +1657,9 @@ func _test_unified_food_search_avoids_budget_starvation() -> void:
 	var second_task := CityCitizenTaskRuntimeSystem.get_city_citizen_current_task(second_id)
 	_expect(
 		str(CityCitizenTaskRuntimeSystem.get_city_citizen_current_task(first_id).get("kind", ""))
-		== WorldData.CITY_CITIZEN_TASK_KIND_NONE
+		== CityCitizens.CITY_CITIZEN_TASK_KIND_NONE
 		and str(second_task.get("kind", ""))
-		== WorldData.CITY_CITIZEN_TASK_KIND_ACQUIRE_FOOD
+		== CityCitizens.CITY_CITIZEN_TASK_KIND_ACQUIRE_FOOD
 		and int(second_task.get("target_object_id", -1)) == pile_id,
 		"The shared critical-food budget must reach the later citizen in the same pass."
 	)
@@ -1667,7 +1667,7 @@ func _test_unified_food_search_avoids_budget_starvation() -> void:
 	_expect(
 		CityCitizenTaskRuntimeSystem.clear_city_citizen_task(
 			second_id,
-			WorldData.CITY_CITIZEN_TASK_SOURCE_AUTONOMY
+			CityCitizens.CITY_CITIZEN_TASK_SOURCE_AUTONOMY
 		),
 		"The fixture must release the critical food reservation before normal seeking."
 	)
@@ -1677,7 +1677,7 @@ func _test_unified_food_search_avoids_budget_starvation() -> void:
 	second_task = CityCitizenTaskRuntimeSystem.get_city_citizen_current_task(second_id)
 	_expect(
 		str(second_task.get("kind", ""))
-		== WorldData.CITY_CITIZEN_TASK_KIND_ACQUIRE_FOOD
+		== CityCitizens.CITY_CITIZEN_TASK_KIND_ACQUIRE_FOOD
 		and int(second_task.get("target_object_id", -1)) == pile_id,
 		"The shared normal-food budget must also reach the later citizen immediately."
 	)
@@ -1687,11 +1687,11 @@ func _test_full_storage_construction_relocation_and_cancel_preview() -> void:
 	var city_world := _reset_fixture()
 	var citizen := _add_citizen("Relocator", Vector2i(13, 14))
 	var citizen_id := int(citizen.get("id", -1))
-	var stockpile_size := WorldData.get_city_object_size_for_type(
-		WorldData.CITY_OBJECT_STOCKPILE
+	var stockpile_size := CityObjectCatalog.get_city_object_size_for_type(
+		CityObjectCatalog.CITY_OBJECT_STOCKPILE
 	)
 	var stockpile := CityObjectSystem.add_city_object({
-		"object_type": WorldData.CITY_OBJECT_STOCKPILE,
+		"object_type": CityObjectCatalog.CITY_OBJECT_STOCKPILE,
 		"top_left": Vector2i(2, 2),
 		"size_tiles": stockpile_size,
 		"object_owner": "player",
@@ -1710,11 +1710,11 @@ func _test_full_storage_construction_relocation_and_cancel_preview() -> void:
 		"The relocation fixture must make public storage genuinely full."
 	)
 
-	var house_size := WorldData.get_city_object_size_for_type(
-		WorldData.CITY_OBJECT_HOUSE
+	var house_size := CityObjectCatalog.get_city_object_size_for_type(
+		CityObjectCatalog.CITY_OBJECT_HOUSE
 	)
 	var house_site := CityConstructionSystemScript.create_rectangular_site({
-		"object_type": WorldData.CITY_OBJECT_HOUSE,
+		"object_type": CityObjectCatalog.CITY_OBJECT_HOUSE,
 		"top_left": Vector2i(15, 14),
 		"size_tiles": house_size,
 		"object_owner": "player",
@@ -1830,13 +1830,13 @@ func _test_full_storage_construction_relocation_and_cancel_preview() -> void:
 
 func _test_construction_labor_balance() -> void:
 	var expected_building_minutes := {
-		WorldData.CITY_OBJECT_HOUSE: 135,
-		WorldData.CITY_OBJECT_STOCKPILE: 90,
-		WorldData.CITY_OBJECT_FISHING_GROUNDS: 180,
+		CityObjectCatalog.CITY_OBJECT_HOUSE: 135,
+		CityObjectCatalog.CITY_OBJECT_STOCKPILE: 90,
+		CityObjectCatalog.CITY_OBJECT_FISHING_GROUNDS: 180,
 	}
 
 	for object_type in expected_building_minutes.keys():
-		var definition := WorldData.get_city_object_definition(
+		var definition := CityObjectCatalog.get_city_object_definition(
 			str(object_type)
 		)
 		_expect(
@@ -1845,8 +1845,8 @@ func _test_construction_labor_balance() -> void:
 			"Building hammer-and-nails labor must retain its faster balance value."
 		)
 
-	var road_definition := WorldData.get_city_object_definition(
-		WorldData.CITY_OBJECT_ROAD
+	var road_definition := CityObjectCatalog.get_city_object_definition(
+		CityObjectCatalog.CITY_OBJECT_ROAD
 	)
 	_expect(
 		int(road_definition.get("construction_labor_minutes", -1)) == 8
@@ -1892,8 +1892,8 @@ func _test_safe_boundary_and_cancellation_preserve_physical_cargo() -> void:
 	var assigned := CityCitizenTaskRuntimeSystem.assign_city_citizen_task(
 		citizen_id,
 		{
-			"kind": WorldData.CITY_CITIZEN_TASK_KIND_HAUL,
-			"source": WorldData.CITY_CITIZEN_TASK_SOURCE_PLAYER,
+			"kind": CityCitizens.CITY_CITIZEN_TASK_KIND_HAUL,
+			"source": CityCitizens.CITY_CITIZEN_TASK_SOURCE_PLAYER,
 			"priority": CityConstructionSystem.CITY_CONSTRUCTION_TASK_PRIORITY,
 			"target_object_id": source_id,
 			"haul": {
@@ -1903,17 +1903,17 @@ func _test_safe_boundary_and_cancellation_preserve_physical_cargo() -> void:
 				"resource_type": WorldData.RESOURCE_STONE,
 				"requested_amount": 2,
 				"reason": (
-					WorldData.CITY_CITIZEN_HAUL_REASON_CONSTRUCTION_DELIVERY
+					CityCitizens.CITY_CITIZEN_HAUL_REASON_CONSTRUCTION_DELIVERY
 				),
 				"source_access_purpose": (
-					WorldData.CONTAINER_HAUL_PURPOSE_CONSTRUCTION
+					CityObjectCatalog.CONTAINER_HAUL_PURPOSE_CONSTRUCTION
 				),
 				"destination_access_purpose": (
-					WorldData.CONTAINER_HAUL_PURPOSE_CONSTRUCTION
+					CityObjectCatalog.CONTAINER_HAUL_PURPOSE_CONSTRUCTION
 				),
-				"phase": WorldData.CITY_CITIZEN_HAUL_PHASE_RETARGETING,
+				"phase": CityCitizens.CITY_CITIZEN_HAUL_PHASE_RETARGETING,
 				"source_tile": Vector2i(7, 7),
-				"destination_tile": WorldData.INVALID_CITY_TILE_POSITION,
+				"destination_tile": CityCitizens.INVALID_CITY_TILE_POSITION,
 			},
 		}
 	)
@@ -1962,11 +1962,11 @@ func _test_cargo_ready_demand_preempts_soft_claim() -> void:
 	var claimant := _add_citizen("Soft claimant", Vector2i(24, 11))
 	var carrier_id := int(carrier.get("id", -1))
 	var claimant_id := int(claimant.get("id", -1))
-	var keep_size := WorldData.get_city_object_size_for_type(
-		WorldData.CITY_OBJECT_CITY_CENTER
+	var keep_size := CityObjectCatalog.get_city_object_size_for_type(
+		CityObjectCatalog.CITY_OBJECT_CITY_CENTER
 	)
-	var house_size := WorldData.get_city_object_size_for_type(
-		WorldData.CITY_OBJECT_HOUSE
+	var house_size := CityObjectCatalog.get_city_object_size_for_type(
+		CityObjectCatalog.CITY_OBJECT_HOUSE
 	)
 
 	for tile_position in (
@@ -1986,7 +1986,7 @@ func _test_cargo_ready_demand_preempts_soft_claim() -> void:
 		).erase("surface_feature")
 
 	var keep := CityObjectSystem.add_city_object({
-		"object_type": WorldData.CITY_OBJECT_CITY_CENTER,
+		"object_type": CityObjectCatalog.CITY_OBJECT_CITY_CENTER,
 		"top_left": Vector2i(2, 2),
 		"size_tiles": keep_size,
 		"object_owner": "player",
@@ -1997,7 +1997,7 @@ func _test_cargo_ready_demand_preempts_soft_claim() -> void:
 		keep_id
 	)
 	var house_site := CityConstructionSystemScript.create_rectangular_site({
-		"object_type": WorldData.CITY_OBJECT_HOUSE,
+		"object_type": CityObjectCatalog.CITY_OBJECT_HOUSE,
 		"top_left": Vector2i(12, 9),
 		"size_tiles": house_size,
 		"object_owner": "player",
@@ -2031,8 +2031,8 @@ func _test_cargo_ready_demand_preempts_soft_claim() -> void:
 	var soft_task_assigned := CityCitizenTaskRuntimeSystem.assign_city_citizen_task(
 		claimant_id,
 		{
-			"kind": WorldData.CITY_CITIZEN_TASK_KIND_HAUL,
-			"source": WorldData.CITY_CITIZEN_TASK_SOURCE_PLAYER,
+			"kind": CityCitizens.CITY_CITIZEN_TASK_KIND_HAUL,
+			"source": CityCitizens.CITY_CITIZEN_TASK_SOURCE_PLAYER,
 			"priority": CityConstructionSystem.CITY_CONSTRUCTION_TASK_PRIORITY,
 			"target_object_id": source_id,
 			"haul": {
@@ -2042,15 +2042,15 @@ func _test_cargo_ready_demand_preempts_soft_claim() -> void:
 				"resource_type": WorldData.RESOURCE_STONE,
 				"requested_amount": 4,
 				"reason": (
-					WorldData.CITY_CITIZEN_HAUL_REASON_CONSTRUCTION_DELIVERY
+					CityCitizens.CITY_CITIZEN_HAUL_REASON_CONSTRUCTION_DELIVERY
 				),
 				"source_access_purpose": (
-					WorldData.CONTAINER_HAUL_PURPOSE_CONSTRUCTION
+					CityObjectCatalog.CONTAINER_HAUL_PURPOSE_CONSTRUCTION
 				),
 				"destination_access_purpose": (
-					WorldData.CONTAINER_HAUL_PURPOSE_CONSTRUCTION
+					CityObjectCatalog.CONTAINER_HAUL_PURPOSE_CONSTRUCTION
 				),
-				"phase": WorldData.CITY_CITIZEN_HAUL_PHASE_PENDING_SOURCE,
+				"phase": CityCitizens.CITY_CITIZEN_HAUL_PHASE_PENDING_SOURCE,
 				"source_tile": Vector2i(24, 10),
 				"destination_tile": Vector2i(11, 10),
 			},
@@ -2080,8 +2080,8 @@ func _test_cargo_ready_demand_preempts_soft_claim() -> void:
 	var carrier_task_assigned := CityCitizenTaskRuntimeSystem.assign_city_citizen_task(
 		carrier_id,
 		{
-			"kind": WorldData.CITY_CITIZEN_TASK_KIND_HAUL,
-			"source": WorldData.CITY_CITIZEN_TASK_SOURCE_AUTONOMY,
+			"kind": CityCitizens.CITY_CITIZEN_TASK_KIND_HAUL,
+			"source": CityCitizens.CITY_CITIZEN_TASK_SOURCE_AUTONOMY,
 			"priority": 90,
 			"target_object_id": source_id,
 			"haul": {
@@ -2091,16 +2091,16 @@ func _test_cargo_ready_demand_preempts_soft_claim() -> void:
 				"resource_type": WorldData.RESOURCE_STONE,
 				"requested_amount": 4,
 				"reason": (
-					WorldData.CITY_CITIZEN_HAUL_REASON_GROUND_PILE_CLEANUP
+					CityCitizens.CITY_CITIZEN_HAUL_REASON_GROUND_PILE_CLEANUP
 				),
 				"source_access_purpose": (
-					WorldData.CONTAINER_HAUL_PURPOSE_GROUND_PILE_CLEANUP
+					CityObjectCatalog.CONTAINER_HAUL_PURPOSE_GROUND_PILE_CLEANUP
 				),
 				"destination_access_purpose": (
-					WorldData.CONTAINER_HAUL_PURPOSE_PUBLIC_STORAGE
+					CityObjectCatalog.CONTAINER_HAUL_PURPOSE_PUBLIC_STORAGE
 				),
 				"phase": (
-					WorldData.CITY_CITIZEN_HAUL_PHASE_PENDING_DESTINATION
+					CityCitizens.CITY_CITIZEN_HAUL_PHASE_PENDING_DESTINATION
 				),
 				"source_tile": Vector2i(6, 10),
 				"destination_tile": Vector2i(5, 4),
@@ -2146,9 +2146,9 @@ func _test_cargo_ready_demand_preempts_soft_claim() -> void:
 		and str(
 			final_reservation.get(
 				"destination_access_purpose",
-				WorldData.CONTAINER_HAUL_PURPOSE_NONE
+				CityObjectCatalog.CONTAINER_HAUL_PURPOSE_NONE
 			)
-		) == WorldData.CONTAINER_HAUL_PURPOSE_CONSTRUCTION,
+		) == CityObjectCatalog.CONTAINER_HAUL_PURPOSE_CONSTRUCTION,
 		"Cargo already in hand must reroute from passive storage to the compatible player-command demand."
 	)
 	_expect(
@@ -2159,7 +2159,7 @@ func _test_cargo_ready_demand_preempts_soft_claim() -> void:
 			CityCitizenTaskRuntimeSystem.get_city_citizen_current_task(
 				claimant_id
 			).get("kind", "")
-		) == WorldData.CITY_CITIZEN_TASK_KIND_NONE,
+		) == CityCitizens.CITY_CITIZEN_TASK_KIND_NONE,
 		"The ready carrier must displace the other citizen's unpicked claim without duplicating the delivery."
 	)
 	_expect(
@@ -2243,10 +2243,10 @@ func _test_off_shift_homeless_idle_wander() -> void:
 	var city_world := _reset_fixture()
 	CitizenDecisionSystemScript.reset_runtime_state()
 	var keep := CityObjectSystem.add_city_object({
-		"object_type": WorldData.CITY_OBJECT_CITY_CENTER,
+		"object_type": CityObjectCatalog.CITY_OBJECT_CITY_CENTER,
 		"top_left": Vector2i(2, 2),
-		"size_tiles": WorldData.get_city_object_size_for_type(
-			WorldData.CITY_OBJECT_CITY_CENTER
+		"size_tiles": CityObjectCatalog.get_city_object_size_for_type(
+			CityObjectCatalog.CITY_OBJECT_CITY_CENTER
 		),
 		"object_owner": "player",
 		"city_world": city_world,
@@ -2263,10 +2263,10 @@ func _test_off_shift_homeless_idle_wander() -> void:
 	var citizen := _add_citizen("Off Shift Wanderer", starting_tile)
 	var citizen_id := int(citizen.get("id", -1))
 	var fishery := CityObjectSystem.add_city_object({
-		"object_type": WorldData.CITY_OBJECT_FISHING_GROUNDS,
+		"object_type": CityObjectCatalog.CITY_OBJECT_FISHING_GROUNDS,
 		"top_left": Vector2i(21, 14),
-		"size_tiles": WorldData.get_city_object_size_for_type(
-			WorldData.CITY_OBJECT_FISHING_GROUNDS
+		"size_tiles": CityObjectCatalog.get_city_object_size_for_type(
+			CityObjectCatalog.CITY_OBJECT_FISHING_GROUNDS
 		),
 		"object_owner": "player",
 		"city_world": city_world,
@@ -2304,7 +2304,7 @@ func _test_off_shift_homeless_idle_wander() -> void:
 
 		if (
 			str(citizen.get("movement_state", ""))
-			== WorldData.CITY_CITIZEN_MOVEMENT_STATE_MOVING
+			== CityCitizens.CITY_CITIZEN_MOVEMENT_STATE_MOVING
 		):
 			movement_was_assigned = true
 			break
@@ -2320,7 +2320,7 @@ func _test_off_shift_homeless_idle_wander() -> void:
 				"kind",
 				""
 			)
-		) == WorldData.CITY_CITIZEN_TASK_KIND_NONE
+		) == CityCitizens.CITY_CITIZEN_TASK_KIND_NONE
 		and CityCitizenInventorySystem.get_city_citizen_haul_cargo_amount(citizen_id) == 0,
 		"Idle wandering must preserve the Fishery job without creating a task or cargo."
 	)
@@ -2358,9 +2358,9 @@ func _test_off_shift_homeless_idle_wander() -> void:
 				"kind",
 				""
 			)
-		) == WorldData.CITY_CITIZEN_TASK_KIND_WORK
+		) == CityCitizens.CITY_CITIZEN_TASK_KIND_WORK
 		and str(citizen.get("movement_state", ""))
-		== WorldData.CITY_CITIZEN_MOVEMENT_STATE_IDLE,
+		== CityCitizens.CITY_CITIZEN_MOVEMENT_STATE_IDLE,
 		"The 08:00 work schedule must immediately replace idle movement."
 	)
 
@@ -2391,10 +2391,10 @@ func _reset_fixture() -> WorldData:
 
 func _add_citizen(_display_name: String, tile_position: Vector2i) -> Dictionary:
 	# An empty name requests the normal deterministic sex-specific pool entry.
-	return WorldData.add_city_citizen(
+	return CityCitizenRegistrySystem.add_city_citizen(
 		"",
 		tile_position,
-		WorldData.CITY_CITIZEN_SEX_FEMALE,
+		CityCitizens.CITY_CITIZEN_SEX_FEMALE,
 		test_culture_id
 	)
 
@@ -2416,13 +2416,13 @@ func _assign_food_match(citizen_id: int, match_result: Dictionary) -> bool:
 	return CityCitizenTaskRuntimeSystem.assign_city_citizen_task(
 		citizen_id,
 		{
-			"kind": WorldData.CITY_CITIZEN_TASK_KIND_ACQUIRE_FOOD,
-			"source": WorldData.CITY_CITIZEN_TASK_SOURCE_AUTONOMY,
+			"kind": CityCitizens.CITY_CITIZEN_TASK_KIND_ACQUIRE_FOOD,
+			"source": CityCitizens.CITY_CITIZEN_TASK_SOURCE_AUTONOMY,
 			"priority": NORMAL_FOOD_TASK_PRIORITY,
 			"target_object_id": int(match_result.get("source_id", -1)),
 			"target_tile": match_result.get(
 				"target_tile",
-				WorldData.INVALID_CITY_TILE_POSITION
+				CityCitizens.INVALID_CITY_TILE_POSITION
 			),
 			"food_resource_type": str(
 				match_result.get("resource_type", WorldData.RESOURCE_NONE)
@@ -2433,11 +2433,11 @@ func _assign_food_match(citizen_id: int, match_result: Dictionary) -> bool:
 			"food_source_endpoint_kind": str(
 				match_result.get(
 					"source_kind",
-					WorldData.CITY_CITIZEN_HAUL_ENDPOINT_KIND_NONE
+					CityCitizens.CITY_CITIZEN_HAUL_ENDPOINT_KIND_NONE
 				)
 			),
 			"food_source_access_purpose": (
-				WorldData.CONTAINER_DIRECT_WITHDRAWAL_PURPOSE_PERSONAL_FOOD
+				CityObjectCatalog.CONTAINER_DIRECT_WITHDRAWAL_PURPOSE_PERSONAL_FOOD
 			),
 		}
 	)
@@ -2457,8 +2457,8 @@ func _create_material_blocked_site(
 ) -> Dictionary:
 	var site := CityConstructionSystemScript.create_city_construction_site({
 		"target_kind": CityConstructionSystem.CITY_CONSTRUCTION_TARGET_NEW,
-		"object_type": WorldData.CITY_OBJECT_ROAD,
-		"shape_mode": WorldData.CITY_OBJECT_SHAPE_TILE_AREA,
+		"object_type": CityObjectCatalog.CITY_OBJECT_ROAD,
+		"shape_mode": CityObjectCatalog.CITY_OBJECT_SHAPE_TILE_AREA,
 		"top_left": tile_position,
 		"size": Vector2i.ONE,
 		"footprint_tiles": [tile_position],
@@ -2497,8 +2497,8 @@ func _create_ready_labor_site(
 
 	var site := CityConstructionSystemScript.create_city_construction_site({
 		"target_kind": CityConstructionSystem.CITY_CONSTRUCTION_TARGET_NEW,
-		"object_type": WorldData.CITY_OBJECT_ROAD,
-		"shape_mode": WorldData.CITY_OBJECT_SHAPE_TILE_AREA,
+		"object_type": CityObjectCatalog.CITY_OBJECT_ROAD,
+		"shape_mode": CityObjectCatalog.CITY_OBJECT_SHAPE_TILE_AREA,
 		"top_left": top_left,
 		"size": bottom_right - top_left + Vector2i.ONE,
 		"footprint_tiles": footprint_tiles,
@@ -2529,7 +2529,7 @@ func _get_assignment_snapshot(citizen_id: int) -> Dictionary:
 		"movement_path_index": int(citizen.get("movement_path_index", 0)),
 		"movement_destination_tile": citizen.get(
 			"movement_destination_tile",
-			WorldData.INVALID_CITY_TILE_POSITION
+			CityCitizens.INVALID_CITY_TILE_POSITION
 		),
 	}
 

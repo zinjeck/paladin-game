@@ -18,19 +18,19 @@ static func get_resource_source_evaluation(
 	var evaluation := _make_empty_resource_source_evaluation(
 		city_object
 	)
-	var policy := WorldData.get_city_object_resource_source_policy(
+	var policy := CityObjectCatalog.get_city_object_resource_source_policy(
 		city_object
 	)
 	var mode := str(
 		policy.get(
 			"mode",
-			WorldData.WORKPLACE_RESOURCE_SOURCE_MODE_NONE
+			CityObjectCatalog.WORKPLACE_RESOURCE_SOURCE_MODE_NONE
 		)
 	)
 
 	if (
 		mode
-		!= WorldData.WORKPLACE_RESOURCE_SOURCE_MODE_FOOTPRINT_REACH
+		!= CityObjectCatalog.WORKPLACE_RESOURCE_SOURCE_MODE_FOOTPRINT_REACH
 	):
 		return evaluation
 
@@ -138,7 +138,7 @@ static func get_resource_source_evaluation(
 		density_basis_points = int(
 			round(
 				float(resource_tile_count)
-				* float(WorldData.PRODUCTIVITY_BASIS_POINTS_SCALE)
+				* float(CityObjectCatalog.PRODUCTIVITY_BASIS_POINTS_SCALE)
 				/ float(zone_tile_count)
 			)
 		)
@@ -147,13 +147,13 @@ static func get_resource_source_evaluation(
 		int(
 			round(
 				float(density_basis_points)
-				* float(WorldData.PRODUCTIVITY_BASIS_POINTS_SCALE)
+				* float(CityObjectCatalog.PRODUCTIVITY_BASIS_POINTS_SCALE)
 				/ float(
 					source_density_for_full_productivity_basis_points
 				)
 			)
 		),
-		WorldData.PRODUCTIVITY_BASIS_POINTS_SCALE
+		CityObjectCatalog.PRODUCTIVITY_BASIS_POINTS_SCALE
 	)
 
 	evaluation["zone_tiles"] = zone_tiles
@@ -230,7 +230,7 @@ static func get_current_site_productivity_basis_points(
 			0
 		)
 
-	return WorldData.get_city_object_site_productivity_basis_points(
+	return CityObjectCatalog.get_city_object_site_productivity_basis_points(
 		city_object
 	)
 
@@ -242,7 +242,7 @@ static func _make_empty_resource_source_evaluation(
 		"is_configured": false,
 		"is_supported": false,
 		"uses_environmental_source": false,
-		"mode": WorldData.WORKPLACE_RESOURCE_SOURCE_MODE_NONE,
+		"mode": CityObjectCatalog.WORKPLACE_RESOURCE_SOURCE_MODE_NONE,
 		"resource_type": WorldData.RESOURCE_NONE,
 		"source_resource": WorldData.RESOURCE_NONE,
 		"reach_tiles": 0,
@@ -262,7 +262,7 @@ static func _make_empty_resource_source_evaluation(
 		"density_basis_points": 0,
 		"source_density_basis_points": 0,
 		"site_productivity_basis_points": (
-			WorldData.get_city_object_site_productivity_basis_points(
+			CityObjectCatalog.get_city_object_site_productivity_basis_points(
 				city_object
 			)
 		),
@@ -422,7 +422,7 @@ static func get_estimated_output_per_hour(
 	if resource == WorldData.RESOURCE_NONE:
 		return 0.0
 
-	var recipe := WorldData.get_city_object_production_recipe(
+	var recipe := CityObjectCatalog.get_city_object_production_recipe(
 		city_object
 	)
 	var raw_work_units_per_batch = recipe.get(
@@ -452,7 +452,7 @@ static func get_estimated_output_per_hour(
 		return 0.0
 
 	var productive_worker_count := (
-		WorldData.get_city_object_productive_worker_count(
+		CityObjectCatalog.get_city_object_productive_worker_count(
 			city_object
 		)
 	)
@@ -475,7 +475,7 @@ static func get_estimated_output_per_hour(
 			* WORK_UNITS_PER_WORKER_MINUTE
 		)
 		* float(site_productivity)
-		/ float(WorldData.PRODUCTIVITY_BASIS_POINTS_SCALE)
+		/ float(CityObjectCatalog.PRODUCTIVITY_BASIS_POINTS_SCALE)
 	)
 
 	var completed_batches_per_hour := (
@@ -504,10 +504,10 @@ static func run_tick(
 
 		var city_object: Dictionary = raw_city_object
 
-		if not WorldData.city_object_is_workplace(city_object):
+		if not CityObjectCatalog.city_object_is_workplace(city_object):
 			continue
 
-		var recipe := WorldData.get_city_object_production_recipe(
+		var recipe := CityObjectCatalog.get_city_object_production_recipe(
 			city_object
 		)
 
@@ -559,7 +559,7 @@ static func _make_workplace_tick_context(
 		return {}
 
 	var current_progress := (
-		WorldData.get_city_object_production_progress_work_units(
+		CityObjectCatalog.get_city_object_production_progress_work_units(
 			city_object
 		)
 	)
@@ -568,7 +568,7 @@ static func _make_workplace_tick_context(
 		source_evaluation.get("uses_environmental_source", false)
 	)
 	var site_productivity := (
-		WorldData.get_city_object_site_productivity_basis_points(
+		CityObjectCatalog.get_city_object_site_productivity_basis_points(
 			city_object
 		)
 	)
@@ -623,7 +623,7 @@ static func _prepare_workplace_tick_recipe(
 			"object_id": object_id,
 			"progress_work_units": 0,
 			"production_status": (
-				WorldData.WORKPLACE_PRODUCTION_STATUS_INACTIVE
+				CityObjectCatalog.WORKPLACE_PRODUCTION_STATUS_INACTIVE
 			),
 			"productive_worker_count": productive_worker_count,
 			"site_productivity_basis_points": site_productivity,
@@ -657,7 +657,7 @@ static func _workplace_tick_is_blocked(
 			"object_id": object_id,
 			"progress_work_units": current_progress,
 			"production_status": (
-				WorldData.WORKPLACE_PRODUCTION_STATUS_IDLE_NO_WORKERS
+				CityObjectCatalog.WORKPLACE_PRODUCTION_STATUS_IDLE_NO_WORKERS
 			),
 			"productive_worker_count": 0,
 			"site_productivity_basis_points": site_productivity,
@@ -696,7 +696,7 @@ static func _workplace_tick_is_blocked(
 		city_object,
 		outputs
 	)
-	var overflow_tile := WorldData.INVALID_CITY_TILE_POSITION
+	var overflow_tile := CityCitizens.INVALID_CITY_TILE_POSITION
 	var can_overflow := false
 
 	# Do not search footprint rings or run pathfinding while ordinary output
@@ -706,7 +706,7 @@ static func _workplace_tick_is_blocked(
 	if output_capacity_in_batches <= 0:
 		overflow_tile = _find_workplace_overflow_tile(city_object)
 		can_overflow = (
-			overflow_tile != WorldData.INVALID_CITY_TILE_POSITION
+			overflow_tile != CityCitizens.INVALID_CITY_TILE_POSITION
 		)
 
 	if output_capacity_in_batches <= 0 and not can_overflow:
@@ -714,7 +714,7 @@ static func _workplace_tick_is_blocked(
 			"object_id": object_id,
 			"progress_work_units": current_progress,
 			"production_status": (
-				WorldData.WORKPLACE_PRODUCTION_STATUS_BLOCKED_OUTPUT_FULL
+				CityObjectCatalog.WORKPLACE_PRODUCTION_STATUS_BLOCKED_OUTPUT_FULL
 			),
 			"productive_worker_count": productive_worker_count,
 			"site_productivity_basis_points": site_productivity,
@@ -744,7 +744,7 @@ static func _prepare_workplace_tick_output(
 	)
 	var overflow_tile: Vector2i = context.get(
 		"overflow_tile",
-		WorldData.INVALID_CITY_TILE_POSITION
+		CityCitizens.INVALID_CITY_TILE_POSITION
 	)
 	var can_overflow := bool(context.get("can_overflow", false))
 	var work_units_added := _calculate_work_units(
@@ -758,7 +758,7 @@ static func _prepare_workplace_tick_output(
 			"object_id": object_id,
 			"progress_work_units": current_progress,
 			"production_status": (
-				WorldData.WORKPLACE_PRODUCTION_STATUS_WORKING
+				CityObjectCatalog.WORKPLACE_PRODUCTION_STATUS_WORKING
 			),
 			"productive_worker_count": productive_worker_count,
 			"site_productivity_basis_points": site_productivity,
@@ -775,7 +775,7 @@ static func _prepare_workplace_tick_output(
 			"object_id": object_id,
 			"progress_work_units": total_progress,
 			"production_status": (
-				WorldData.WORKPLACE_PRODUCTION_STATUS_WORKING
+				CityObjectCatalog.WORKPLACE_PRODUCTION_STATUS_WORKING
 			),
 			"productive_worker_count": productive_worker_count,
 			"site_productivity_basis_points": site_productivity,
@@ -797,7 +797,7 @@ static func _prepare_workplace_tick_output(
 	):
 		overflow_tile = _find_workplace_overflow_tile(city_object)
 		can_overflow = (
-			overflow_tile != WorldData.INVALID_CITY_TILE_POSITION
+			overflow_tile != CityCitizens.INVALID_CITY_TILE_POSITION
 		)
 
 	if can_overflow:
@@ -815,7 +815,7 @@ static func _prepare_workplace_tick_output(
 			"object_id": object_id,
 			"progress_work_units": current_progress,
 			"production_status": (
-				WorldData.WORKPLACE_PRODUCTION_STATUS_BLOCKED_OUTPUT_FULL
+				CityObjectCatalog.WORKPLACE_PRODUCTION_STATUS_BLOCKED_OUTPUT_FULL
 			),
 			"productive_worker_count": productive_worker_count,
 			"site_productivity_basis_points": site_productivity,
@@ -856,7 +856,7 @@ static func _commit_workplace_tick_output(
 	var batches_to_produce := int(context.get("batches_to_produce", 0))
 	var overflow_tile: Vector2i = context.get(
 		"overflow_tile",
-		WorldData.INVALID_CITY_TILE_POSITION
+		CityCitizens.INVALID_CITY_TILE_POSITION
 	)
 	var can_overflow := bool(context.get("can_overflow", false))
 
@@ -876,7 +876,7 @@ static func _commit_workplace_tick_output(
 			"object_id": object_id,
 			"progress_work_units": current_progress,
 			"production_status": (
-				WorldData.WORKPLACE_PRODUCTION_STATUS_BLOCKED_OUTPUT_FULL
+				CityObjectCatalog.WORKPLACE_PRODUCTION_STATUS_BLOCKED_OUTPUT_FULL
 			),
 			"productive_worker_count": productive_worker_count,
 			"site_productivity_basis_points": site_productivity,
@@ -901,11 +901,11 @@ static func _commit_workplace_tick_output(
 		updated_city_object,
 		outputs
 	)
-	var new_status := WorldData.WORKPLACE_PRODUCTION_STATUS_WORKING
+	var new_status := CityObjectCatalog.WORKPLACE_PRODUCTION_STATUS_WORKING
 
 	if remaining_output_capacity <= 0 and not can_overflow:
 		new_status = (
-			WorldData.WORKPLACE_PRODUCTION_STATUS_BLOCKED_OUTPUT_FULL
+			CityObjectCatalog.WORKPLACE_PRODUCTION_STATUS_BLOCKED_OUTPUT_FULL
 		)
 
 	_write_workplace_state({
@@ -942,7 +942,7 @@ static func _outputs_are_valid_for_workplace(
 	if outputs.is_empty():
 		return false
 
-	var known_resource_types := WorldData.get_city_resource_types()
+	var known_resource_types := CityResourceCatalog.get_city_resource_types()
 
 	for raw_resource in outputs:
 		var resource := str(raw_resource)
@@ -1017,22 +1017,22 @@ static func _find_workplace_overflow_tile(
 	var active_world = WorldPoliticalState.get_current_city_world()
 
 	if active_world == null or city_object.is_empty():
-		return WorldData.INVALID_CITY_TILE_POSITION
+		return CityCitizens.INVALID_CITY_TILE_POSITION
 
 	var overflow_policy := (
-		WorldData.get_city_object_overflow_policy(
+		CityObjectCatalog.get_city_object_overflow_policy(
 			city_object
 		)
 	)
 	var mode := str(
 		overflow_policy.get(
 			"mode",
-			WorldData.WORKPLACE_OVERFLOW_MODE_NONE
+			CityObjectCatalog.WORKPLACE_OVERFLOW_MODE_NONE
 		)
 	)
 
-	if mode != WorldData.WORKPLACE_OVERFLOW_MODE_FOOTPRINT_RADIUS:
-		return WorldData.INVALID_CITY_TILE_POSITION
+	if mode != CityObjectCatalog.WORKPLACE_OVERFLOW_MODE_FOOTPRINT_RADIUS:
+		return CityCitizens.INVALID_CITY_TILE_POSITION
 
 	var radius_tiles := maxi(
 		int(overflow_policy.get("radius_tiles", 0)),
@@ -1040,14 +1040,14 @@ static func _find_workplace_overflow_tile(
 	)
 
 	if radius_tiles <= 0:
-		return WorldData.INVALID_CITY_TILE_POSITION
+		return CityCitizens.INVALID_CITY_TILE_POSITION
 
 	var footprint_tiles := _get_unique_footprint_tiles(
 		city_object
 	)
 
 	if footprint_tiles.is_empty():
-		return WorldData.INVALID_CITY_TILE_POSITION
+		return CityCitizens.INVALID_CITY_TILE_POSITION
 
 	var access_tiles := CityNavigationSystem.get_city_object_access_tiles(
 		active_world,
@@ -1076,7 +1076,7 @@ static func _find_workplace_overflow_tile(
 			return access_tile
 
 	if access_tiles.is_empty() or radius_tiles <= 1:
-		return WorldData.INVALID_CITY_TILE_POSITION
+		return CityCitizens.INVALID_CITY_TILE_POSITION
 
 	var candidate_lookup: Dictionary = {}
 
@@ -1110,14 +1110,14 @@ static func _find_workplace_overflow_tile(
 	var candidate_tiles: Array = candidate_lookup.keys()
 
 	if candidate_tiles.is_empty():
-		return WorldData.INVALID_CITY_TILE_POSITION
+		return CityCitizens.INVALID_CITY_TILE_POSITION
 
 	candidate_tiles.sort_custom(CityObjectSystem._sort_city_tiles_y_then_x)
 
 	# If buildings or roads consume the immediate ring, select the cheapest
 	# reachable tile inside the configured radius rather than spawning loose
 	# resources across an impassable boundary.
-	var best_tile := WorldData.INVALID_CITY_TILE_POSITION
+	var best_tile := CityCitizens.INVALID_CITY_TILE_POSITION
 	var best_path_cost := CityNavigationSystem.MAXIMUM_PATH_COST
 
 	for raw_access_tile in access_tiles:
@@ -1141,7 +1141,7 @@ static func _find_workplace_overflow_tile(
 
 		var candidate_tile = path_result.get(
 			"destination_tile",
-			WorldData.INVALID_CITY_TILE_POSITION
+			CityCitizens.INVALID_CITY_TILE_POSITION
 		)
 
 		if not candidate_tile is Vector2i:
@@ -1217,7 +1217,7 @@ static func _calculate_work_units(
 	return maxi(
 		int(
 			adjusted_work_units_numerator
-			/ WorldData.PRODUCTIVITY_BASIS_POINTS_SCALE
+			/ CityObjectCatalog.PRODUCTIVITY_BASIS_POINTS_SCALE
 		),
 		0
 	)
@@ -1272,7 +1272,7 @@ static func _store_recipe_output_distribution(
 	)
 	var overflow_tile: Vector2i = values.get(
 		"overflow_tile",
-		WorldData.INVALID_CITY_TILE_POSITION
+		CityCitizens.INVALID_CITY_TILE_POSITION
 	)
 	var stored_in_object := false
 
@@ -1314,7 +1314,7 @@ static func _store_recipe_outputs_in_ground_pile(
 	if (
 		batch_count <= 0
 		or tile_position
-		== WorldData.INVALID_CITY_TILE_POSITION
+		== CityCitizens.INVALID_CITY_TILE_POSITION
 	):
 		return false
 
@@ -1399,6 +1399,108 @@ static func _rollback_ground_pile_resources(
 static func _write_workplace_state(
 	values: Dictionary
 ) -> void:
-	WorldData.set_city_workplace_production_state(
+	WorkplaceProductionSystem.set_city_workplace_production_state(
 		values
 	)
+
+static func set_city_workplace_production_state(
+	values: Dictionary
+) -> bool:
+	for raw_key in CityObjectCatalog.CITY_WORKPLACE_PRODUCTION_STATE_KEYS:
+		var key := str(raw_key)
+
+		if not values.has(key):
+			push_error(
+				"Workplace production state is missing key: "
+				+ key
+			)
+			return false
+
+	var object_id := int(values["object_id"])
+	var progress_work_units := int(values["progress_work_units"])
+	var production_status := str(values["production_status"])
+	var productive_worker_count := int(
+		values["productive_worker_count"]
+	)
+	var site_productivity_basis_points := int(
+		values["site_productivity_basis_points"]
+	)
+	var object_index := CityObjectSystem.get_city_object_index_by_id(object_id)
+
+	if object_index < 0:
+		return false
+
+	var raw_city_object = CityObjectSystem.get_city_objects()[object_index]
+
+	if not raw_city_object is Dictionary:
+		return false
+
+	var city_object: Dictionary = raw_city_object
+
+	if not city_object_is_workplace(city_object):
+		return false
+
+	var recipe := CityObjectCatalog.get_city_object_production_recipe(city_object)
+
+	if recipe.is_empty():
+		return false
+
+	var safe_progress := maxi(progress_work_units, 0)
+	var work_units_per_batch := int(
+		recipe.get("work_units_per_batch", 0)
+	)
+
+	if work_units_per_batch > 0:
+		safe_progress = mini(
+			safe_progress,
+			work_units_per_batch - 1
+	)
+	else:
+		safe_progress = 0
+
+	var safe_status := production_status
+
+	if not CityObjectCatalog.is_valid_city_workplace_production_status(safe_status):
+		safe_status = CityObjectCatalog.WORKPLACE_PRODUCTION_STATUS_INACTIVE
+
+	var safe_productive_worker_count := maxi(
+		productive_worker_count,
+		0
+	)
+	var safe_site_productivity := maxi(
+		site_productivity_basis_points,
+		0
+	)
+
+	var state_changed := (
+		CityObjectCatalog.get_city_object_production_progress_work_units(city_object)
+		!= safe_progress
+		or CityObjectCatalog.get_city_object_production_status(city_object)
+		!= safe_status
+		or CityObjectCatalog.get_city_object_productive_worker_count(city_object)
+		!= safe_productive_worker_count
+		or CityObjectCatalog.get_city_object_site_productivity_basis_points(city_object)
+		!= safe_site_productivity
+	)
+
+	if not state_changed:
+		return false
+
+	city_object["production_progress_work_units"] = safe_progress
+	city_object["production_status"] = safe_status
+	city_object["productive_worker_count"] = (
+		safe_productive_worker_count
+	)
+	city_object["site_productivity_basis_points"] = (
+		safe_site_productivity
+	)
+
+	if not CityObjectSystem.write_city_object_at_index(
+		object_index,
+		city_object
+	):
+		return false
+	CityEmploymentSystem.mark_city_workplaces_changed()
+
+	return true
+

@@ -62,12 +62,12 @@ static func ensure_workplace_staffing_state() -> int:
 
 		var city_object: Dictionary = raw_city_object
 
-		if not WorldData.city_object_is_workplace(city_object):
+		if not CityObjectCatalog.city_object_is_workplace(city_object):
 			continue
 
 		var normalized := city_object.duplicate(false)
 		var worker_capacity := maxi(
-			WorldData.get_city_object_worker_capacity(city_object),
+			CityObjectCatalog.get_city_object_worker_capacity(city_object),
 			0
 		)
 		var staffing_mode := str(
@@ -110,7 +110,7 @@ static func ensure_workplace_staffing_state() -> int:
 
 
 static func get_workplace_staffing_mode(workplace: Dictionary) -> String:
-	if workplace.is_empty() or not WorldData.city_object_is_workplace(workplace):
+	if workplace.is_empty() or not CityObjectCatalog.city_object_is_workplace(workplace):
 		return ""
 
 	var staffing_mode := str(
@@ -127,11 +127,11 @@ static func get_workplace_staffing_mode(workplace: Dictionary) -> String:
 
 
 static func get_workplace_desired_worker_count(workplace: Dictionary) -> int:
-	if workplace.is_empty() or not WorldData.city_object_is_workplace(workplace):
+	if workplace.is_empty() or not CityObjectCatalog.city_object_is_workplace(workplace):
 		return 0
 
 	var worker_capacity := maxi(
-		WorldData.get_city_object_worker_capacity(workplace),
+		CityObjectCatalog.get_city_object_worker_capacity(workplace),
 		0
 	)
 	return clampi(
@@ -165,7 +165,7 @@ static func set_workplace_staffing_mode(
 
 	var workplace: Dictionary = raw_workplace
 
-	if not WorldData.city_object_is_workplace(workplace):
+	if not CityObjectCatalog.city_object_is_workplace(workplace):
 		return false
 
 	if get_workplace_staffing_mode(workplace) == staffing_mode:
@@ -200,11 +200,11 @@ static func set_workplace_desired_worker_count(
 
 	var workplace: Dictionary = raw_workplace
 
-	if not WorldData.city_object_is_workplace(workplace):
+	if not CityObjectCatalog.city_object_is_workplace(workplace):
 		return false
 
 	var worker_capacity := maxi(
-		WorldData.get_city_object_worker_capacity(workplace),
+		CityObjectCatalog.get_city_object_worker_capacity(workplace),
 		0
 	)
 
@@ -279,7 +279,7 @@ static func is_city_citizen_attending_workplace(
 
 	var workplace := CityObjectSystem.get_city_object_by_id(workplace_id)
 
-	if workplace.is_empty() or not WorldData.city_object_is_workplace(workplace):
+	if workplace.is_empty() or not CityObjectCatalog.city_object_is_workplace(workplace):
 		return false
 
 	var city_world: WorldData = source_world
@@ -309,12 +309,12 @@ static func get_city_object_attending_worker_ids(
 
 	if (
 		city_object.is_empty()
-		or not WorldData.city_object_is_workplace(city_object)
+		or not CityObjectCatalog.city_object_is_workplace(city_object)
 	):
 		return attending_worker_ids
 
 	var workplace_id := int(city_object.get("id", -1))
-	var worker_capacity := WorldData.get_city_object_worker_capacity(city_object)
+	var worker_capacity := CityObjectCatalog.get_city_object_worker_capacity(city_object)
 
 	if workplace_id <= 0 or worker_capacity <= 0:
 		return attending_worker_ids
@@ -382,7 +382,7 @@ static func reconcile_automatic_workplaces() -> int:
 		var city_object: Dictionary = raw_city_object
 
 		if (
-			WorldData.city_object_is_workplace(city_object)
+			CityObjectCatalog.city_object_is_workplace(city_object)
 			and get_workplace_staffing_mode(city_object)
 			== STAFFING_MODE_AUTOMATIC
 		):
@@ -482,19 +482,19 @@ static func _city_citizen_matches_workplace_attendance(
 
 	if (
 		str(current_task.get("kind", ""))
-		!= WorldData.CITY_CITIZEN_TASK_KIND_WORK
+		!= CityCitizens.CITY_CITIZEN_TASK_KIND_WORK
 		or str(current_task.get("phase", ""))
-		!= WorldData.CITY_CITIZEN_TASK_PHASE_PERFORMING
+		!= CityCitizens.CITY_CITIZEN_TASK_PHASE_PERFORMING
 		or int(current_task.get("target_object_id", -1))
 		!= workplace_id
 		or str(citizen.get("movement_state", ""))
-		!= WorldData.CITY_CITIZEN_MOVEMENT_STATE_IDLE
+		!= CityCitizens.CITY_CITIZEN_MOVEMENT_STATE_IDLE
 	):
 		return false
 
 	var raw_tile_position = citizen.get(
 		"city_tile_position",
-		WorldData.INVALID_CITY_TILE_POSITION
+		CityCitizens.INVALID_CITY_TILE_POSITION
 	)
 
 	if not raw_tile_position is Vector2i:
@@ -503,12 +503,12 @@ static func _city_citizen_matches_workplace_attendance(
 	var citizen_tile: Vector2i = raw_tile_position
 	var raw_target_tile = current_task.get(
 		"target_tile",
-		WorldData.INVALID_CITY_TILE_POSITION
+		CityCitizens.INVALID_CITY_TILE_POSITION
 	)
 
 	if raw_target_tile is Vector2i:
 		var target_tile: Vector2i = raw_target_tile
-		if target_tile != WorldData.INVALID_CITY_TILE_POSITION:
+		if target_tile != CityCitizens.INVALID_CITY_TILE_POSITION:
 			return citizen_tile == target_tile
 
 	return access_tiles.has(citizen_tile)

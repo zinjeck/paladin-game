@@ -160,7 +160,7 @@ static func _city_citizen_can_directly_withdraw_food(
 	resource: String
 ) -> bool:
 	var withdrawal_purpose := (
-		WorldData.CONTAINER_DIRECT_WITHDRAWAL_PURPOSE_PERSONAL_FOOD
+		CityObjectCatalog.CONTAINER_DIRECT_WITHDRAWAL_PURPOSE_PERSONAL_FOOD
 	)
 	var citizen := CityCitizenRegistrySystem.get_city_citizen_by_id(citizen_id)
 
@@ -181,13 +181,13 @@ static func _city_citizen_can_directly_withdraw_food(
 
 	if (
 		withdrawal_purpose
-		== WorldData.CONTAINER_DIRECT_WITHDRAWAL_PURPOSE_PERSONAL_FOOD
+		== CityObjectCatalog.CONTAINER_DIRECT_WITHDRAWAL_PURPOSE_PERSONAL_FOOD
 		and CityResourceCatalog.get_city_food_hunger_restore(resource) <= 0
 	):
 		return false
 
 	match CityResourceContainerSystem.get_city_object_container_type(city_object):
-		WorldData.CONTAINER_TYPE_PRIVATE_HOME_STORAGE:
+		CityObjectCatalog.CONTAINER_TYPE_PRIVATE_HOME_STORAGE:
 			return (
 				int(citizen.get("home_object_id", -1))
 				== int(city_object.get("id", -1))
@@ -196,18 +196,18 @@ static func _city_citizen_can_directly_withdraw_food(
 				)
 			)
 
-		WorldData.CONTAINER_TYPE_PUBLIC_CITY_STORAGE:
+		CityObjectCatalog.CONTAINER_TYPE_PUBLIC_CITY_STORAGE:
 			return (
 				CityResourceContainerSystem
 				.city_object_container_is_publicly_usable(city_object)
 			)
 
-		WorldData.CONTAINER_TYPE_WORKPLACE_STORAGE:
+		CityObjectCatalog.CONTAINER_TYPE_WORKPLACE_STORAGE:
 			return (
 				withdrawal_purpose
-				== WorldData.CONTAINER_DIRECT_WITHDRAWAL_PURPOSE_PERSONAL_FOOD
-				and WorldData.city_object_is_workplace(city_object)
-				and WorldData.get_city_object_output_resources(city_object).has(
+				== CityObjectCatalog.CONTAINER_DIRECT_WITHDRAWAL_PURPOSE_PERSONAL_FOOD
+				and CityObjectCatalog.city_object_is_workplace(city_object)
+				and CityObjectCatalog.get_city_object_output_resources(city_object).has(
 					resource
 				)
 			)
@@ -222,7 +222,7 @@ static func _get_city_citizen_direct_food_withdrawal_target_tiles(
 	var target_tiles: Array = []
 	var citizen := CityCitizenRegistrySystem.get_city_citizen_by_id(citizen_id)
 	var withdrawal_purpose := (
-		WorldData.CONTAINER_DIRECT_WITHDRAWAL_PURPOSE_PERSONAL_FOOD
+		CityObjectCatalog.CONTAINER_DIRECT_WITHDRAWAL_PURPOSE_PERSONAL_FOOD
 	)
 
 	if (
@@ -237,7 +237,7 @@ static func _get_city_citizen_direct_food_withdrawal_target_tiles(
 		return target_tiles
 
 	match CityResourceContainerSystem.get_city_object_container_type(city_object):
-		WorldData.CONTAINER_TYPE_PRIVATE_HOME_STORAGE:
+		CityObjectCatalog.CONTAINER_TYPE_PRIVATE_HOME_STORAGE:
 			if (
 				int(citizen.get("home_object_id", -1))
 				== int(city_object.get("id", -1))
@@ -249,7 +249,7 @@ static func _get_city_citizen_direct_food_withdrawal_target_tiles(
 					city_object
 				)
 
-		WorldData.CONTAINER_TYPE_PUBLIC_CITY_STORAGE:
+		CityObjectCatalog.CONTAINER_TYPE_PUBLIC_CITY_STORAGE:
 			if (
 				CityResourceContainerSystem
 				.city_object_container_is_publicly_usable(city_object)
@@ -259,11 +259,11 @@ static func _get_city_citizen_direct_food_withdrawal_target_tiles(
 					city_object
 				)
 
-		WorldData.CONTAINER_TYPE_WORKPLACE_STORAGE:
+		CityObjectCatalog.CONTAINER_TYPE_WORKPLACE_STORAGE:
 			if (
 				withdrawal_purpose
-				== WorldData.CONTAINER_DIRECT_WITHDRAWAL_PURPOSE_PERSONAL_FOOD
-				and WorldData.city_object_is_workplace(city_object)
+				== CityObjectCatalog.CONTAINER_DIRECT_WITHDRAWAL_PURPOSE_PERSONAL_FOOD
+				and CityObjectCatalog.city_object_is_workplace(city_object)
 			):
 				return CityNavigationSystem.get_city_object_access_tiles(
 					WorldPoliticalState.get_current_city_world(),
@@ -284,20 +284,20 @@ static func city_citizen_can_withdraw_food_from_endpoint(
 	var endpoint_kind := str(
 		endpoint.get(
 			"kind",
-			WorldData.CITY_CITIZEN_HAUL_ENDPOINT_KIND_NONE
+			CityCitizens.CITY_CITIZEN_HAUL_ENDPOINT_KIND_NONE
 		)
 	)
 	var endpoint_id := int(endpoint.get("id", -1))
 
 	match endpoint_kind:
-		WorldData.CITY_CITIZEN_HAUL_ENDPOINT_KIND_CITY_OBJECT_CONTAINER:
+		CityCitizens.CITY_CITIZEN_HAUL_ENDPOINT_KIND_CITY_OBJECT_CONTAINER:
 			return _city_citizen_can_directly_withdraw_food(
 				citizen_id,
 				CityObjectSystem.get_city_object_by_id(endpoint_id),
 				resource
 			)
 
-		WorldData.CITY_CITIZEN_HAUL_ENDPOINT_KIND_GROUND_PILE:
+		CityCitizens.CITY_CITIZEN_HAUL_ENDPOINT_KIND_GROUND_PILE:
 			var citizen := CityCitizenRegistrySystem.get_city_citizen_by_id(
 				citizen_id
 			)
@@ -327,10 +327,10 @@ static func get_city_citizen_food_endpoint_target_tiles(
 	match str(
 		endpoint.get(
 			"kind",
-			WorldData.CITY_CITIZEN_HAUL_ENDPOINT_KIND_NONE
+			CityCitizens.CITY_CITIZEN_HAUL_ENDPOINT_KIND_NONE
 		)
 	):
-		WorldData.CITY_CITIZEN_HAUL_ENDPOINT_KIND_CITY_OBJECT_CONTAINER:
+		CityCitizens.CITY_CITIZEN_HAUL_ENDPOINT_KIND_CITY_OBJECT_CONTAINER:
 			return _get_city_citizen_direct_food_withdrawal_target_tiles(
 				citizen_id,
 				CityObjectSystem.get_city_object_by_id(
@@ -338,13 +338,13 @@ static func get_city_citizen_food_endpoint_target_tiles(
 				)
 			)
 
-		WorldData.CITY_CITIZEN_HAUL_ENDPOINT_KIND_GROUND_PILE:
+		CityCitizens.CITY_CITIZEN_HAUL_ENDPOINT_KIND_GROUND_PILE:
 			var ground_pile := CityLogisticsSystem.get_city_ground_pile_by_id(
 				int(endpoint.get("id", -1))
 			)
 			var raw_tile = ground_pile.get(
 				"tile_position",
-				WorldData.INVALID_CITY_TILE_POSITION
+				CityCitizens.INVALID_CITY_TILE_POSITION
 			)
 
 			if (
@@ -379,7 +379,7 @@ static func get_city_food_endpoint_unreserved_amount(
 	return CityLogisticsSystem.get_city_haul_endpoint_unreserved_resource_amount(
 		endpoint,
 		resource,
-		WorldData.INVALID_CITY_CITIZEN_HAUL_RESERVATION_ID,
+		CityCitizens.INVALID_CITY_CITIZEN_HAUL_RESERVATION_ID,
 		excluding_citizen_id
 	)
 
@@ -403,7 +403,7 @@ static func transfer_city_food_endpoint_to_citizen_inventory(
 	var citizen := CityCitizenRegistrySystem.get_city_citizen_by_id(citizen_id)
 	var raw_citizen_tile = citizen.get(
 		"city_tile_position",
-		WorldData.INVALID_CITY_TILE_POSITION
+		CityCitizens.INVALID_CITY_TILE_POSITION
 	)
 
 	if (
@@ -421,7 +421,7 @@ static func transfer_city_food_endpoint_to_citizen_inventory(
 			CityLogisticsSystem.get_city_haul_endpoint_unreserved_resource_amount(
 				endpoint,
 				resource,
-				WorldData.INVALID_CITY_CITIZEN_HAUL_RESERVATION_ID,
+				CityCitizens.INVALID_CITY_CITIZEN_HAUL_RESERVATION_ID,
 				citizen_id
 			),
 			CityCitizenInventorySystem.get_city_citizen_inventory_free_space(
@@ -436,27 +436,27 @@ static func transfer_city_food_endpoint_to_citizen_inventory(
 	var endpoint_kind := str(
 		endpoint.get(
 			"kind",
-			WorldData.CITY_CITIZEN_HAUL_ENDPOINT_KIND_NONE
+			CityCitizens.CITY_CITIZEN_HAUL_ENDPOINT_KIND_NONE
 		)
 	)
 	var endpoint_id := int(endpoint.get("id", -1))
 	var removed_amount := 0
-	var original_ground_tile := WorldData.INVALID_CITY_TILE_POSITION
+	var original_ground_tile := CityCitizens.INVALID_CITY_TILE_POSITION
 
-	if endpoint_kind == WorldData.CITY_CITIZEN_HAUL_ENDPOINT_KIND_GROUND_PILE:
+	if endpoint_kind == CityCitizens.CITY_CITIZEN_HAUL_ENDPOINT_KIND_GROUND_PILE:
 		var original_ground_pile := (
 			CityLogisticsSystem.get_city_ground_pile_by_id(endpoint_id)
 		)
 		var raw_original_ground_tile = original_ground_pile.get(
 			"tile_position",
-			WorldData.INVALID_CITY_TILE_POSITION
+			CityCitizens.INVALID_CITY_TILE_POSITION
 		)
 
 		if raw_original_ground_tile is Vector2i:
 			original_ground_tile = raw_original_ground_tile
 
 	match endpoint_kind:
-		WorldData.CITY_CITIZEN_HAUL_ENDPOINT_KIND_CITY_OBJECT_CONTAINER:
+		CityCitizens.CITY_CITIZEN_HAUL_ENDPOINT_KIND_CITY_OBJECT_CONTAINER:
 			removed_amount = (
 				CityResourceContainerSystem.remove_resource_from_city_object_storage(
 					endpoint_id,
@@ -465,7 +465,7 @@ static func transfer_city_food_endpoint_to_citizen_inventory(
 				)
 			)
 
-		WorldData.CITY_CITIZEN_HAUL_ENDPOINT_KIND_GROUND_PILE:
+		CityCitizens.CITY_CITIZEN_HAUL_ENDPOINT_KIND_GROUND_PILE:
 			removed_amount = CityLogisticsSystem.remove_resource_from_city_ground_pile(
 				endpoint_id,
 				resource,
@@ -496,7 +496,7 @@ static func transfer_city_food_endpoint_to_citizen_inventory(
 	var rollback_amount := 0
 
 	match endpoint_kind:
-		WorldData.CITY_CITIZEN_HAUL_ENDPOINT_KIND_CITY_OBJECT_CONTAINER:
+		CityCitizens.CITY_CITIZEN_HAUL_ENDPOINT_KIND_CITY_OBJECT_CONTAINER:
 			rollback_amount = (
 				CityResourceContainerSystem.add_resource_to_city_object_storage(
 					endpoint_id,
@@ -505,8 +505,8 @@ static func transfer_city_food_endpoint_to_citizen_inventory(
 				)
 			)
 
-		WorldData.CITY_CITIZEN_HAUL_ENDPOINT_KIND_GROUND_PILE:
-			if original_ground_tile != WorldData.INVALID_CITY_TILE_POSITION:
+		CityCitizens.CITY_CITIZEN_HAUL_ENDPOINT_KIND_GROUND_PILE:
+			if original_ground_tile != CityCitizens.INVALID_CITY_TILE_POSITION:
 				rollback_amount = int(
 					CityLogisticsSystem.add_resource_to_city_ground_piles_with_result({
 						"tile_position": original_ground_tile,
@@ -722,7 +722,7 @@ static func _get_legal_food_source_endpoints_at_citizen(
 	var sources: Array = []
 	var raw_citizen_tile = citizen.get(
 		"city_tile_position",
-		WorldData.INVALID_CITY_TILE_POSITION
+		CityCitizens.INVALID_CITY_TILE_POSITION
 	)
 
 	if not raw_citizen_tile is Vector2i:
@@ -746,7 +746,7 @@ static func _get_legal_food_source_endpoints_at_citizen(
 	# policy, including workplace output and ordinary food piles.
 	for storage_tier in (
 		CityResourceContainerSystem.get_public_city_storage_tiers()
-		+ [WorldData.PUBLIC_CITY_STORAGE_TIER_NONE]
+		+ [CityObjectCatalog.PUBLIC_CITY_STORAGE_TIER_NONE]
 	):
 		for raw_city_object in CityObjectSystem.get_city_objects():
 			if not raw_city_object is Dictionary:
@@ -756,18 +756,18 @@ static func _get_legal_food_source_endpoints_at_citizen(
 
 			if (
 				(
-					storage_tier != WorldData.PUBLIC_CITY_STORAGE_TIER_NONE
+					storage_tier != CityObjectCatalog.PUBLIC_CITY_STORAGE_TIER_NONE
 					and CityResourceContainerSystem.get_city_object_public_storage_tier(city_object)
 					!= storage_tier
 				)
 				or (
-					storage_tier == WorldData.PUBLIC_CITY_STORAGE_TIER_NONE
+					storage_tier == CityObjectCatalog.PUBLIC_CITY_STORAGE_TIER_NONE
 					and CityResourceContainerSystem.get_city_object_container_type(city_object)
-					!= WorldData.CONTAINER_TYPE_WORKPLACE_STORAGE
+					!= CityObjectCatalog.CONTAINER_TYPE_WORKPLACE_STORAGE
 				)
 				or not CityResourceContainerSystem.city_object_allows_direct_resource_withdrawal(
 					city_object,
-					WorldData.CONTAINER_DIRECT_WITHDRAWAL_PURPOSE_PERSONAL_FOOD
+					CityObjectCatalog.CONTAINER_DIRECT_WITHDRAWAL_PURPOSE_PERSONAL_FOOD
 				)
 			):
 				continue
@@ -796,7 +796,7 @@ static func _get_legal_food_source_endpoints_at_citizen(
 		)
 
 		if (
-			pile.get("tile_position", WorldData.INVALID_CITY_TILE_POSITION)
+			pile.get("tile_position", CityCitizens.INVALID_CITY_TILE_POSITION)
 			== citizen_tile
 			and not CityLogisticsSystem.city_ground_pile_is_construction_reserved(pile)
 		):
@@ -809,8 +809,8 @@ static func _city_object_is_household_home(city_object: Dictionary) -> bool:
 	return (
 		not city_object.is_empty()
 		and CityResourceContainerSystem.get_city_object_container_type(city_object)
-		== WorldData.CONTAINER_TYPE_PRIVATE_HOME_STORAGE
-		and WorldData.get_city_object_resident_capacity(city_object) > 0
+		== CityObjectCatalog.CONTAINER_TYPE_PRIVATE_HOME_STORAGE
+		and CityObjectCatalog.get_city_object_resident_capacity(city_object) > 0
 	)
 
 

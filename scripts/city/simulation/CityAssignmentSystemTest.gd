@@ -255,22 +255,22 @@ func _make_assignment_fixture(seed: int) -> Dictionary:
 	WorldData.store_city_world_save(city_world, seed)
 
 	var house_a := _register_object(
-		WorldData.CITY_OBJECT_HOUSE,
+		CityObjectCatalog.CITY_OBJECT_HOUSE,
 		Vector2i(3, 3),
 		city_world
 	)
 	var house_b := _register_object(
-		WorldData.CITY_OBJECT_HOUSE,
+		CityObjectCatalog.CITY_OBJECT_HOUSE,
 		Vector2i(10, 3),
 		city_world
 	)
 	var fishery_a := _register_object(
-		WorldData.CITY_OBJECT_FISHING_GROUNDS,
+		CityObjectCatalog.CITY_OBJECT_FISHING_GROUNDS,
 		Vector2i(3, 12),
 		city_world
 	)
 	var fishery_b := _register_object(
-		WorldData.CITY_OBJECT_FISHING_GROUNDS,
+		CityObjectCatalog.CITY_OBJECT_FISHING_GROUNDS,
 		Vector2i(12, 12),
 		city_world
 	)
@@ -299,7 +299,7 @@ func _make_assignment_fixture(seed: int) -> Dictionary:
 
 	var citizen_ids: Array[int] = []
 	for citizen_index in range(3):
-		var citizen := WorldData.add_city_citizen(
+		var citizen := CityCitizenRegistrySystem.add_city_citizen(
 			"",
 			Vector2i(20 + citizen_index, 20),
 			CityCitizens.CITY_CITIZEN_SEX_MALE,
@@ -333,7 +333,7 @@ func _register_object(
 	return CityObjectSystem.register_completed_city_object({
 		"object_type": object_type,
 		"top_left": top_left,
-		"size_tiles": WorldData.get_city_object_size_for_type(object_type),
+		"size_tiles": CityObjectCatalog.get_city_object_size_for_type(object_type),
 		"object_owner": "player",
 		"city_world": city_world,
 	})

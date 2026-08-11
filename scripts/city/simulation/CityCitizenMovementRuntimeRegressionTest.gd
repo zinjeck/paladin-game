@@ -295,7 +295,7 @@ func _test_real_tick_completion_and_reset() -> void:
 				"movement_state",
 				""
 			)
-		) == WorldData.CITY_CITIZEN_MOVEMENT_STATE_IDLE,
+		) == CityCitizens.CITY_CITIZEN_MOVEMENT_STATE_IDLE,
 		"The next real tick must finish both routes and retire both movers once."
 	)
 
@@ -303,7 +303,7 @@ func _test_real_tick_completion_and_reset() -> void:
 	var mover_lookup_ref: Dictionary = state.active_mover_id_lookup
 	var visual_events_ref: Array = state.citizen_movement_visual_events
 	var version_before_reset := state.citizen_movement_version
-	WorldData.reset_city_citizen_state()
+	CityCitizenRegistrySystem.reset_city_citizen_state()
 	_expect(
 		is_same(
 			CityCitizenMovementRuntimeSystem.get_current_state(),
@@ -382,10 +382,10 @@ func _reset_fixture(seed_value: int) -> Dictionary:
 
 
 func _add_citizen(culture_id: int, tile: Vector2i) -> Dictionary:
-	return WorldData.add_city_citizen(
+	return CityCitizenRegistrySystem.add_city_citizen(
 		"",
 		tile,
-		WorldData.CITY_CITIZEN_SEX_MALE,
+		CityCitizens.CITY_CITIZEN_SEX_MALE,
 		culture_id
 	)
 

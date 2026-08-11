@@ -342,7 +342,7 @@ func _prepare_active_city_movement(values: Dictionary) -> Dictionary:
 	var seed_value := int(values.get("seed", 0))
 	var destination: Vector2i = values.get(
 		"destination",
-		WorldData.INVALID_CITY_TILE_POSITION
+		CityCitizens.INVALID_CITY_TILE_POSITION
 	)
 	_expect(
 		WorldPoliticalState.set_active_settlement(city_id),
@@ -351,10 +351,10 @@ func _prepare_active_city_movement(values: Dictionary) -> Dictionary:
 	var city_world := _make_world(12, 12, seed_value)
 	WorldPoliticalState.set_current_city_world(city_world)
 	WorldPoliticalState.set_current_city_seed(seed_value)
-	var citizen := WorldData.add_city_citizen(
+	var citizen := CityCitizenRegistrySystem.add_city_citizen(
 		"",
 		SHARED_CITIZEN_TILE,
-		WorldData.CITY_CITIZEN_SEX_MALE,
+		CityCitizens.CITY_CITIZEN_SEX_MALE,
 		culture_id
 	)
 	var citizen_id := int(citizen.get("id", -1))
@@ -433,13 +433,13 @@ func _clone_movement_state(
 
 func _event_step_target(events: Array):
 	if events.size() != 1 or not events[0] is Dictionary:
-		return WorldData.INVALID_CITY_TILE_POSITION
+		return CityCitizens.INVALID_CITY_TILE_POSITION
 	var after = events[0].get("after", {})
 	if not after is Dictionary:
-		return WorldData.INVALID_CITY_TILE_POSITION
+		return CityCitizens.INVALID_CITY_TILE_POSITION
 	return after.get(
 		"movement_visual_step_target_tile",
-		WorldData.INVALID_CITY_TILE_POSITION
+		CityCitizens.INVALID_CITY_TILE_POSITION
 	)
 
 

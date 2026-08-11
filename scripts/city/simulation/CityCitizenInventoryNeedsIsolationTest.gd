@@ -146,7 +146,7 @@ func _exercise_city(values: Dictionary) -> Dictionary:
 
 	WorldPoliticalState.set_current_city_world(_make_world(16, 16, world_seed))
 	WorldPoliticalState.set_current_city_seed(world_seed)
-	var citizen := WorldData.add_city_citizen(
+	var citizen := CityCitizenRegistrySystem.add_city_citizen(
 		"",
 		SHARED_TILE,
 		str(values.get("sex", "")),

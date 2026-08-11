@@ -112,11 +112,11 @@ func _test_real_founding_spatial_bootstrap() -> void:
 	var spatial_index: Dictionary = spatial_state.citizen_ids_by_tile
 	var city_world := _make_world(20, 20, 98_102)
 	WorldData.store_city_world_save(city_world, 98_102)
-	var keep_size := WorldData.get_city_object_size_for_type(
-		WorldData.CITY_OBJECT_CITY_CENTER
+	var keep_size := CityObjectCatalog.get_city_object_size_for_type(
+		CityObjectCatalog.CITY_OBJECT_CITY_CENTER
 	)
 	var keep := CityObjectSystem.add_city_object({
-		"object_type": WorldData.CITY_OBJECT_CITY_CENTER,
+		"object_type": CityObjectCatalog.CITY_OBJECT_CITY_CENTER,
 		"top_left": Vector2i(6, 6),
 		"size_tiles": keep_size,
 		"object_owner": "player",
@@ -135,9 +135,9 @@ func _test_real_founding_spatial_bootstrap() -> void:
 
 	_expect(
 		WorldData.has_player_city()
-		and CityCitizenRegistrySystem.get_current_state().citizens.size() == WorldData.STARTING_CITY_POPULATION
+		and CityCitizenRegistrySystem.get_current_state().citizens.size() == CityCitizenRegistrySystem.STARTING_CITY_POPULATION
 		and spatial_state.citizen_spatial_version
-		== WorldData.STARTING_CITY_POPULATION
+		== CityCitizenRegistrySystem.STARTING_CITY_POPULATION
 		and _spatial_index_matches_registry(spatial_index),
 		"Founding must index all eight citizens and publish eight spatial changes."
 	)
@@ -153,7 +153,7 @@ func _test_real_founding_spatial_bootstrap() -> void:
 	)
 
 	var version_before_repeat := spatial_state.citizen_spatial_version
-	var repeated_count := WorldData.initialize_starting_city_population()
+	var repeated_count := CityCitizenRegistrySystem.initialize_starting_city_population()
 	_expect(
 		repeated_count == 0
 		and spatial_state.citizen_spatial_version == version_before_repeat
@@ -192,7 +192,7 @@ func _spatial_index_matches_registry(spatial_index: Dictionary) -> bool:
 		var citizen_id := int(citizen.get("id", -1))
 		var raw_tile = citizen.get(
 			"city_tile_position",
-			WorldData.INVALID_CITY_TILE_POSITION
+			CityCitizens.INVALID_CITY_TILE_POSITION
 		)
 		if citizen_id <= 0 or not raw_tile is Vector2i:
 			return false

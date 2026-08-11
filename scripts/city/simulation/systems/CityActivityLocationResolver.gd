@@ -36,48 +36,48 @@ static func get_work_activity_tiles(
 	if (
 		city_world == null
 		or workplace.is_empty()
-		or not WorldData.city_object_is_workplace(workplace)
+		or not CityObjectCatalog.city_object_is_workplace(workplace)
 	):
 		return activity_tiles
 
 	var location_policy := (
-		WorldData.get_city_object_work_location_policy(
+		CityObjectCatalog.get_city_object_work_location_policy(
 			workplace
 		)
 	)
 	var location_mode := str(
 		location_policy.get(
 			"mode",
-			WorldData.WORKPLACE_WORK_LOCATION_MODE_NONE
+			CityObjectCatalog.WORKPLACE_WORK_LOCATION_MODE_NONE
 		)
 	)
 
 	match location_mode:
-		WorldData.WORKPLACE_WORK_LOCATION_MODE_RESOURCE_SOURCE_TILES:
+		CityObjectCatalog.WORKPLACE_WORK_LOCATION_MODE_RESOURCE_SOURCE_TILES:
 			activity_tiles = _get_resource_source_zone_tiles(
 				city_world,
 				workplace
 			)
 
-		WorldData.WORKPLACE_WORK_LOCATION_MODE_LINKED_TILES:
+		CityObjectCatalog.WORKPLACE_WORK_LOCATION_MODE_LINKED_TILES:
 			activity_tiles = _get_exterior_access_tiles(
 				city_world,
 				workplace
 			)
 
-		WorldData.WORKPLACE_WORK_LOCATION_MODE_WORKSTATIONS:
+		CityObjectCatalog.WORKPLACE_WORK_LOCATION_MODE_WORKSTATIONS:
 			activity_tiles = _get_exterior_access_tiles(
 				city_world,
 				workplace
 			)
 
-		WorldData.WORKPLACE_WORK_LOCATION_MODE_EXPLICIT_POINTS:
+		CityObjectCatalog.WORKPLACE_WORK_LOCATION_MODE_EXPLICIT_POINTS:
 			activity_tiles = _get_exterior_access_tiles(
 				city_world,
 				workplace
 			)
 
-		WorldData.WORKPLACE_WORK_LOCATION_MODE_FOOTPRINT:
+		CityObjectCatalog.WORKPLACE_WORK_LOCATION_MODE_FOOTPRINT:
 			# Contextual interior traversal has not been enabled yet.
 			activity_tiles = _get_exterior_access_tiles(
 				city_world,
@@ -175,7 +175,7 @@ static func _filter_activity_tiles_by_policy(
 	var adjacency_mode := str(
 		location_policy.get(
 			"adjacency_mode",
-			WorldData.WORKPLACE_WORK_LOCATION_ADJACENCY_NONE
+			CityObjectCatalog.WORKPLACE_WORK_LOCATION_ADJACENCY_NONE
 		)
 	)
 	var adjacent_terrain := str(
@@ -185,7 +185,7 @@ static func _filter_activity_tiles_by_policy(
 	for candidate_tile in candidate_tiles:
 		if (
 			standing_tile_requirement
-			== WorldData.WORKPLACE_WORK_LOCATION_TILE_REQUIREMENT_WALKABLE
+			== CityObjectCatalog.WORKPLACE_WORK_LOCATION_TILE_REQUIREMENT_WALKABLE
 			and not CityNavigationSystem.is_city_tile_walkable_for_citizen(
 				city_world,
 				candidate_tile
@@ -195,7 +195,7 @@ static func _filter_activity_tiles_by_policy(
 
 		if (
 			adjacency_mode
-			== WorldData.WORKPLACE_WORK_LOCATION_ADJACENCY_CARDINAL_TERRAIN
+			== CityObjectCatalog.WORKPLACE_WORK_LOCATION_ADJACENCY_CARDINAL_TERRAIN
 			and not _tile_cardinally_borders_terrain(
 				city_world,
 				candidate_tile,
@@ -243,7 +243,7 @@ static func choose_work_activity_tile(
 	values: Dictionary
 ) -> Vector2i:
 	if not _has_valid_activity_choice_values(values):
-		return WorldData.INVALID_CITY_TILE_POSITION
+		return CityCitizens.INVALID_CITY_TILE_POSITION
 
 	var activity_tiles: Array[Vector2i] = (
 		values["activity_tiles"]
@@ -263,7 +263,7 @@ static func choose_work_activity_tile(
 	)
 
 	if activity_tiles.is_empty():
-		return WorldData.INVALID_CITY_TILE_POSITION
+		return CityCitizens.INVALID_CITY_TILE_POSITION
 
 	var preferred_tiles: Array[Vector2i] = []
 	var fallback_tiles: Array[Vector2i] = []

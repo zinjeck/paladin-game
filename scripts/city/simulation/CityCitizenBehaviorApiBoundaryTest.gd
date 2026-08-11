@@ -87,19 +87,19 @@ func _exercise_city_gateways(
 	WorldPoliticalState.set_current_city_seed(seed_value)
 
 	var house := CityObjectSystem.add_city_object({
-		"object_type": WorldData.CITY_OBJECT_HOUSE,
+		"object_type": CityObjectCatalog.CITY_OBJECT_HOUSE,
 		"top_left": Vector2i(8, 8),
-		"size_tiles": WorldData.get_city_object_size_for_type(
-			WorldData.CITY_OBJECT_HOUSE
+		"size_tiles": CityObjectCatalog.get_city_object_size_for_type(
+			CityObjectCatalog.CITY_OBJECT_HOUSE
 		),
 		"object_owner": "player",
 		"city_world": city_world,
 	})
 	var house_id := int(house.get("id", -1))
-	var citizen := WorldData.add_city_citizen(
+	var citizen := CityCitizenRegistrySystem.add_city_citizen(
 		"",
 		TILE_A,
-		WorldData.CITY_CITIZEN_SEX_MALE,
+		CityCitizens.CITY_CITIZEN_SEX_MALE,
 		culture_id
 	)
 	var citizen_id := int(citizen.get("id", -1))
@@ -128,8 +128,8 @@ func _exercise_city_gateways(
 	_expect(
 		CityAssignmentSystem.assign_city_citizen_home(citizen_id, house_id)
 		and CityCitizenTaskRuntimeSystem.assign_city_citizen_task(citizen_id, {
-			"kind": WorldData.CITY_CITIZEN_TASK_KIND_RETURN_HOME,
-			"source": WorldData.CITY_CITIZEN_TASK_SOURCE_SCHEDULE,
+			"kind": CityCitizens.CITY_CITIZEN_TASK_KIND_RETURN_HOME,
+			"source": CityCitizens.CITY_CITIZEN_TASK_SOURCE_SCHEDULE,
 			"priority": 50,
 			"target_object_id": house_id,
 		})
@@ -139,7 +139,7 @@ func _exercise_city_gateways(
 			CityCitizenTaskRuntimeSystem.get_city_citizen_current_task(
 				citizen_id
 			).get("kind", "")
-		) == WorldData.CITY_CITIZEN_TASK_KIND_RETURN_HOME,
+		) == CityCitizens.CITY_CITIZEN_TASK_KIND_RETURN_HOME,
 		"Task assignment must update the focused task registry exactly once."
 	)
 	_expect(
@@ -151,7 +151,7 @@ func _exercise_city_gateways(
 			CityCitizenTaskRuntimeSystem.get_city_citizen_current_task(
 				citizen_id
 			).get("kind", "")
-		) == WorldData.CITY_CITIZEN_TASK_KIND_NONE,
+		) == CityCitizens.CITY_CITIZEN_TASK_KIND_NONE,
 		"Task clearing must retire registry membership and invalidate once."
 	)
 

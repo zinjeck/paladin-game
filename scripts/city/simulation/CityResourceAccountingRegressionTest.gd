@@ -25,22 +25,22 @@ func _ready() -> void:
 func _test_container_accounting_and_cache_invalidation() -> void:
 	var city_world := _reset_fixture(96_101)
 	var keep := _register_container(
-		WorldData.CITY_OBJECT_CITY_CENTER,
+		CityObjectCatalog.CITY_OBJECT_CITY_CENTER,
 		Vector2i(2, 2),
 		city_world
 	)
 	var stockpile := _register_container(
-		WorldData.CITY_OBJECT_STOCKPILE,
+		CityObjectCatalog.CITY_OBJECT_STOCKPILE,
 		Vector2i(8, 2),
 		city_world
 	)
 	var house := _register_container(
-		WorldData.CITY_OBJECT_HOUSE,
+		CityObjectCatalog.CITY_OBJECT_HOUSE,
 		Vector2i(13, 2),
 		city_world
 	)
 	var fishery := _register_container(
-		WorldData.CITY_OBJECT_FISHING_GROUNDS,
+		CityObjectCatalog.CITY_OBJECT_FISHING_GROUNDS,
 		Vector2i(19, 2),
 		city_world
 	)
@@ -112,13 +112,13 @@ func _test_container_accounting_and_cache_invalidation() -> void:
 		and not CityResourceContainerSystem.city_object_counts_as_public_city_storage(house)
 		and not CityResourceContainerSystem.city_object_counts_as_public_city_storage(fishery)
 		and CityResourceContainerSystem.get_city_object_public_storage_tier(keep)
-		== WorldData.PUBLIC_CITY_STORAGE_TIER_CITY_KEEP
+		== CityObjectCatalog.PUBLIC_CITY_STORAGE_TIER_CITY_KEEP
 		and CityResourceContainerSystem.get_city_object_public_storage_tier(stockpile)
-		== WorldData.PUBLIC_CITY_STORAGE_TIER_STOCKPILE
+		== CityObjectCatalog.PUBLIC_CITY_STORAGE_TIER_STOCKPILE
 		and CityResourceContainerSystem.get_city_object_public_storage_tier(house)
-		== WorldData.PUBLIC_CITY_STORAGE_TIER_NONE
+		== CityObjectCatalog.PUBLIC_CITY_STORAGE_TIER_NONE
 		and CityResourceContainerSystem.get_city_object_public_storage_tier(fishery)
-		== WorldData.PUBLIC_CITY_STORAGE_TIER_NONE,
+		== CityObjectCatalog.PUBLIC_CITY_STORAGE_TIER_NONE,
 		"Public/private container classification must remain unchanged."
 	)
 	_expect(
@@ -376,7 +376,7 @@ func _register_container(
 	return CityObjectSystem.register_completed_city_object({
 		"object_type": object_type,
 		"top_left": top_left,
-		"size_tiles": WorldData.get_city_object_size_for_type(object_type),
+		"size_tiles": CityObjectCatalog.get_city_object_size_for_type(object_type),
 		"object_owner": "player",
 		"city_world": city_world,
 	})

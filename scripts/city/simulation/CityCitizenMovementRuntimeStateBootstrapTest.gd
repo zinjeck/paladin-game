@@ -136,11 +136,11 @@ func _test_real_founding_bootstrap() -> void:
 	)
 	var city_world := _make_world(20, 20, 95_102)
 	WorldData.store_city_world_save(city_world, 95_102)
-	var keep_size := WorldData.get_city_object_size_for_type(
-		WorldData.CITY_OBJECT_CITY_CENTER
+	var keep_size := CityObjectCatalog.get_city_object_size_for_type(
+		CityObjectCatalog.CITY_OBJECT_CITY_CENTER
 	)
 	var keep := CityObjectSystem.add_city_object({
-		"object_type": WorldData.CITY_OBJECT_CITY_CENTER,
+		"object_type": CityObjectCatalog.CITY_OBJECT_CITY_CENTER,
 		"top_left": Vector2i(6, 6),
 		"size_tiles": keep_size,
 		"object_owner": "player",
@@ -160,7 +160,7 @@ func _test_real_founding_bootstrap() -> void:
 	_expect(
 		WorldData.has_player_city()
 		and CityCitizenRegistrySystem.get_current_state().citizens.size()
-		== WorldData.STARTING_CITY_POPULATION
+		== CityCitizenRegistrySystem.STARTING_CITY_POPULATION
 		and _all_citizens_are_idle()
 		and _state_has_clean_defaults(movement_state),
 		"Founding must leave all eight citizens idle in the capital owner."
@@ -190,7 +190,7 @@ func _test_city_and_session_reset() -> void:
 	state.citizen_movement_visual_tick_index = 144
 	state.citizen_movement_version = 20
 
-	WorldData.reset_city_citizen_state()
+	CityCitizenRegistrySystem.reset_city_citizen_state()
 	_expect(
 		is_same(
 			CityCitizenMovementRuntimeSystem.get_current_state(),
@@ -236,7 +236,7 @@ func _all_citizens_are_idle() -> bool:
 			return false
 		if (
 			str(raw_citizen.get("movement_state", ""))
-			!= WorldData.CITY_CITIZEN_MOVEMENT_STATE_IDLE
+			!= CityCitizens.CITY_CITIZEN_MOVEMENT_STATE_IDLE
 		):
 			return false
 	return true

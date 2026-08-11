@@ -42,7 +42,7 @@ static func add_city_citizen_to_spatial_index(
 	if citizen_id <= 0:
 		return false
 
-	if tile_position == WorldData.INVALID_CITY_TILE_POSITION:
+	if tile_position == CityCitizens.INVALID_CITY_TILE_POSITION:
 		return false
 
 	var citizen_ids: Array = []
@@ -120,7 +120,7 @@ static func register_city_citizen_spatial_index_entry(
 	)
 	var raw_position = citizen.get(
 		"city_tile_position",
-		WorldData.INVALID_CITY_TILE_POSITION
+		CityCitizens.INVALID_CITY_TILE_POSITION
 	)
 
 	if not raw_position is Vector2i:
@@ -191,7 +191,7 @@ static func has_living_city_citizen_at_tile(
 		if (
 			citizen.get(
 				"city_tile_position",
-				WorldData.INVALID_CITY_TILE_POSITION
+				CityCitizens.INVALID_CITY_TILE_POSITION
 			)
 			!= tile_position
 		):
@@ -241,7 +241,7 @@ static func ensure_city_citizen_spatial_state(
 
 	if not citizens_missing_position.is_empty():
 		var spawn_tiles := (
-			WorldData.get_starting_city_citizen_spawn_tiles(
+			CityCitizenSpatialSystem.get_starting_city_citizen_spawn_tiles(
 				city_world
 			)
 		)
@@ -301,15 +301,15 @@ static func get_city_citizen_tile_position(
 	)
 
 	if citizen.is_empty():
-		return WorldData.INVALID_CITY_TILE_POSITION
+		return CityCitizens.INVALID_CITY_TILE_POSITION
 
 	var raw_position = citizen.get(
 		"city_tile_position",
-		WorldData.INVALID_CITY_TILE_POSITION
+		CityCitizens.INVALID_CITY_TILE_POSITION
 	)
 
 	if not raw_position is Vector2i:
-		return WorldData.INVALID_CITY_TILE_POSITION
+		return CityCitizens.INVALID_CITY_TILE_POSITION
 
 	return raw_position
 
@@ -346,7 +346,7 @@ static func set_city_citizen_tile_position(
 		return false
 	var current_position = citizen.get(
 		"city_tile_position",
-		WorldData.INVALID_CITY_TILE_POSITION
+		CityCitizens.INVALID_CITY_TILE_POSITION
 	)
 
 	if current_position == tile_position:
@@ -394,7 +394,7 @@ static func get_living_city_citizen_ids_in_tiles(
 
 		var raw_tile = citizen.get(
 			"city_tile_position",
-			WorldData.INVALID_CITY_TILE_POSITION
+			CityCitizens.INVALID_CITY_TILE_POSITION
 		)
 
 		if not raw_tile is Vector2i or not tile_lookup.has(raw_tile):
@@ -407,3 +407,31 @@ static func get_living_city_citizen_ids_in_tiles(
 
 	citizen_ids.sort()
 	return citizen_ids
+
+static func get_starting_city_citizen_spawn_tiles(
+	city_world: WorldData
+) -> Array:
+	for raw_city_object in CityObjectSystem.get_city_objects():
+		if not raw_city_object is Dictionary:
+			continue
+
+		var city_object: Dictionary = raw_city_object
+
+		if (
+			str(city_object.get("type", ""))
+			!= CityObjectCatalog.CITY_OBJECT_CITY_CENTER
+		):
+			continue
+
+		return CityNavigationSystem.get_city_object_access_tiles(
+			city_world,
+			city_object
+		)
+
+	return []
+
+
+#endregion
+
+#region Simulation Tick and Session Reset
+

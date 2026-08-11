@@ -22,11 +22,11 @@ class FakeRenderer:
 	var objects := {
 		1: {
 			"id": 1,
-			"type": WorldData.CITY_OBJECT_HOUSE,
+			"type": CityObjectCatalog.CITY_OBJECT_HOUSE,
 		},
 		2: {
 			"id": 2,
-			"type": WorldData.CITY_OBJECT_ROAD,
+			"type": CityObjectCatalog.CITY_OBJECT_ROAD,
 		},
 	}
 	var object_rects := {

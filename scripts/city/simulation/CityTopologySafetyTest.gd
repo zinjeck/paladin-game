@@ -36,9 +36,9 @@ func _test_low_level_topology_gate_is_generic() -> void:
 	print("Topology test: generic authoritative placement gate")
 
 	for object_type in [
-		WorldData.CITY_OBJECT_HOUSE,
-		WorldData.CITY_OBJECT_STOCKPILE,
-		WorldData.CITY_OBJECT_FISHING_GROUNDS,
+		CityObjectCatalog.CITY_OBJECT_HOUSE,
+		CityObjectCatalog.CITY_OBJECT_STOCKPILE,
+		CityObjectCatalog.CITY_OBJECT_FISHING_GROUNDS,
 	]:
 		var city_world := _reset_fixture()
 		var top_left := Vector2i(10, 8)
@@ -46,7 +46,7 @@ func _test_low_level_topology_gate_is_generic() -> void:
 		var created_object := CityObjectSystem.add_city_object({
 			"object_type": object_type,
 			"top_left": top_left,
-			"size_tiles": WorldData.get_city_object_size_for_type(
+			"size_tiles": CityObjectCatalog.get_city_object_size_for_type(
 				object_type
 			),
 			"object_owner": "player",
@@ -88,11 +88,11 @@ func _test_construction_waits_for_footprint_clearance() -> void:
 	print("Topology test: staged construction finalization")
 	var city_world := _reset_fixture()
 	var top_left := Vector2i(12, 8)
-	var fishery_size := WorldData.get_city_object_size_for_type(
-		WorldData.CITY_OBJECT_FISHING_GROUNDS
+	var fishery_size := CityObjectCatalog.get_city_object_size_for_type(
+		CityObjectCatalog.CITY_OBJECT_FISHING_GROUNDS
 	)
 	var site := CityConstructionSystemScript.create_rectangular_site({
-		"object_type": WorldData.CITY_OBJECT_FISHING_GROUNDS,
+		"object_type": CityObjectCatalog.CITY_OBJECT_FISHING_GROUNDS,
 		"top_left": top_left,
 		"size_tiles": fishery_size,
 		"object_owner": "player",
@@ -171,7 +171,7 @@ func _test_construction_waits_for_footprint_clearance() -> void:
 	_expect(
 		trapped_after_request.get("city_tile_position") == trapped_tile
 		and str(trapped_after_request.get("movement_state", ""))
-		== WorldData.CITY_CITIZEN_MOVEMENT_STATE_MOVING,
+		== CityCitizens.CITY_CITIZEN_MOVEMENT_STATE_MOVING,
 		"Clearance must give the citizen a real route without teleporting them."
 	)
 	_expect(
@@ -207,7 +207,7 @@ func _test_construction_waits_for_footprint_clearance() -> void:
 	_expect(
 		CityConstructionSystem.get_city_construction_site_by_id(site_id).is_empty()
 		and str(completed_fishery.get("type", ""))
-		== WorldData.CITY_OBJECT_FISHING_GROUNDS,
+		== CityObjectCatalog.CITY_OBJECT_FISHING_GROUNDS,
 		"The Fishing Grounds must finalize once its footprint is physically clear."
 	)
 	_expect(
@@ -258,7 +258,7 @@ func _test_construction_waits_for_footprint_clearance() -> void:
 		not footprint_tiles.has(
 			trapped_after_completion.get(
 				"city_tile_position",
-				WorldData.INVALID_CITY_TILE_POSITION
+				CityCitizens.INVALID_CITY_TILE_POSITION
 			)
 		),
 		"The displaced citizen must finish outside the completed footprint."
@@ -315,7 +315,7 @@ func _test_one_bad_mover_does_not_freeze_the_batch() -> void:
 				"movement_state",
 				""
 			)
-		) == WorldData.CITY_CITIZEN_MOVEMENT_STATE_BLOCKED,
+		) == CityCitizens.CITY_CITIZEN_MOVEMENT_STATE_BLOCKED,
 		"The bad mover must enter an explicit recoverable quarantine state."
 	)
 
@@ -325,10 +325,10 @@ func _test_legacy_occupant_can_escape_but_not_reenter() -> void:
 	var city_world := _reset_fixture()
 	var top_left := Vector2i(12, 8)
 	var fishery := CityObjectSystem.add_city_object({
-		"object_type": WorldData.CITY_OBJECT_FISHING_GROUNDS,
+		"object_type": CityObjectCatalog.CITY_OBJECT_FISHING_GROUNDS,
 		"top_left": top_left,
-		"size_tiles": WorldData.get_city_object_size_for_type(
-			WorldData.CITY_OBJECT_FISHING_GROUNDS
+		"size_tiles": CityObjectCatalog.get_city_object_size_for_type(
+			CityObjectCatalog.CITY_OBJECT_FISHING_GROUNDS
 		),
 		"object_owner": "player",
 		"city_world": city_world,
@@ -396,10 +396,10 @@ func _reset_fixture() -> WorldData:
 
 
 func _add_citizen(tile_position: Vector2i) -> Dictionary:
-	return WorldData.add_city_citizen(
+	return CityCitizenRegistrySystem.add_city_citizen(
 		"",
 		tile_position,
-		WorldData.CITY_CITIZEN_SEX_FEMALE,
+		CityCitizens.CITY_CITIZEN_SEX_FEMALE,
 		test_primary_culture_id
 	)
 

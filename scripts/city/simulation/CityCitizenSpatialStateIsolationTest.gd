@@ -59,10 +59,10 @@ func _test_equal_version_city_isolation() -> void:
 	)
 	WorldPoliticalState.set_current_city_world(_make_world(16, 16, 100_101))
 	WorldPoliticalState.set_current_city_seed(100_101)
-	var citizen_a := WorldData.add_city_citizen(
+	var citizen_a := CityCitizenRegistrySystem.add_city_citizen(
 		"",
 		SHARED_CITIZEN_TILE,
-		WorldData.CITY_CITIZEN_SEX_MALE,
+		CityCitizens.CITY_CITIZEN_SEX_MALE,
 		culture_id
 	)
 	var registry_a := (
@@ -101,10 +101,10 @@ func _test_equal_version_city_isolation() -> void:
 	)
 	WorldPoliticalState.set_current_city_world(_make_world(16, 16, 100_202))
 	WorldPoliticalState.set_current_city_seed(100_202)
-	var citizen_b := WorldData.add_city_citizen(
+	var citizen_b := CityCitizenRegistrySystem.add_city_citizen(
 		"",
 		SHARED_CITIZEN_TILE,
-		WorldData.CITY_CITIZEN_SEX_FEMALE,
+		CityCitizens.CITY_CITIZEN_SEX_FEMALE,
 		culture_id
 	)
 	var registry_b := (

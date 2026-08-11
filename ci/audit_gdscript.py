@@ -189,6 +189,32 @@ RETIRED_LEGACY_CITY_BACKEND_SYMBOLS = (
     "legacy_city_world_data",
 )
 
+WORLD_DATA_FINAL_FORBIDDEN_CITY_SYMBOLS = (
+    "CityCitizensScript",
+    "CityObjectCatalogScript",
+    "STARTING_CITY_POPULATION",
+    "CITY_CITIZEN_TASK_KIND_NONE",
+    "CITY_CITIZEN_HAUL_ENDPOINT_KIND_NONE",
+    "INVALID_CITY_TILE_POSITION",
+    "CITY_OBJECT_CITY_CENTER",
+    "CONTAINER_TYPE_PUBLIC_CITY_STORAGE",
+    "WORKPLACE_PRODUCTION_STATUS_WORKING",
+    "CITY_CARDINAL_TILE_OFFSETS",
+    "CITY_TOPOLOGY_MUTATION_FAILURE_NONE",
+    "get_city_object_definition",
+    "get_city_object_resident_capacity",
+    "city_object_is_workplace",
+    "set_city_workplace_production_state",
+    "commit_city_haul_source_reservation",
+    "reserve_city_haul_destination",
+    "add_city_citizen",
+    "initialize_starting_city_population",
+    "ensure_city_citizen_demographic_state",
+    "get_starting_city_citizen_spawn_tiles",
+    "get_city_resource_types",
+    "is_city_resource_type",
+)
+
 WORLD_DATA_FORBIDDEN_CITY_NAVIGATION_SYMBOLS = (
     "city_object_access_tile_cache",
     "get_city_object_access_tiles",
@@ -1248,6 +1274,12 @@ def main() -> int:
     world_data_path = ROOT / "scripts/world/simulation/WorldData.gd"
     if world_data_path.exists():
         world_data_text = world_data_path.read_text(encoding="utf-8")
+        for symbol in WORLD_DATA_FINAL_FORBIDDEN_CITY_SYMBOLS:
+            if re.search(rf"\b{re.escape(symbol)}\b", world_data_text):
+                errors.append(
+                    "scripts/world/simulation/WorldData.gd: Pass 14 final boundary "
+                    f"forbids city-only symbol: {symbol}"
+                )
         for symbol in WORLD_DATA_FORBIDDEN_CITY_LOGISTICS_SYMBOLS:
             declaration_patterns = (
                 rf"^\s*static\s+var\s+{re.escape(symbol)}\b",

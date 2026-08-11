@@ -946,3 +946,46 @@ static func get_city_object_visual_style_for_type(
 		"fill_color": definition["fill_color"],
 		"frame_thickness": definition["frame_thickness"],
 	}
+
+static func get_city_object_resident_capacity(city_object: Dictionary) -> int:
+	if city_object.is_empty():
+		return 0
+	if city_object.has("resident_capacity"):
+		return int(city_object.get("resident_capacity", 0))
+	var definition := get_city_object_definition_from_object(city_object)
+	return int(definition.get("resident_capacity", 0))
+
+
+static func city_object_is_workplace(city_object: Dictionary) -> bool:
+	if city_object.is_empty():
+		return false
+	if bool(city_object.get("is_workplace", false)):
+		return true
+	var definition := get_city_object_definition_from_object(city_object)
+	return not definition.is_empty() and bool(definition.get("is_workplace", false))
+
+
+static func get_city_object_worker_capacity(city_object: Dictionary) -> int:
+	if city_object.is_empty():
+		return 0
+	if city_object.has("worker_capacity"):
+		return int(city_object.get("worker_capacity", 0))
+	var definition := get_city_object_definition_from_object(city_object)
+	return int(definition.get("worker_capacity", 0))
+
+
+static func get_city_object_output_resource(city_object: Dictionary) -> String:
+	var output_resources := get_city_object_output_resources(city_object)
+	if not output_resources.is_empty():
+		return output_resources[0]
+	if city_object.is_empty():
+		return CityResourceCatalogScript.RESOURCE_NONE
+	if city_object.has("output_resource"):
+		return str(city_object.get("output_resource", CityResourceCatalogScript.RESOURCE_NONE))
+	var definition := get_city_object_definition_from_object(city_object)
+	return str(definition.get("output_resource", CityResourceCatalogScript.RESOURCE_NONE))
+
+
+static func get_city_object_output_resources(city_object: Dictionary) -> Array[String]:
+	return _get_recipe_output_resource_types(get_city_object_production_recipe(city_object))
+

@@ -135,7 +135,7 @@ static func rebuild_city_active_mover_registry() -> bool:
 
 		if (
 			str(citizen.get("movement_state", ""))
-			!= WorldData.CITY_CITIZEN_MOVEMENT_STATE_MOVING
+			!= CityCitizens.CITY_CITIZEN_MOVEMENT_STATE_MOVING
 		):
 			continue
 
@@ -245,7 +245,7 @@ static func _get_clean_city_citizen_movement_path(
 	if raw_path.is_empty():
 		return movement_path
 
-	var previous_tile := WorldData.INVALID_CITY_TILE_POSITION
+	var previous_tile := CityCitizens.INVALID_CITY_TILE_POSITION
 
 	for raw_path_tile in raw_path:
 		if not raw_path_tile is Vector2i:
@@ -260,7 +260,7 @@ static func _get_clean_city_citizen_movement_path(
 		):
 			return []
 
-		if previous_tile != WorldData.INVALID_CITY_TILE_POSITION:
+		if previous_tile != CityCitizens.INVALID_CITY_TILE_POSITION:
 			if CityNavigationSystem.get_city_citizen_movement_step_cost(
 				previous_tile,
 				path_tile
@@ -336,7 +336,7 @@ static func assign_city_citizen_movement_order(
 
 	var current_position = citizen.get(
 		"city_tile_position",
-		WorldData.INVALID_CITY_TILE_POSITION
+		CityCitizens.INVALID_CITY_TILE_POSITION
 	)
 
 	if not current_position is Vector2i:
@@ -361,17 +361,17 @@ static func assign_city_citizen_movement_order(
 	var movement_speed := int(
 		citizen.get(
 			"movement_speed_basis_points_per_minute",
-			WorldData.DEFAULT_CITIZEN_MOVEMENT_SPEED_PER_MINUTE
+			CityCitizens.DEFAULT_CITIZEN_MOVEMENT_SPEED_PER_MINUTE
 		)
 	)
 
 	if movement_speed <= 0:
 		movement_speed = (
-			WorldData.DEFAULT_CITIZEN_MOVEMENT_SPEED_PER_MINUTE
+			CityCitizens.DEFAULT_CITIZEN_MOVEMENT_SPEED_PER_MINUTE
 		)
 
 	citizen["movement_state"] = (
-		WorldData.CITY_CITIZEN_MOVEMENT_STATE_MOVING
+		CityCitizens.CITY_CITIZEN_MOVEMENT_STATE_MOVING
 	)
 	citizen["movement_path"] = movement_path.duplicate()
 	citizen["movement_path_index"] = 1
@@ -384,7 +384,7 @@ static func assign_city_citizen_movement_order(
 	)
 	citizen["movement_repath_attempt_count"] = 0
 	citizen["movement_failure_reason"] = (
-		WorldData.CITY_CITIZEN_MOVEMENT_FAILURE_NONE
+		CityCitizens.CITY_CITIZEN_MOVEMENT_FAILURE_NONE
 	)
 
 	CityCitizenRegistrySystem.get_current_state().citizens[citizen_index] = citizen
@@ -489,7 +489,7 @@ static func commit_city_citizen_movement_tick(
 static func _make_city_citizen_movement_rejection(
 	citizen_id: int,
 	reason: String,
-	final_tile = WorldData.INVALID_CITY_TILE_POSITION,
+	final_tile = CityCitizens.INVALID_CITY_TILE_POSITION,
 	quarantine: bool = true
 ) -> Dictionary:
 	var rejection := {
@@ -520,7 +520,7 @@ static func _normalize_city_citizen_movement_updates(
 				_make_city_citizen_movement_rejection(
 					-1,
 					"update_is_not_dictionary",
-					WorldData.INVALID_CITY_TILE_POSITION,
+					CityCitizens.INVALID_CITY_TILE_POSITION,
 					false
 				)
 			)
@@ -531,7 +531,7 @@ static func _normalize_city_citizen_movement_updates(
 		var raw_updated_citizen = update.get("citizen", {})
 		var raw_final_tile = update.get(
 			"final_tile",
-			WorldData.INVALID_CITY_TILE_POSITION
+			CityCitizens.INVALID_CITY_TILE_POSITION
 		)
 		var raw_traversed_tiles = update.get("traversed_tiles", [])
 
@@ -626,7 +626,7 @@ static func _normalize_city_citizen_movement_updates(
 
 		var authoritative_position = existing_citizen.get(
 			"city_tile_position",
-			WorldData.INVALID_CITY_TILE_POSITION
+			CityCitizens.INVALID_CITY_TILE_POSITION
 		)
 
 		if not authoritative_position is Vector2i:
@@ -714,7 +714,7 @@ static func _normalize_next_active_mover_ids(
 				_make_city_citizen_movement_rejection(
 					citizen_id,
 					"invalid_or_duplicate_active_mover",
-					WorldData.INVALID_CITY_TILE_POSITION,
+					CityCitizens.INVALID_CITY_TILE_POSITION,
 					false
 				)
 			)
@@ -731,7 +731,7 @@ static func _normalize_next_active_mover_ids(
 				_make_city_citizen_movement_rejection(
 					citizen_id,
 					"active_mover_citizen_missing",
-					WorldData.INVALID_CITY_TILE_POSITION,
+					CityCitizens.INVALID_CITY_TILE_POSITION,
 					false
 				)
 			)
@@ -742,7 +742,7 @@ static func _normalize_next_active_mover_ids(
 				_make_city_citizen_movement_rejection(
 					citizen_id,
 					"active_mover_not_alive",
-					WorldData.INVALID_CITY_TILE_POSITION,
+					CityCitizens.INVALID_CITY_TILE_POSITION,
 					false
 				)
 			)
@@ -750,13 +750,13 @@ static func _normalize_next_active_mover_ids(
 
 		if (
 			str(proposed_citizen.get("movement_state", ""))
-			!= WorldData.CITY_CITIZEN_MOVEMENT_STATE_MOVING
+			!= CityCitizens.CITY_CITIZEN_MOVEMENT_STATE_MOVING
 		):
 			rejected_updates.append(
 				_make_city_citizen_movement_rejection(
 					citizen_id,
 					"active_registry_entry_not_moving",
-					WorldData.INVALID_CITY_TILE_POSITION,
+					CityCitizens.INVALID_CITY_TILE_POSITION,
 					false
 				)
 			)
@@ -802,9 +802,9 @@ static func _quarantine_rejected_city_citizen_movement_updates(
 
 		var citizen: Dictionary = raw_citizen
 		CityCitizensScript.reset_city_citizen_movement_state(citizen, true)
-		citizen["movement_state"] = WorldData.CITY_CITIZEN_MOVEMENT_STATE_BLOCKED
+		citizen["movement_state"] = CityCitizens.CITY_CITIZEN_MOVEMENT_STATE_BLOCKED
 		citizen["movement_failure_reason"] = (
-			WorldData.CITY_CITIZEN_MOVEMENT_FAILURE_INVALID_PATH
+			CityCitizens.CITY_CITIZEN_MOVEMENT_FAILURE_INVALID_PATH
 		)
 		CityCitizenRegistrySystem.get_current_state().citizens[citizen_index] = citizen
 		quarantined_ids[citizen_id] = true
@@ -824,12 +824,12 @@ static func _apply_city_citizen_movement_updates(
 		var updated_citizen: Dictionary = clean_update.get("citizen", {})
 		var final_tile: Vector2i = clean_update.get(
 			"final_tile",
-			WorldData.INVALID_CITY_TILE_POSITION
+			CityCitizens.INVALID_CITY_TILE_POSITION
 		)
 		var existing_citizen: Dictionary = CityCitizenRegistrySystem.get_current_state().citizens[citizen_index]
 		var old_tile: Vector2i = existing_citizen.get(
 			"city_tile_position",
-			WorldData.INVALID_CITY_TILE_POSITION
+			CityCitizens.INVALID_CITY_TILE_POSITION
 		)
 		var movement_visual_event := _make_city_citizen_movement_visual_event({
 			"before_citizen": existing_citizen,
@@ -891,11 +891,11 @@ static func _make_city_citizen_movement_visual_event(
 	var after_citizen: Dictionary = values.get("after_citizen", {})
 	var before_tile: Vector2i = values.get(
 		"before_tile",
-		WorldData.INVALID_CITY_TILE_POSITION
+		CityCitizens.INVALID_CITY_TILE_POSITION
 	)
 	var after_tile: Vector2i = values.get(
 		"after_tile",
-		WorldData.INVALID_CITY_TILE_POSITION
+		CityCitizens.INVALID_CITY_TILE_POSITION
 	)
 	var raw_traversed_tiles = values.get("traversed_tiles", [])
 	var citizen_id := int(before_citizen.get("id", -1))
@@ -940,10 +940,10 @@ static func _make_city_citizen_movement_visual_snapshot(
 	))
 	var movement_state := str(citizen.get("movement_state", ""))
 	var visual_position := Vector2(tile_position)
-	var visual_step_target_tile := WorldData.INVALID_CITY_TILE_POSITION
+	var visual_step_target_tile := CityCitizens.INVALID_CITY_TILE_POSITION
 
 	if (
-		movement_state == WorldData.CITY_CITIZEN_MOVEMENT_STATE_MOVING
+		movement_state == CityCitizens.CITY_CITIZEN_MOVEMENT_STATE_MOVING
 		and raw_path is Array
 		and movement_path_index >= 1
 		and movement_path_index < raw_path.size()
@@ -977,7 +977,7 @@ static func _make_city_citizen_movement_visual_snapshot(
 		"movement_visual_step_target_tile": visual_step_target_tile,
 		"movement_speed_basis_points_per_minute": int(citizen.get(
 			"movement_speed_basis_points_per_minute",
-			WorldData.DEFAULT_CITIZEN_MOVEMENT_SPEED_PER_MINUTE
+			CityCitizens.DEFAULT_CITIZEN_MOVEMENT_SPEED_PER_MINUTE
 		))
 	}
 

@@ -59,10 +59,10 @@ func _test_equal_version_city_isolation() -> void:
 	)
 	WorldPoliticalState.set_current_city_world(_make_world(16, 16, 97_101))
 	WorldPoliticalState.set_current_city_seed(97_101)
-	var citizen_a := WorldData.add_city_citizen(
+	var citizen_a := CityCitizenRegistrySystem.add_city_citizen(
 		"",
 		SHARED_CITIZEN_TILE,
-		WorldData.CITY_CITIZEN_SEX_MALE,
+		CityCitizens.CITY_CITIZEN_SEX_MALE,
 		culture_id
 	)
 	var state_a := (
@@ -108,10 +108,10 @@ func _test_equal_version_city_isolation() -> void:
 	)
 	WorldPoliticalState.set_current_city_world(_make_world(16, 16, 97_202))
 	WorldPoliticalState.set_current_city_seed(97_202)
-	var citizen_b := WorldData.add_city_citizen(
+	var citizen_b := CityCitizenRegistrySystem.add_city_citizen(
 		"",
 		SHARED_CITIZEN_TILE,
-		WorldData.CITY_CITIZEN_SEX_FEMALE,
+		CityCitizens.CITY_CITIZEN_SEX_FEMALE,
 		culture_id
 	)
 	var state_b := (
@@ -137,9 +137,9 @@ func _test_equal_version_city_isolation() -> void:
 		and not is_same(index_b, index_a)
 		and not is_same(spatial_b, spatial_a)
 		and str(citizens_a[0].get("sex", ""))
-		== WorldData.CITY_CITIZEN_SEX_MALE
+		== CityCitizens.CITY_CITIZEN_SEX_MALE
 		and str(citizens_b[0].get("sex", ""))
-		== WorldData.CITY_CITIZEN_SEX_FEMALE,
+		== CityCitizens.CITY_CITIZEN_SEX_FEMALE,
 		"Equal local IDs, coordinates, and versions must not alias City state."
 	)
 
@@ -189,7 +189,7 @@ func _test_equal_version_city_isolation() -> void:
 		and CityCitizenRegistrySystem.get_current_state().next_citizen_id == next_id_a
 		and CityCitizenRegistrySystem.get_current_state().citizen_version == version_a
 		and str(CityCitizenRegistrySystem.get_current_state().citizens[0].get("sex", ""))
-		== WorldData.CITY_CITIZEN_SEX_MALE,
+		== CityCitizens.CITY_CITIZEN_SEX_MALE,
 		"A -> B -> A must restore City A's exact registry and spatial workspace."
 	)
 	_expect(
@@ -218,7 +218,7 @@ func _test_equal_version_city_isolation() -> void:
 		and CityCitizenRegistrySystem.get_current_state().next_citizen_id == 2
 		and CityCitizenRegistrySystem.get_current_state().citizen_version == 1
 		and str(CityCitizenRegistrySystem.get_current_state().citizens[0].get("sex", ""))
-		== WorldData.CITY_CITIZEN_SEX_FEMALE,
+		== CityCitizens.CITY_CITIZEN_SEX_FEMALE,
 		"A -> B -> A -> B must leave City B's registry unchanged."
 	)
 

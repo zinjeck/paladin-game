@@ -25,7 +25,7 @@ class FakeRenderer:
 	var objects := {
 		1: {
 			"id": 1,
-			"type": WorldData.CITY_OBJECT_FISHING_GROUNDS,
+			"type": CityObjectCatalog.CITY_OBJECT_FISHING_GROUNDS,
 		},
 	}
 	var object_rects := {
