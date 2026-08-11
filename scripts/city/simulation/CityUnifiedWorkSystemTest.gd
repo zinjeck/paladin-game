@@ -269,7 +269,7 @@ func _test_unreachable_order_runtime_diagnostics() -> void:
 	# tile.
 	for y in range(city_world.height):
 		var barrier_tile := city_world.get_tile(10, y)
-		barrier_tile["terrain"] = WorldData.TERRAIN_WATER
+		barrier_tile["terrain"] = CityObjectCatalog.TERRAIN_WATER
 		barrier_tile["biome"] = WorldData.BIOME_OCEAN
 		barrier_tile["is_land"] = false
 		barrier_tile.erase("surface_feature")
@@ -916,7 +916,7 @@ func _test_unreachable_blueprint_does_not_churn_construction_travel() -> void:
 
 	for y in range(city_world.height):
 		var barrier_tile := city_world.get_tile(10, y)
-		barrier_tile["terrain"] = WorldData.TERRAIN_WATER
+		barrier_tile["terrain"] = CityObjectCatalog.TERRAIN_WATER
 		barrier_tile["biome"] = WorldData.BIOME_OCEAN
 		barrier_tile["is_land"] = false
 		barrier_tile.erase("surface_feature")

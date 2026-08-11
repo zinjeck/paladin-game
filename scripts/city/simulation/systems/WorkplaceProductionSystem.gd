@@ -1437,7 +1437,7 @@ static func set_city_workplace_production_state(
 
 	var city_object: Dictionary = raw_city_object
 
-	if not city_object_is_workplace(city_object):
+	if not CityObjectCatalog.city_object_is_workplace(city_object):
 		return false
 
 	var recipe := CityObjectCatalog.get_city_object_production_recipe(city_object)

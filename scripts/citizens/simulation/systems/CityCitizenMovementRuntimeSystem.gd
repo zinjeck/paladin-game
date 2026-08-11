@@ -214,7 +214,7 @@ static func ensure_city_citizen_movement_state() -> int:
 		):
 			continue
 
-		CityCitizensScript.reset_city_citizen_movement_state(
+		CityCitizens.reset_city_citizen_movement_state(
 			citizen
 		)
 		CityCitizenRegistrySystem.get_current_state().citizens[citizen_index] = citizen
@@ -297,7 +297,7 @@ static func cancel_city_citizen_movement(
 
 	var citizen: Dictionary = raw_citizen
 
-	CityCitizensScript.reset_city_citizen_movement_state(
+	CityCitizens.reset_city_citizen_movement_state(
 		citizen,
 		true
 	)
@@ -801,7 +801,7 @@ static func _quarantine_rejected_city_citizen_movement_updates(
 			continue
 
 		var citizen: Dictionary = raw_citizen
-		CityCitizensScript.reset_city_citizen_movement_state(citizen, true)
+		CityCitizens.reset_city_citizen_movement_state(citizen, true)
 		citizen["movement_state"] = CityCitizens.CITY_CITIZEN_MOVEMENT_STATE_BLOCKED
 		citizen["movement_failure_reason"] = (
 			CityCitizens.CITY_CITIZEN_MOVEMENT_FAILURE_INVALID_PATH

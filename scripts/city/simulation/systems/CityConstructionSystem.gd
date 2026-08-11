@@ -164,10 +164,10 @@ static func can_place_city_construction_footprint(
 			tile_position.x,
 			tile_position.y
 		)
-		var terrain := str(tile.get("terrain", WorldData.TERRAIN_WATER))
+		var terrain := str(tile.get("terrain", CityObjectCatalog.TERRAIN_WATER))
 
 		if (
-			terrain == WorldData.TERRAIN_WATER
+			terrain == CityObjectCatalog.TERRAIN_WATER
 			or terrain == WorldData.TERRAIN_MOUNTAIN
 			or not bool(tile.get("is_land", false))
 		):
@@ -724,10 +724,10 @@ static func _can_update_city_construction_site_footprint(
 			tile_position.x,
 			tile_position.y
 		)
-		var terrain := str(tile.get("terrain", WorldData.TERRAIN_WATER))
+		var terrain := str(tile.get("terrain", CityObjectCatalog.TERRAIN_WATER))
 
 		if (
-			terrain == WorldData.TERRAIN_WATER
+			terrain == CityObjectCatalog.TERRAIN_WATER
 			or terrain == WorldData.TERRAIN_MOUNTAIN
 			or not bool(tile.get("is_land", false))
 		):

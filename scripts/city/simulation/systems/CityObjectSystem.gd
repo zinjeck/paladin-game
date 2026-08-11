@@ -463,8 +463,8 @@ static func validate_city_object_topology_mutation(
 		)
 
 		if (
-			str(tile.get("terrain", WorldData.TERRAIN_WATER)) in [
-				WorldData.TERRAIN_WATER,
+			str(tile.get("terrain", CityObjectCatalog.TERRAIN_WATER)) in [
+				CityObjectCatalog.TERRAIN_WATER,
 				WorldData.TERRAIN_MOUNTAIN,
 			]
 			or not bool(tile.get("is_land", false))
@@ -567,7 +567,7 @@ static func can_place_city_object(
 			var tile: Dictionary = city_world.get_tile(x, y)
 
 			if str(tile.get("terrain", "")) in [
-				WorldData.TERRAIN_WATER,
+				CityObjectCatalog.TERRAIN_WATER,
 				WorldData.TERRAIN_MOUNTAIN,
 			]:
 				return false
@@ -650,7 +650,7 @@ static func get_city_object_citizen_interior_access_mode(
 static func get_city_object_citizen_entry_policy(
 	city_object: Dictionary
 ) -> Dictionary:
-	return WorldData._get_city_object_definition_dictionary(
+	return CityObjectCatalog._get_city_object_definition_dictionary(
 		city_object,
 		"citizen_entry_policy"
 	)
@@ -1024,7 +1024,7 @@ static func can_use_city_object_definition(object_type: String) -> bool:
 	return true
 
 static var city_object_definitions: Dictionary = (
-	CityObjectCatalogScript.get_city_object_definitions()
+	CityObjectCatalog.get_city_object_definitions()
 )
 
 #endregion

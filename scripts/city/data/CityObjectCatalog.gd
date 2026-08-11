@@ -989,3 +989,9 @@ static func get_city_object_output_resource(city_object: Dictionary) -> String:
 static func get_city_object_output_resources(city_object: Dictionary) -> Array[String]:
 	return _get_recipe_output_resource_types(get_city_object_production_recipe(city_object))
 
+
+
+static func get_city_object_definition_from_object(city_object: Dictionary) -> Dictionary:
+	if city_object.is_empty():
+		return {}
+	return get_city_object_definition(str(city_object.get("type", "")))

@@ -40,9 +40,9 @@ static func make_city_construction_site_haul_endpoint(
 	site_id: int
 ) -> Dictionary:
 	if site_id <= 0:
-		return CityCitizensScript.make_city_citizen_haul_endpoint()
+		return CityCitizens.make_city_citizen_haul_endpoint()
 
-	return CityCitizensScript.make_city_citizen_haul_endpoint({
+	return CityCitizens.make_city_citizen_haul_endpoint({
 		"kind": CityCitizens.CITY_CITIZEN_HAUL_ENDPOINT_KIND_CONSTRUCTION_SITE,
 		"id": site_id,
 	})
@@ -64,9 +64,9 @@ static func make_city_citizen_haul_endpoint(
 	object_id: int
 ) -> Dictionary:
 	if object_id <= 0:
-		return CityCitizensScript.make_city_citizen_haul_endpoint()
+		return CityCitizens.make_city_citizen_haul_endpoint()
 
-	return CityCitizensScript.make_city_citizen_haul_endpoint({
+	return CityCitizens.make_city_citizen_haul_endpoint({
 		"kind": (
 			CityCitizens.CITY_CITIZEN_HAUL_ENDPOINT_KIND_CITY_OBJECT_CONTAINER
 		),
@@ -77,9 +77,9 @@ static func make_city_ground_pile_haul_endpoint(
 	ground_pile_id: int
 ) -> Dictionary:
 	if ground_pile_id <= 0:
-		return CityCitizensScript.make_city_citizen_haul_endpoint()
+		return CityCitizens.make_city_citizen_haul_endpoint()
 
-	return CityCitizensScript.make_city_citizen_haul_endpoint({
+	return CityCitizens.make_city_citizen_haul_endpoint({
 		"kind": CityCitizens.CITY_CITIZEN_HAUL_ENDPOINT_KIND_GROUND_PILE,
 		"id": ground_pile_id,
 	})
@@ -95,9 +95,9 @@ static func make_city_ground_tile_haul_endpoint(
 			tile_position
 		)
 	):
-		return CityCitizensScript.make_city_citizen_haul_endpoint()
+		return CityCitizens.make_city_citizen_haul_endpoint()
 
-	return CityCitizensScript.make_city_citizen_haul_endpoint({
+	return CityCitizens.make_city_citizen_haul_endpoint({
 		"kind": CityCitizens.CITY_CITIZEN_HAUL_ENDPOINT_KIND_GROUND_TILE,
 		"id": -1,
 		"tile_position": tile_position,
@@ -264,9 +264,9 @@ static func can_city_ground_pile_exist_at_tile(
 
 	return (
 		bool(tile.get("is_land", false))
-		and str(tile.get("terrain", WorldData.TERRAIN_WATER))
-		!= WorldData.TERRAIN_WATER
-		and str(tile.get("terrain", WorldData.TERRAIN_WATER))
+		and str(tile.get("terrain", CityObjectCatalog.TERRAIN_WATER))
+		!= CityObjectCatalog.TERRAIN_WATER
+		and str(tile.get("terrain", CityObjectCatalog.TERRAIN_WATER))
 		!= WorldData.TERRAIN_MOUNTAIN
 		and not city_surface_feature_blocks_ground_pile(
 			WorldData.get_city_surface_feature(tile)
@@ -1641,10 +1641,10 @@ static func _make_city_haul_reservation_context(
 	):
 		return {}
 
-	var source := CityCitizensScript.make_city_citizen_haul_endpoint(
+	var source := CityCitizens.make_city_citizen_haul_endpoint(
 		raw_source
 	)
-	var destination := CityCitizensScript.make_city_citizen_haul_endpoint(
+	var destination := CityCitizens.make_city_citizen_haul_endpoint(
 		raw_destination
 	)
 	var resource := str(values.get("resource_type", WorldData.RESOURCE_NONE))
@@ -1665,8 +1665,8 @@ static func _make_city_haul_reservation_context(
 	if (
 		requested_amount <= 0
 		or not CityResourceCatalog.is_city_resource_type(resource)
-		or not CityCitizensScript.is_valid_city_citizen_haul_endpoint(source)
-		or not CityCitizensScript.is_valid_city_citizen_haul_endpoint(
+		or not CityCitizens.is_valid_city_citizen_haul_endpoint(source)
+		or not CityCitizens.is_valid_city_citizen_haul_endpoint(
 			destination
 		)
 	):
@@ -2069,7 +2069,7 @@ static func retarget_city_haul_reservation_source(
 
 	var citizen_id := int(reservation.get("citizen_id", -1))
 	var normalized_source := (
-		CityCitizensScript.make_city_citizen_haul_endpoint(source)
+		CityCitizens.make_city_citizen_haul_endpoint(source)
 	)
 	var destination: Dictionary = reservation.get("destination", {})
 	var destination_access_purpose := str(
@@ -2455,7 +2455,7 @@ static func retarget_city_haul_destination_reservation(
 	CityLogisticsSystem._mark_city_haul_reservations_changed()
 	return 0
 
-static func CityLogisticsSystem.reserve_city_haul_destination(
+static func reserve_city_haul_destination(
 	reservation_id: int,
 	destination: Dictionary,
 	requested_amount: int

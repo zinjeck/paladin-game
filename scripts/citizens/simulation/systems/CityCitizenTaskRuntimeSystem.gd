@@ -182,14 +182,14 @@ static func get_city_citizen_current_haul(
 	var citizen := CityCitizenRegistrySystem.get_city_citizen_by_id(citizen_id)
 
 	if citizen.is_empty():
-		return CityCitizensScript.make_city_citizen_haul()
+		return CityCitizens.make_city_citizen_haul()
 
 	var raw_haul = citizen.get("current_haul", {})
 
 	if not raw_haul is Dictionary:
-		return CityCitizensScript.make_city_citizen_haul()
+		return CityCitizens.make_city_citizen_haul()
 
-	return CityCitizensScript.make_city_citizen_haul(
+	return CityCitizens.make_city_citizen_haul(
 		raw_haul
 	)
 
@@ -210,7 +210,7 @@ static func set_city_citizen_current_haul(
 		return false
 
 	var normalized_haul := (
-		CityCitizensScript.make_city_citizen_haul(
+		CityCitizens.make_city_citizen_haul(
 			haul_values
 		)
 	)
@@ -221,7 +221,7 @@ static func set_city_citizen_current_haul(
 		)
 	)
 
-	if not CityCitizensScript.is_valid_city_citizen_haul_phase(
+	if not CityCitizens.is_valid_city_citizen_haul_phase(
 		haul_phase
 	):
 		return false
@@ -323,12 +323,12 @@ static func ensure_city_citizen_task_state() -> int:
 
 			if raw_current_task is Dictionary:
 				citizen["current_task"] = (
-					CityCitizensScript.make_city_citizen_task(
+					CityCitizens.make_city_citizen_task(
 						raw_current_task
 					)
 				)
 			else:
-				CityCitizensScript.reset_city_citizen_task_state(citizen)
+				CityCitizens.reset_city_citizen_task_state(citizen)
 
 			citizen_was_migrated = true
 
@@ -340,12 +340,12 @@ static func ensure_city_citizen_task_state() -> int:
 
 			if raw_current_haul is Dictionary:
 				citizen["current_haul"] = (
-					CityCitizensScript.make_city_citizen_haul(
+					CityCitizens.make_city_citizen_haul(
 						raw_current_haul
 					)
 				)
 			else:
-				CityCitizensScript.reset_city_citizen_haul_runtime_state(
+				CityCitizens.reset_city_citizen_haul_runtime_state(
 					citizen
 				)
 			citizen_was_migrated = true
@@ -455,13 +455,13 @@ static func _make_city_citizen_task_assignment_context(
 	var player_locked: bool = raw_player_locked
 
 	if (
-		not CityCitizensScript.is_valid_city_citizen_task_kind(task_kind)
+		not CityCitizens.is_valid_city_citizen_task_kind(task_kind)
 		or task_kind == CityCitizens.CITY_CITIZEN_TASK_KIND_NONE
 	):
 		return {}
 
 	if (
-		not CityCitizensScript.is_valid_city_citizen_task_source(task_source)
+		not CityCitizens.is_valid_city_citizen_task_source(task_source)
 		or task_source == CityCitizens.CITY_CITIZEN_TASK_SOURCE_NONE
 	):
 		return {}
@@ -535,7 +535,7 @@ static func _make_city_citizen_task_assignment_context(
 		"job_id": job_id,
 		"player_locked": player_locked,
 		"haul_cargo_amount": haul_cargo_amount,
-		"assigned_haul": CityCitizensScript.make_city_citizen_haul(),
+		"assigned_haul": CityCitizens.make_city_citizen_haul(),
 		"assigned_target_tile": CityCitizens.INVALID_CITY_TILE_POSITION,
 		"assigned_food_resource": WorldData.RESOURCE_NONE,
 		"assigned_food_requested_amount": 0,
@@ -633,7 +633,7 @@ static func _prepare_city_food_task_assignment(
 		or food_access_purpose
 		!= CityObjectCatalog.CONTAINER_DIRECT_WITHDRAWAL_PURPOSE_PERSONAL_FOOD
 		or not raw_food_target_tile is Vector2i
-		or not CityCitizensScript.is_valid_city_citizen_haul_endpoint(
+		or not CityCitizens.is_valid_city_citizen_haul_endpoint(
 			food_endpoint
 		)
 		or not CitizenNeedsSystem.get_city_citizen_food_endpoint_target_tiles(
@@ -716,7 +716,7 @@ static func _prepare_city_haul_task_assignment(
 	if not raw_haul is Dictionary:
 		return false
 
-	var assigned_haul := CityCitizensScript.make_city_citizen_haul(raw_haul)
+	var assigned_haul := CityCitizens.make_city_citizen_haul(raw_haul)
 	var haul_phase := str(
 		assigned_haul.get("phase", CityCitizens.CITY_CITIZEN_HAUL_PHASE_NONE)
 	)
@@ -729,7 +729,7 @@ static func _prepare_city_haul_task_assignment(
 	var source_endpoint_id := int(haul_source.get("id", -1))
 
 	if (
-		not CityCitizensScript.is_valid_city_citizen_haul_phase(haul_phase)
+		not CityCitizens.is_valid_city_citizen_haul_phase(haul_phase)
 		or haul_phase == CityCitizens.CITY_CITIZEN_HAUL_PHASE_NONE
 		or not CityResourceCatalog.is_city_resource_type(haul_resource)
 		or int(assigned_haul.get("requested_amount", 0)) <= 0
@@ -753,17 +753,17 @@ static func _prepare_city_haul_task_assignment(
 	):
 		return false
 
-	if not CityCitizensScript.is_valid_city_citizen_haul_endpoint(haul_source):
+	if not CityCitizens.is_valid_city_citizen_haul_endpoint(haul_source):
 		return false
 
-	if not CityCitizensScript.is_valid_city_citizen_haul_endpoint(haul_requester):
+	if not CityCitizens.is_valid_city_citizen_haul_endpoint(haul_requester):
 		return false
 
 	if source_endpoint_id != target_object_id:
 		return false
 
 	if haul_cargo_amount <= 0:
-		if not CityCitizensScript.is_valid_city_citizen_haul_endpoint(
+		if not CityCitizens.is_valid_city_citizen_haul_endpoint(
 			haul_destination
 		):
 			return false
@@ -788,7 +788,7 @@ static func _prepare_city_haul_task_assignment(
 		if cargo_resources.is_empty():
 			return false
 
-	if not CityCitizensScript.is_valid_city_citizen_haul_endpoint(
+	if not CityCitizens.is_valid_city_citizen_haul_endpoint(
 		haul_destination,
 		haul_cargo_amount > 0
 	):
@@ -889,7 +889,7 @@ static func _commit_city_citizen_task_assignment(
 	var citizen_index := int(assignment.get("citizen_index", -1))
 	var citizen: Dictionary = assignment.get("citizen", {})
 	var task_kind := str(assignment.get("task_kind", ""))
-	var current_task := CityCitizensScript.make_city_citizen_task({
+	var current_task := CityCitizens.make_city_citizen_task({
 		"kind": task_kind,
 		"source": str(assignment.get("task_source", "")),
 		"phase": CityCitizens.CITY_CITIZEN_TASK_PHASE_PENDING,
@@ -928,10 +928,10 @@ static func _commit_city_citizen_task_assignment(
 	if task_kind == CityCitizens.CITY_CITIZEN_TASK_KIND_HAUL:
 		citizen["current_haul"] = assignment.get(
 			"assigned_haul",
-			CityCitizensScript.make_city_citizen_haul()
+			CityCitizens.make_city_citizen_haul()
 		)
 	else:
-		CityCitizensScript.reset_city_citizen_haul_runtime_state(citizen)
+		CityCitizens.reset_city_citizen_haul_runtime_state(citizen)
 
 	CityCitizenRegistrySystem.get_current_state().citizens[citizen_index] = citizen
 	_add_city_active_task_id(citizen_id)
@@ -943,7 +943,7 @@ static func set_city_citizen_task_phase(
 	task_phase: String
 ) -> bool:
 	if (
-		not CityCitizensScript.is_valid_city_citizen_task_phase(task_phase)
+		not CityCitizens.is_valid_city_citizen_task_phase(task_phase)
 		or task_phase == CityCitizens.CITY_CITIZEN_TASK_PHASE_NONE
 	):
 		return false
@@ -1143,7 +1143,7 @@ static func clear_city_citizen_task(
 	citizen_id: int,
 	requesting_source: String = CityCitizens.CITY_CITIZEN_TASK_SOURCE_NONE
 ) -> bool:
-	if not CityCitizensScript.is_valid_city_citizen_task_source(
+	if not CityCitizens.is_valid_city_citizen_task_source(
 		requesting_source
 	):
 		return false
@@ -1173,7 +1173,7 @@ static func clear_city_citizen_task(
 		):
 			return false
 
-	var empty_task := CityCitizensScript.make_city_citizen_task()
+	var empty_task := CityCitizens.make_city_citizen_task()
 	var active_reservation_id := (
 		CityLogisticsSystem.get_city_haul_reservation_id_for_citizen(citizen_id)
 	)
@@ -1213,12 +1213,12 @@ static func clear_city_citizen_task(
 		):
 			var raw_haul = citizen.get("current_haul", {})
 			var current_haul := (
-				CityCitizensScript.make_city_citizen_haul()
+				CityCitizens.make_city_citizen_haul()
 			)
 
 			if raw_haul is Dictionary:
 				current_haul = (
-					CityCitizensScript.make_city_citizen_haul(
+					CityCitizens.make_city_citizen_haul(
 						raw_haul
 					)
 				)
@@ -1234,7 +1234,7 @@ static func clear_city_citizen_task(
 			)
 			citizen["current_haul"] = current_haul
 		else:
-			CityCitizensScript.reset_city_citizen_haul_runtime_state(
+			CityCitizens.reset_city_citizen_haul_runtime_state(
 				citizen
 			)
 

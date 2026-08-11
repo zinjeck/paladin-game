@@ -284,7 +284,7 @@ func _test_dead_active_mover_cleanup() -> void:
 		"The death-cleanup fixture must begin with an active mover."
 	)
 	var occupied_tile: Dictionary = city_world.tiles[TILE_A.y][TILE_A.x]
-	occupied_tile["terrain"] = WorldData.TERRAIN_WATER
+	occupied_tile["terrain"] = CityObjectCatalog.TERRAIN_WATER
 	occupied_tile["is_land"] = false
 	city_world.tiles[TILE_A.y][TILE_A.x] = occupied_tile
 	city_world.mark_tile_data_changed()
