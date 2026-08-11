@@ -1,72 +1,45 @@
-# Pass 11: Remaining city-specific WorldData audit
+# Pass 11: Remaining WorldData Ownership Audit
 
-Baseline: `main` after Pass 10 merge commit `63e2a1328eff7df0b0f46e2e0d0e58dc132d2835`.
+Pass 11 re-audited the post-Pass-10 `WorldData` boundary and extracted the last clearly isolated city-local derived cache without crossing into the compatibility-workspace or legacy-backend removal passes.
 
-This pass is an architecture audit and targeted cleanup. It does not remove the capture/apply workspace or the legacy city backend; those remain Passes 12 and 13.
+## Extracted in Pass 11
 
-## Fresh classification
+`city_object_access_tile_cache` was city-local derived navigation state and is now owned by settlement-local `CityNavigationState`. `CityNavigationSystem` owns access-tile cache behavior, lookup, reset, and deterministic access-tile computation. `WorldData` no longer declares the cache, exposes `get_city_object_access_tiles`, or owns the associated sort helper.
 
-### Genuine world/session-level responsibility
+The cache is selected by active settlement identity through `WorldPoliticalState.get_current_city_navigation_state()`. A pre-context owner exists only for bootstrap/legacy compatibility and is transferred by identity when the founding City or a converted legacy City adopts the instance-owned backend.
 
-These remain legitimate in `WorldData` during Pass 11:
+The navigation cache does not participate in `CitySettlementSimulationState.capture_from_world_data()` or `apply_to_world_data()`. Settlement switching therefore selects the correct owner directly instead of copying cache dictionaries through the WorldData workspace.
 
-- generated world grid data (`width`, `height`, `seed`, `tiles`, tile-data versions)
-- world-save/founding-region selection and scene-return metadata
-- world map / city map `WorldData` objects used as generated map data
-- culture registry and founding culture identity
-- global visual/session cache coordination
-- immutable constants and compatibility aliases into catalogs
+## Intentionally retained in WorldData after Pass 11
 
-### Settlement-local simulation already extracted
+The following categories remain legitimate WorldData responsibilities at this boundary:
 
-These must continue resolving through focused settlement-local owners and must not be reintroduced into `WorldData`:
+- generated world/grid and city-world tile data
+- founding-region and world-session metadata
+- culture/founding identity data
+- immutable city catalog aliases and shared metadata helpers
+- global visual/session coordination
 
-- completed objects / occupancy
-- resource accounting
-- citizen registry
-- citizen spatial state
-- citizen movement runtime
-- citizen task runtime
-- personal inventory / needs mutation boundaries
-- housing / job assignment invalidation
-- workplace invalidation / staffing policy
-- work
-- logistics
-- construction
+The remaining city compatibility workspace is deliberately deferred to Pass 12. This includes `official_city_world`, `official_city_seed`, `player_city_data`, and the remaining capture/apply bridge responsibilities that still depend on them.
 
-### Remaining city-local cache to retire from WorldData
+`BACKEND_LEGACY_CITY_WORLD_DATA` is deliberately retained for Pass 13, where the legacy city backend is removed only after the compatibility workspace has been eliminated.
 
-`city_object_access_tile_cache` is derived navigation/topology cache state. Previous passes intentionally left it out of citizen spatial and movement ownership because it is not citizen state. Pass 11 will move its physical ownership to the active `CitySettlementSimulationState` and make `CityNavigationSystem` the behavioral/cache API owner. The cache is derived and may be discarded/rebuilt across bootstrap transitions; it must never leak between City A and City B.
+## Invariants established by Pass 11
 
-Required invariants:
+- Access-tile memoization is settlement-local and cannot alias merely because two Cities reuse the same local object ID.
+- `CityNavigationState` is data-only; navigation behavior remains in `CityNavigationSystem`.
+- Access-tile/pathfinding rules are unchanged.
+- Clearing or mutating one City's navigation cache cannot modify another City's cache.
+- Founding bootstrap and legacy-backend conversion preserve the exact pre-context navigation owner once rather than cloning it.
+- The extracted cache must not return to WorldData or to capture/apply copying. The static architecture audit enforces this boundary.
 
-- City A and City B have independent access-tile caches even when local object IDs and version values match.
-- settlement switching selects the matching cache by settlement identity instead of copying it through `WorldData`.
-- object-version, map tile-data-version, world-instance, and footprint-hash invalidation behavior remains unchanged.
-- reset/new-game paths clear the relevant cache without clearing another settlement.
+## Verification
 
-### Legacy workspace fields deliberately retained for Pass 12
+Godot CI run #315 passed on commit `61a144f004a71568cfbfb799fcc119ce80d069a6` before this documentation-only finalization:
 
-The following are already mirrored by `CitySettlementSimulationState` but are still applied/captured through the compatibility workspace:
+- static GDScript architecture/resource-path audit passed
+- Godot 4.7.1 project import passed
+- full `scripts/**/*Test.tscn` headless suite passed
+- CI completed successfully
 
-- `official_city_world` <-> `city_world`
-- `official_city_seed` <-> `city_seed`
-- `player_city_data` <-> `city_runtime_data`
-
-Pass 11 will audit their callers but will not prematurely remove the bridge. Pass 12 owns removal of `capture_from_world_data()` / `apply_to_world_data()` and the active-city workspace model.
-
-### Legacy backend deliberately retained for Pass 13
-
-`SettlementSimulationContext.BACKEND_LEGACY_CITY_WORLD_DATA` remains compatibility-only until Pass 13 proves no legitimate record, fixture, migration path, or bootstrap path depends on it.
-
-## Pass 11 boundary
-
-1. Extract `city_object_access_tile_cache` from `WorldData` ownership.
-2. Route access-tile cache behavior through `CityNavigationSystem` while preserving compatibility only where necessary.
-3. Remove access-cache capture/apply copying from `CitySettlementSimulationState`.
-4. Add permanent architecture guards preventing the cache from returning to `WorldData`.
-5. Add focused bootstrap/isolation/regression coverage.
-6. Run static audit, Godot 4.7.1 import, all `scripts/**/*Test.tscn`, and main-scene boot.
-7. Leave the three legacy workspace fields above for Pass 12 and the legacy backend for Pass 13.
-
-No gameplay balance or pathfinding-rule changes belong in this pass.
+Focused coverage includes navigation-state bootstrap/adoption and A/B/A settlement isolation with equal settlement-local object IDs.
