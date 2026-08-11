@@ -26,7 +26,7 @@ static func _validate_city_citizen_spatial_state(
 
 		return
 
-	var city_world = WorldData.official_city_world
+	var city_world = WorldPoliticalState.get_current_city_world()
 
 	if city_world == null:
 		errors.append(
@@ -538,13 +538,13 @@ static func _validate_city_citizen_culture_state(
 
 	var primary_culture_id := WorldData.INVALID_CULTURE_ID
 
-	if not WorldData.player_city_data.has("primary_culture_id"):
+	if not WorldPoliticalState.get_current_city_runtime_data().has("primary_culture_id"):
 		errors.append(
 			"Founded player city is missing primary_culture_id."
 		)
 	elif (
 		typeof(
-			WorldData.player_city_data.get("primary_culture_id")
+			WorldPoliticalState.get_current_city_runtime_data().get("primary_culture_id")
 		)
 		!= TYPE_INT
 	):
@@ -553,7 +553,7 @@ static func _validate_city_citizen_culture_state(
 		)
 	else:
 		primary_culture_id = int(
-			WorldData.player_city_data.get("primary_culture_id")
+			WorldPoliticalState.get_current_city_runtime_data().get("primary_culture_id")
 		)
 
 		if primary_culture_id <= 0:
@@ -573,7 +573,7 @@ static func _validate_city_citizen_culture_state(
 		)
 	else:
 		var player_city_name := str(
-			WorldData.player_city_data.get("name", "")
+			WorldPoliticalState.get_current_city_runtime_data().get("name", "")
 		)
 
 		if player_city_name != WorldData.get_official_city_name():
@@ -2253,7 +2253,7 @@ static func _validate_city_citizen_movement_state(
 	errors: Array[String],
 	citizen_lookup: Dictionary
 ) -> void:
-	var city_world = WorldData.official_city_world
+	var city_world = WorldPoliticalState.get_current_city_world()
 	var expected_active_ids: Dictionary = {}
 	var required_fields := [
 		"movement_state",

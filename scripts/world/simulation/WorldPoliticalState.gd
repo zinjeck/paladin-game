@@ -65,6 +65,9 @@ var player_polity_id: int = PolityDataScript.INVALID_POLITY_ID
 var active_settlement_id: int = SettlementDataScript.INVALID_SETTLEMENT_ID
 
 var _foundation_world_fingerprint: String = ""
+var _unbound_city_world = null
+var _unbound_city_seed: int = 0
+var _unbound_city_runtime_data: Dictionary = {}
 var _unbound_city_object_state = CityObjectStateScript.new()
 var _unbound_city_resource_accounting_state = (
 	CityResourceAccountingStateScript.new()
@@ -99,6 +102,9 @@ func reset_state() -> void:
 	player_polity_id = PolityDataScript.INVALID_POLITY_ID
 	active_settlement_id = SettlementDataScript.INVALID_SETTLEMENT_ID
 	_foundation_world_fingerprint = ""
+	_unbound_city_world = null
+	_unbound_city_seed = 0
+	_unbound_city_runtime_data = {}
 	_unbound_city_object_state = CityObjectStateScript.new()
 	_unbound_city_resource_accounting_state = (
 		CityResourceAccountingStateScript.new()
@@ -138,6 +144,9 @@ func synchronize_foundation_with_world_data() -> bool:
 	# when the first City settlement adopts the current city simulation. Never
 	# carry it across an already-live political registry into another world.
 	var should_adopt_unbound_city_state := not _has_live_foundation_registry()
+	var unbound_city_world_to_adopt = _unbound_city_world
+	var unbound_city_seed_to_adopt: int = _unbound_city_seed
+	var unbound_city_runtime_data_to_adopt: Dictionary = _unbound_city_runtime_data
 	var unbound_object_state_to_adopt = _unbound_city_object_state
 	var unbound_resource_accounting_state_to_adopt = (
 		_unbound_city_resource_accounting_state
@@ -212,6 +221,9 @@ func synchronize_foundation_with_world_data() -> bool:
 		reset_state()
 		return false
 	if should_adopt_unbound_city_state:
+		capital_state.city_world = unbound_city_world_to_adopt
+		capital_state.city_seed = unbound_city_seed_to_adopt
+		capital_state.city_runtime_data = unbound_city_runtime_data_to_adopt
 		capital_state.object_state = unbound_object_state_to_adopt
 		capital_state.resource_accounting_state = (
 			unbound_resource_accounting_state_to_adopt
@@ -234,7 +246,6 @@ func synchronize_foundation_with_world_data() -> bool:
 		capital_state.logistics_state = unbound_logistics_state_to_adopt
 		capital_state.construction_state = unbound_construction_state_to_adopt
 		capital_state.navigation_state = unbound_navigation_state_to_adopt
-	capital_state.capture_from_world_data()
 
 	_foundation_world_fingerprint = fingerprint
 	return validate_registry_integrity()
@@ -378,9 +389,7 @@ func set_active_settlement(settlement_id: int) -> bool:
 	if settlement_id == active_settlement_id:
 		return true
 
-	_capture_active_city_workspace()
 	active_settlement_id = settlement_id
-	_apply_active_city_workspace()
 
 	# CitizenDecisionSystem still carries process-local cursors while its state
 	# is migrated in a later pass. Resetting those cursors on a settlement switch
@@ -414,9 +423,6 @@ func set_settlement_simulation_backend(
 		)
 	)
 
-	if settlement_id == active_settlement_id:
-		_capture_active_city_workspace()
-
 	settlement_backend_kind_by_id[settlement_id] = backend_kind
 
 	if (
@@ -437,7 +443,7 @@ func set_settlement_simulation_backend(
 		):
 			# Extracted ownership still resolves through unbound compatibility
 			# state while the legacy backend is active. Transfer those exact
-			# owners once; capture_from_world_data() no longer copies them.
+			# owners once; the retired compatibility capture hook no longer copies them.
 			city_state.object_state = _unbound_city_object_state
 			_unbound_city_object_state = CityObjectStateScript.new()
 			city_state.resource_accounting_state = (
@@ -476,12 +482,14 @@ func set_settlement_simulation_backend(
 			)
 			city_state.navigation_state = _unbound_city_navigation_state
 			_unbound_city_navigation_state = CityNavigationStateScript.new()
-			city_state.capture_from_world_data()
+			city_state.city_world = _unbound_city_world
+			city_state.city_seed = _unbound_city_seed
+			city_state.city_runtime_data = _unbound_city_runtime_data
+			_unbound_city_world = null
+			_unbound_city_seed = 0
+			_unbound_city_runtime_data = {}
 
 		settlement_city_state_by_id[settlement_id] = city_state
-
-	if settlement_id == active_settlement_id:
-		_apply_active_city_workspace()
 
 	return true
 
@@ -651,6 +659,79 @@ func reset_extracted_city_state() -> void:
 	get_current_city_work_state().reset_all()
 
 
+func get_current_city_world():
+	var active_city_state = get_active_city_simulation_state()
+	if active_city_state != null:
+		return active_city_state.city_world
+	return _unbound_city_world
+
+
+func get_current_city_seed() -> int:
+	var active_city_state = get_active_city_simulation_state()
+	if active_city_state != null:
+		return active_city_state.city_seed
+	return _unbound_city_seed
+
+
+func get_current_city_runtime_data() -> Dictionary:
+	var active_city_state = get_active_city_simulation_state()
+	if active_city_state != null:
+		return active_city_state.city_runtime_data
+	return _unbound_city_runtime_data
+
+
+func set_current_city_world(city_world) -> void:
+	var active_city_state = get_active_city_simulation_state()
+	if active_city_state != null:
+		active_city_state.city_world = city_world
+		return
+	_unbound_city_world = city_world
+
+
+func set_current_city_seed(city_seed: int) -> void:
+	var active_city_state = get_active_city_simulation_state()
+	if active_city_state != null:
+		active_city_state.city_seed = city_seed
+		return
+	_unbound_city_seed = city_seed
+
+
+func store_current_city_world(city_world, city_seed: int) -> void:
+	var active_city_state = get_active_city_simulation_state()
+	if active_city_state != null:
+		active_city_state.city_world = city_world
+		active_city_state.city_seed = city_seed
+		return
+	_unbound_city_world = city_world
+	_unbound_city_seed = city_seed
+
+
+func replace_current_city_runtime_data(values: Dictionary) -> void:
+	var active_city_state = get_active_city_simulation_state()
+	if active_city_state != null:
+		active_city_state.city_runtime_data = values
+		return
+	_unbound_city_runtime_data = values
+
+
+func clear_current_city_world() -> void:
+	var active_city_state = get_active_city_simulation_state()
+	if active_city_state != null:
+		active_city_state.city_world = null
+		active_city_state.city_seed = 0
+		return
+	_unbound_city_world = null
+	_unbound_city_seed = 0
+
+
+func clear_current_city_runtime_data() -> void:
+	var active_city_state = get_active_city_simulation_state()
+	if active_city_state != null:
+		active_city_state.city_runtime_data = {}
+		return
+	_unbound_city_runtime_data = {}
+
+
 func get_polity_snapshot() -> Array[Dictionary]:
 	var polity_snapshot: Array[Dictionary] = []
 	var polity_ids := polities_by_id.keys()
@@ -715,8 +796,6 @@ func get_active_settlement_context():
 	})
 
 
-func capture_active_settlement_state() -> void:
-	_capture_active_city_workspace()
 
 
 func is_settlement_capital(settlement_id: int) -> bool:
@@ -789,38 +868,6 @@ func validate_registry_integrity() -> bool:
 			return false
 
 	return true
-
-
-func _capture_active_city_workspace() -> void:
-	if active_settlement_id == SettlementDataScript.INVALID_SETTLEMENT_ID:
-		return
-	if not settlement_backend_kind_by_id.has(active_settlement_id):
-		return
-	if (
-		str(settlement_backend_kind_by_id[active_settlement_id])
-		!= SettlementSimulationContextScript.BACKEND_CITY_SETTLEMENT_STATE
-	):
-		return
-
-	var city_state = get_city_simulation_state(active_settlement_id)
-	if city_state != null:
-		city_state.capture_from_world_data()
-
-
-func _apply_active_city_workspace() -> void:
-	if active_settlement_id == SettlementDataScript.INVALID_SETTLEMENT_ID:
-		return
-	if not settlement_backend_kind_by_id.has(active_settlement_id):
-		return
-	if (
-		str(settlement_backend_kind_by_id[active_settlement_id])
-		!= SettlementSimulationContextScript.BACKEND_CITY_SETTLEMENT_STATE
-	):
-		return
-
-	var city_state = get_city_simulation_state(active_settlement_id)
-	if city_state != null:
-		city_state.apply_to_world_data()
 
 
 func _is_settlement_parent_relationship_valid(

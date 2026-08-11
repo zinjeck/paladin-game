@@ -383,7 +383,7 @@ func _reset_fixture() -> WorldData:
 	WorldData.official_city_name = "Topology Safety Test City"
 	WorldData.official_founding_culture_id = test_primary_culture_id
 	WorldData.player_city_founded = true
-	WorldData.player_city_data = {
+	WorldPoliticalState.replace_current_city_runtime_data({
 		"id": 1,
 		"name": "Topology Safety Test City",
 		"primary_culture_id": test_primary_culture_id,
@@ -391,7 +391,7 @@ func _reset_fixture() -> WorldData:
 		"city_map_size": TEST_WORLD_SIZE,
 		"can_build": true,
 		"founded": true,
-	}
+	})
 	return city_world
 
 

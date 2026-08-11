@@ -144,8 +144,8 @@ func _exercise_city(values: Dictionary) -> Dictionary:
 	if WorldPoliticalState.active_settlement_id != city_id:
 		return {}
 
-	WorldData.official_city_world = _make_world(16, 16, world_seed)
-	WorldData.official_city_seed = world_seed
+	WorldPoliticalState.set_current_city_world(_make_world(16, 16, world_seed))
+	WorldPoliticalState.set_current_city_seed(world_seed)
 	var citizen := WorldData.add_city_citizen(
 		"",
 		SHARED_TILE,

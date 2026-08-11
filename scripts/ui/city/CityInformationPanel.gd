@@ -224,7 +224,7 @@ func refresh_identity() -> void:
 
 	if city_name.is_empty() and WorldData.has_player_city():
 		city_name = str(
-			WorldData.player_city_data.get("name", "")
+			WorldPoliticalState.get_current_city_runtime_data().get("name", "")
 		).strip_edges()
 
 	city_name_label.text = city_name

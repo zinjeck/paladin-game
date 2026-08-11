@@ -34,7 +34,7 @@ static func run_tick(
 	_tick_index: int,
 	minutes_advanced: int
 ) -> void:
-	if minutes_advanced <= 0 or WorldData.official_city_world == null:
+	if minutes_advanced <= 0 or WorldPoliticalState.get_current_city_world() == null:
 		return
 
 	CityAssignmentSystem.ensure_city_citizen_assignment_state()
@@ -285,7 +285,7 @@ static func is_city_citizen_attending_workplace(
 	var city_world: WorldData = source_world
 
 	if city_world == null:
-		city_world = WorldData.official_city_world
+		city_world = WorldPoliticalState.get_current_city_world()
 
 	if city_world == null:
 		return false
@@ -322,7 +322,7 @@ static func get_city_object_attending_worker_ids(
 	var city_world: WorldData = source_world
 
 	if city_world == null:
-		city_world = WorldData.official_city_world
+		city_world = WorldPoliticalState.get_current_city_world()
 
 	if city_world == null:
 		return attending_worker_ids

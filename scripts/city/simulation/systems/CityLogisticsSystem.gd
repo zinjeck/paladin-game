@@ -91,7 +91,7 @@ static func make_city_ground_tile_haul_endpoint(
 	if (
 		tile_position == WorldData.INVALID_CITY_TILE_POSITION
 		or not can_city_ground_pile_exist_at_tile(
-			WorldData.official_city_world,
+			WorldPoliticalState.get_current_city_world(),
 			tile_position
 		)
 	):
@@ -395,7 +395,7 @@ static func add_resource_to_city_ground_piles_with_result(
 		return result
 
 	if not can_city_ground_pile_exist_at_tile(
-		WorldData.official_city_world,
+		WorldPoliticalState.get_current_city_world(),
 		tile_position
 	):
 		return result
@@ -1292,7 +1292,7 @@ static func get_city_haul_endpoint_unreserved_destination_space(
 		if (
 			not raw_tile is Vector2i
 			or not can_city_ground_pile_exist_at_tile(
-				WorldData.official_city_world,
+				WorldPoliticalState.get_current_city_world(),
 				raw_tile
 			)
 		):
@@ -1460,7 +1460,7 @@ static func city_haul_endpoint_can_accept_resource(
 			!= WorldData.CONTAINER_HAUL_PURPOSE_GROUND_PILE_CLEANUP
 			or not raw_tile is Vector2i
 			or not can_city_ground_pile_exist_at_tile(
-				WorldData.official_city_world,
+				WorldPoliticalState.get_current_city_world(),
 				raw_tile
 			)
 		):

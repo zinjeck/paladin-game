@@ -255,8 +255,8 @@ func _prepare_active_city_task(
 		"The fixture City must become active."
 	)
 	var city_world := _make_world(18, 18, seed_value)
-	WorldData.official_city_world = city_world
-	WorldData.official_city_seed = seed_value
+	WorldPoliticalState.set_current_city_world(city_world)
+	WorldPoliticalState.set_current_city_seed(seed_value)
 	var house := CityObjectSystem.add_city_object({
 		"object_type": WorldData.CITY_OBJECT_HOUSE,
 		"top_left": Vector2i(8, 8),

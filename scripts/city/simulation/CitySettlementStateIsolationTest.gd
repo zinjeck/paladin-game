@@ -87,8 +87,8 @@ func _run_state_isolation_test() -> void:
 	# Give the player city unmistakable local state. WorldData remains a
 	# compatibility workspace while individual city subsystems are extracted.
 	var player_city_world := _make_world(5, 5, 91_101)
-	WorldData.official_city_world = player_city_world
-	WorldData.official_city_seed = 91_101
+	WorldPoliticalState.set_current_city_world(player_city_world)
+	WorldPoliticalState.set_current_city_seed(91_101)
 	var shared_object_tile := Vector2i(2, 2)
 	CityObjectSystem.get_current_state().next_object_id = 16
 	CityObjectSystem.get_current_state().object_version = 3
@@ -244,8 +244,8 @@ func _run_state_isolation_test() -> void:
 		"The CPU city must become activatable."
 	)
 	_expect(
-		WorldData.official_city_world == null
-		and WorldData.official_city_seed == 0,
+		WorldPoliticalState.get_current_city_world() == null
+		and WorldPoliticalState.get_current_city_seed() == 0,
 		"A fresh city must not inherit the previous city's generated local world."
 	)
 	_expect(
@@ -301,8 +301,8 @@ func _run_state_isolation_test() -> void:
 	)
 
 	var cpu_city_world := _make_world(6, 6, 91_202)
-	WorldData.official_city_world = cpu_city_world
-	WorldData.official_city_seed = 91_202
+	WorldPoliticalState.set_current_city_world(cpu_city_world)
+	WorldPoliticalState.set_current_city_seed(91_202)
 	CityObjectSystem.get_current_state().next_object_id = 54
 	CityObjectSystem.get_current_state().object_version = 11
 	var cpu_road := CityObjectSystem.add_city_road_object(
@@ -375,8 +375,8 @@ func _run_state_isolation_test() -> void:
 		"The player city must remain activatable after CPU state mutation."
 	)
 	_expect(
-		WorldData.official_city_world == player_city_world
-		and WorldData.official_city_seed == 91_101,
+		WorldPoliticalState.get_current_city_world() == player_city_world
+		and WorldPoliticalState.get_current_city_seed() == 91_101,
 		"Returning to the player city must restore its local generated world."
 	)
 	_expect(
@@ -421,8 +421,8 @@ func _run_state_isolation_test() -> void:
 		"The CPU city must be reactivatable."
 	)
 	_expect(
-		WorldData.official_city_world == cpu_city_world
-		and WorldData.official_city_seed == 91_202,
+		WorldPoliticalState.get_current_city_world() == cpu_city_world
+		and WorldPoliticalState.get_current_city_seed() == 91_202,
 		"Reactivating the CPU city must restore its own generated world."
 	)
 	_expect(

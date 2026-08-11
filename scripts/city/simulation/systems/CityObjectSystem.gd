@@ -837,7 +837,7 @@ static func _register_completed_rectangle(
 	var feature_world := city_world
 
 	if feature_world == null:
-		feature_world = WorldData.official_city_world
+		feature_world = WorldPoliticalState.get_current_city_world()
 
 	WorldData.clear_city_surface_features_at_tiles(feature_world, footprint_tiles)
 
@@ -878,7 +878,7 @@ static func _register_completed_road(values: Dictionary) -> Dictionary:
 	var city_world: WorldData = values.get("city_world")
 
 	if city_world == null:
-		city_world = WorldData.official_city_world
+		city_world = WorldPoliticalState.get_current_city_world()
 
 	var topology_validation := validate_city_object_topology_mutation({
 		"city_world": city_world,

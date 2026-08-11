@@ -102,7 +102,7 @@ static func run_tick(
 		return
 
 	if (
-		WorldData.official_city_world == null
+		WorldPoliticalState.get_current_city_world() == null
 		or not WorldData.player_city_founded
 		or CityCitizenRegistrySystem.get_current_state().citizens.is_empty()
 	):
@@ -436,7 +436,7 @@ static func _prepare_citizen_for_critical_food_interrupt(
 		released = (
 			CitizenHaulingSystemScript
 			.drop_citizen_haul_cargo_for_priority_interrupt(
-				WorldData.official_city_world,
+				WorldPoliticalState.get_current_city_world(),
 				citizen_id,
 				WorldData.CITY_CITIZEN_TASK_SOURCE_SCHEDULE
 			)
@@ -864,7 +864,7 @@ static func _get_outstanding_obligation_task_request(
 		return (
 			CitizenHaulingSystemScript
 			.make_public_storage_haul_task_request({
-				"city_world": WorldData.official_city_world,
+				"city_world": WorldPoliticalState.get_current_city_world(),
 				"citizen": citizen,
 				"source": raw_source,
 				"resource_type": str(
@@ -961,7 +961,7 @@ static func _get_outstanding_obligation_task_request(
 			var task_request := (
 				CitizenHaulingSystemScript
 				.make_public_storage_haul_task_request({
-					"city_world": WorldData.official_city_world,
+					"city_world": WorldPoliticalState.get_current_city_world(),
 					"citizen": citizen,
 					"source": source,
 					"resource_type": resource,
@@ -1062,7 +1062,7 @@ static func _get_scheduled_home_food_delivery_task_request(
 
 		var task_request := (
 			CitizenHaulingSystemScript.make_directed_haul_task_request({
-				"city_world": WorldData.official_city_world,
+				"city_world": WorldPoliticalState.get_current_city_world(),
 				"citizen": citizen,
 				"source": source_result.get("endpoint", {}),
 				"destination": destination,
@@ -1283,7 +1283,7 @@ static func _clear_decision_queue() -> void:
 static func _process_bounded_autonomous_hauling(
 	schedule_phase: String
 ) -> void:
-	var city_world: WorldData = WorldData.official_city_world
+	var city_world: WorldData = WorldPoliticalState.get_current_city_world()
 
 	if city_world == null:
 		return
@@ -2063,7 +2063,7 @@ static func _process_bounded_idle_behaviors(
 		_idle_scan_cursor = 0
 		return
 
-	var city_world: WorldData = WorldData.official_city_world
+	var city_world: WorldData = WorldPoliticalState.get_current_city_world()
 
 	if city_world == null:
 		return
@@ -2395,7 +2395,7 @@ static func _get_citizen_life_anchor_tile(citizen: Dictionary) -> Vector2i:
 			continue
 
 		var access_tiles := CityNavigationSystem.get_city_object_access_tiles(
-			WorldData.official_city_world,
+			WorldPoliticalState.get_current_city_world(),
 			city_object
 		)
 

@@ -83,8 +83,8 @@ func _exercise_city_gateways(
 		"The City under test must become active."
 	)
 	var city_world := _make_world(16, 16, seed_value)
-	WorldData.official_city_world = city_world
-	WorldData.official_city_seed = seed_value
+	WorldPoliticalState.set_current_city_world(city_world)
+	WorldPoliticalState.set_current_city_seed(seed_value)
 
 	var house := CityObjectSystem.add_city_object({
 		"object_type": WorldData.CITY_OBJECT_HOUSE,

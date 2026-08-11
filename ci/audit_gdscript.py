@@ -139,6 +139,51 @@ WORLD_DATA_FORBIDDEN_CITY_LOGISTICS_SYMBOLS = (
     "reset_city_haul_reservation_state",
 )
 
+WORLD_DATA_FORBIDDEN_CITY_WORKSPACE_SYMBOLS = (
+    "official_city_world",
+    "official_city_seed",
+    "player_city_data",
+)
+
+RETIRED_CITY_WORKSPACE_BRIDGE_SYMBOLS = (
+    "capture_from_world_data",
+    "apply_to_world_data",
+    "capture_active_settlement_state",
+    "_capture_active_city_workspace",
+    "_apply_active_city_workspace",
+    "is_bound_to_world_data_workspace",
+)
+
+WORLD_DATA_FORBIDDEN_CITY_WORKSPACE_SYMBOLS = (
+    "official_city_world",
+    "official_city_seed",
+    "player_city_data",
+)
+
+RETIRED_CITY_WORKSPACE_BRIDGE_SYMBOLS = (
+    "capture_from_world_data",
+    "apply_to_world_data",
+    "capture_active_settlement_state",
+    "_capture_active_city_workspace",
+    "_apply_active_city_workspace",
+    "is_bound_to_world_data_workspace",
+)
+
+WORLD_DATA_FORBIDDEN_CITY_WORKSPACE_SYMBOLS = (
+    "official_city_world",
+    "official_city_seed",
+    "player_city_data",
+)
+
+RETIRED_CITY_WORKSPACE_BRIDGE_SYMBOLS = (
+    "capture_from_world_data",
+    "apply_to_world_data",
+    "capture_active_settlement_state",
+    "_capture_active_city_workspace",
+    "_apply_active_city_workspace",
+    "is_bound_to_world_data_workspace",
+)
+
 WORLD_DATA_FORBIDDEN_CITY_NAVIGATION_SYMBOLS = (
     "city_object_access_tile_cache",
     "get_city_object_access_tiles",
@@ -1213,6 +1258,66 @@ def main() -> int:
                     f"ownership declaration must not return to WorldData: {symbol}"
                 )
 
+
+        for symbol in WORLD_DATA_FORBIDDEN_CITY_WORKSPACE_SYMBOLS:
+            declaration_patterns = (
+                rf"^\s*static\s+var\s+{re.escape(symbol)}\b",
+                rf"^\s*var\s+{re.escape(symbol)}\b",
+            )
+            if any(re.search(pattern, world_data_text, re.MULTILINE) for pattern in declaration_patterns):
+                errors.append(
+                    "scripts/world/simulation/WorldData.gd: retired Pass 12 city workspace field must not return: " + symbol
+                )
+
+        for path in scripts:
+            relative = str(path.relative_to(ROOT))
+            source_text = path.read_text(encoding="utf-8")
+            for symbol in WORLD_DATA_FORBIDDEN_CITY_WORKSPACE_SYMBOLS:
+                if re.search(rf"\bWorldData\s*\.\s*{re.escape(symbol)}\b", source_text):
+                    errors.append(f"{relative}: retired WorldData city workspace reference remains: WorldData.{symbol}")
+            for symbol in RETIRED_CITY_WORKSPACE_BRIDGE_SYMBOLS:
+                if re.search(rf"(?:func\s+)?{re.escape(symbol)}\b", source_text):
+                    errors.append(f"{relative}: retired Pass 12 capture/apply bridge symbol remains: {symbol}")
+
+        for symbol in WORLD_DATA_FORBIDDEN_CITY_WORKSPACE_SYMBOLS:
+            declaration_patterns = (
+                rf"^\s*static\s+var\s+{re.escape(symbol)}\b",
+                rf"^\s*var\s+{re.escape(symbol)}\b",
+            )
+            if any(re.search(pattern, world_data_text, re.MULTILINE) for pattern in declaration_patterns):
+                errors.append(
+                    "scripts/world/simulation/WorldData.gd: retired Pass 12 city workspace field must not return: " + symbol
+                )
+
+        for path in scripts:
+            relative = str(path.relative_to(ROOT))
+            source_text = path.read_text(encoding="utf-8")
+            for symbol in WORLD_DATA_FORBIDDEN_CITY_WORKSPACE_SYMBOLS:
+                if re.search(rf"\bWorldData\s*\.\s*{re.escape(symbol)}\b", source_text):
+                    errors.append(f"{relative}: retired WorldData city workspace reference remains: WorldData.{symbol}")
+            for symbol in RETIRED_CITY_WORKSPACE_BRIDGE_SYMBOLS:
+                if re.search(rf"(?:func\s+)?{re.escape(symbol)}\b", source_text):
+                    errors.append(f"{relative}: retired Pass 12 capture/apply bridge symbol remains: {symbol}")
+
+        for symbol in WORLD_DATA_FORBIDDEN_CITY_WORKSPACE_SYMBOLS:
+            declaration_patterns = (
+                rf"^\s*static\s+var\s+{re.escape(symbol)}\b",
+                rf"^\s*var\s+{re.escape(symbol)}\b",
+            )
+            if any(re.search(pattern, world_data_text, re.MULTILINE) for pattern in declaration_patterns):
+                errors.append(
+                    "scripts/world/simulation/WorldData.gd: retired Pass 12 city workspace field must not return: " + symbol
+                )
+
+        for path in scripts:
+            relative = str(path.relative_to(ROOT))
+            source_text = path.read_text(encoding="utf-8")
+            for symbol in WORLD_DATA_FORBIDDEN_CITY_WORKSPACE_SYMBOLS:
+                if re.search(rf"\bWorldData\s*\.\s*{re.escape(symbol)}\b", source_text):
+                    errors.append(f"{relative}: retired WorldData city workspace reference remains: WorldData.{symbol}")
+            for symbol in RETIRED_CITY_WORKSPACE_BRIDGE_SYMBOLS:
+                if re.search(rf"(?:func\s+)?{re.escape(symbol)}\b", source_text):
+                    errors.append(f"{relative}: retired Pass 12 capture/apply bridge symbol remains: {symbol}")
 
         for symbol in WORLD_DATA_FORBIDDEN_CITY_NAVIGATION_SYMBOLS:
             declaration_patterns = (
