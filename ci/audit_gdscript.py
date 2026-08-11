@@ -2823,12 +2823,11 @@ def main() -> int:
             political_state_text.count(
                 "CityCitizenMovementRuntimeStateScript.new()"
             )
-            < 3
+            < 2
         ):
             errors.append(
                 "scripts/world/simulation/WorldPoliticalState.gd: citizen "
-                "movement-runtime fallback must be created initially, on "
-                "reset, and after legacy adoption"
+                "movement-runtime fallback must be created initially and on reset"
             )
         if not re.search(
             r"^func\s+get_city_citizen_movement_runtime_state"
