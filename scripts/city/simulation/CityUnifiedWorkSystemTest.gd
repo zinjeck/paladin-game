@@ -37,11 +37,14 @@ func _ready() -> void:
 	_test_roads_optimize_travel_time()
 	_test_large_destination_heuristic_is_admissible()
 	_test_independent_road_tiles_batch_scheduling()
+	_test_road_placement_refreshes_only_new_orders()
+	_test_board_sync_reuses_runtime_reachability_candidate()
 	_test_parent_orders_and_two_level_fairness()
 	_test_new_blueprint_rebalances_uncommitted_construction_travel()
 	_test_blocked_construction_worker_uses_reachable_existing_alternative()
 	_test_unreachable_blueprint_does_not_churn_construction_travel()
 	_test_rebalance_preserves_active_construction_clearing()
+	_test_blueprint_placement_skips_rebalance_without_interruptible_worker()
 	_test_unreachable_order_runtime_diagnostics()
 	_test_food_replenishment_cycle_and_whole_item_consumption()
 	_test_workplace_fish_production_accounting()
@@ -259,6 +262,204 @@ func _test_independent_road_tiles_batch_scheduling() -> void:
 	)
 
 
+func _test_road_placement_refreshes_only_new_orders() -> void:
+	var city_world := _reset_fixture()
+	var unrelated_site := _create_ready_labor_site([Vector2i(20, 12)], 1)
+	var unrelated_site_id := int(unrelated_site.get("id", -1))
+	CityWorkSystemScript.synchronize_player_work_board()
+	var unrelated_order := _find_order(
+		CityWorkSystemScript.ORDER_TYPE_CONSTRUCTION_SITE,
+		unrelated_site_id
+	)
+	var unrelated_order_id := int(unrelated_order.get("id", -1))
+
+	# A focused road placement must leave unrelated runtime records byte-for-byte
+	# unchanged. The sentinel is intentionally different from the real runtime
+	# so a broad work-board refresh cannot accidentally satisfy this assertion.
+	var sentinel_order := unrelated_order.duplicate(true)
+	sentinel_order["phase"] = "focused_road_sync_sentinel"
+	sentinel_order["progress_signature"] = "focused_road_sync_sentinel"
+	CityWorkSystemScript.get_current_work_state().work_orders[
+		unrelated_order_id
+	] = sentinel_order
+	var road_tiles: Array[Vector2i] = [
+		Vector2i(4, 4),
+		Vector2i(5, 4),
+	]
+	var road_sites := CityConstructionSystemScript.create_road_sites(
+		road_tiles,
+		"player",
+		city_world
+	)
+	var unrelated_after := CityWorkSystemScript.get_city_work_order_by_id(
+		unrelated_order_id
+	)
+	var road_orders_immediately_available := (
+		road_sites.size() == road_tiles.size()
+	)
+
+	for road_site in road_sites:
+		road_orders_immediately_available = (
+			road_orders_immediately_available
+			and not _find_order(
+				CityWorkSystemScript.ORDER_TYPE_CONSTRUCTION_SITE,
+				int(road_site.get("id", -1))
+			).is_empty()
+		)
+
+	_expect(
+		unrelated_site_id > 0
+		and unrelated_order_id > 0
+		and unrelated_after == sentinel_order,
+		"Road placement must not refresh or change an unrelated work order."
+	)
+	_expect(
+		road_orders_immediately_available,
+		"Every road tile order must be available immediately after focused batch placement."
+	)
+
+
+func _test_board_sync_reuses_runtime_reachability_candidate() -> void:
+	var city_world := _reset_fixture()
+	var citizen := _add_citizen("Cached Pathfinder", Vector2i(2, 4))
+	var citizen_id := int(citizen.get("id", -1))
+	var target_tile := Vector2i(18, 4)
+	city_world.get_tile(target_tile.x, target_tile.y)["surface_feature"] = (
+		WorldData.CITY_SURFACE_FEATURE_TREE
+	)
+	_expect(
+		CityWorkSystem.add_city_player_command_targets(
+			CityWorkSystem.CITY_PLAYER_COMMAND_TYPE_CHOP_TREE,
+			[target_tile]
+		) == 1,
+		"The runtime-candidate cache fixture must create one valid command."
+	)
+
+	var candidate_by_order_by_citizen_id := (
+		CityWorkSystemScript.synchronize_player_work_board()
+	)
+	var orders := CityWorkSystem.get_city_work_order_snapshot()
+	var order: Dictionary = orders[0] if orders.size() == 1 else {}
+	var order_id := int(order.get("id", -1))
+	var raw_candidate_by_order = candidate_by_order_by_citizen_id.get(
+		citizen_id,
+		{}
+	)
+	var candidate_by_order: Dictionary = (
+		raw_candidate_by_order
+		if raw_candidate_by_order is Dictionary
+		else {}
+	)
+	var raw_cached_candidate = candidate_by_order.get(order_id, {})
+	var cached_candidate: Dictionary = (
+		raw_cached_candidate
+		if raw_cached_candidate is Dictionary
+		else {}
+	)
+
+	_expect(
+		order_id > 0 and not cached_candidate.is_empty(),
+		"Board diagnostics must retain their exact positive reachability witness for immediate assignment."
+	)
+	var selected_candidate := (
+		CityWorkSystemScript.get_best_player_job_for_citizen(
+			citizen_id,
+			candidate_by_order
+		)
+	)
+	_expect(
+		not candidate_by_order.has(order_id),
+		"Assignment selection must consume each reachability witness exactly once."
+	)
+	_expect(
+		int(selected_candidate.get("work_order_id", -1)) == order_id
+		and selected_candidate.get(
+			"target_tile",
+			CityCitizens.INVALID_CITY_TILE_POSITION
+		) == cached_candidate.get(
+			"target_tile",
+			CityCitizens.INVALID_CITY_TILE_POSITION
+		)
+		and selected_candidate.get("assignment_path", [])
+		== cached_candidate.get("assignment_path", []),
+		"Consuming the witness must preserve the exact destination and path chosen during diagnostics."
+	)
+	var selected_path: Array = selected_candidate.get("assignment_path", [])
+	_expect(
+		CityWorkSystemScript.assign_player_job(
+			citizen_id,
+			selected_candidate
+		),
+		"The exact cached candidate must remain assignable."
+	)
+	var assigned_task := (
+		CityCitizenTaskRuntimeSystem.get_city_citizen_current_task(citizen_id)
+	)
+	var assigned_citizen := (
+		CityCitizenRegistrySystem.get_city_citizen_by_id(citizen_id)
+	)
+	_expect(
+		selected_path.size() > 1
+		and str(assigned_task.get("phase", ""))
+		== CityCitizens.CITY_CITIZEN_TASK_PHASE_TRAVELING
+		and str(assigned_citizen.get("movement_state", ""))
+		== CityCitizens.CITY_CITIZEN_MOVEMENT_STATE_MOVING
+		and assigned_citizen.get("movement_path", []) == selected_path,
+		"Assignment must immediately install the already selected exact route instead of leaving Tasks to search again."
+	)
+	CityCitizenTaskRuntimeSystem.clear_city_citizen_task(
+		citizen_id,
+		CityCitizens.CITY_CITIZEN_TASK_SOURCE_PLAYER
+	)
+	CityCitizenMovementRuntimeSystem.cancel_city_citizen_movement(citizen_id)
+	CityWorkSystem.release_city_player_command_claim(
+		int(selected_candidate.get("id", -1)),
+		citizen_id
+	)
+	var fallback_candidate := (
+		CityWorkSystemScript.get_best_player_job_for_citizen(
+			citizen_id,
+			candidate_by_order
+		)
+	)
+	_expect(
+		int(fallback_candidate.get("work_order_id", -1)) == order_id
+		and fallback_candidate.get("assignment_path", [])
+		== selected_candidate.get("assignment_path", []),
+		"An absent witness must fall back to the unchanged exact candidate search."
+	)
+	var stale_candidate := fallback_candidate.duplicate(true)
+	var stale_path: Array = stale_candidate.get("assignment_path", []).duplicate()
+	stale_path[0] = Vector2i(0, 0)
+	stale_candidate["assignment_path"] = stale_path
+	_expect(
+		CityWorkSystemScript.assign_player_job(citizen_id, stale_candidate),
+		"A stale route witness must not invalidate the otherwise valid assignment."
+	)
+	var stale_task := (
+		CityCitizenTaskRuntimeSystem.get_city_citizen_current_task(citizen_id)
+	)
+	var stale_citizen := (
+		CityCitizenRegistrySystem.get_city_citizen_by_id(citizen_id)
+	)
+	_expect(
+		str(stale_task.get("phase", ""))
+		== CityCitizens.CITY_CITIZEN_TASK_PHASE_PENDING
+		and str(stale_citizen.get("movement_state", ""))
+		== CityCitizens.CITY_CITIZEN_MOVEMENT_STATE_IDLE
+		and stale_citizen.get("movement_path", []).is_empty(),
+		"A stale route witness must fall back to the pending task state without installing movement."
+	)
+	CityCitizenTaskRuntimeSystem.clear_city_citizen_task(
+		citizen_id,
+		CityCitizens.CITY_CITIZEN_TASK_SOURCE_PLAYER
+	)
+	CityWorkSystem.release_city_player_command_claim(
+		int(stale_candidate.get("id", -1)),
+		citizen_id
+	)
+
+
 func _test_unreachable_order_runtime_diagnostics() -> void:
 	var city_world := _reset_fixture()
 	var citizen := _add_citizen("Pathfinder", Vector2i(2, 4))
@@ -285,9 +486,21 @@ func _test_unreachable_order_runtime_diagnostics() -> void:
 		) == 1,
 		"The reachability fixture must create one valid command."
 	)
-	CityWorkSystemScript.synchronize_player_work_board()
+	var negative_candidate_cache := (
+		CityWorkSystemScript.synchronize_player_work_board()
+	)
 	var orders := CityWorkSystem.get_city_work_order_snapshot()
 	var blocked_order: Dictionary = orders[0] if orders.size() == 1 else {}
+	var blocked_order_id := int(blocked_order.get("id", -1))
+	var raw_negative_candidate_by_order = negative_candidate_cache.get(
+		citizen_id,
+		{}
+	)
+	var negative_candidate_by_order: Dictionary = (
+		raw_negative_candidate_by_order
+		if raw_negative_candidate_by_order is Dictionary
+		else {}
+	)
 	var blocked_jobs: Array = blocked_order.get("jobs", [])
 	var blocked_job: Dictionary = (
 		blocked_jobs[0] if blocked_jobs.size() == 1 else {}
@@ -310,10 +523,19 @@ func _test_unreachable_order_runtime_diagnostics() -> void:
 		"An unreachable runtime job must not remain advertised as actionable."
 	)
 	_expect(
+		negative_candidate_by_order.has(blocked_order_id)
+		and negative_candidate_by_order.get(blocked_order_id, null)
+		is Dictionary
+		and negative_candidate_by_order.get(blocked_order_id, {}).is_empty(),
+		"Board diagnostics must retain an exact negative reachability witness."
+	)
+	_expect(
 		CityWorkSystemScript.get_best_player_job_for_citizen(
-			citizen_id
-		).is_empty(),
-		"Citizen-specific scheduling must also reject the unreachable job."
+			citizen_id,
+			negative_candidate_by_order
+		).is_empty()
+		and not negative_candidate_by_order.has(blocked_order_id),
+		"Citizen-specific scheduling must consume and preserve an exact negative witness."
 	)
 
 	# Opening one deterministic gate must recover both diagnostics and the
@@ -935,6 +1157,54 @@ func _test_unreachable_blueprint_does_not_churn_construction_travel() -> void:
 		and switched_count == 0
 		and _get_assignment_snapshot(citizen_id) == assignment_before,
 		"An unreachable blueprint must leave the current task and movement path untouched."
+	)
+
+
+func _test_blueprint_placement_skips_rebalance_without_interruptible_worker() -> void:
+	var city_world := _reset_fixture()
+	var idle_citizen := _add_citizen("Idle Builder", Vector2i(2, 2))
+	var existing_site := _create_ready_labor_site([Vector2i(6, 4)], 1)
+	var existing_site_id := int(existing_site.get("id", -1))
+	CityWorkSystemScript.synchronize_player_work_board()
+	var existing_order := _find_order(
+		CityWorkSystemScript.ORDER_TYPE_CONSTRUCTION_SITE,
+		existing_site_id
+	)
+	var work_state := CityWorkSystemScript.get_current_work_state()
+	var board_version_before_placement := work_state.work_order_version
+	var order_count_before_placement := work_state.work_orders.size()
+	var house_size := CityObjectCatalog.get_city_object_size_for_type(
+		CityObjectCatalog.CITY_OBJECT_HOUSE
+	)
+	var house_site := CityConstructionSystemScript.create_rectangular_site({
+		"object_type": CityObjectCatalog.CITY_OBJECT_HOUSE,
+		"top_left": Vector2i(14, 10),
+		"size_tiles": house_size,
+		"object_owner": "player",
+		"city_world": city_world,
+	})
+	var house_site_id := int(house_site.get("id", -1))
+	var idle_task := CityCitizenTaskRuntimeSystem.get_city_citizen_current_task(
+		int(idle_citizen.get("id", -1))
+	)
+
+	_expect(
+		int(idle_citizen.get("id", -1)) > 0
+		and existing_site_id > 0
+		and not existing_order.is_empty()
+		and house_site_id > 0,
+		"The placement fast-path fixture must create an idle citizen, an existing order, and a House blueprint."
+	)
+	_expect(
+		str(idle_task.get("kind", CityCitizens.CITY_CITIZEN_TASK_KIND_NONE))
+		== CityCitizens.CITY_CITIZEN_TASK_KIND_NONE
+		and work_state.work_order_version == board_version_before_placement
+		and work_state.work_orders.size() == order_count_before_placement
+		and _find_order(
+			CityWorkSystemScript.ORDER_TYPE_CONSTRUCTION_SITE,
+			house_site_id
+		).is_empty(),
+		"Placement must return before work-board synchronization when no construction worker can be rebalanced."
 	)
 
 

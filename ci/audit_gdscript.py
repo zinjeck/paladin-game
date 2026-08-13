@@ -1419,9 +1419,20 @@ def main() -> int:
                     re.MULTILINE,
                 )
             )
-            if declared_navigation_fields != {"object_access_tile_cache"}:
+            expected_navigation_fields = {
+                "object_access_tile_cache",
+                "base_land_component_world",
+                "base_land_component_world_size",
+                "base_land_component_tile_data_version",
+                "base_land_component_seed_tile",
+                "base_land_component_membership",
+                "base_land_component_boundary_indices",
+            }
+            if declared_navigation_fields != expected_navigation_fields:
                 errors.append(
-                    "scripts/city/simulation/CityNavigationState.gd: must own exactly object_access_tile_cache"
+                    "scripts/city/simulation/CityNavigationState.gd: must own "
+                    "exactly the focused access-tile and base-land component "
+                    "cache fields"
                 )
             if FUNC_RE.search(navigation_state_text):
                 errors.append(
@@ -4503,7 +4514,7 @@ def main() -> int:
         )
         for resolver, allowed_paths in private_resolvers:
             for path in scripts:
-                relative = str(path.relative_to(ROOT))
+                relative = path.relative_to(ROOT).as_posix()
                 if relative in allowed_paths:
                     continue
                 text = path.read_text(encoding="utf-8")

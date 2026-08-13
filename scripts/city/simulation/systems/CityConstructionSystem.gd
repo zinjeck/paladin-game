@@ -1240,10 +1240,11 @@ static func create_road_sites(
 	if created_sites.is_empty():
 		return []
 
-	# Build all work-board entries in one pass, then compare existing
+	# Publish this batch's work orders in one focused pass, then compare existing
 	# uncommitted builders against the complete set of newly painted road tiles.
-	# CityWorkSystem batches road routing, so this does not run A* per tile.
-	CityWorkSystem.synchronize_player_work_board()
+	# Unrelated orders are not refreshed on the placement frame, and road routing
+	# remains batched rather than running A* per tile.
+	CityWorkSystem.synchronize_construction_work_orders(created_site_ids)
 	rebalance_uncommitted_construction_workers_for_sites(created_site_ids)
 
 	var refreshed_sites: Array[Dictionary] = []
@@ -3452,6 +3453,54 @@ static func rebalance_uncommitted_construction_workers_for_sites(
 	):
 		return 0
 
+	# Do not create or refresh work orders merely because a blueprint was
+	# placed. Rebalancing is meaningful only when an existing, uncommitted
+	# construction worker can actually be reconsidered. This prefilter stays
+	# ahead of every work-board synchronization and path search on the placement
+	# frame, while preserving the immediate redirect behavior for real workers.
+	var citizen_ids: Array[int] = []
+
+	for raw_citizen in CityCitizenRegistrySystem.get_current_state().citizens:
+		if not raw_citizen is Dictionary:
+			continue
+
+		var citizen: Dictionary = raw_citizen
+		var citizen_id := int(citizen.get("id", -1))
+
+		if (
+			citizen_id <= 0
+			or not bool(citizen.get("alive", false))
+			or int(citizen.get("job_object_id", -1)) > 0
+			or CityCitizenInventorySystem.get_city_citizen_haul_cargo_amount(
+				citizen_id
+			) > 0
+			or not citizen_task_is_interruptible_construction(citizen_id)
+		):
+			continue
+
+		var current_task := (
+			CityCitizenTaskRuntimeSystem.get_city_citizen_current_task(
+				citizen_id
+			)
+		)
+
+		if (
+			str(current_task.get("kind", ""))
+			== CityCitizens.CITY_CITIZEN_TASK_KIND_HAUL
+			or str(current_task.get("phase", "")) not in [
+				CityCitizens.CITY_CITIZEN_TASK_PHASE_PENDING,
+				CityCitizens.CITY_CITIZEN_TASK_PHASE_TRAVELING,
+				CityCitizens.CITY_CITIZEN_TASK_PHASE_BLOCKED,
+			]
+		):
+			continue
+
+		citizen_ids.append(citizen_id)
+
+	if citizen_ids.is_empty():
+		return 0
+
+	citizen_ids.sort()
 	var triggering_site_ids: Array = triggering_site_id_lookup.keys()
 	triggering_site_ids.sort()
 	var triggering_order_ids: Array[int] = []
@@ -3508,16 +3557,6 @@ static func rebalance_uncommitted_construction_workers_for_sites(
 	var affected_order_ids: Dictionary = (
 		triggering_order_id_lookup.duplicate()
 	)
-	var citizen_ids: Array[int] = []
-
-	for raw_citizen in CityCitizenRegistrySystem.get_current_state().citizens:
-		if raw_citizen is Dictionary:
-			var citizen_id := int(raw_citizen.get("id", -1))
-
-			if citizen_id > 0:
-				citizen_ids.append(citizen_id)
-
-	citizen_ids.sort()
 	var switched_count := 0
 
 	for citizen_id in citizen_ids:
@@ -3643,8 +3682,10 @@ static func rebalance_uncommitted_construction_workers_for_sites(
 		CityCitizenMovementRuntimeSystem.cancel_city_citizen_movement(citizen_id)
 
 		if (
-			CityWorkSystem.assign_player_job(citizen_id, candidate)
-			and _start_rebalanced_construction_assignment(
+			# Rebalance owns strict route installation and rollback, so suppress
+			# the normal best-effort start performed by assign_player_job.
+			CityWorkSystem.assign_player_job(citizen_id, candidate, false)
+			and start_assigned_player_work_candidate(
 				citizen_id,
 				candidate
 			)
@@ -3882,7 +3923,12 @@ static func _construction_reassignment_is_worthwhile(
 	return clears_absolute_dead_band and clears_relative_dead_band
 
 
-static func _start_rebalanced_construction_assignment(
+# Candidate selection has already paid for and tie-resolved this exact route.
+# Install it immediately after the task is assigned so the Task phase does not
+# synchronously solve the same city-wide path again on the next tick. Every
+# field is revalidated; a stale witness simply returns false and the normal
+# pending-task fallback retains its established behavior.
+static func start_assigned_player_work_candidate(
 	citizen_id: int,
 	candidate: Dictionary
 ) -> bool:

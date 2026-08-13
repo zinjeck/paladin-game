@@ -892,7 +892,7 @@ static func complete_city_player_command(
 	return _remove_city_player_command_record(command_id)
 
 
-static func synchronize_player_work_board() -> void:
+static func synchronize_player_work_board() -> Dictionary:
 	# Capture immutable read snapshots once for the complete synchronization pass.
 	# Previously, each work order rebuilt deep snapshots of the same command and
 	# ground-pile registries, multiplying allocations by the number of orders.
@@ -902,6 +902,10 @@ static func synchronize_player_work_board() -> void:
 	)
 	var ground_pile_snapshot := CityLogisticsSystem.get_city_ground_pile_snapshot()
 	var desired_sources: Dictionary = {}
+	# Runtime diagnostics already perform exact citizen/order reachability
+	# searches. Preserve those pass-local results so the immediately following
+	# assignment pass can consume them instead of repeating the same A* work.
+	var candidate_by_order_by_citizen_id: Dictionary = {}
 
 	for raw_command in command_snapshot:
 		if not raw_command is Dictionary:
@@ -985,32 +989,106 @@ static func synchronize_player_work_board() -> void:
 	order_ids.sort()
 
 	for raw_order_id in order_ids:
-		_refresh_order_runtime(
-			int(raw_order_id),
+		var order_id := int(raw_order_id)
+		var candidate_by_citizen_id := _refresh_order_runtime(
+			order_id,
 			command_snapshot,
 			ground_pile_snapshot
 		)
 
+		for raw_citizen_id in candidate_by_citizen_id.keys():
+			var citizen_id := int(raw_citizen_id)
+			var candidate_by_order = candidate_by_order_by_citizen_id.get(
+				citizen_id,
+				{}
+			)
+
+			if not candidate_by_order is Dictionary:
+				candidate_by_order = {}
+
+			candidate_by_order[order_id] = candidate_by_citizen_id.get(
+				raw_citizen_id,
+				{}
+			)
+			candidate_by_order_by_citizen_id[citizen_id] = candidate_by_order
+
+	return candidate_by_order_by_citizen_id
+
 
 static func synchronize_construction_work_order(site_id: int) -> Dictionary:
-	var site := CityConstructionSystem.get_city_construction_site_by_id(site_id)
+	var orders := synchronize_construction_work_orders([site_id])
 
-	if site.is_empty():
+	if orders.is_empty():
 		return {}
 
-	var source_key := _make_construction_source_key(site_id)
-	var order_id := _ensure_order_for_source({
-		"source_key": source_key,
-		"order_type": ORDER_TYPE_CONSTRUCTION_SITE,
-		"source_id": site_id,
-		"created_world_minute": int(site.get("issued_world_minute", 0)),
-	})
+	return orders[0]
 
-	if order_id <= 0:
-		return {}
 
-	refresh_work_order_runtimes([order_id])
-	return get_city_work_order_by_id(order_id)
+# Placement batches must publish their construction orders immediately, but a
+# road stroke must not refresh every unrelated command and construction order.
+# Capture shared inputs once, ensure only the requested valid site orders, and
+# refresh only those new/targeted runtimes.
+static func synchronize_construction_work_orders(
+	raw_site_ids: Array
+) -> Array[Dictionary]:
+	var site_by_id: Dictionary = {}
+
+	for raw_site_id in raw_site_ids:
+		var site_id := int(raw_site_id)
+
+		if site_id <= 0 or site_by_id.has(site_id):
+			continue
+
+		var site := CityConstructionSystem.get_city_construction_site_by_id(
+			site_id
+		)
+
+		if not site.is_empty():
+			site_by_id[site_id] = site
+
+	if site_by_id.is_empty():
+		return []
+
+	var site_ids: Array = site_by_id.keys()
+	site_ids.sort()
+	var order_ids: Array[int] = []
+
+	for raw_site_id in site_ids:
+		var site_id := int(raw_site_id)
+		var site: Dictionary = site_by_id.get(site_id, {})
+		var order_id := _ensure_order_for_source({
+			"source_key": _make_construction_source_key(site_id),
+			"order_type": ORDER_TYPE_CONSTRUCTION_SITE,
+			"source_id": site_id,
+			"created_world_minute": int(
+				site.get("issued_world_minute", 0)
+			),
+		})
+
+		if order_id > 0:
+			order_ids.append(order_id)
+
+	if order_ids.is_empty():
+		return []
+
+	var command_snapshot := get_city_player_command_snapshot()
+	var ground_pile_snapshot := (
+		CityLogisticsSystem.get_city_ground_pile_snapshot()
+	)
+	var orders: Array[Dictionary] = []
+
+	for order_id in order_ids:
+		_refresh_order_runtime(
+			order_id,
+			command_snapshot,
+			ground_pile_snapshot
+		)
+		var order := get_city_work_order_by_id(order_id)
+
+		if not order.is_empty():
+			orders.append(order)
+
+	return orders
 
 
 # Construction-site removal is an atomic lifecycle boundary. Removing the
@@ -1055,10 +1133,14 @@ static func refresh_work_order_runtimes(raw_order_ids: Array) -> void:
 		)
 
 
-static func get_best_player_job_for_citizen(citizen_id: int) -> Dictionary:
+static func get_best_player_job_for_citizen(
+	citizen_id: int,
+	precomputed_candidate_by_order: Dictionary = {}
+) -> Dictionary:
 	return get_best_player_job_for_citizen_and_orders(
 		citizen_id,
-		_work_state().work_orders.keys()
+		_work_state().work_orders.keys(),
+		precomputed_candidate_by_order
 	)
 
 
@@ -1067,7 +1149,8 @@ static func get_best_player_job_for_citizen(citizen_id: int) -> Dictionary:
 # road-candidate search per citizen rather than one A* search per tile.
 static func get_best_player_job_for_citizen_and_orders(
 	citizen_id: int,
-	raw_order_ids: Array
+	raw_order_ids: Array,
+	precomputed_candidate_by_order: Dictionary = {}
 ) -> Dictionary:
 	var citizen := CityCitizenRegistrySystem.get_city_citizen_by_id(citizen_id)
 
@@ -1107,10 +1190,30 @@ static func get_best_player_job_for_citizen_and_orders(
 			] = order_id
 			continue
 
-		var candidate := _get_best_job_candidate_for_order(
-			citizen_id,
-			order
-		)
+		var candidate: Dictionary = {}
+
+		# Cache entries are single-use. An empty cached Dictionary is an exact
+		# negative reachability result, distinct from an absent entry. Consuming
+		# every entry prevents a later caller from reusing it after assignments
+		# have changed claims or useful capacity.
+		if precomputed_candidate_by_order.has(order_id):
+			var raw_precomputed_candidate = (
+				precomputed_candidate_by_order.get(order_id, {})
+			)
+			precomputed_candidate_by_order.erase(order_id)
+
+			if raw_precomputed_candidate is Dictionary:
+				candidate = raw_precomputed_candidate
+			else:
+				candidate = _get_best_job_candidate_for_order(
+					citizen_id,
+					order
+				)
+		else:
+			candidate = _get_best_job_candidate_for_order(
+				citizen_id,
+				order
+			)
 
 		if candidate.is_empty():
 			continue
@@ -1414,7 +1517,8 @@ static func get_best_construction_job_for_citizen_excluding_order(
 
 static func assign_player_job(
 	citizen_id: int,
-	candidate: Dictionary
+	candidate: Dictionary,
+	start_candidate_path: bool = true
 ) -> bool:
 	var order_id := int(candidate.get("work_order_id", -1))
 	var order := get_city_work_order_by_id(order_id)
@@ -1467,6 +1571,15 @@ static func assign_player_job(
 		)
 
 	if assigned:
+		# The candidate contains the exact route used to win selection. Starting
+		# that validated route now avoids a duplicate full-city A* in Tasks. If
+		# anything changed between selection and assignment, leave the task
+		# pending so its existing state machine recomputes safely.
+		if start_candidate_path:
+			CityConstructionSystemScript.start_assigned_player_work_candidate(
+				citizen_id,
+				candidate
+			)
 		_note_order_attention(order_id)
 
 	return assigned
@@ -1702,11 +1815,11 @@ static func _refresh_order_runtime(
 	order_id: int,
 	command_snapshot: Array,
 	ground_pile_snapshot: Array
-) -> void:
+) -> Dictionary:
 	var raw_order = _work_state().work_orders.get(order_id, {})
 
 	if not raw_order is Dictionary:
-		return
+		return {}
 
 	var order: Dictionary = raw_order.duplicate(true)
 	var jobs := _build_jobs_for_order(
@@ -1714,7 +1827,9 @@ static func _refresh_order_runtime(
 		command_snapshot,
 		ground_pile_snapshot
 	)
-	_apply_runtime_worker_actionability(order, jobs)
+	var candidate_by_citizen_id := (
+		_apply_runtime_worker_actionability(order, jobs)
+	)
 	_finalize_job_runtime_diagnostics(order, jobs)
 	var progress_signature := _build_progress_signature(
 		order,
@@ -1749,6 +1864,8 @@ static func _refresh_order_runtime(
 		_work_state().work_orders[order_id] = order
 		mark_city_work_orders_changed()
 
+	return candidate_by_citizen_id
+
 
 # Source validity says that work is physically meaningful; runtime
 # actionability additionally requires at least one presently eligible
@@ -1758,7 +1875,8 @@ static func _refresh_order_runtime(
 static func _apply_runtime_worker_actionability(
 	order: Dictionary,
 	jobs: Array
-) -> void:
+) -> Dictionary:
+	var candidate_by_citizen_id: Dictionary = {}
 	var has_source_actionable_job := false
 
 	for raw_job in jobs:
@@ -1767,7 +1885,7 @@ static func _apply_runtime_worker_actionability(
 			break
 
 	if not has_source_actionable_job:
-		return
+		return candidate_by_citizen_id
 
 	var eligible_citizen_ids := _get_runtime_eligible_worker_ids()
 
@@ -1776,28 +1894,32 @@ static func _apply_runtime_worker_actionability(
 			jobs,
 			BLOCKED_REASON_NO_ELIGIBLE_WORKER
 		)
-		return
+		return candidate_by_citizen_id
 
 	# Reachability for material-free road sites is evaluated in one batched
 	# route search during actual candidate selection. Repeating A* once for
 	# every independent tile here would reintroduce the old road-placement hitch.
 	if _construction_order_uses_batchable_road_site(order):
-		return
+		return candidate_by_citizen_id
 
 	var candidate_order := order.duplicate(true)
 	candidate_order["jobs"] = jobs
 
 	for citizen_id in eligible_citizen_ids:
-		if not _get_best_job_candidate_for_order(
+		var candidate := _get_best_job_candidate_for_order(
 			citizen_id,
 			candidate_order
-		).is_empty():
-			return
+		)
+		candidate_by_citizen_id[citizen_id] = candidate
+
+		if not candidate.is_empty():
+			return candidate_by_citizen_id
 
 	_override_actionable_jobs_with_reason(
 		jobs,
 		BLOCKED_REASON_NO_REACHABLE_WORK_POSITION
 	)
+	return candidate_by_citizen_id
 
 
 #endregion

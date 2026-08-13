@@ -73,7 +73,12 @@ const MAX_AUTONOMOUS_HAUL_ASSIGNMENTS_PER_TICK: int = 2
 const MAX_AUTONOMOUS_HAUL_CANDIDATES_PER_TICK: int = 32
 const MAX_AUTONOMOUS_HAUL_TASK_BUILD_ATTEMPTS_PER_TICK: int = 4
 const AUTONOMOUS_HAUL_EXACT_HEURISTIC_WEIGHT: int = 1
-const MAX_PLAYER_COMMAND_ASSIGNMENTS_PER_TICK: int = 8
+# Each successful assignment invalidates the remaining pass-local route witnesses.
+# Dispatch at most two citizens per tick so a populated work board cannot
+# multiply exact city-wide path searches into a single-frame burst. At 3x this
+# still dispatches more than seven citizens per real-time second and preserves
+# the established two-citizen road-assignment contract.
+const MAX_PLAYER_COMMAND_ASSIGNMENTS_PER_TICK: int = 2
 const MAX_FOOD_TASK_ASSIGNMENTS_PER_TICK: int = 4
 const MAX_FOOD_SOURCE_PATH_REQUESTS_PER_TICK: int = 8
 const HOME_FOOD_SOURCE_MAX_EXTRA_TILES: int = 4
@@ -123,8 +128,10 @@ static func run_tick(
 	CityWorkSystem.prune_invalid_city_player_commands()
 	CityWorkSystem.repair_stale_city_player_command_claims()
 	CityConstructionSystemScript.refresh_all_city_construction_sites()
-	CityWorkSystemScript.synchronize_player_work_board()
-	_process_player_commands()
+	var runtime_work_candidate_cache := (
+		CityWorkSystemScript.synchronize_player_work_board()
+	)
+	_process_player_commands(runtime_work_candidate_cache)
 	_process_food_needs(true)
 
 	if not _runtime_initialized:
@@ -195,7 +202,9 @@ static func run_tick(
 
 #region Player Command Assignment
 
-static func _process_player_commands() -> void:
+static func _process_player_commands(
+	runtime_candidate_by_order_by_citizen_id: Dictionary = {}
+) -> void:
 	var assigned_count := 0
 
 	for raw_citizen in CityCitizenRegistrySystem.get_current_state().citizens:
@@ -226,9 +235,22 @@ static func _process_player_commands() -> void:
 			):
 				continue
 
+		var raw_precomputed_candidates = (
+			runtime_candidate_by_order_by_citizen_id.get(
+				citizen_id,
+				{}
+			)
+		)
+		var precomputed_candidates: Dictionary = (
+			raw_precomputed_candidates
+			if raw_precomputed_candidates is Dictionary
+			else {}
+		)
+		runtime_candidate_by_order_by_citizen_id.erase(citizen_id)
 		var player_work := (
 			CityWorkSystemScript.get_best_player_job_for_citizen(
-				citizen_id
+				citizen_id,
+				precomputed_candidates
 			)
 		)
 
@@ -248,6 +270,9 @@ static func _process_player_commands() -> void:
 
 		_clear_idle_activity_runtime(citizen_id)
 		assigned_count += 1
+		# Assignment mutates claims and capacity. Any unused witnesses were
+		# measured before that mutation and must not be reused by later citizens.
+		runtime_candidate_by_order_by_citizen_id.clear()
 #endregion
 
 #region Food Need Assignment

@@ -34,7 +34,20 @@ static func get_current_state() -> CityNavigationState:
 
 
 static func reset_city_navigation_state() -> void:
-	get_current_state().object_access_tile_cache.clear()
+	var navigation_state := get_current_state()
+	navigation_state.object_access_tile_cache.clear()
+	_reset_base_land_component_cache(navigation_state)
+
+
+static func _reset_base_land_component_cache(
+	navigation_state: CityNavigationState
+) -> void:
+	navigation_state.base_land_component_world = null
+	navigation_state.base_land_component_world_size = Vector2i.ZERO
+	navigation_state.base_land_component_tile_data_version = -1
+	navigation_state.base_land_component_seed_tile = Vector2i(-1, -1)
+	navigation_state.base_land_component_membership.clear()
+	navigation_state.base_land_component_boundary_indices.clear()
 
 
 static func _sort_city_tiles_y_then_x(
@@ -542,6 +555,25 @@ static func find_path_to_any_city_tile(values: Dictionary) -> Dictionary:
 			search_start_usec
 		)
 
+	# This permissive terrain-only component is a supergraph of citizen
+	# traversal: it ignores objects and diagonal corner restrictions. Therefore
+	# a different component proves that A* cannot succeed, while a shared
+	# component says nothing and preserves the existing search exactly.
+	if (
+		max_expanded_nodes >= city_world.width * city_world.height
+		and not _base_land_component_has_destination(
+		city_world,
+		start_tile,
+		destination_tiles
+		)
+	):
+		result["status"] = PATH_STATUS_UNREACHABLE
+
+		return _finish_result(
+			result,
+			search_start_usec
+		)
+
 	var open_heap: Array = []
 	var travel_cost_by_tile: Dictionary = {
 		start_tile: 0
@@ -767,6 +799,239 @@ static func _get_clean_destination_tiles(
 	)
 
 	return destination_tiles
+
+
+static func _base_land_component_has_destination(
+	city_world: WorldData,
+	start_tile: Vector2i,
+	destination_tiles: Array
+) -> bool:
+	var navigation_state := get_current_state()
+	var world_size := Vector2i(city_world.width, city_world.height)
+	var tile_count := city_world.width * city_world.height
+	var cache_key_changed := (
+		not is_same(
+			navigation_state.base_land_component_world,
+			city_world
+		)
+		or navigation_state.base_land_component_world_size != world_size
+		or navigation_state.base_land_component_tile_data_version
+		!= city_world.tile_data_version
+		or navigation_state.base_land_component_membership.size()
+		!= tile_count
+	)
+
+	if cache_key_changed:
+		_reset_base_land_component_cache(navigation_state)
+		navigation_state.base_land_component_world = city_world
+		navigation_state.base_land_component_world_size = world_size
+		navigation_state.base_land_component_tile_data_version = (
+			city_world.tile_data_version
+		)
+		navigation_state.base_land_component_membership.resize(tile_count)
+
+	var start_index := start_tile.y * city_world.width + start_tile.x
+	var membership := navigation_state.base_land_component_membership
+	var built_component := false
+
+	if membership[start_index] != 1:
+		membership.fill(0)
+		navigation_state.base_land_component_boundary_indices.clear()
+		navigation_state.base_land_component_seed_tile = start_tile
+		_flood_base_land_component(
+			city_world,
+			start_index,
+			membership,
+			navigation_state.base_land_component_boundary_indices
+		)
+		built_component = true
+
+	if _base_land_component_contains_destination(
+		city_world,
+		destination_tiles,
+		membership
+	):
+		return true
+
+	# Existing callers and tests may mutate tile dictionaries directly without
+	# incrementing tile_data_version. A stale positive only permits ordinary A*
+	# and is therefore safe. Before a negative rejection, verify that no water
+	# boundary tile became land; any new connection must first cross this exact
+	# permissive eight-neighbor boundary.
+	if (
+		not built_component
+		and _base_land_component_boundary_changed(
+			city_world,
+			navigation_state.base_land_component_boundary_indices
+		)
+	):
+		membership.fill(0)
+		navigation_state.base_land_component_boundary_indices.clear()
+		navigation_state.base_land_component_seed_tile = start_tile
+		_flood_base_land_component(
+			city_world,
+			start_index,
+			membership,
+			navigation_state.base_land_component_boundary_indices
+		)
+
+		if _base_land_component_contains_destination(
+			city_world,
+			destination_tiles,
+			membership
+		):
+			return true
+
+	return false
+
+
+static func _base_land_component_boundary_changed(
+	city_world: WorldData,
+	boundary_indices: PackedInt32Array
+) -> bool:
+	for tile_index in boundary_indices:
+		var tile_x := tile_index % city_world.width
+		var tile_y := int(tile_index / city_world.width)
+
+		if (
+			city_world.tiles[tile_y][tile_x]["terrain"]
+			== WorldData.TERRAIN_LAND
+		):
+			return true
+
+	return false
+
+
+static func _base_land_component_contains_destination(
+	city_world: WorldData,
+	destination_tiles: Array,
+	membership: PackedByteArray
+) -> bool:
+	for raw_destination_tile in destination_tiles:
+		var destination_tile: Vector2i = raw_destination_tile
+		var destination_index: int = (
+			destination_tile.y * city_world.width
+			+ destination_tile.x
+		)
+
+		if membership[destination_index] == 1:
+			return true
+
+	return false
+
+
+static func _flood_base_land_component(
+	city_world: WorldData,
+	start_index: int,
+	membership: PackedByteArray,
+	boundary_indices: PackedInt32Array
+) -> void:
+	var pending_indices := PackedInt32Array()
+	pending_indices.append(start_index)
+	# Two means queued; one means confirmed component membership. Marking queue
+	# entries prevents duplicate span seeds without allocating a Dictionary.
+	membership[start_index] = 2
+	var pending_index := 0
+
+	while pending_index < pending_indices.size():
+		var tile_index := pending_indices[pending_index]
+		pending_index += 1
+
+		if membership[tile_index] == 1:
+			continue
+
+		var tile_x := tile_index % city_world.width
+		var tile_y := int(tile_index / city_world.width)
+		var tile_row: Array = city_world.tiles[tile_y]
+		var span_left := tile_x
+		var span_right := tile_x
+
+		while span_left > 0:
+			var left_index := tile_y * city_world.width + span_left - 1
+
+			if membership[left_index] == 1:
+				break
+
+			if (
+				tile_row[span_left - 1]["terrain"]
+				!= WorldData.TERRAIN_LAND
+			):
+				if membership[left_index] == 0:
+					membership[left_index] = 3
+					boundary_indices.append(left_index)
+				break
+
+			span_left -= 1
+
+		while span_right + 1 < city_world.width:
+			var right_index := tile_y * city_world.width + span_right + 1
+
+			if membership[right_index] == 1:
+				break
+
+			if (
+				tile_row[span_right + 1]["terrain"]
+				!= WorldData.TERRAIN_LAND
+			):
+				if membership[right_index] == 0:
+					membership[right_index] = 3
+					boundary_indices.append(right_index)
+				break
+
+			span_right += 1
+
+		for span_x in range(span_left, span_right + 1):
+			membership[tile_y * city_world.width + span_x] = 1
+
+		for neighbor_y in [tile_y - 1, tile_y + 1]:
+			if neighbor_y < 0 or neighbor_y >= city_world.height:
+				continue
+
+			var neighbor_row: Array = city_world.tiles[neighbor_y]
+			# A legal diagonal traversal requires both cardinal side tiles to be
+			# walkable. Consequently every terrain-only diagonal connection also
+			# has a cardinal route, and four-connected land is the exact
+			# permissive terrain supergraph needed here. Including span corners
+			# would merge islands that merely touch diagonally, forcing the real
+			# A* to exhaust the city before proving that corner impassable.
+			var neighbor_x := span_left
+			var maximum_neighbor_x := mini(
+				span_right,
+				city_world.width - 1
+			)
+
+			while neighbor_x <= maximum_neighbor_x:
+				var neighbor_index: int = (
+					neighbor_y * city_world.width + neighbor_x
+				)
+
+				if (
+					membership[neighbor_index] == 0
+					and neighbor_row[neighbor_x]["terrain"]
+					== WorldData.TERRAIN_LAND
+				):
+					membership[neighbor_index] = 2
+					pending_indices.append(neighbor_index)
+
+					# One queued seed discovers the whole horizontal run.
+					while (
+						neighbor_x + 1 <= maximum_neighbor_x
+						and neighbor_row[neighbor_x + 1]["terrain"]
+						== WorldData.TERRAIN_LAND
+					):
+						neighbor_x += 1
+						var run_index: int = (
+							neighbor_y * city_world.width + neighbor_x
+						)
+
+						if membership[run_index] == 0:
+							membership[run_index] = 2
+
+				elif membership[neighbor_index] == 0:
+					membership[neighbor_index] = 3
+					boundary_indices.append(neighbor_index)
+
+				neighbor_x += 1
 
 
 static func _make_destination_heuristic(
@@ -1019,5 +1284,4 @@ static func _finish_result(
 		Time.get_ticks_usec()
 		- search_start_usec
 	)
-
 	return result
