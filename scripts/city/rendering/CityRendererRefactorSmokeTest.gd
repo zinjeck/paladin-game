@@ -17,6 +17,7 @@ const TEST_CITY_NAME := "Smoke Test City"
 const TEST_CULTURE_NAME := "Smoke Test Culture"
 
 var failure_count: int = 0
+var active_workplace_preview_draw_count: int = 0
 var background_draw_count: int = 0
 var citizen_draw_count: int = 0
 var interaction_draw_count: int = 0
@@ -52,6 +53,10 @@ func _run_smoke_test() -> void:
 	await get_tree().process_frame
 
 	_expect(renderer.city_world != null, "City world must be generated.")
+	_expect(
+		renderer.city_active_workplace_preview_render_layer != null,
+		"Active workplace preview render layer must exist."
+	)
 	_expect(
 		renderer.city_background_render_layer != null,
 		"Background render layer must exist."
@@ -512,6 +517,9 @@ func _test_city_information_panel_live_data(
 func _test_focused_layer_invalidation(
 	renderer: CityRenderer
 ) -> void:
+	renderer.city_active_workplace_preview_render_layer.draw.connect(
+		_on_active_workplace_preview_layer_draw
+	)
 	renderer.city_background_render_layer.draw.connect(
 		_on_background_layer_draw
 	)
@@ -529,6 +537,7 @@ func _test_focused_layer_invalidation(
 	# Isolate the explicit invalidation from hover/version work performed by the
 	# renderer's regular process loop.
 	renderer.set_process(false)
+	var active_preview_before := active_workplace_preview_draw_count
 	var background_before := background_draw_count
 	var citizen_before := citizen_draw_count
 	var interaction_before := interaction_draw_count
@@ -541,6 +550,10 @@ func _test_focused_layer_invalidation(
 	_expect(
 		citizen_draw_count == citizen_before + 1,
 		"Repeated same-frame invalidation must coalesce into one citizen redraw."
+	)
+	_expect(
+		active_workplace_preview_draw_count == active_preview_before,
+		"Citizen-only invalidation must not redraw the placement preview."
 	)
 	_expect(
 		background_draw_count == background_before,
@@ -582,7 +595,159 @@ func _test_focused_layer_invalidation(
 		and interaction_draw_count == interaction_before + 1,
 		"Leaving citizen selection must clear its moving-layer outline while object selection redraws its zone and interaction layers."
 	)
+
+	await _test_active_workplace_preview_invalidation(renderer)
 	renderer.set_process(true)
+
+
+func _test_active_workplace_preview_invalidation(
+	renderer: CityRenderer
+) -> void:
+	var camera_process_was_enabled := renderer.camera.is_processing()
+	renderer.camera.set_process(false)
+	renderer._process_texture_cache_and_camera()
+	await get_tree().process_frame
+	await get_tree().process_frame
+	var background_before := background_draw_count
+	var active_preview_before := active_workplace_preview_draw_count
+	var interaction_before := interaction_draw_count
+
+	renderer.start_city_object_placement(
+		CityObjectCatalog.CITY_OBJECT_HOUSE,
+		Vector2i(3, 3)
+	)
+	await get_tree().process_frame
+	await get_tree().process_frame
+	_expect(
+		not renderer.active_city_object_placement_uses_environmental_source()
+		and not renderer.active_workplace_preview_refresh_pending,
+		"Non-environmental placement must not schedule workplace-zone cache work."
+	)
+	_expect(
+		background_draw_count == background_before
+		and active_workplace_preview_draw_count == active_preview_before + 1
+		and interaction_draw_count == interaction_before + 1,
+		"Starting a placement must refresh only its retained preview and interaction layers."
+	)
+
+	renderer.clear_city_object_placement()
+	await get_tree().process_frame
+	await get_tree().process_frame
+
+	renderer.start_city_object_placement(
+		CityObjectCatalog.CITY_OBJECT_FISHING_GROUNDS,
+		Vector2i(3, 3)
+	)
+	await get_tree().process_frame
+	await get_tree().process_frame
+	_expect(
+		renderer.active_city_object_placement_uses_environmental_source()
+		and renderer.active_workplace_preview_refresh_pending,
+		"Environmental placement must defer its zone cache until hover is stable."
+	)
+
+	background_before = background_draw_count
+	active_preview_before = active_workplace_preview_draw_count
+	interaction_before = interaction_draw_count
+	# Model two consecutive edge-scroll frames. Both invalidations must coalesce,
+	# clear any stale retained zone, and leave texture preparation pending.
+	renderer._apply_city_change_refreshes({}, true)
+	renderer.queue_city_interaction_layer_redraw()
+	renderer._apply_city_change_refreshes({}, true)
+	renderer.queue_city_interaction_layer_redraw()
+	await get_tree().process_frame
+	await get_tree().process_frame
+	_expect(
+		renderer.active_workplace_preview_refresh_pending,
+		"Moving hover must not rebuild an environmental preview cache."
+	)
+	_expect(
+		background_draw_count == background_before
+		and active_workplace_preview_draw_count == active_preview_before + 1
+		and interaction_draw_count == interaction_before + 1,
+		"Moving placement hover must never redraw static background geometry."
+	)
+
+	background_before = background_draw_count
+	active_preview_before = active_workplace_preview_draw_count
+	var original_camera_position := renderer.camera.position
+	renderer.camera.position += Vector2(0.25, 0.0)
+	var camera_transform_changed := (
+		renderer._process_texture_cache_and_camera()
+	)
+	renderer._apply_city_change_refreshes(
+		{},
+		false,
+		camera_transform_changed
+	)
+	await get_tree().process_frame
+	await get_tree().process_frame
+	var moving_camera_preview := (
+		renderer.get_active_city_object_placement_preview()
+	)
+	_expect(
+		camera_transform_changed
+		and renderer.active_workplace_preview_refresh_pending
+		and not renderer.workplace_zone_overlay_cache.has_cached_zone(
+			moving_camera_preview,
+			true,
+			renderer.city_world
+		),
+		"Camera motion with an unchanged hovered tile must keep environmental preview preparation deferred."
+	)
+	_expect(
+		background_draw_count == background_before
+		and active_workplace_preview_draw_count == active_preview_before + 1,
+		"Camera motion must clear only the retained workplace preview layer."
+	)
+
+	background_before = background_draw_count
+	active_preview_before = active_workplace_preview_draw_count
+	camera_transform_changed = renderer._process_texture_cache_and_camera()
+	renderer._apply_city_change_refreshes(
+		{},
+		false,
+		camera_transform_changed
+	)
+	await get_tree().process_frame
+	await get_tree().process_frame
+	var fishing_preview := renderer.get_active_city_object_placement_preview()
+	_expect(
+		not renderer.active_workplace_preview_refresh_pending
+		and not fishing_preview.is_empty()
+		and renderer.workplace_zone_overlay_cache.has_cached_zone(
+			fishing_preview,
+			true,
+			renderer.city_world
+		),
+		"One stable-hover frame must prepare the environmental preview exactly once."
+	)
+	_expect(
+		background_draw_count == background_before
+		and active_workplace_preview_draw_count == active_preview_before + 1,
+		"Preparing a stable workplace preview must not redraw static background geometry."
+	)
+
+	background_before = background_draw_count
+	active_preview_before = active_workplace_preview_draw_count
+	interaction_before = interaction_draw_count
+	renderer.clear_city_object_placement()
+	await get_tree().process_frame
+	await get_tree().process_frame
+	_expect(
+		not renderer.has_active_city_object_placement()
+		and background_draw_count == background_before
+		and active_workplace_preview_draw_count == active_preview_before + 1
+		and interaction_draw_count == interaction_before + 1,
+		"Clearing placement must erase its retained preview without touching the static background."
+	)
+	renderer.camera.position = original_camera_position
+	renderer._process_texture_cache_and_camera()
+	renderer.camera.set_process(camera_process_was_enabled)
+
+
+func _on_active_workplace_preview_layer_draw() -> void:
+	active_workplace_preview_draw_count += 1
 
 
 func _on_background_layer_draw() -> void:

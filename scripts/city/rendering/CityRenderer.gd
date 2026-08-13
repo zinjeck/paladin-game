@@ -53,6 +53,7 @@ var session_prepared_city_payload: Dictionary = {}
 var session_view_active: bool = true
 var city_layers_have_been_presented: bool = false
 var camera: Camera2D
+var observed_city_camera_position: Vector2 = Vector2.ZERO
 var observed_city_camera_zoom: Vector2 = Vector2.ZERO
 var ui_layer: CanvasLayer
 var ui_root: Control
@@ -78,6 +79,7 @@ var city_map_texture_setup_duration_usec: int = 0
 var city_natural_feature_setup_duration_usec: int = 0
 var city_map_texture_cache_reused_on_entry: bool = false
 var city_natural_feature_cache_reused_on_entry: bool = false
+var city_active_workplace_preview_render_layer: CityRenderLayer
 var city_background_render_layer: CityRenderLayer
 var city_citizen_render_layer: CityRenderLayer
 var city_interaction_render_layer: CityRenderLayer
@@ -236,6 +238,7 @@ var observed_city_workplace_state: CityWorkplaceState
 var observed_city_workplace_version: int = -1
 var observed_city_tile_data_version: int = -1
 var observed_city_surface_feature_change_version: int = -1
+var active_workplace_preview_refresh_pending: bool = false
 var workplace_zone_overlay_cache = (
 	CityWorkplaceZoneOverlayCacheScript.new()
 )
@@ -447,7 +450,7 @@ func get_game_session_controller() -> Node:
 
 
 func _process(delta: float) -> void:
-	_process_texture_cache_and_camera()
+	var city_camera_transform_changed := _process_texture_cache_and_camera()
 	var city_hover_tile_changed := _update_city_hover_state()
 	_update_active_city_interaction_state()
 	var change_flags := _collect_city_change_flags()
@@ -458,17 +461,28 @@ func _process(delta: float) -> void:
 
 	_apply_city_change_refreshes(
 		change_flags,
-		city_hover_tile_changed
+		city_hover_tile_changed,
+		city_camera_transform_changed
 	)
 
 
-func _process_texture_cache_and_camera() -> void:
-	if (
-		camera != null
-		and camera.zoom != observed_city_camera_zoom
-	):
+func _process_texture_cache_and_camera() -> bool:
+	if camera == null:
+		return false
+
+	var camera_position_changed := (
+		camera.position != observed_city_camera_position
+	)
+	var camera_zoom_changed := camera.zoom != observed_city_camera_zoom
+
+	if camera_position_changed:
+		observed_city_camera_position = camera.position
+
+	if camera_zoom_changed:
 		observed_city_camera_zoom = camera.zoom
 		queue_city_interaction_layer_redraw()
+
+	return camera_position_changed or camera_zoom_changed
 
 
 func _update_city_hover_state() -> bool:
@@ -873,7 +887,8 @@ func _synchronize_city_citizen_movement(
 
 func _apply_city_change_refreshes(
 	change_flags: Dictionary,
-	city_hover_tile_changed: bool
+	city_hover_tile_changed: bool,
+	city_camera_transform_changed: bool = false
 ) -> void:
 	var city_objects_changed := bool(
 		change_flags.get("city_objects_changed", false)
@@ -921,15 +936,25 @@ func _apply_city_change_refreshes(
 		change_flags.get("city_surface_features_changed", false)
 	)
 
-	if (
-		has_active_city_object_placement()
-		and (
+	if has_active_city_object_placement():
+		if not active_city_object_placement_uses_environmental_source():
+			active_workplace_preview_refresh_pending = false
+		elif (
 			city_hover_tile_changed
+			or city_camera_transform_changed
 			or city_tile_data_changed
-		)
-	):
-		refresh_active_workplace_zone_preview_cache()
-		queue_city_background_layer_redraw()
+		):
+			# Edge scrolling can move the cursor across hundreds of two-pixel
+			# city tiles. Clear the stale retained zone now, then wait for one
+			# stable-hover frame before rebuilding its CPU image/GPU texture.
+			active_workplace_preview_refresh_pending = true
+			queue_city_active_workplace_preview_layer_redraw()
+		elif active_workplace_preview_refresh_pending:
+			refresh_active_workplace_zone_preview_cache()
+			active_workplace_preview_refresh_pending = false
+			queue_city_active_workplace_preview_layer_redraw()
+	else:
+		active_workplace_preview_refresh_pending = false
 
 	if (
 		has_selected_city_entity()
@@ -1387,6 +1412,7 @@ func create_city_camera() -> void:
 		camera.clamp_camera_to_map_bounds()
 
 	camera.make_current()
+	observed_city_camera_position = camera.position
 	observed_city_camera_zoom = camera.zoom
 
 func store_current_city_camera_state() -> void:
@@ -2355,7 +2381,7 @@ func start_city_object_placement_from_definition(object_type: String) -> void:
 	)
 
 	set_city_object_option_selected(object_type, true)
-	queue_city_background_layer_redraw()
+	queue_city_active_workplace_preview_layer_redraw()
 	queue_city_interaction_layer_redraw()
 
 	print("City object placement started: ", object_type)
@@ -2372,7 +2398,7 @@ func cancel_active_city_object_placement() -> void:
 	if object_type != "":
 		set_city_object_option_selected(object_type, false)
 
-	queue_city_background_layer_redraw()
+	queue_city_active_workplace_preview_layer_redraw()
 	queue_city_interaction_layer_redraw()
 
 	print("City object placement canceled: ", object_type)
@@ -5862,6 +5888,19 @@ func should_draw_city_trees() -> bool:
 
 
 func create_city_render_layers() -> void:
+	city_active_workplace_preview_render_layer = CityRenderLayerScript.new()
+	city_active_workplace_preview_render_layer.name = (
+		"CityActiveWorkplacePreviewRenderLayer"
+	)
+	city_active_workplace_preview_render_layer.setup(
+		Callable(self, "draw_city_active_workplace_preview_layer")
+	)
+	# Active workplace zones sit above terrain and rocks, but below completed
+	# objects and construction blueprints. Keeping them in their own retained
+	# layer prevents cursor-following previews from rebuilding static geometry.
+	city_active_workplace_preview_render_layer.z_index = -1
+	add_child(city_active_workplace_preview_render_layer)
+
 	city_background_render_layer = CityRenderLayerScript.new()
 	city_background_render_layer.name = "CityBackgroundRenderLayer"
 	city_background_render_layer.setup(
@@ -5887,6 +5926,13 @@ func create_city_render_layers() -> void:
 	add_child(city_interaction_render_layer)
 
 
+func queue_city_active_workplace_preview_layer_redraw() -> void:
+	if not session_view_active:
+		return
+	if city_active_workplace_preview_render_layer != null:
+		city_active_workplace_preview_render_layer.request_redraw()
+
+
 func queue_city_background_layer_redraw() -> void:
 	if not session_view_active:
 		return
@@ -5909,9 +5955,19 @@ func queue_city_interaction_layer_redraw() -> void:
 
 
 func queue_all_city_render_layers_redraw() -> void:
+	queue_city_active_workplace_preview_layer_redraw()
 	queue_city_background_layer_redraw()
 	queue_city_citizen_layer_redraw()
 	queue_city_interaction_layer_redraw()
+
+
+func draw_city_active_workplace_preview_layer(
+	draw_target: CanvasItem
+) -> void:
+	if city_world == null:
+		return
+
+	draw_active_workplace_zone_background(draw_target)
 
 
 func draw_city_background_layer(draw_target: CanvasItem) -> void:
@@ -5921,7 +5977,6 @@ func draw_city_background_layer(draw_target: CanvasItem) -> void:
 	# CityTerrainSprite and natural-feature MultiMeshInstance2D nodes retain the
 	# static map geometry. This layer redraws only versioned objects and overlays.
 	draw_selected_workplace_zone_background(draw_target)
-	draw_active_workplace_zone_background(draw_target)
 	draw_city_objects(draw_target)
 	draw_city_roads(draw_target)
 	draw_city_construction_sites(draw_target)
@@ -6853,14 +6908,34 @@ func start_city_object_placement(
 		"owner": object_owner,
 		"repeat_after_place": repeat_after_place
 	}
-	refresh_active_workplace_zone_preview_cache()
+	active_workplace_preview_refresh_pending = (
+		active_city_object_placement_uses_environmental_source()
+	)
+	queue_city_active_workplace_preview_layer_redraw()
+	queue_city_interaction_layer_redraw()
 
 func clear_city_object_placement() -> void:
 	active_city_object_placement.clear()
+	active_workplace_preview_refresh_pending = false
+	queue_city_active_workplace_preview_layer_redraw()
+	queue_city_interaction_layer_redraw()
 
 
 func has_active_city_object_placement() -> bool:
 	return not active_city_object_placement.is_empty()
+
+
+func active_city_object_placement_uses_environmental_source() -> bool:
+	if not has_active_city_object_placement():
+		return false
+
+	var policy := CityObjectCatalog.get_city_object_resource_source_policy(
+		active_city_object_placement
+	)
+	return (
+		str(policy.get("mode", ""))
+		== CityObjectCatalog.WORKPLACE_RESOURCE_SOURCE_MODE_FOOTPRINT_REACH
+	)
 
 
 func is_uncommitted_city_placement_preview_active() -> bool:
