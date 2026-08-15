@@ -1122,6 +1122,52 @@ func get_settlement_snapshot() -> Array[Dictionary]:
 	return settlement_snapshot
 
 
+func is_registered_settlement_context(
+	settlement_context: SettlementSimulationContext
+) -> bool:
+	if settlement_context == null or not settlement_context.is_valid():
+		return false
+
+	var settlement_id := settlement_context.settlement_id
+	var raw_settlement = settlements_by_id.get(settlement_id)
+	if not raw_settlement is Dictionary:
+		return false
+
+	var settlement: Dictionary = raw_settlement
+	var polity_id := int(
+		settlement.get("polity_id", PolityDataScript.INVALID_POLITY_ID)
+	)
+	var raw_polity = polities_by_id.get(polity_id)
+	if not raw_polity is Dictionary:
+		return false
+
+	var polity: Dictionary = raw_polity
+	var backend_kind := str(
+		settlement_backend_kind_by_id.get(
+			settlement_id,
+			SettlementSimulationContextScript.BACKEND_NONE
+		)
+	)
+	var registered_state = settlement_city_state_by_id.get(settlement_id)
+	var is_player_polity := polity_id == player_polity_id
+	var is_capital := int(polity.get(
+		"capital_settlement_id",
+		PolityDataScript.INVALID_SETTLEMENT_ID
+	)) == settlement_id
+
+	return (
+		int(settlement.get("id", SettlementDataScript.INVALID_SETTLEMENT_ID))
+		== settlement_id
+		and str(settlement.get("settlement_type", ""))
+		== settlement_context.settlement_type
+		and polity_id == settlement_context.polity_id
+		and backend_kind == settlement_context.backend_kind
+		and is_player_polity == settlement_context.is_player_polity
+		and is_capital == settlement_context.is_capital
+		and is_same(registered_state, settlement_context.local_state)
+	)
+
+
 func get_settlement_context(settlement_id: int):
 	var settlement := get_settlement(settlement_id)
 	if settlement.is_empty():
