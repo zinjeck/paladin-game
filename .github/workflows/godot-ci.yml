@@ -24,6 +24,8 @@ jobs:
     steps:
       - name: Check out Paladin
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Cache Godot
         id: cache-godot
@@ -53,6 +55,13 @@ jobs:
 
       - name: Show Godot version
         run: godot --version
+
+      - name: Guard settlement-local authority boundaries
+        shell: bash
+        run: |
+          set -o pipefail
+          mkdir -p ci-logs
+          python3 ci/settlement_locality_guard.py 2>&1 | tee ci-logs/settlement-locality-guard.log
 
       - name: Audit GDScript structure and resource paths
         shell: bash
