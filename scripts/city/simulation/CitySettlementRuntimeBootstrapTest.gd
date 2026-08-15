@@ -204,7 +204,7 @@ func _test_missing_keep_recovery_is_target_local() -> void:
 				"foundation_keep",
 				0
 			)
-		== 1
+		) == 1
 		and keeps.size() == 1
 		and int(keeps[0].get("id", -1)) == foundation_object_id,
 		"A missing target-local Keep must be recovered exactly once."
