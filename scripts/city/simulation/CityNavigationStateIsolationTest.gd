@@ -43,8 +43,8 @@ func _test_navigation_cache_is_settlement_owned() -> void:
 	if city_a.is_empty() or city_b.is_empty():
 		return
 
-	var state_a := _exercise_city(int(city_a["id"]), 71_101)
-	var state_b := _exercise_city(int(city_b["id"]), 71_102)
+	var state_a := _exercise_city(int(city_a["id"]), culture_id, 71_101)
+	var state_b := _exercise_city(int(city_b["id"]), culture_id, 71_102)
 	if state_a.is_empty() or state_b.is_empty():
 		return
 
@@ -207,8 +207,24 @@ func _test_base_land_component_guard_and_invalidation() -> void:
 		and int(corner_result.get("expanded_node_count", -1)) == 0,
 		"Corner-touching land must reject before A* because legal diagonal traversal requires both side tiles."
 	)
-	_set_land_tile(corner_world, Vector2i(1, 0))
-	_set_land_tile(corner_world, Vector2i(0, 1))
+	var corner_version_before_bridge := corner_world.tile_data_version
+	_expect(
+		corner_world.set_tile_terrain(
+			Vector2i(1, 0),
+			WorldData.TERRAIN_LAND
+		)
+		and not corner_world.set_tile_terrain(
+			Vector2i(1, 0),
+			WorldData.TERRAIN_LAND
+		)
+		and corner_world.set_tile_terrain(
+			Vector2i(0, 1),
+			WorldData.TERRAIN_LAND
+		)
+		and corner_world.tile_data_version
+		== corner_version_before_bridge + 2,
+		"Each effective terrain mutation must publish exactly once and an identical retry must be a no-op."
+	)
 	var bridged_corner_result := CityNavigationSystem.find_path_to_any_city_tile({
 		"city_world": corner_world,
 		"start_tile": Vector2i(0, 0),
@@ -218,7 +234,7 @@ func _test_base_land_component_guard_and_invalidation() -> void:
 	_expect(
 		bool(bridged_corner_result.get("success", false))
 		and int(bridged_corner_result.get("expanded_node_count", 0)) > 0,
-		"An unversioned cardinal bridge must invalidate the corner rejection and run the original A*."
+		"A versioned cardinal bridge must invalidate the corner rejection and run the original A*."
 	)
 	WorldPoliticalState.set_current_city_world(disconnected_world)
 	CityNavigationSystem.find_path_to_any_city_tile({
@@ -239,9 +255,24 @@ func _test_base_land_component_guard_and_invalidation() -> void:
 		"The component cache key must record exact world, size, and tile version."
 	)
 
-	_set_land_tile(disconnected_world, Vector2i(3, 2))
-	_set_land_tile(disconnected_world, Vector2i(4, 2))
-	var unversioned_bridge_result := (
+	_expect(
+		disconnected_world.set_tile_terrain(
+			Vector2i(3, 2),
+			WorldData.TERRAIN_LAND
+		)
+		and disconnected_world.set_tile_terrain(
+			Vector2i(4, 2),
+			WorldData.TERRAIN_LAND
+		)
+		and not disconnected_world.set_tile_terrain(
+			Vector2i(4, 2),
+			WorldData.TERRAIN_LAND
+		)
+		and disconnected_world.tile_data_version
+		== disconnected_version + 2,
+		"Opening a bridge must publish one broad tile-data change per effective terrain mutation."
+	)
+	var bridged_result := (
 		CityNavigationSystem.find_path_to_any_city_tile({
 			"city_world": disconnected_world,
 			"start_tile": Vector2i(1, 2),
@@ -249,27 +280,16 @@ func _test_base_land_component_guard_and_invalidation() -> void:
 		})
 	)
 	_expect(
-		bool(unversioned_bridge_result.get("success", false))
-		and int(unversioned_bridge_result.get("expanded_node_count", 0)) > 0
-		and navigation_state.base_land_component_tile_data_version
-		== disconnected_version,
-		"A direct unversioned land bridge must never make a stale rejection."
-	)
-
-	disconnected_world.mark_tile_data_changed()
-	var bridged_result := CityNavigationSystem.find_path_to_any_city_tile({
-		"city_world": disconnected_world,
-		"start_tile": Vector2i(1, 2),
-		"destination_tiles": [Vector2i(6, 2)],
-	})
-	_expect(
 		bool(bridged_result.get("success", false))
 		and int(bridged_result.get("expanded_node_count", 0)) > 0
 		and navigation_state.base_land_component_tile_data_version
 		== disconnected_world.tile_data_version,
-		"A tile-version change must rebuild the cache and allow existing A*."
+		"The terrain owner API must invalidate the cached rejection before pathfinding."
 	)
 
+	var resized_tile_count := 9 * 5
+	while disconnected_world.tile_data_version < resized_tile_count:
+		disconnected_world.mark_tile_data_changed()
 	var retained_version := disconnected_world.tile_data_version
 	disconnected_world.setup(9, 5, 71_203)
 	_fill_world_with_land(disconnected_world)
@@ -282,13 +302,18 @@ func _test_base_land_component_guard_and_invalidation() -> void:
 	})
 	_expect(
 		bool(resized_result.get("success", false))
+		and disconnected_world.tile_data_version == retained_version
 		and navigation_state.base_land_component_world_size == Vector2i(9, 5)
 		and navigation_state.base_land_component_membership.size() == 45,
 		"A same-instance size change must invalidate even at the same version."
 	)
 
 
-func _exercise_city(city_id: int, world_seed: int) -> Dictionary:
+func _exercise_city(
+	city_id: int,
+	culture_id: int,
+	world_seed: int
+) -> Dictionary:
 	_expect(
 		WorldPoliticalState.set_active_settlement(city_id),
 		"The City under test must become active."
@@ -299,6 +324,21 @@ func _exercise_city(city_id: int, world_seed: int) -> Dictionary:
 	var city_world := _make_world(TEST_WORLD_SIZE.x, TEST_WORLD_SIZE.y, world_seed)
 	WorldPoliticalState.set_current_city_world(city_world)
 	WorldPoliticalState.set_current_city_seed(world_seed)
+	var city_state = WorldPoliticalState.get_city_simulation_state(city_id)
+	_expect(
+		city_state is CitySettlementSimulationState,
+		"The navigation fixture must expose its settlement-owned City state."
+	)
+	if not city_state is CitySettlementSimulationState:
+		return {}
+	var settlement := WorldPoliticalState.get_settlement(city_id)
+	city_state.city_runtime_data.clear()
+	city_state.city_runtime_data.merge({
+		"name": str(settlement.get("name", "Navigation City")),
+		"primary_culture_id": culture_id,
+		"founded": true,
+		"can_build": true,
+	}, true)
 	var city_object := CityObjectSystem.register_completed_city_object({
 		"object_type": CityObjectCatalog.CITY_OBJECT_HOUSE,
 		"top_left": SHARED_OBJECT_TOP_LEFT,
@@ -360,7 +400,6 @@ func _make_world(width: int, height: int, seed_value: int) -> WorldData:
 	var world := WorldData.new()
 	world.setup(width, height, seed_value)
 	_fill_world_with_land(world)
-	world.mark_tile_data_changed()
 	return world
 
 
@@ -377,7 +416,6 @@ func _make_disconnected_world(
 			if x <= 2 or x >= width - 3:
 				_set_land_tile(world, Vector2i(x, y))
 
-	world.mark_tile_data_changed()
 	return world
 
 
@@ -388,7 +426,7 @@ func _fill_world_with_land(world: WorldData) -> void:
 
 
 func _set_land_tile(world: WorldData, tile_position: Vector2i) -> void:
-	world.tiles[tile_position.y][tile_position.x] = {
+	world.set_tile(tile_position.x, tile_position.y, {
 		"fertility": 50.0,
 		"elevation": 0.2,
 		"temperature": 0.5,
@@ -397,7 +435,7 @@ func _set_land_tile(world: WorldData, tile_position: Vector2i) -> void:
 		"biome": WorldData.BIOME_PLAIN,
 		"resource": WorldData.RESOURCE_NONE,
 		"is_land": true,
-	}
+	})
 
 
 func _expect(condition: bool, message: String) -> void:

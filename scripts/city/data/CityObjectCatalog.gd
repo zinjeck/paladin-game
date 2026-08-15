@@ -151,10 +151,10 @@ static var _storage_resource_lookup_by_object_type: Dictionary = {}
 
 static func ensure_city_object_definitions_ready() -> void:
 	if _city_object_definitions.is_empty():
-		setup_city_object_definitions()
+		_setup_city_object_definitions()
 
 
-static func setup_city_object_definitions() -> void:
+static func _setup_city_object_definitions() -> void:
 	_city_object_definitions.clear()
 	_storage_resource_lookup_by_object_type.clear()
 
@@ -425,6 +425,39 @@ static func setup_city_object_definitions() -> void:
 			storage_resource_lookup
 		)
 
+	# Definitions are process-wide rule data. Freeze every nested reference once
+	# after setup so hot-path readers can safely share them without allocating a
+	# deep copy on every policy, recipe, or rendering query.
+	for raw_object_type in _city_object_definitions.keys():
+		_make_variant_read_only_recursive(
+			_city_object_definitions[raw_object_type]
+		)
+	for raw_object_type in _storage_resource_lookup_by_object_type.keys():
+		_make_variant_read_only_recursive(
+			_storage_resource_lookup_by_object_type[raw_object_type]
+		)
+
+
+static func _make_variant_read_only_recursive(value) -> void:
+	if value is Dictionary:
+		var dictionary: Dictionary = value
+
+		for raw_key in dictionary.keys():
+			_make_variant_read_only_recursive(dictionary[raw_key])
+
+		if not dictionary.is_read_only():
+			dictionary.make_read_only()
+		return
+
+	if value is Array:
+		var array: Array = value
+
+		for item in array:
+			_make_variant_read_only_recursive(item)
+
+		if not array.is_read_only():
+			array.make_read_only()
+
 
 static func make_city_object_definition(values: Dictionary) -> Dictionary:
 	var object_type: String = str(values.get("type", ""))
@@ -464,26 +497,62 @@ static func make_city_object_definition(values: Dictionary) -> Dictionary:
 		values.get("shape_mode", CITY_OBJECT_SHAPE_RECTANGLE)
 	)
 	var is_workplace := bool(values.get("is_workplace", false))
+	var size_tiles = values.get("size", Vector2i.ONE)
+	var requires_city := bool(values.get("requires_city", false))
+	var requires_no_city := bool(values.get("requires_no_city", false))
+	var construction_enabled := bool(
+		values.get("construction_enabled", false)
+	)
+	var placement_effect := str(
+		values.get(
+			"placement_effect",
+			CITY_OBJECT_PLACEMENT_EFFECT_NONE
+		)
+	)
+
+	if (
+		not size_tiles is Vector2i
+		or size_tiles.x <= 0
+		or size_tiles.y <= 0
+	):
+		push_error("City object definition has an invalid size: " + object_type)
+		return {}
+	if requires_city and requires_no_city:
+		push_error(
+			"City object definition cannot require both a founded and unfounded city: "
+			+ object_type
+		)
+		return {}
+	if not [
+		CITY_OBJECT_PLACEMENT_EFFECT_NONE,
+		CITY_OBJECT_PLACEMENT_EFFECT_FOUND_CITY,
+	].has(placement_effect):
+		push_error("City object definition has an unknown placement effect: " + object_type)
+		return {}
+	if (
+		placement_effect == CITY_OBJECT_PLACEMENT_EFFECT_FOUND_CITY
+		and (
+			object_type != CITY_OBJECT_CITY_CENTER
+			or requires_city
+			or not requires_no_city
+			or construction_enabled
+		)
+	):
+		push_error("Only the immediate unfounded City Keep may found a city.")
+		return {}
 
 	return {
 		"type": object_type,
 		"display_name": str(
 			values.get("display_name", object_type.capitalize())
 		),
-		"size": values.get("size", Vector2i.ONE),
+		"size": size_tiles,
 		"button_slot": int(values.get("button_slot", 0)),
-		"requires_city": bool(values.get("requires_city", false)),
-		"requires_no_city": bool(values.get("requires_no_city", false)),
+		"requires_city": requires_city,
+		"requires_no_city": requires_no_city,
 		"repeat_after_place": bool(values.get("repeat_after_place", false)),
-		"placement_effect": str(
-			values.get(
-				"placement_effect",
-				CITY_OBJECT_PLACEMENT_EFFECT_NONE
-			)
-		),
-		"construction_enabled": bool(
-			values.get("construction_enabled", false)
-		),
+		"placement_effect": placement_effect,
+		"construction_enabled": construction_enabled,
 		"construction_materials": construction_materials,
 		"construction_materials_per_tile": bool(
 			values.get("construction_materials_per_tile", false)
@@ -624,7 +693,10 @@ static func _copy_dictionary_field(
 
 static func get_city_object_definitions() -> Dictionary:
 	ensure_city_object_definitions_ready()
-	return _city_object_definitions
+	# The outer map remains private and replaceable during setup. A shallow copy
+	# protects catalog membership while its recursively read-only definitions
+	# remain allocation-free shared values.
+	return _city_object_definitions.duplicate()
 
 
 static func get_city_object_definition(object_type: String) -> Dictionary:

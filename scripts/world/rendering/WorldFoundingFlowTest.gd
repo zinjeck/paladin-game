@@ -431,7 +431,7 @@ func _test_world_map_cache(
 			int(source_world.width / 2),
 			int(source_world.height / 2)
 		)
-		var source_tile := source_world.get_tile(
+		var source_tile := source_world.get_tile_for_internal_read(
 			sample_tile_position.x,
 			sample_tile_position.y
 		)
@@ -476,7 +476,7 @@ func _make_test_world() -> WorldData:
 
 	for y in range(test_world.height):
 		for x in range(test_world.width):
-			var tile := test_world.get_tile(x, y)
+			var tile := test_world.get_tile_for_internal_read(x, y)
 			tile["terrain"] = WorldData.TERRAIN_LAND
 			tile["biome"] = WorldData.BIOME_PLAIN
 			tile["is_land"] = true

@@ -769,6 +769,8 @@ func _test_city_natural_features(
 	var rock_count := 0
 	var first_tree_tile := Vector2i(-1, -1)
 	var first_rock_tile := Vector2i(-1, -1)
+	var generated_tree_tiles: Array[Vector2i] = []
+	var generated_rock_tiles: Array[Vector2i] = []
 
 	for y in range(renderer.city_world.height):
 		var row: Array = renderer.city_world.tiles[y]
@@ -784,6 +786,7 @@ func _test_city_natural_features(
 				== WorldData.CITY_SURFACE_FEATURE_TREE
 			):
 				tree_count += 1
+				generated_tree_tiles.append(Vector2i(x, y))
 
 				if first_tree_tile == Vector2i(-1, -1):
 					first_tree_tile = Vector2i(x, y)
@@ -808,6 +811,7 @@ func _test_city_natural_features(
 				== WorldData.CITY_SURFACE_FEATURE_ROCK
 			):
 				rock_count += 1
+				generated_rock_tiles.append(Vector2i(x, y))
 
 				if first_rock_tile == Vector2i(-1, -1):
 					first_rock_tile = Vector2i(x, y)
@@ -861,15 +865,26 @@ func _test_city_natural_features(
 		var tile_data_version_before_harvest := (
 			renderer.city_world.tile_data_version
 		)
-		var tree_tile := renderer.city_world.get_tile(
-			first_tree_tile.x,
-			first_tree_tile.y
+		var prepared_payload_before_harvest := (
+			renderer.session_prepared_city_payload.duplicate(true)
 		)
-		tree_tile.erase("surface_feature")
-		renderer.city_world.mark_city_surface_feature_changed(
-			first_tree_tile,
-			WorldData.CITY_SURFACE_FEATURE_TREE,
-			WorldData.CITY_SURFACE_FEATURE_NONE
+		renderer.session_prepared_city_payload.merge({
+			"city_world": renderer.city_world,
+			"tree_tiles": generated_tree_tiles.duplicate(),
+			"rock_tiles": generated_rock_tiles.duplicate(),
+			"feature_tile_data_version": (
+				renderer.city_world.tile_data_version
+			),
+			"city_surface_feature_change_version": (
+				renderer.city_world.city_surface_feature_change_version
+			),
+		}, true)
+		_expect(
+			renderer.city_world.remove_tile_surface_feature(
+				first_tree_tile,
+				WorldData.CITY_SURFACE_FEATURE_TREE
+			),
+			"A harvested tree must mutate through the WorldData owner API."
 		)
 		var feature_changes := (
 			renderer.city_world.consume_city_surface_feature_changes()
@@ -894,8 +909,35 @@ func _test_city_natural_features(
 			"Harvesting a tree must not invalidate broad tile data."
 		)
 
-		# Restore the fixture after the focused incremental-removal check.
-		tree_tile["surface_feature"] = WorldData.CITY_SURFACE_FEATURE_TREE
+		# A full rebuild must not trust the stale session-prepared feature lists
+		# that predate the focused owner mutation.
+		renderer.rebuild_city_natural_feature_multimeshes()
+		_expect(
+			renderer.city_tree_multimesh != null
+			and renderer.city_tree_multimesh.instance_count
+			== tree_count - 1
+			and WorldData.get_city_surface_feature(
+				renderer.city_world.get_tile(
+					first_tree_tile.x,
+					first_tree_tile.y
+				)
+			) == WorldData.CITY_SURFACE_FEATURE_NONE,
+			"A full natural-feature rebuild must not resurrect a removed tree from stale prepared data."
+		)
+		renderer.session_prepared_city_payload = (
+			prepared_payload_before_harvest
+		)
+
+		# Restore the fixture through the same owner boundary after the focused
+		# incremental-removal and full-rebuild checks.
+		_expect(
+			renderer.city_world.set_tile_surface_feature(
+				first_tree_tile,
+				WorldData.CITY_SURFACE_FEATURE_TREE
+			),
+			"The natural-feature fixture must restore its tree through WorldData."
+		)
+		renderer.city_world.consume_city_surface_feature_changes()
 		renderer.rebuild_city_natural_feature_multimeshes()
 		renderer.observed_city_surface_feature_change_version = (
 			renderer.city_world.city_surface_feature_change_version
@@ -957,8 +999,11 @@ func _test_city_keep_accepts_tree_covered_access() -> void:
 
 	for y in range(test_world.height):
 		for x in range(test_world.width):
-			var tile: Dictionary = test_world.get_tile(x, y)
-			tile["terrain"] = WorldData.TERRAIN_LAND
+			var tile_position := Vector2i(x, y)
+			test_world.set_tile_terrain(
+				tile_position,
+				WorldData.TERRAIN_LAND
+			)
 
 			if (
 				x == 0
@@ -966,7 +1011,8 @@ func _test_city_keep_accepts_tree_covered_access() -> void:
 				or x == test_world.width - 1
 				or y == test_world.height - 1
 			):
-				tile["surface_feature"] = (
+				test_world.set_tile_surface_feature(
+					tile_position,
 					WorldData.CITY_SURFACE_FEATURE_TREE
 				)
 
@@ -1305,14 +1351,17 @@ func _place_and_validate_city_fixture(
 	)
 	var tree_test_tile := keep_top_left
 	var rock_test_tile := keep_top_left + Vector2i(1, 0)
-	renderer.city_world.get_tile(
-		tree_test_tile.x,
-		tree_test_tile.y
-	)["surface_feature"] = WorldData.CITY_SURFACE_FEATURE_TREE
-	renderer.city_world.get_tile(
-		rock_test_tile.x,
-		rock_test_tile.y
-	)["surface_feature"] = WorldData.CITY_SURFACE_FEATURE_ROCK
+	_expect(
+		renderer.city_world.set_tile_surface_feature(
+			tree_test_tile,
+			WorldData.CITY_SURFACE_FEATURE_TREE
+		)
+		and renderer.city_world.set_tile_surface_feature(
+			rock_test_tile,
+			WorldData.CITY_SURFACE_FEATURE_ROCK
+		),
+		"The immediate-placement fixture must publish tree and rock features through WorldData."
+	)
 	renderer.rebuild_city_natural_feature_multimeshes()
 	renderer.observed_city_surface_feature_change_version = (
 		renderer.city_world.city_surface_feature_change_version
@@ -1336,13 +1385,119 @@ func _place_and_validate_city_fixture(
 		"Surface features must not invalidate building placement."
 	)
 
-	var keep := CityObjectSystem.add_city_object({
+	_expect(
+		WorldPoliticalState.synchronize_foundation_with_world_data(),
+		"The atomic foundation fixture must establish its target capital context."
+	)
+	var city_state = WorldPoliticalState.get_current_city_simulation_state()
+	_expect(
+		city_state is CitySettlementSimulationState,
+		"Immediate placement must resolve a target settlement state."
+	)
+	if not city_state is CitySettlementSimulationState:
+		return
+
+	var object_count_before_failure: int = city_state.object_state.objects.size()
+	var next_object_id_before_failure: int = (
+		city_state.object_state.next_object_id
+	)
+	var runtime_before_failure: Dictionary = (
+		city_state.city_runtime_data.duplicate(true)
+	)
+	var citizen_count_before_failure: int = (
+		city_state.citizen_registry_state.citizens.size()
+	)
+	var population_marker_before_failure: bool = (
+		city_state.citizen_registry_state.starting_population_initialized
+	)
+	var valid_city_seed: int = renderer.city_seed
+	var failed_keep_values := {
 		"object_type": CityObjectCatalog.CITY_OBJECT_CITY_CENTER,
 		"top_left": keep_top_left,
 		"size_tiles": keep_size,
 		"object_owner": "player",
 		"city_world": renderer.city_world,
-	})
+	}
+
+	# A zero seed is rejected by the local foundation transaction after the Keep
+	# has registered. Temporarily treating the capital as a non-player polity
+	# exercises the silent local transaction boundary rather than deliberately
+	# emitting a player-bridge error. The renderer must roll that exact object
+	# back before a retry.
+	var player_polity_id_before_failure: int = (
+		WorldPoliticalState.player_polity_id
+	)
+	WorldPoliticalState.player_polity_id = PolityData.INVALID_POLITY_ID
+	renderer.city_seed = 0
+	var failed_keep := (
+		renderer.register_immediate_city_object_for_city_state(
+			city_state,
+			failed_keep_values
+		)
+	)
+	renderer.city_seed = valid_city_seed
+	WorldPoliticalState.player_polity_id = player_polity_id_before_failure
+	var state_after_failure = (
+		WorldPoliticalState.get_current_city_simulation_state()
+	)
+	_expect(
+		failed_keep.is_empty(),
+		"A rejected foundation transaction must report placement failure."
+	)
+	_expect(
+		state_after_failure is CitySettlementSimulationState
+		and state_after_failure.object_state.objects.size()
+		== object_count_before_failure
+		and state_after_failure.object_state.next_object_id
+		== next_object_id_before_failure,
+		"Rejected foundation placement must leave no Keep and must restore its object ID."
+	)
+	_expect(
+		state_after_failure is CitySettlementSimulationState
+		and state_after_failure.city_runtime_data == runtime_before_failure
+		and state_after_failure.citizen_registry_state.citizens.size()
+		== citizen_count_before_failure
+		and state_after_failure.citizen_registry_state.starting_population_initialized
+		== population_marker_before_failure,
+		"Rejected foundation placement must leave no runtime or starting-population residue."
+	)
+	var failed_footprint_is_clear := true
+	if state_after_failure is CitySettlementSimulationState:
+		for raw_tile in keep_footprint:
+			if (
+				raw_tile is Vector2i
+				and CityObjectSystem.get_city_object_id_at_tile_for_city_state(
+					state_after_failure,
+					raw_tile
+				) > 0
+			):
+				failed_footprint_is_clear = false
+				break
+	_expect(
+		failed_footprint_is_clear,
+		"Rejected foundation placement must release every occupied Keep tile."
+	)
+	_expect(
+		WorldData.get_city_surface_feature(
+			renderer.city_world.get_tile(tree_test_tile.x, tree_test_tile.y)
+		) == WorldData.CITY_SURFACE_FEATURE_TREE
+		and WorldData.get_city_surface_feature(
+			renderer.city_world.get_tile(rock_test_tile.x, rock_test_tile.y)
+		) == WorldData.CITY_SURFACE_FEATURE_ROCK
+		and renderer.city_world.city_surface_feature_change_version
+		== surface_feature_version_before_placement,
+		"Rejected foundation placement must not clear local surface features."
+	)
+
+	city_state = WorldPoliticalState.get_current_city_simulation_state()
+	var keep := renderer.register_immediate_city_object_for_city_state(
+		city_state,
+		failed_keep_values
+	)
+	_expect(
+		int(keep.get("id", -1)) == next_object_id_before_failure,
+		"A successful foundation retry must reuse the rolled-back object ID."
+	)
 
 	_expect(
 		WorldData.get_city_surface_feature(
@@ -1374,8 +1529,6 @@ func _place_and_validate_city_fixture(
 		== surface_feature_version_before_placement + 2,
 		"Placement must publish one incremental change per removed feature."
 	)
-
-	renderer.after_city_center_placed(keep)
 
 	var primary_culture_id := int(
 		WorldPoliticalState.get_current_city_runtime_data().get(
@@ -1628,18 +1781,18 @@ func _test_universal_construction_core(
 	var tree_tile := house_top_left
 	var rock_tile := house_top_left + Vector2i(1, 0)
 	var cleanup_tile := house_top_left + Vector2i(2, 0)
-	renderer.city_world.get_tile(
-		tree_tile.x,
-		tree_tile.y
-	)["surface_feature"] = WorldData.CITY_SURFACE_FEATURE_TREE
-	renderer.city_world.get_tile(
-		rock_tile.x,
-		rock_tile.y
-	)["surface_feature"] = WorldData.CITY_SURFACE_FEATURE_ROCK
-	renderer.city_world.get_tile(
-		cleanup_tile.x,
-		cleanup_tile.y
-	).erase("surface_feature")
+	_expect(
+		renderer.city_world.set_tile_surface_feature(
+			tree_tile,
+			WorldData.CITY_SURFACE_FEATURE_TREE
+		)
+		and renderer.city_world.set_tile_surface_feature(
+			rock_tile,
+			WorldData.CITY_SURFACE_FEATURE_ROCK
+		),
+		"The construction fixture must publish tree and rock features through WorldData."
+	)
+	renderer.city_world.remove_tile_surface_feature(cleanup_tile)
 	renderer.rebuild_city_natural_feature_multimeshes()
 	renderer.observed_city_surface_feature_change_version = (
 		renderer.city_world.city_surface_feature_change_version
@@ -2283,15 +2436,11 @@ func _find_reachable_construction_rectangle(
 						continue
 
 					var fixture_tile: Vector2i = raw_fixture_tile
-					var tile := city_world.get_tile(
-						fixture_tile.x,
-						fixture_tile.y
+					city_world.set_tile_terrain(
+						fixture_tile,
+						WorldData.TERRAIN_LAND
 					)
-					tile["terrain"] = WorldData.TERRAIN_LAND
-					tile["is_land"] = true
-					tile.erase("surface_feature")
-
-				city_world.mark_tile_data_changed()
+					city_world.remove_tile_surface_feature(fixture_tile)
 
 				if not CityConstructionSystem.can_place_city_object_construction(
 					city_world,
@@ -2396,10 +2545,7 @@ func _normalize_surface_feature_fixture(
 			continue
 
 		var tile_position: Vector2i = raw_tile
-		city_world.get_tile(
-			tile_position.x,
-			tile_position.y
-		).erase("surface_feature")
+		city_world.remove_tile_surface_feature(tile_position)
 
 
 func _find_placeable_rectangle(

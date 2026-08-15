@@ -24,15 +24,21 @@ static func _validate_city_foundation_state(
 		):
 			city_center_count += 1
 
-	if not WorldData.player_city_founded:
+	var city_state = WorldPoliticalState.get_current_city_simulation_state()
+	var city_is_founded: bool = (
+		city_state is CitySettlementSimulationState
+		and city_state.is_city_founded()
+	)
+
+	if not city_is_founded:
 		if not CityCitizenRegistrySystem.get_current_state().citizens.is_empty():
 			errors.append(
-				"Citizens exist before the player city is founded."
+				"Citizens exist before the target settlement is founded."
 			)
 
 		if city_center_count > 0:
 			errors.append(
-				"A City Keep exists while player_city_founded is false."
+				"A City Keep exists while the target settlement is unfounded."
 			)
 
 		return

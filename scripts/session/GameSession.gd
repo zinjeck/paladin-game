@@ -27,6 +27,9 @@ var simulation_speed_controls: CanvasLayer
 var city_preparation = CityPreparationServiceScript.new()
 var pending_city_request: Dictionary = {}
 var pending_city_switch: bool = false
+var pending_city_preparation_generation: int = 0
+var prewarmed_city_request: Dictionary = {}
+var prewarmed_city_preparation_generation: int = 0
 var city_view_has_been_entered: bool = false
 
 
@@ -66,30 +69,7 @@ func _ready() -> void:
 
 func _process(_delta: float) -> void:
 	city_preparation.poll()
-
-	if not pending_city_switch:
-		return
-
-	var signature := str(pending_city_request.get("signature", ""))
-	var payload := city_preparation.take_completed_payload(signature)
-
-	if payload.is_empty():
-		if city_preparation.take_failure(signature):
-			pending_city_switch = false
-			_set_world_transition_pending(false)
-			push_error(
-				"Background city preparation failed; falling back to "
-				+ "synchronous city initialization."
-			)
-			_ensure_city_view({})
-			_activate_view(city_view)
-
-		return
-
-	pending_city_switch = false
-	_set_world_transition_pending(false)
-	_ensure_city_view(payload)
-	_activate_view(city_view)
+	_consume_pending_city_preparation_terminal()
 
 
 func _exit_tree() -> void:
@@ -104,25 +84,60 @@ func _enter_requested_initial_city_view() -> void:
 
 
 func prepare_city_view(request: Dictionary) -> void:
-	if city_view != null or WorldData.has_active_city_save():
+	if (
+		city_view != null
+		or WorldData.has_active_city_save()
+		or pending_city_switch
+	):
 		return
 
-	city_preparation.request_preparation(request)
+	if not city_preparation.is_valid_request(request):
+		return
+
+	var signature := str(request.get("signature", ""))
+
+	if (
+		prewarmed_city_preparation_generation > 0
+		and str(prewarmed_city_request.get("signature", ""))
+		!= signature
+	):
+		_abandon_prewarmed_city_preparation()
+
+	var generation: int = city_preparation.request_preparation(request)
+
+	if generation <= 0:
+		return
+
+	prewarmed_city_request = request.duplicate(true)
+	prewarmed_city_preparation_generation = generation
 
 
 func cancel_city_preparation() -> void:
-	pending_city_switch = false
-	pending_city_request.clear()
-	_set_world_transition_pending(false)
+	var pending_generation := pending_city_preparation_generation
+	var prewarmed_generation := prewarmed_city_preparation_generation
 	city_preparation.cancel_pending_requests()
+
+	if pending_generation > 0:
+		city_preparation.discard_terminal_result(pending_generation)
+	if (
+		prewarmed_generation > 0
+		and prewarmed_generation != pending_generation
+	):
+		city_preparation.discard_terminal_result(prewarmed_generation)
+
+	_clear_prewarmed_city_preparation_tracking()
+	_clear_pending_city_switch()
 
 
 func show_city_view(request: Dictionary = {}) -> void:
 	if city_view != null:
-		_activate_view(city_view)
+		show_settlement_city_view(
+			WorldPoliticalState.active_settlement_id
+		)
 		return
 
 	if WorldData.has_active_city_save():
+		cancel_city_preparation()
 		_ensure_city_view({})
 		_activate_view(city_view)
 		return
@@ -136,35 +151,262 @@ func show_city_view(request: Dictionary = {}) -> void:
 		return
 
 	var signature := str(request["signature"])
-	var payload := city_preparation.take_completed_payload(signature)
+	if (
+		prewarmed_city_preparation_generation > 0
+		and str(prewarmed_city_request.get("signature", ""))
+		!= signature
+	):
+		_abandon_prewarmed_city_preparation()
 
-	if not payload.is_empty():
-		_ensure_city_view(payload)
-		_activate_view(city_view)
+	if (
+		pending_city_switch
+		and pending_city_preparation_generation > 0
+		and str(pending_city_request.get("signature", "")) != signature
+	):
+		var replaced_generation := pending_city_preparation_generation
+		city_preparation.supersede_request(replaced_generation)
+		city_preparation.discard_terminal_result(replaced_generation)
+
+	var generation: int = city_preparation.request_preparation(request)
+
+	if generation <= 0:
+		push_error("GameSession could not start city preparation.")
 		return
 
 	pending_city_request = request.duplicate(true)
+	pending_city_preparation_generation = generation
 	pending_city_switch = true
+
+	if prewarmed_city_preparation_generation > 0:
+		if prewarmed_city_preparation_generation == generation:
+			_clear_prewarmed_city_preparation_tracking()
+		else:
+			_abandon_prewarmed_city_preparation()
+
+	_consume_pending_city_preparation_terminal()
+
+	if pending_city_switch:
+		_set_world_transition_pending(true)
+
+
+func show_settlement_city_view(
+	settlement_id: int,
+	prepared_payload: Dictionary = {}
+) -> bool:
+	if city_view == null or settlement_id <= 0:
+		return false
+
+	var target_context = WorldPoliticalState.get_settlement_context(
+		settlement_id
+	)
+	if (
+		target_context == null
+		or not target_context.supports_city_simulation()
+	):
+		return false
+
+	var lifecycle_owner := _find_view_lifecycle_owner(city_view)
+	if (
+		lifecycle_owner == null
+		or not lifecycle_owner.has_method("can_rebind_city_presentation")
+		or not lifecycle_owner.has_method("rebind_city_presentation")
+		or not lifecycle_owner.has_method("validate_city_presentation_binding")
+		or not bool(lifecycle_owner.call(
+			"can_rebind_city_presentation",
+			target_context,
+			prepared_payload
+		))
+	):
+		return false
+
+	var previous_settlement_id := WorldPoliticalState.active_settlement_id
+	var previous_detailed_simulation_settlement_id := (
+		SimulationCoordinator.get_detailed_simulation_settlement_id()
+	)
+	var previous_context = WorldPoliticalState.get_settlement_context(
+		previous_settlement_id
+	)
+	var city_was_active := active_view == city_view
+	var simulation_was_paused := SimulationClock.simulation_paused
+	var simulation_speed_before := SimulationClock.speed_multiplier
+
+	cancel_city_preparation()
 	_set_world_transition_pending(true)
-	city_preparation.request_preparation(request)
+	SimulationClock.set_simulation_paused(true)
+	if city_was_active:
+		_set_view_active(city_view, false)
+
+	var rebound := false
+	if WorldPoliticalState.set_active_settlement(settlement_id):
+		rebound = bool(lifecycle_owner.call(
+			"rebind_city_presentation",
+			target_context,
+			prepared_payload
+		))
+		if rebound:
+			rebound = bool(lifecycle_owner.call(
+				"validate_city_presentation_binding",
+				target_context
+			))
+		if rebound:
+			rebound = (
+				SimulationCoordinator
+				.select_detailed_simulation_settlement(settlement_id)
+			)
+
+	if not rebound:
+		if previous_context != null:
+			WorldPoliticalState.set_active_settlement(
+				previous_settlement_id
+			)
+			lifecycle_owner.call(
+				"rebind_city_presentation",
+				previous_context,
+				{}
+			)
+		if previous_detailed_simulation_settlement_id > 0:
+			SimulationCoordinator.select_detailed_simulation_settlement(
+				previous_detailed_simulation_settlement_id
+			)
+		else:
+			SimulationCoordinator.clear_detailed_simulation_settlement()
+		if city_was_active:
+			_set_view_active(city_view, true)
+			active_view = city_view
+		_set_world_transition_pending(false)
+		SimulationClock.set_speed_multiplier(simulation_speed_before)
+		SimulationClock.set_simulation_paused(simulation_was_paused)
+		return false
+
+	if city_was_active:
+		_set_view_active(city_view, true)
+		active_view = city_view
+	else:
+		_activate_view(city_view)
+
+	_set_world_transition_pending(false)
+	SimulationClock.set_speed_multiplier(simulation_speed_before)
+	SimulationClock.set_simulation_paused(simulation_was_paused)
+	return true
 
 
 func show_world_view() -> void:
-	pending_city_switch = false
-	pending_city_request.clear()
-	_set_world_transition_pending(false)
+	cancel_city_preparation()
 	_hide_world_region_selection_after_city_entry()
 	_activate_view(world_view)
 
 
-func _ensure_city_view(prepared_payload: Dictionary) -> void:
-	if city_view != null:
+func _consume_pending_city_preparation_terminal() -> void:
+	if not pending_city_switch:
 		return
 
-	# Establish the authoritative new-city clock before the expensive renderer
-	# enters the tree. No hidden initialization frame may consume settlement time.
-	_prepare_first_city_entry()
-	city_view = CITY_SCENE.instantiate()
+	var expected_generation := pending_city_preparation_generation
+
+	if expected_generation <= 0:
+		_finish_failed_city_preparation(
+			"City preparation lost its request generation."
+		)
+		return
+
+	var terminal: Dictionary = city_preparation.take_terminal_result(
+		expected_generation
+	)
+
+	if terminal.is_empty():
+		return
+	if (
+		int(terminal.get("generation", 0)) != expected_generation
+		or str(terminal.get("signature", ""))
+		!= str(pending_city_request.get("signature", ""))
+	):
+		# Exact-generation lookup makes this impossible for the real service.
+		# If a substitute violates that contract, a stale result still must not
+		# clear or activate over the current request.
+		return
+
+	var status := str(terminal.get("status", ""))
+
+	if status == CityPreparationServiceScript.STATUS_SUCCEEDED:
+		var payload = terminal.get("payload", {})
+
+		if payload is Dictionary and not payload.is_empty():
+			_clear_pending_city_switch()
+			_ensure_city_view(payload)
+			_activate_view(city_view)
+			return
+
+		_finish_failed_city_preparation(
+			"Background city preparation returned an empty payload."
+		)
+		return
+
+	if status == CityPreparationServiceScript.STATUS_FAILED:
+		_finish_failed_city_preparation(
+			"Background city preparation failed; falling back to "
+				+ "synchronous city initialization."
+		)
+		return
+
+	if (
+		status == CityPreparationServiceScript.STATUS_CANCELLED
+		or status == CityPreparationServiceScript.STATUS_SUPERSEDED
+	):
+		_clear_pending_city_switch()
+		return
+
+	_finish_failed_city_preparation(
+		"Background city preparation returned an unknown terminal state."
+	)
+
+
+func _finish_failed_city_preparation(message: String) -> void:
+	_clear_pending_city_switch()
+	_report_city_preparation_failure(message)
+	_ensure_city_view({})
+	_activate_view(city_view)
+
+
+func _report_city_preparation_failure(message: String) -> void:
+	push_error(message)
+
+
+func _clear_pending_city_switch() -> void:
+	pending_city_switch = false
+	pending_city_request.clear()
+	pending_city_preparation_generation = 0
+	_set_world_transition_pending(false)
+
+
+func _abandon_prewarmed_city_preparation() -> void:
+	var generation := prewarmed_city_preparation_generation
+
+	if generation > 0:
+		city_preparation.supersede_request(generation)
+		city_preparation.discard_terminal_result(generation)
+
+	_clear_prewarmed_city_preparation_tracking()
+
+
+func _clear_prewarmed_city_preparation_tracking() -> void:
+	prewarmed_city_request.clear()
+	prewarmed_city_preparation_generation = 0
+
+
+func _ensure_city_view(prepared_payload: Dictionary) -> bool:
+	if city_view != null:
+		return _prepare_first_city_entry()
+
+	var candidate_city_view := _create_city_view()
+	if candidate_city_view == null:
+		_report_first_city_entry_failure(
+			"GameSession could not instantiate the prepared city view."
+		)
+		return false
+	if not _prepare_first_city_entry():
+		candidate_city_view.free()
+		return false
+
+	city_view = candidate_city_view
 
 	if city_view.has_method("set_session_prepared_city_payload"):
 		city_view.call(
@@ -180,41 +422,75 @@ func _ensure_city_view(prepared_payload: Dictionary) -> void:
 
 	add_child(city_view)
 	_set_view_active(city_view, false)
+	return true
 
 
-func _activate_view(target_view: Node) -> void:
+func _create_city_view() -> Node:
+	return CITY_SCENE.instantiate()
+
+
+func _activate_view(target_view: Node) -> bool:
 	if target_view == null:
-		return
+		return false
 
-	if target_view == city_view:
-		_prepare_first_city_entry()
+	if target_view == city_view and not _prepare_first_city_entry():
+		return false
 
 	if target_view == active_view:
-		return
+		return true
 
 	_set_view_active(active_view, false)
 	_set_view_active(target_view, true)
 	active_view = target_view
+	return true
 
 
-func _prepare_first_city_entry() -> void:
+func _prepare_first_city_entry() -> bool:
 	if city_view_has_been_entered:
-		return
+		return true
 
 	# The capital is now one settlement in a world registry, not an implicit
 	# singleton. Its local state still uses the legacy WorldData backend during
 	# this migration pass, but every simulation tick receives its settlement
 	# identity through SettlementSimulationContext.
-	if not WorldPoliticalState.synchronize_foundation_with_world_data():
-		push_error(
+	if not _synchronize_first_city_entry_foundation():
+		_report_first_city_entry_failure(
 			"GameSession could not establish the founding settlement context."
 		)
+		return false
+	if not _select_first_city_detailed_simulation_target():
+		_report_first_city_entry_failure(
+			"GameSession could not select the founding settlement for detailed simulation."
+		)
+		return false
 
+	# Commit only after the foundation registry and its settlement-local city
+	# state are both valid. The CityRenderer enters the tree after this point, so
+	# no hidden initialization frame can consume settlement time.
 	city_view_has_been_entered = true
 	SimulationClock.start_new_game()
 	SimulationClock.set_simulation_paused(true)
 	_ensure_simulation_speed_controls()
 	_hide_world_region_selection_after_city_entry()
+	return true
+
+
+func _select_first_city_detailed_simulation_target() -> bool:
+	return SimulationCoordinator.select_detailed_simulation_settlement(
+		WorldPoliticalState.active_settlement_id
+	)
+
+
+func _synchronize_first_city_entry_foundation() -> bool:
+	return (
+		WorldPoliticalState.synchronize_foundation_with_world_data()
+		and WorldPoliticalState.validate_registry_integrity()
+		and WorldPoliticalState.get_active_city_simulation_state() != null
+	)
+
+
+func _report_first_city_entry_failure(message: String) -> void:
+	push_error(message)
 
 
 func _hide_world_region_selection_after_city_entry() -> void:

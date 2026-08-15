@@ -1,5 +1,8 @@
 extends Node
 
+const WORLD_POLITICAL_STATE_SCRIPT := preload(
+	"res://scripts/world/simulation/WorldPoliticalState.gd"
+)
 const TEST_CITY_NAME := "Asterfall"
 const TEST_CULTURE_NAME := "Valen"
 const TEST_CPU_CULTURE_NAME := "Maren"
@@ -10,7 +13,22 @@ const TEST_REGION_SIZE: int = 3
 var failure_count: int = 0
 
 
+class RejectFirstSettlementPoliticalState:
+	extends WORLD_POLITICAL_STATE_SCRIPT
+
+	var reject_next_settlement: bool = true
+
+
+	func create_settlement(values: Dictionary) -> Dictionary:
+		if reject_next_settlement:
+			reject_next_settlement = false
+			return {}
+
+		return super.create_settlement(values)
+
+
 func _ready() -> void:
+	_test_foundation_synchronization_transaction()
 	_run_framework_test()
 	WorldPoliticalState.reset_state()
 	WorldData.reset_runtime_session_state()
@@ -25,6 +43,139 @@ func _ready() -> void:
 
 	print("World political framework test passed.")
 	get_tree().quit(0)
+
+
+func _test_foundation_synchronization_transaction() -> void:
+	WorldData.reset_runtime_session_state()
+	var world := _make_world(8, 8, 43_901)
+	var locked := WorldData.lock_world_save({
+		"source_world": world,
+		"region_top_left": TEST_REGION_TOP_LEFT,
+		"region_center": TEST_REGION_CENTER,
+		"region_size": TEST_REGION_SIZE,
+		"world_scene_path": "res://scenes/GameSession.tscn",
+		"city_scene_path": "res://scenes/CityScreen.tscn",
+		"city_name": "Transactional Asterfall",
+		"culture_name": "Transactional Valen",
+	})
+	_expect(locked, "The transaction fixture must lock its founding world.")
+	if not locked:
+		return
+
+	var political_state := RejectFirstSettlementPoliticalState.new()
+	var object_state = political_state.get_current_city_object_state()
+	var citizen_state = (
+		political_state.get_current_city_citizen_registry_state()
+	)
+	var resource_state = (
+		political_state.get_current_city_resource_accounting_state()
+	)
+	object_state.objects = [{
+		"id": 41,
+		"type": CityObjectCatalog.CITY_OBJECT_CITY_CENTER,
+		"stored_resources": {CityResourceCatalog.RESOURCE_FISH: 9},
+	}]
+	object_state.next_object_id = 42
+	citizen_state.citizens = [{"id": 17, "display_name": "Founder"}]
+	citizen_state.next_citizen_id = 18
+	resource_state.owned_resource_amount_cache = {
+		CityResourceCatalog.RESOURCE_FISH: 9,
+	}
+
+	_expect(
+		not political_state.synchronize_foundation_with_world_data(),
+		"A candidate settlement failure must reject synchronization."
+	)
+	_expect(
+		political_state.get_polity_snapshot().is_empty()
+		and political_state.get_settlement_snapshot().is_empty()
+		and political_state.next_polity_id == 1
+		and political_state.next_settlement_id == 1
+		and is_same(
+			political_state.get_current_city_object_state(),
+			object_state
+		)
+		and is_same(
+			political_state.get_current_city_citizen_registry_state(),
+			citizen_state
+		)
+		and is_same(
+			political_state.get_current_city_resource_accounting_state(),
+			resource_state
+		)
+		and int(
+			object_state.objects[0].get("stored_resources", {}).get(
+				CityResourceCatalog.RESOURCE_FISH,
+				0
+			)
+		) == 9
+		and int(resource_state.owned_resource_amount_cache.get(
+			CityResourceCatalog.RESOURCE_FISH,
+			0
+		)) == 9,
+		"Rejected synchronization must preserve exact pre-context owners."
+	)
+
+	_expect(
+		political_state.synchronize_foundation_with_world_data(),
+		"A rolled-back foundation transaction must remain retryable."
+	)
+	var capital_id := political_state.active_settlement_id
+	var capital_state = political_state.get_city_simulation_state(capital_id)
+	_expect(
+		capital_state != null
+		and is_same(capital_state.object_state, object_state)
+		and is_same(capital_state.citizen_registry_state, citizen_state)
+		and is_same(capital_state.resource_accounting_state, resource_state)
+		and object_state.objects.size() == 1
+		and object_state.next_object_id == 42
+		and citizen_state.citizens.size() == 1
+		and citizen_state.next_citizen_id == 18
+		and int(
+			object_state.objects[0].get("stored_resources", {}).get(
+				CityResourceCatalog.RESOURCE_FISH,
+				0
+			)
+		) == 9
+		and int(resource_state.owned_resource_amount_cache.get(
+			CityResourceCatalog.RESOURCE_FISH,
+			0
+		)) == 9,
+		"Successful retry must adopt each pre-context owner exactly once."
+	)
+
+	political_state.settlement_city_state_by_id.erase(capital_id)
+	_expect(
+		not political_state.validate_registry_integrity()
+		and not political_state.synchronize_foundation_with_world_data(),
+		"Same-fingerprint synchronization must reject a missing city-state binding."
+	)
+	political_state.settlement_city_state_by_id[capital_id] = capital_state
+	_expect(
+		political_state.synchronize_foundation_with_world_data()
+		and political_state.get_polity_snapshot().size() == 1
+		and political_state.get_settlement_snapshot().size() == 1
+		and political_state.next_polity_id == 2
+		and political_state.next_settlement_id == 2
+		and is_same(
+			political_state.get_city_simulation_state(capital_id),
+			capital_state
+		)
+		and int(
+			object_state.objects[0].get("stored_resources", {}).get(
+				CityResourceCatalog.RESOURCE_FISH,
+				0
+			)
+		) == 9
+		and int(resource_state.owned_resource_amount_cache.get(
+			CityResourceCatalog.RESOURCE_FISH,
+			0
+		)) == 9,
+		"Restoring the exact city owner must recover without duplication."
+	)
+
+	political_state.free()
+	WorldData.reset_runtime_session_state()
 
 
 func _run_framework_test() -> void:

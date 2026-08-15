@@ -1,6 +1,10 @@
 extends RefCounted
 class_name CitizenDecisionSystem
 
+const CityCitizenDecisionRuntimeStateScript = preload(
+	"res://scripts/city/simulation/CityCitizenDecisionRuntimeState.gd"
+)
+
 # File responsibility: Bounded citizen intent selection for commands, needs, schedules, hauling, and idling.
 # Navigation regions are organizational only; they do not define runtime ownership.
 
@@ -83,19 +87,99 @@ const MAX_FOOD_TASK_ASSIGNMENTS_PER_TICK: int = 4
 const MAX_FOOD_SOURCE_PATH_REQUESTS_PER_TICK: int = 8
 const HOME_FOOD_SOURCE_MAX_EXTRA_TILES: int = 4
 
-static var _pending_decision_ids: Array[int] = []
-static var _pending_decision_id_lookup: Dictionary = {}
-static var _runtime_initialized: bool = false
-static var _work_shift_was_active: bool = false
-static var _observed_assignment_version: int = -1
-static var _recovery_scan_cursor: int = 0
-static var _idle_scan_cursor: int = 0
-static var _idle_anchor_tile_by_citizen_id: Dictionary = {}
-static var _next_idle_decision_minute_by_citizen_id: Dictionary = {}
-static var _idle_choice_sequence_by_citizen_id: Dictionary = {}
-static var _autonomous_haul_scan_cursor: int = 0
-static var _critical_food_scan_cursor: int = 0
-static var _normal_food_scan_cursor: int = 0
+static func get_current_state() -> CityCitizenDecisionRuntimeStateScript:
+	return WorldPoliticalState.get_current_city_citizen_decision_runtime_state()
+
+
+static var _pending_decision_ids: Array[int]:
+	get:
+		return get_current_state().pending_decision_ids
+	set(value):
+		get_current_state().pending_decision_ids = value
+
+
+static var _pending_decision_id_lookup: Dictionary:
+	get:
+		return get_current_state().pending_decision_id_lookup
+	set(value):
+		get_current_state().pending_decision_id_lookup = value
+
+
+static var _runtime_initialized: bool:
+	get:
+		return get_current_state().runtime_initialized
+	set(value):
+		get_current_state().runtime_initialized = value
+
+
+static var _work_shift_was_active: bool:
+	get:
+		return get_current_state().work_shift_was_active
+	set(value):
+		get_current_state().work_shift_was_active = value
+
+
+static var _observed_assignment_version: int:
+	get:
+		return get_current_state().observed_assignment_version
+	set(value):
+		get_current_state().observed_assignment_version = value
+
+
+static var _recovery_scan_cursor: int:
+	get:
+		return get_current_state().recovery_scan_cursor
+	set(value):
+		get_current_state().recovery_scan_cursor = value
+
+
+static var _idle_scan_cursor: int:
+	get:
+		return get_current_state().idle_scan_cursor
+	set(value):
+		get_current_state().idle_scan_cursor = value
+
+
+static var _idle_anchor_tile_by_citizen_id: Dictionary:
+	get:
+		return get_current_state().idle_anchor_tile_by_citizen_id
+	set(value):
+		get_current_state().idle_anchor_tile_by_citizen_id = value
+
+
+static var _next_idle_decision_minute_by_citizen_id: Dictionary:
+	get:
+		return get_current_state().next_idle_decision_minute_by_citizen_id
+	set(value):
+		get_current_state().next_idle_decision_minute_by_citizen_id = value
+
+
+static var _idle_choice_sequence_by_citizen_id: Dictionary:
+	get:
+		return get_current_state().idle_choice_sequence_by_citizen_id
+	set(value):
+		get_current_state().idle_choice_sequence_by_citizen_id = value
+
+
+static var _autonomous_haul_scan_cursor: int:
+	get:
+		return get_current_state().autonomous_haul_scan_cursor
+	set(value):
+		get_current_state().autonomous_haul_scan_cursor = value
+
+
+static var _critical_food_scan_cursor: int:
+	get:
+		return get_current_state().critical_food_scan_cursor
+	set(value):
+		get_current_state().critical_food_scan_cursor = value
+
+
+static var _normal_food_scan_cursor: int:
+	get:
+		return get_current_state().normal_food_scan_cursor
+	set(value):
+		get_current_state().normal_food_scan_cursor = value
 
 #region Decision Tick Entry Point
 
@@ -103,111 +187,308 @@ static func run_tick(
 	_tick_index: int,
 	minutes_advanced: int
 ) -> void:
+	var city_state = WorldPoliticalState.get_current_city_simulation_state()
+	if not city_state is CitySettlementSimulationState:
+		return
+	run_tick_for_city_state(city_state, _tick_index, minutes_advanced)
+
+
+static func run_tick_for_city_state(
+	city_state: CitySettlementSimulationState,
+	_tick_index: int,
+	minutes_advanced: int
+) -> void:
 	if minutes_advanced <= 0:
 		return
 
-	if (
-		WorldPoliticalState.get_current_city_world() == null
-		or not WorldData.player_city_founded
-		or CityCitizenRegistrySystem.get_current_state().citizens.is_empty()
-	):
-		reset_runtime_state()
+	var decision_state = city_state.citizen_decision_runtime_state
+	if not decision_state is CityCitizenDecisionRuntimeStateScript:
 		return
 
-	var work_shift_is_active := is_work_shift_active()
-	var schedule_phase := _get_schedule_phase(
+	if (
+		city_state.city_world == null
+		or not city_state.is_city_founded()
+		or city_state.citizen_registry_state.citizens.is_empty()
+	):
+		_reset_runtime_state_for_city_state(city_state, decision_state)
+		return
+
+	var work_shift_is_active := is_work_shift_active_for_city_state(
+		city_state,
+		decision_state
+	)
+	var schedule_phase := _get_schedule_phase_for_city_state(
+		city_state,
+		decision_state,
 		work_shift_is_active
 	)
 
 	# Newly produced output first expands the oldest compatible pre-pickup load.
 	# Only the remainder is visible to autonomous task matching below.
-	CityLogisticsSystem.expand_pending_city_haul_reservations()
+	CityLogisticsSystem.expand_pending_city_haul_reservations_for_city_state(
+		city_state
+	)
 
 	# Player designations outrank every scheduled or autonomous activity for
 	# unemployed citizens. Invalid targets are pruned before workers claim them.
-	CityWorkSystem.prune_invalid_city_player_commands()
-	CityWorkSystem.repair_stale_city_player_command_claims()
-	CityConstructionSystemScript.refresh_all_city_construction_sites()
-	var runtime_work_candidate_cache := (
-		CityWorkSystemScript.synchronize_player_work_board()
+	CityWorkSystem.prune_invalid_city_player_commands_for_city_state(city_state)
+	CityWorkSystem.repair_stale_city_player_command_claims_for_city_state(
+		city_state
 	)
-	_process_player_commands(runtime_work_candidate_cache)
-	_process_food_needs(true)
+	CityConstructionSystemScript.refresh_all_city_construction_sites_for_city_state(
+		city_state
+	)
+	var runtime_work_candidate_cache := (
+		CityWorkSystemScript.synchronize_player_work_board_for_city_state(
+			city_state
+		)
+	)
+	_process_player_commands_for_city_state(
+		city_state,
+		decision_state,
+		runtime_work_candidate_cache
+	)
+	_process_food_needs_for_city_state(city_state, decision_state, true)
 
-	if not _runtime_initialized:
-		_runtime_initialized = true
-		_work_shift_was_active = work_shift_is_active
-		_observed_assignment_version = (
-			CityAssignmentSystem.get_city_assignment_version()
+	if not decision_state.runtime_initialized:
+		decision_state.runtime_initialized = true
+		decision_state.work_shift_was_active = work_shift_is_active
+		decision_state.observed_assignment_version = (
+			city_state.assignment_state.assignment_version
 		)
 
-		_clear_schedule_sourced_tasks()
-		_queue_all_eligible_scheduled_tasks(
+		_clear_schedule_sourced_tasks_for_city_state(
+			city_state,
+			decision_state
+		)
+		_queue_all_eligible_scheduled_tasks_for_city_state(
+			city_state,
+			decision_state,
 			schedule_phase
 		)
-	elif work_shift_is_active != _work_shift_was_active:
-		_work_shift_was_active = work_shift_is_active
-		_clear_schedule_sourced_tasks()
-		_queue_all_eligible_scheduled_tasks(
+	elif work_shift_is_active != decision_state.work_shift_was_active:
+		decision_state.work_shift_was_active = work_shift_is_active
+		_clear_schedule_sourced_tasks_for_city_state(
+			city_state,
+			decision_state
+		)
+		_queue_all_eligible_scheduled_tasks_for_city_state(
+			city_state,
+			decision_state,
 			schedule_phase
 		)
 
 	if (
-		_observed_assignment_version
-		!= CityAssignmentSystem.get_city_assignment_version()
+		decision_state.observed_assignment_version
+		!= city_state.assignment_state.assignment_version
 	):
-		_observed_assignment_version = (
-			CityAssignmentSystem.get_city_assignment_version()
+		decision_state.observed_assignment_version = (
+			city_state.assignment_state.assignment_version
 		)
-		_idle_anchor_tile_by_citizen_id.clear()
-		_next_idle_decision_minute_by_citizen_id.clear()
+		decision_state.idle_anchor_tile_by_citizen_id.clear()
+		decision_state.next_idle_decision_minute_by_citizen_id.clear()
 
-		_queue_all_eligible_scheduled_tasks(
+		_queue_all_eligible_scheduled_tasks_for_city_state(
+			city_state,
+			decision_state,
 			schedule_phase
 		)
 
-	_queue_bounded_recovery_candidates(
+	_queue_bounded_recovery_candidates_for_city_state(
+		city_state,
+		decision_state,
 		schedule_phase
 	)
 
 	# Resolve real schedule obligations first, but defer the two home-bound
 	# activities: pantry provisioning and return_home. This keeps assigned work
 	# and outstanding physical cargo ahead of ordinary hunger and logistics.
-	_process_decision_queue(
+	_process_decision_queue_for_city_state(
+		city_state,
+		decision_state,
 		schedule_phase,
 		SCHEDULED_HOME_FOOD_DELIVERY_TASK_PRIORITY
 	)
-	_process_food_needs(false)
+	_process_food_needs_for_city_state(city_state, decision_state, false)
 
 	# Autonomous logistics then outrank the deferred home-bound schedule. A
 	# citizen who just delivered one load can therefore claim the next valid
 	# ground-pile or workplace-output trip immediately instead of walking home
 	# between loads. If no reachable haul can use remaining public container
 	# space, the final schedule pass below sends the citizen home in this tick.
-	_process_bounded_autonomous_hauling(schedule_phase)
+	var autonomous_haul_assignment_budget_was_exhausted := (
+		_process_bounded_autonomous_hauling_for_city_state(
+			city_state,
+			decision_state,
+			schedule_phase
+		)
+	)
 
 	# The assignment count is deliberately bounded, so a single decision tick
-	# may not dispatch every load the city still needs. Keep the deferred home
-	# queue intact while unreserved, deliverable logistics work remains. Further
-	# haulers are assigned on following ticks; citizens are released home only
-	# once existing haulers can absorb the remainder or public storage is full.
-	if not _has_unassigned_autonomous_haul_work():
-		_process_decision_queue(schedule_phase)
+	# may not dispatch every useful unemployed hauler. When that real budget is
+	# exhausted, retain only unemployed home-bound candidates for the next haul
+	# pass; employed residents must still receive their off-shift home schedule.
+	# If matching stops early, release the complete deferred queue in this tick.
+	_process_decision_queue_for_city_state(
+		city_state,
+		decision_state,
+		schedule_phase,
+		CityCitizens.CITY_CITIZEN_TASK_PRIORITY_NONE,
+		autonomous_haul_assignment_budget_was_exhausted
+	)
 
-	_process_bounded_idle_behaviors(
+	_process_bounded_idle_behaviors_for_city_state(
+		city_state,
+		decision_state,
 		work_shift_is_active
+	)
+
+#endregion
+
+#region Legacy Current-Settlement Test Seams
+
+# These wrappers preserve the existing focused test API. Runtime simulation
+# enters through run_tick_for_city_state() and cannot reach this compatibility
+# lookup path.
+static func _get_legacy_current_city_state() -> CitySettlementSimulationState:
+	var city_state = WorldPoliticalState.get_current_city_simulation_state()
+	if city_state is CitySettlementSimulationState:
+		return city_state
+	return null
+
+
+static func _process_player_commands(
+	runtime_candidate_by_order_by_citizen_id: Dictionary = {}
+) -> void:
+	var city_state := _get_legacy_current_city_state()
+	if city_state == null:
+		return
+	_process_player_commands_for_city_state(
+		city_state,
+		city_state.citizen_decision_runtime_state,
+		runtime_candidate_by_order_by_citizen_id
+	)
+
+
+static func _process_food_needs(critical_only: bool) -> void:
+	var city_state := _get_legacy_current_city_state()
+	if city_state == null:
+		return
+	_process_food_needs_for_city_state(
+		city_state,
+		city_state.citizen_decision_runtime_state,
+		critical_only
+	)
+
+
+static func _queue_all_eligible_scheduled_tasks(
+	schedule_phase: String
+) -> void:
+	var city_state := _get_legacy_current_city_state()
+	if city_state == null:
+		return
+	_queue_all_eligible_scheduled_tasks_for_city_state(
+		city_state,
+		city_state.citizen_decision_runtime_state,
+		schedule_phase
+	)
+
+
+static func _get_assigned_work_task_request(
+	citizen: Dictionary
+) -> Dictionary:
+	var city_state := _get_legacy_current_city_state()
+	if city_state == null:
+		return {}
+	return _get_assigned_work_task_request_for_city_state(
+		city_state,
+		city_state.citizen_decision_runtime_state,
+		citizen
+	)
+
+
+static func _get_assigned_home_task_request(
+	citizen: Dictionary
+) -> Dictionary:
+	var city_state := _get_legacy_current_city_state()
+	if city_state == null:
+		return {}
+	return _get_assigned_home_task_request_for_city_state(
+		city_state,
+		city_state.citizen_decision_runtime_state,
+		citizen
+	)
+
+
+static func _get_scheduled_home_food_delivery_task_request(
+	citizen: Dictionary
+) -> Dictionary:
+	var city_state := _get_legacy_current_city_state()
+	if city_state == null:
+		return {}
+	return _get_scheduled_home_food_delivery_task_request_for_city_state(
+		city_state,
+		city_state.citizen_decision_runtime_state,
+		citizen
+	)
+
+
+static func _process_decision_queue(
+	schedule_phase: String,
+	minimum_priority_exclusive: int = (
+		CityCitizens.CITY_CITIZEN_TASK_PRIORITY_NONE
+	)
+) -> void:
+	var city_state := _get_legacy_current_city_state()
+	if city_state == null:
+		return
+	_process_decision_queue_for_city_state(
+		city_state,
+		city_state.citizen_decision_runtime_state,
+		schedule_phase,
+		minimum_priority_exclusive
+	)
+
+
+static func _process_bounded_idle_behaviors(
+	work_shift_is_active: bool
+) -> void:
+	var city_state := _get_legacy_current_city_state()
+	if city_state == null:
+		return
+	_process_bounded_idle_behaviors_for_city_state(
+		city_state,
+		city_state.citizen_decision_runtime_state,
+		work_shift_is_active
+	)
+
+
+static func _get_idle_anchor_tile(
+	citizen: Dictionary,
+	current_tile: Vector2i
+) -> Vector2i:
+	var city_state := _get_legacy_current_city_state()
+	if city_state == null:
+		return CityCitizens.INVALID_CITY_TILE_POSITION
+	return _get_idle_anchor_tile_for_city_state(
+		city_state,
+		city_state.citizen_decision_runtime_state,
+		citizen,
+		current_tile
 	)
 
 #endregion
 
 #region Player Command Assignment
 
-static func _process_player_commands(
+static func _process_player_commands_for_city_state(
+	city_state: CitySettlementSimulationState,
+	decision_state: CityCitizenDecisionRuntimeStateScript,
 	runtime_candidate_by_order_by_citizen_id: Dictionary = {}
 ) -> void:
 	var assigned_count := 0
 
-	for raw_citizen in CityCitizenRegistrySystem.get_current_state().citizens:
+	for raw_citizen in city_state.citizen_registry_state.citizens:
 		if assigned_count >= MAX_PLAYER_COMMAND_ASSIGNMENTS_PER_TICK:
 			return
 
@@ -248,7 +529,8 @@ static func _process_player_commands(
 		)
 		runtime_candidate_by_order_by_citizen_id.erase(citizen_id)
 		var player_work := (
-			CityWorkSystemScript.get_best_player_job_for_citizen(
+			CityWorkSystemScript.get_best_player_job_for_citizen_for_city_state(
+				city_state,
 				citizen_id,
 				precomputed_candidates
 			)
@@ -257,18 +539,24 @@ static func _process_player_commands(
 		if player_work.is_empty():
 			continue
 
-		if not CitizenTaskSystem.prepare_unemployed_citizen_for_player_command(
+		if not CitizenTaskSystem.prepare_unemployed_citizen_for_player_command_for_city_state(
+			city_state,
 			citizen_id
 		):
 			continue
 
-		if not CityWorkSystemScript.assign_player_job(
+		if not CityWorkSystemScript.assign_player_job_for_city_state(
+			city_state,
 			citizen_id,
 			player_work
 		):
 			continue
 
-		_clear_idle_activity_runtime(citizen_id)
+		_clear_idle_activity_runtime_for_city_state(
+			city_state,
+			decision_state,
+			citizen_id
+		)
 		assigned_count += 1
 		# Assignment mutates claims and capacity. Any unused witnesses were
 		# measured before that mutation and must not be reused by later citizens.
@@ -277,10 +565,14 @@ static func _process_player_commands(
 
 #region Food Need Assignment
 
-static func _process_food_needs(critical_only: bool) -> void:
+static func _process_food_needs_for_city_state(
+	city_state: CitySettlementSimulationState,
+	decision_state: CityCitizenDecisionRuntimeStateScript,
+	critical_only: bool
+) -> void:
 	var candidates: Array = []
 
-	for raw_citizen in CityCitizenRegistrySystem.get_current_state().citizens:
+	for raw_citizen in city_state.citizen_registry_state.citizens:
 		if not raw_citizen is Dictionary:
 			continue
 
@@ -290,18 +582,25 @@ static func _process_food_needs(critical_only: bool) -> void:
 		if (
 			citizen_id <= 0
 			or not bool(citizen.get("alive", false))
-			or not CitizenNeedsSystem.citizen_should_seek_food(citizen_id)
+			or not CitizenNeedsSystem.citizen_should_seek_food_for_city_state(
+				city_state,
+				citizen_id
+			)
 		):
 			continue
 
-		var is_critical := CitizenNeedsSystem.citizen_has_critical_food_need(
+		var is_critical := CitizenNeedsSystem.citizen_has_critical_food_need_for_city_state(
+			city_state,
 			citizen_id
 		)
 
 		if is_critical != critical_only:
 			continue
 
-		var current_task := CityCitizenTaskRuntimeSystem.get_city_citizen_current_task(citizen_id)
+		var current_task := CityCitizenTaskRuntimeSystem.get_city_citizen_current_task_for_city_state(
+			city_state,
+			citizen_id
+		)
 		var current_task_kind := str(
 			current_task.get("kind", CityCitizens.CITY_CITIZEN_TASK_KIND_NONE)
 		)
@@ -311,7 +610,10 @@ static func _process_food_needs(critical_only: bool) -> void:
 
 		candidates.append({
 			"citizen_id": citizen_id,
-			"hunger": CitizenNeedsSystem.get_city_citizen_hunger(citizen_id),
+			"hunger": CitizenNeedsSystem.get_city_citizen_hunger_for_city_state(
+				city_state,
+				citizen_id
+			),
 		})
 
 	candidates.sort_custom(_sort_food_need_candidates)
@@ -319,7 +621,9 @@ static func _process_food_needs(critical_only: bool) -> void:
 	if candidates.is_empty():
 		return
 
-	var start_index := _take_food_scan_start_index(
+	var start_index := _take_food_scan_start_index_for_city_state(
+		city_state,
+		decision_state,
 		critical_only,
 		candidates.size()
 	)
@@ -341,13 +645,24 @@ static func _process_food_needs(critical_only: bool) -> void:
 			continue
 
 		var citizen_id := int(raw_candidate.get("citizen_id", -1))
-		var citizen := CityCitizenRegistrySystem.get_city_citizen_by_id(citizen_id)
-		var available_food_capacity := (
-			CityCitizenInventorySystem.get_city_citizen_personal_inventory_free_space(citizen_id)
-			if critical_only
-			else CityCitizenInventorySystem.get_city_citizen_inventory_free_space(citizen_id)
+		var citizen := CityCitizenRegistrySystem.get_city_citizen_by_id_for_city_state(
+			city_state,
+			citizen_id
 		)
-		var food_result := _find_best_food_source_for_citizen(
+		var available_food_capacity := (
+			CityCitizenInventorySystem.get_city_citizen_personal_inventory_free_space_for_city_state(
+				city_state,
+				citizen_id
+			)
+			if critical_only
+			else CityCitizenInventorySystem.get_city_citizen_inventory_free_space_for_city_state(
+				city_state,
+				citizen_id
+			)
+		)
+		var food_result := _find_best_food_source_for_citizen_for_city_state(
+			city_state,
+			decision_state,
 			citizen,
 			path_requests_remaining,
 			available_food_capacity
@@ -357,7 +672,10 @@ static func _process_food_needs(critical_only: bool) -> void:
 		if food_result.is_empty() or int(food_result.get("object_id", -1)) <= 0:
 			continue
 
-		var current_task := CityCitizenTaskRuntimeSystem.get_city_citizen_current_task(citizen_id)
+		var current_task := CityCitizenTaskRuntimeSystem.get_city_citizen_current_task_for_city_state(
+			city_state,
+			citizen_id
+		)
 		var current_task_kind := str(
 			current_task.get(
 				"kind",
@@ -373,7 +691,9 @@ static func _process_food_needs(critical_only: bool) -> void:
 
 			if critical_only:
 				prepared_for_food = (
-					_prepare_citizen_for_critical_food_interrupt(
+					_prepare_citizen_for_critical_food_interrupt_for_city_state(
+						city_state,
+						decision_state,
 						citizen_id,
 						current_task
 					)
@@ -381,7 +701,8 @@ static func _process_food_needs(critical_only: bool) -> void:
 			else:
 				prepared_for_food = (
 					CitizenTaskSystem
-					.prepare_citizen_for_normal_food_interrupt(
+					.prepare_citizen_for_normal_food_interrupt_for_city_state(
+						city_state,
 						citizen_id
 					)
 				)
@@ -420,15 +741,28 @@ static func _process_food_needs(critical_only: bool) -> void:
 			"player_locked": false,
 		}
 
-		if not CityCitizenTaskRuntimeSystem.assign_city_citizen_task(citizen_id, task_request):
+		if not CityCitizenTaskRuntimeSystem.assign_city_citizen_task_for_city_state(
+			city_state,
+			citizen_id,
+			task_request
+		):
 			continue
 
-		CityCitizenMovementRuntimeSystem.cancel_city_citizen_movement(citizen_id)
-		_clear_idle_activity_runtime(citizen_id)
+		CityCitizenMovementRuntimeSystem.cancel_city_citizen_movement_for_city_state(
+			city_state,
+			citizen_id
+		)
+		_clear_idle_activity_runtime_for_city_state(
+			city_state,
+			decision_state,
+			citizen_id
+		)
 		assigned_count += 1
 
 
-static func _prepare_citizen_for_critical_food_interrupt(
+static func _prepare_citizen_for_critical_food_interrupt_for_city_state(
+	city_state: CitySettlementSimulationState,
+	decision_state: CityCitizenDecisionRuntimeStateScript,
 	citizen_id: int,
 	current_task: Dictionary
 ) -> bool:
@@ -442,7 +776,10 @@ static func _prepare_citizen_for_critical_food_interrupt(
 	if task_source != CityCitizens.CITY_CITIZEN_TASK_SOURCE_SCHEDULE:
 		return (
 			CitizenTaskSystem
-			.prepare_citizen_for_critical_food_interrupt(citizen_id)
+			.prepare_citizen_for_critical_food_interrupt_for_city_state(
+				city_state,
+				citizen_id
+			)
 		)
 
 	var task_kind := str(
@@ -459,21 +796,30 @@ static func _prepare_citizen_for_critical_food_interrupt(
 	if task_kind == CityCitizens.CITY_CITIZEN_TASK_KIND_HAUL:
 		released = (
 			CitizenHaulingSystemScript
-			.drop_citizen_haul_cargo_for_priority_interrupt(
-				WorldPoliticalState.get_current_city_world(),
+			.drop_citizen_haul_cargo_for_priority_interrupt_for_city_state(
+				city_state,
+				city_state.city_world,
 				citizen_id,
 				CityCitizens.CITY_CITIZEN_TASK_SOURCE_SCHEDULE
 			)
 		)
 	else:
-		released = CityCitizenTaskRuntimeSystem.clear_city_citizen_task(
+		released = CityCitizenTaskRuntimeSystem.clear_city_citizen_task_for_city_state(
+			city_state,
 			citizen_id,
 			CityCitizens.CITY_CITIZEN_TASK_SOURCE_SCHEDULE
 		)
 
 	if released:
-		CityCitizenMovementRuntimeSystem.cancel_city_citizen_movement(citizen_id)
-		_clear_idle_activity_runtime(citizen_id)
+		CityCitizenMovementRuntimeSystem.cancel_city_citizen_movement_for_city_state(
+			city_state,
+			citizen_id
+		)
+		_clear_idle_activity_runtime_for_city_state(
+			city_state,
+			decision_state,
+			citizen_id
+		)
 
 	return released
 
@@ -482,25 +828,69 @@ static func _take_food_scan_start_index(
 	critical_only: bool,
 	candidate_count: int
 ) -> int:
+	var decision_state := get_current_state()
+	return _take_food_scan_start_index_for_decision_state(
+		decision_state,
+		critical_only,
+		candidate_count
+	)
+
+
+static func _take_food_scan_start_index_for_city_state(
+	_city_state: CitySettlementSimulationState,
+	decision_state: CityCitizenDecisionRuntimeStateScript,
+	critical_only: bool,
+	candidate_count: int
+) -> int:
 	if candidate_count <= 0:
 		return 0
 
 	if critical_only:
 		var start_index := posmod(
-			_critical_food_scan_cursor,
+			decision_state.critical_food_scan_cursor,
 			candidate_count
 		)
-		_critical_food_scan_cursor = posmod(
+		decision_state.critical_food_scan_cursor = posmod(
 			start_index + 1,
 			candidate_count
 		)
 		return start_index
 
 	var start_index := posmod(
-		_normal_food_scan_cursor,
+		decision_state.normal_food_scan_cursor,
 		candidate_count
 	)
-	_normal_food_scan_cursor = posmod(
+	decision_state.normal_food_scan_cursor = posmod(
+		start_index + 1,
+		candidate_count
+	)
+	return start_index
+
+
+static func _take_food_scan_start_index_for_decision_state(
+	decision_state: CityCitizenDecisionRuntimeStateScript,
+	critical_only: bool,
+	candidate_count: int
+) -> int:
+	if candidate_count <= 0:
+		return 0
+
+	if critical_only:
+		var start_index := posmod(
+			decision_state.critical_food_scan_cursor,
+			candidate_count
+		)
+		decision_state.critical_food_scan_cursor = posmod(
+			start_index + 1,
+			candidate_count
+		)
+		return start_index
+
+	var start_index := posmod(
+		decision_state.normal_food_scan_cursor,
+		candidate_count
+	)
+	decision_state.normal_food_scan_cursor = posmod(
 		start_index + 1,
 		candidate_count
 	)
@@ -517,7 +907,9 @@ static func _sort_food_need_candidates(a: Dictionary, b: Dictionary) -> bool:
 	return int(a.get("citizen_id", -1)) < int(b.get("citizen_id", -1))
 
 
-static func _find_best_food_source_for_citizen(
+static func _find_best_food_source_for_citizen_for_city_state(
+	city_state: CitySettlementSimulationState,
+	_decision_state: CityCitizenDecisionRuntimeStateScript,
 	citizen: Dictionary,
 	maximum_path_requests: int,
 	available_food_capacity: int
@@ -531,14 +923,16 @@ static func _find_best_food_source_for_citizen(
 	):
 		return {}
 
-	var desired_nutrition := CitizenNeedsSystem.get_citizen_food_need_nutrition(
+	var desired_nutrition := CitizenNeedsSystem.get_citizen_food_need_nutrition_for_city_state(
+		city_state,
 		citizen_id
 	)
 
 	if desired_nutrition <= 0:
 		return {}
 
-	return CityResourceMatcherScript.find_best_survival_food_source(
+	return CityResourceMatcherScript.find_best_survival_food_source_for_city_state(
+		city_state,
 		citizen,
 		desired_nutrition,
 		available_food_capacity,
@@ -551,18 +945,42 @@ static func _find_best_food_source_for_citizen(
 #region Schedule State and Scheduled Tasks
 
 static func reset_runtime_state() -> void:
-	_clear_decision_queue()
-	_runtime_initialized = false
-	_work_shift_was_active = false
-	_observed_assignment_version = -1
-	_recovery_scan_cursor = 0
-	_idle_scan_cursor = 0
-	_idle_anchor_tile_by_citizen_id.clear()
-	_next_idle_decision_minute_by_citizen_id.clear()
-	_idle_choice_sequence_by_citizen_id.clear()
-	_autonomous_haul_scan_cursor = 0
-	_critical_food_scan_cursor = 0
-	_normal_food_scan_cursor = 0
+	_reset_decision_runtime_state(get_current_state())
+
+
+static func _reset_runtime_state_for_city_state(
+	city_state: CitySettlementSimulationState,
+	decision_state: CityCitizenDecisionRuntimeStateScript
+) -> void:
+	_clear_decision_queue_for_city_state(city_state, decision_state)
+	decision_state.runtime_initialized = false
+	decision_state.work_shift_was_active = false
+	decision_state.observed_assignment_version = -1
+	decision_state.recovery_scan_cursor = 0
+	decision_state.idle_scan_cursor = 0
+	decision_state.idle_anchor_tile_by_citizen_id.clear()
+	decision_state.next_idle_decision_minute_by_citizen_id.clear()
+	decision_state.idle_choice_sequence_by_citizen_id.clear()
+	decision_state.autonomous_haul_scan_cursor = 0
+	decision_state.critical_food_scan_cursor = 0
+	decision_state.normal_food_scan_cursor = 0
+
+
+static func _reset_decision_runtime_state(
+	decision_state: CityCitizenDecisionRuntimeStateScript
+) -> void:
+	_clear_decision_queue_for_decision_state(decision_state)
+	decision_state.runtime_initialized = false
+	decision_state.work_shift_was_active = false
+	decision_state.observed_assignment_version = -1
+	decision_state.recovery_scan_cursor = 0
+	decision_state.idle_scan_cursor = 0
+	decision_state.idle_anchor_tile_by_citizen_id.clear()
+	decision_state.next_idle_decision_minute_by_citizen_id.clear()
+	decision_state.idle_choice_sequence_by_citizen_id.clear()
+	decision_state.autonomous_haul_scan_cursor = 0
+	decision_state.critical_food_scan_cursor = 0
+	decision_state.normal_food_scan_cursor = 0
 
 
 static func is_work_shift_active() -> bool:
@@ -576,7 +994,25 @@ static func is_work_shift_active() -> bool:
 		and minute_of_day < WORK_SHIFT_END_MINUTE_OF_DAY
 	)
 
-static func _get_schedule_phase(
+
+static func is_work_shift_active_for_city_state(
+	_city_state: CitySettlementSimulationState,
+	_decision_state: CityCitizenDecisionRuntimeStateScript
+) -> bool:
+	var minute_of_day := (
+		SimulationClock.get_world_hour() * 60
+		+ SimulationClock.get_world_minute()
+	)
+
+	return (
+		minute_of_day >= WORK_SHIFT_START_MINUTE_OF_DAY
+		and minute_of_day < WORK_SHIFT_END_MINUTE_OF_DAY
+	)
+
+
+static func _get_schedule_phase_for_city_state(
+	_city_state: CitySettlementSimulationState,
+	_decision_state: CityCitizenDecisionRuntimeStateScript,
 	work_shift_is_active: bool
 ) -> String:
 	if work_shift_is_active:
@@ -585,35 +1021,43 @@ static func _get_schedule_phase(
 	return SCHEDULE_PHASE_OFF_SHIFT
 
 
-static func _queue_all_eligible_scheduled_tasks(
+static func _queue_all_eligible_scheduled_tasks_for_city_state(
+	city_state: CitySettlementSimulationState,
+	decision_state: CityCitizenDecisionRuntimeStateScript,
 	schedule_phase: String
 ) -> void:
-	for raw_citizen in CityCitizenRegistrySystem.get_current_state().citizens:
+	for raw_citizen in city_state.citizen_registry_state.citizens:
 		if not raw_citizen is Dictionary:
 			continue
 
 		var citizen: Dictionary = raw_citizen
 
-		if not _citizen_needs_scheduled_task(
+		if not _citizen_needs_scheduled_task_for_city_state(
+			city_state,
+			decision_state,
 			citizen,
 			schedule_phase
 		):
 			continue
 
-		_queue_citizen_id(
+		_queue_citizen_id_for_city_state(
+			city_state,
+			decision_state,
 			int(citizen.get("id", -1))
 		)
 
-	_pending_decision_ids.sort()
+	decision_state.pending_decision_ids.sort()
 
 
-static func _queue_bounded_recovery_candidates(
+static func _queue_bounded_recovery_candidates_for_city_state(
+	city_state: CitySettlementSimulationState,
+	decision_state: CityCitizenDecisionRuntimeStateScript,
 	schedule_phase: String
 ) -> void:
-	var citizen_count := CityCitizenRegistrySystem.get_current_state().citizens.size()
+	var citizen_count := city_state.citizen_registry_state.citizens.size()
 
 	if citizen_count <= 0:
-		_recovery_scan_cursor = 0
+		decision_state.recovery_scan_cursor = 0
 		return
 
 	var scan_count := mini(
@@ -623,13 +1067,13 @@ static func _queue_bounded_recovery_candidates(
 
 	for _scan_index in range(scan_count):
 		var citizen_index := (
-			_recovery_scan_cursor % citizen_count
+			decision_state.recovery_scan_cursor % citizen_count
 		)
-		_recovery_scan_cursor = (
-			(_recovery_scan_cursor + 1) % citizen_count
+		decision_state.recovery_scan_cursor = (
+			(decision_state.recovery_scan_cursor + 1) % citizen_count
 		)
 
-		var raw_citizen = CityCitizenRegistrySystem.get_current_state().citizens[
+		var raw_citizen = city_state.citizen_registry_state.citizens[
 			citizen_index
 		]
 
@@ -638,19 +1082,25 @@ static func _queue_bounded_recovery_candidates(
 
 		var citizen: Dictionary = raw_citizen
 
-		if not _citizen_needs_scheduled_task(
+		if not _citizen_needs_scheduled_task_for_city_state(
+			city_state,
+			decision_state,
 			citizen,
 			schedule_phase
 		):
 			continue
 
-		_queue_citizen_id(
+		_queue_citizen_id_for_city_state(
+			city_state,
+			decision_state,
 			int(citizen.get("id", -1))
 		)
 
-	_pending_decision_ids.sort()
+	decision_state.pending_decision_ids.sort()
 
-static func _citizen_needs_scheduled_work_task(
+static func _citizen_needs_scheduled_work_task_for_city_state(
+	city_state: CitySettlementSimulationState,
+	_decision_state: CityCitizenDecisionRuntimeStateScript,
 	citizen: Dictionary
 ) -> bool:
 	if not bool(citizen.get("alive", false)):
@@ -663,7 +1113,8 @@ static func _citizen_needs_scheduled_work_task(
 	if workplace_id <= 0:
 		return false
 
-	var workplace := CityObjectSystem.get_city_object_by_id(
+	var workplace := CityObjectSystem.get_city_object_by_id_for_city_state(
+		city_state,
 		workplace_id
 	)
 
@@ -686,7 +1137,9 @@ static func _citizen_needs_scheduled_work_task(
 	)
 
 
-static func _citizen_needs_scheduled_return_home_task(
+static func _citizen_needs_scheduled_return_home_task_for_city_state(
+	city_state: CitySettlementSimulationState,
+	decision_state: CityCitizenDecisionRuntimeStateScript,
 	citizen: Dictionary
 ) -> bool:
 	if not bool(citizen.get("alive", false)):
@@ -699,24 +1152,34 @@ static func _citizen_needs_scheduled_return_home_task(
 	if home_id <= 0:
 		return false
 
-	var home := CityObjectSystem.get_city_object_by_id(home_id)
+	var home := CityObjectSystem.get_city_object_by_id_for_city_state(
+		city_state,
+		home_id
+	)
 	var citizen_id := int(citizen.get("id", -1))
 
 	if (
 		home.is_empty()
 		or CityObjectCatalog.get_city_object_resident_capacity(home) <= 0
 		or not CityObjectSystem.city_object_supports_citizen_interior(home)
-		or not CityAssignmentSystem.get_city_object_resident_ids(
+		or not CityAssignmentSystem.get_city_object_resident_ids_for_city_state(
+			city_state,
 			home
 		).has(citizen_id)
-		or not CityNavigationSystem.city_citizen_can_access_object_interior(
+		or not CityNavigationSystem.city_citizen_can_access_object_interior_for_city_state(
+			city_state,
 			citizen_id,
 			home
 		)
 	):
 		return false
 
-	if _citizen_has_satisfied_home_arrival(citizen, home):
+	if _citizen_has_satisfied_home_arrival_for_city_state(
+		city_state,
+		decision_state,
+		citizen,
+		home
+	):
 		return false
 
 	var raw_current_task = citizen.get("current_task", {})
@@ -732,7 +1195,9 @@ static func _citizen_needs_scheduled_return_home_task(
 	)
 
 
-static func _citizen_has_satisfied_home_arrival(
+static func _citizen_has_satisfied_home_arrival_for_city_state(
+	_city_state: CitySettlementSimulationState,
+	decision_state: CityCitizenDecisionRuntimeStateScript,
 	citizen: Dictionary,
 	home: Dictionary
 ) -> bool:
@@ -751,7 +1216,7 @@ static func _citizen_has_satisfied_home_arrival(
 		return true
 
 	var citizen_id := int(citizen.get("id", -1))
-	var raw_anchor_tile = _idle_anchor_tile_by_citizen_id.get(
+	var raw_anchor_tile = decision_state.idle_anchor_tile_by_citizen_id.get(
 		citizen_id,
 		CityCitizens.INVALID_CITY_TILE_POSITION
 	)
@@ -772,7 +1237,9 @@ static func _citizen_has_satisfied_home_arrival(
 
 	return distance_from_home_anchor <= IDLE_ANCHOR_RADIUS_TILES
 
-static func _citizen_needs_scheduled_task(
+static func _citizen_needs_scheduled_task_for_city_state(
+	city_state: CitySettlementSimulationState,
+	decision_state: CityCitizenDecisionRuntimeStateScript,
 	citizen: Dictionary,
 	schedule_phase: String
 ) -> bool:
@@ -792,13 +1259,17 @@ static func _citizen_needs_scheduled_task(
 	):
 		return false
 
-	return not _get_next_scheduled_task_request(
+	return not _get_next_scheduled_task_request_for_city_state(
+		city_state,
+		decision_state,
 		citizen,
 		schedule_phase
 	).is_empty()
 
 
-static func _get_next_scheduled_task_request(
+static func _get_next_scheduled_task_request_for_city_state(
+	city_state: CitySettlementSimulationState,
+	decision_state: CityCitizenDecisionRuntimeStateScript,
 	citizen: Dictionary,
 	schedule_phase: String
 ) -> Dictionary:
@@ -815,7 +1286,9 @@ static func _get_next_scheduled_task_request(
 	for raw_rule in activity_rules:
 		var activity_rule := str(raw_rule)
 		var task_request := (
-			_get_scheduled_activity_task_request(
+			_get_scheduled_activity_task_request_for_city_state(
+				city_state,
+				decision_state,
 				citizen,
 				activity_rule
 			)
@@ -827,24 +1300,38 @@ static func _get_next_scheduled_task_request(
 	return {}
 
 
-static func _get_scheduled_activity_task_request(
+static func _get_scheduled_activity_task_request_for_city_state(
+	city_state: CitySettlementSimulationState,
+	decision_state: CityCitizenDecisionRuntimeStateScript,
 	citizen: Dictionary,
 	activity_rule: String
 ) -> Dictionary:
 	match activity_rule:
 		SCHEDULE_ACTIVITY_OUTSTANDING_OBLIGATION:
-			return _get_outstanding_obligation_task_request(
+			return _get_outstanding_obligation_task_request_for_city_state(
+				city_state,
+				decision_state,
 				citizen
 			)
 		SCHEDULE_ACTIVITY_ASSIGNED_WORK:
-			return _get_assigned_work_task_request(citizen)
+			return _get_assigned_work_task_request_for_city_state(
+				city_state,
+				decision_state,
+				citizen
+			)
 		SCHEDULE_ACTIVITY_ASSIGNED_HOME:
-			return _get_assigned_home_task_request(citizen)
+			return _get_assigned_home_task_request_for_city_state(
+				city_state,
+				decision_state,
+				citizen
+			)
 
 	return {}
 
 
-static func _get_outstanding_obligation_task_request(
+static func _get_outstanding_obligation_task_request_for_city_state(
+	city_state: CitySettlementSimulationState,
+	decision_state: CityCitizenDecisionRuntimeStateScript,
 	citizen: Dictionary
 ) -> Dictionary:
 	var citizen_id := int(citizen.get("id", -1))
@@ -852,14 +1339,16 @@ static func _get_outstanding_obligation_task_request(
 	if citizen_id <= 0:
 		return {}
 
-	var cargo := CityCitizenInventorySystem.get_city_citizen_haul_cargo(
+	var cargo := CityCitizenInventorySystem.get_city_citizen_haul_cargo_for_city_state(
+		city_state,
 		citizen_id
 	)
 	var cargo_amount := maxi(
 		int(cargo.get("amount", 0)),
 		0
 	)
-	var current_haul := CityCitizenTaskRuntimeSystem.get_city_citizen_current_haul(
+	var current_haul := CityCitizenTaskRuntimeSystem.get_city_citizen_current_haul_for_city_state(
+		city_state,
 		citizen_id
 	)
 
@@ -888,7 +1377,8 @@ static func _get_outstanding_obligation_task_request(
 		return (
 			CitizenHaulingSystemScript
 			.make_public_storage_haul_task_request({
-				"city_world": WorldPoliticalState.get_current_city_world(),
+				"city_state": city_state,
+				"city_world": city_state.city_world,
 				"citizen": citizen,
 				"source": raw_source,
 				"resource_type": str(
@@ -921,34 +1411,47 @@ static func _get_outstanding_obligation_task_request(
 	# A carried load is the atomic obligation above. Once it is settled, normal
 	# food seeking (31--70) outranks every new scheduled or logistical
 	# activity once the carried load reaches its safe delivery boundary.
-	if CitizenNeedsSystem.citizen_should_seek_food(citizen_id):
+	if CitizenNeedsSystem.citizen_should_seek_food_for_city_state(
+		city_state,
+		citizen_id
+	):
 		return {}
 
 	# Employed citizens work through the shift. Unemployed residents may still
 	# provision their own household before settling into home-centered idling.
 	if (
-		is_work_shift_active()
+		is_work_shift_active_for_city_state(city_state, decision_state)
 		and int(citizen.get("job_object_id", -1)) > 0
 	):
 		return {}
 
 	var home_id := int(citizen.get("home_object_id", -1))
-	var home := CityObjectSystem.get_city_object_by_id(home_id)
+	var home := CityObjectSystem.get_city_object_by_id_for_city_state(
+		city_state,
+		home_id
+	)
 	var has_satisfied_home_arrival := (
 		home_id > 0
 		and not home.is_empty()
-		and _citizen_has_satisfied_home_arrival(citizen, home)
+		and _citizen_has_satisfied_home_arrival_for_city_state(
+			city_state,
+			decision_state,
+			citizen,
+			home
+		)
 	)
 
 	var workplace_id := int(
 		citizen.get("job_object_id", -1)
 	)
-	var workplace := CityObjectSystem.get_city_object_by_id(
+	var workplace := CityObjectSystem.get_city_object_by_id_for_city_state(
+		city_state,
 		workplace_id
 	)
 
 	var remaining_carry_capacity := (
-		CityCitizenInventorySystem.get_city_citizen_available_haul_capacity(
+		CityCitizenInventorySystem.get_city_citizen_available_haul_capacity_for_city_state(
+			city_state,
 			citizen_id
 		)
 	)
@@ -984,7 +1487,8 @@ static func _get_outstanding_obligation_task_request(
 			var task_request := (
 				CitizenHaulingSystemScript
 				.make_public_storage_haul_task_request({
-					"city_world": WorldPoliticalState.get_current_city_world(),
+					"city_state": city_state,
+					"city_world": city_state.city_world,
 					"citizen": citizen,
 					"source": source,
 					"resource_type": resource,
@@ -1011,15 +1515,24 @@ static func _get_outstanding_obligation_task_request(
 			if not task_request.is_empty():
 				return task_request
 
-	return _get_scheduled_home_food_delivery_task_request(citizen)
+	return _get_scheduled_home_food_delivery_task_request_for_city_state(
+		city_state,
+		decision_state,
+		citizen
+	)
 
 
-static func _get_scheduled_home_food_delivery_task_request(
+static func _get_scheduled_home_food_delivery_task_request_for_city_state(
+	city_state: CitySettlementSimulationState,
+	_decision_state: CityCitizenDecisionRuntimeStateScript,
 	citizen: Dictionary
 ) -> Dictionary:
 	var citizen_id := int(citizen.get("id", -1))
 	var home_id := int(citizen.get("home_object_id", -1))
-	var home := CityObjectSystem.get_city_object_by_id(home_id)
+	var home := CityObjectSystem.get_city_object_by_id_for_city_state(
+		city_state,
+		home_id
+	)
 	var raw_current_tile = citizen.get(
 		"city_tile_position",
 		CityCitizens.INVALID_CITY_TILE_POSITION
@@ -1027,16 +1540,25 @@ static func _get_scheduled_home_food_delivery_task_request(
 
 	if (
 		citizen_id <= 0
-		or CitizenNeedsSystem.citizen_should_seek_food(citizen_id)
+		or CitizenNeedsSystem.citizen_should_seek_food_for_city_state(
+			city_state,
+			citizen_id
+		)
 		or home_id <= 0
 		or not raw_current_tile is Vector2i
 		or not CityResourceMatcher.city_object_is_household_home(home)
-		or CityResourceMatcher.get_city_home_unfulfilled_food_nutrition(home) <= 0
+		or CityResourceMatcher.get_city_home_unfulfilled_food_nutrition_for_city_state(
+			city_state,
+			home
+		) <= 0
 	):
 		return {}
 
 	var remaining_carry_capacity := (
-		CityCitizenInventorySystem.get_city_citizen_available_haul_capacity(citizen_id)
+		CityCitizenInventorySystem.get_city_citizen_available_haul_capacity_for_city_state(
+			city_state,
+			citizen_id
+		)
 	)
 
 	if remaining_carry_capacity <= 0:
@@ -1050,7 +1572,8 @@ static func _get_scheduled_home_food_delivery_task_request(
 	for resource in CityResourceCatalog.get_city_food_resource_types():
 		var requested_amount := mini(
 			remaining_carry_capacity,
-			CityResourceMatcher.get_city_home_requested_food_units(
+			CityResourceMatcher.get_city_home_requested_food_units_for_city_state(
+				city_state,
 				home,
 				resource
 			)
@@ -1060,7 +1583,8 @@ static func _get_scheduled_home_food_delivery_task_request(
 			continue
 
 		var source_result := (
-			CityResourceMatcherScript.find_best_household_food_source(
+			CityResourceMatcherScript.find_best_household_food_source_for_city_state(
+				city_state,
 				citizen,
 				resource,
 				requested_amount
@@ -1083,7 +1607,8 @@ static func _get_scheduled_home_food_delivery_task_request(
 
 		var task_request := (
 			CitizenHaulingSystemScript.make_directed_haul_task_request({
-				"city_world": WorldPoliticalState.get_current_city_world(),
+				"city_state": city_state,
+				"city_world": city_state.city_world,
 				"citizen": citizen,
 				"source": source_result.get("endpoint", {}),
 				"destination": destination,
@@ -1119,10 +1644,16 @@ static func _get_scheduled_home_food_delivery_task_request(
 	return {}
 
 
-static func _get_assigned_work_task_request(
+static func _get_assigned_work_task_request_for_city_state(
+	city_state: CitySettlementSimulationState,
+	decision_state: CityCitizenDecisionRuntimeStateScript,
 	citizen: Dictionary
 ) -> Dictionary:
-	if not _citizen_needs_scheduled_work_task(citizen):
+	if not _citizen_needs_scheduled_work_task_for_city_state(
+		city_state,
+		decision_state,
+		citizen
+	):
 		return {}
 
 	# Hunger alone cannot suppress the work that may create the settlement's
@@ -1141,10 +1672,16 @@ static func _get_assigned_work_task_request(
 	}
 
 
-static func _get_assigned_home_task_request(
+static func _get_assigned_home_task_request_for_city_state(
+	city_state: CitySettlementSimulationState,
+	decision_state: CityCitizenDecisionRuntimeStateScript,
 	citizen: Dictionary
 ) -> Dictionary:
-	if not _citizen_needs_scheduled_return_home_task(citizen):
+	if not _citizen_needs_scheduled_return_home_task_for_city_state(
+		city_state,
+		decision_state,
+		citizen
+	):
 		return {}
 
 	# A hungry citizen with no obtainable food still has a valid home schedule.
@@ -1167,44 +1704,77 @@ static func _get_assigned_home_task_request(
 #region Decision Queue Processing
 
 static func _queue_citizen_id(citizen_id: int) -> void:
+	_queue_citizen_id_for_decision_state(get_current_state(), citizen_id)
+
+
+static func _queue_citizen_id_for_city_state(
+	_city_state: CitySettlementSimulationState,
+	decision_state: CityCitizenDecisionRuntimeStateScript,
+	citizen_id: int
+) -> void:
 	if citizen_id <= 0:
 		return
 
-	if _pending_decision_id_lookup.has(citizen_id):
+	if decision_state.pending_decision_id_lookup.has(citizen_id):
 		return
 
-	_pending_decision_ids.append(citizen_id)
-	_pending_decision_id_lookup[citizen_id] = true
+	decision_state.pending_decision_ids.append(citizen_id)
+	decision_state.pending_decision_id_lookup[citizen_id] = true
 
 
-static func _process_decision_queue(
+static func _queue_citizen_id_for_decision_state(
+	decision_state: CityCitizenDecisionRuntimeStateScript,
+	citizen_id: int
+) -> void:
+	if citizen_id <= 0:
+		return
+
+	if decision_state.pending_decision_id_lookup.has(citizen_id):
+		return
+
+	decision_state.pending_decision_ids.append(citizen_id)
+	decision_state.pending_decision_id_lookup[citizen_id] = true
+
+
+static func _process_decision_queue_for_city_state(
+	city_state: CitySettlementSimulationState,
+	decision_state: CityCitizenDecisionRuntimeStateScript,
 	schedule_phase: String,
 	minimum_priority_exclusive: int = (
 		CityCitizens.CITY_CITIZEN_TASK_PRIORITY_NONE
-	)
+	),
+	employed_only: bool = false
 ) -> void:
 	var processed_count := 0
 	var deferred_citizen_ids: Array[int] = []
 
 	while (
 		processed_count < MAX_DECISIONS_PER_TICK
-		and not _pending_decision_ids.is_empty()
+		and not decision_state.pending_decision_ids.is_empty()
 	):
-		var citizen_id: int = _pending_decision_ids.pop_front()
-		_pending_decision_id_lookup.erase(citizen_id)
+		var citizen_id: int = decision_state.pending_decision_ids.pop_front()
+		decision_state.pending_decision_id_lookup.erase(citizen_id)
 		processed_count += 1
 
-		var citizen := CityCitizenRegistrySystem.get_city_citizen_by_id(
+		var citizen := CityCitizenRegistrySystem.get_city_citizen_by_id_for_city_state(
+			city_state,
 			citizen_id
 		)
+		if employed_only and int(citizen.get("job_object_id", -1)) <= 0:
+			deferred_citizen_ids.append(citizen_id)
+			continue
 
-		if not _citizen_needs_scheduled_task(
+		if not _citizen_needs_scheduled_task_for_city_state(
+			city_state,
+			decision_state,
 			citizen,
 			schedule_phase
 		):
 			continue
 
-		var task_request := _get_next_scheduled_task_request(
+		var task_request := _get_next_scheduled_task_request_for_city_state(
+			city_state,
+			decision_state,
 			citizen,
 			schedule_phase
 		)
@@ -1225,7 +1795,8 @@ static func _process_decision_queue(
 			continue
 
 		var task_was_assigned := (
-			CityCitizenTaskRuntimeSystem.assign_city_citizen_task(
+			CityCitizenTaskRuntimeSystem.assign_city_citizen_task_for_city_state(
+				city_state,
 				citizen_id,
 				task_request
 			)
@@ -1234,24 +1805,36 @@ static func _process_decision_queue(
 		if not task_was_assigned:
 			continue
 
-		_clear_idle_activity_runtime(citizen_id)
+		_clear_idle_activity_runtime_for_city_state(
+			city_state,
+			decision_state,
+			citizen_id
+		)
 
 		if (
 			str(citizen.get("movement_state", ""))
 			!= CityCitizens.CITY_CITIZEN_MOVEMENT_STATE_IDLE
 		):
-			CityCitizenMovementRuntimeSystem.cancel_city_citizen_movement(
+			CityCitizenMovementRuntimeSystem.cancel_city_citizen_movement_for_city_state(
+				city_state,
 				citizen_id
 			)
 
 	for citizen_id in deferred_citizen_ids:
-		_queue_citizen_id(citizen_id)
+		_queue_citizen_id_for_city_state(
+			city_state,
+			decision_state,
+			citizen_id
+		)
 
 
-static func _clear_schedule_sourced_tasks() -> void:
-	_clear_decision_queue()
+static func _clear_schedule_sourced_tasks_for_city_state(
+	city_state: CitySettlementSimulationState,
+	decision_state: CityCitizenDecisionRuntimeStateScript
+) -> void:
+	_clear_decision_queue_for_city_state(city_state, decision_state)
 
-	for raw_citizen in CityCitizenRegistrySystem.get_current_state().citizens:
+	for raw_citizen in city_state.citizen_registry_state.citizens:
 		if not raw_citizen is Dictionary:
 			continue
 
@@ -1282,72 +1865,113 @@ static func _clear_schedule_sourced_tasks() -> void:
 		if citizen_id <= 0:
 			continue
 
-		if CityCitizenTaskRuntimeSystem.clear_city_citizen_task(
+		if CityCitizenTaskRuntimeSystem.clear_city_citizen_task_for_city_state(
+			city_state,
 			citizen_id,
 			CityCitizens.CITY_CITIZEN_TASK_SOURCE_SCHEDULE
 		):
-			CityCitizenMovementRuntimeSystem.cancel_city_citizen_movement(
+			CityCitizenMovementRuntimeSystem.cancel_city_citizen_movement_for_city_state(
+				city_state,
 				citizen_id
 			)
-			_clear_idle_activity_runtime(citizen_id)
+			_clear_idle_activity_runtime_for_city_state(
+				city_state,
+				decision_state,
+				citizen_id
+			)
 
 static func _clear_decision_queue() -> void:
-	_pending_decision_ids.clear()
-	_pending_decision_id_lookup.clear()
+	_clear_decision_queue_for_decision_state(get_current_state())
+
+
+static func _clear_decision_queue_for_city_state(
+	_city_state: CitySettlementSimulationState,
+	decision_state: CityCitizenDecisionRuntimeStateScript
+) -> void:
+	decision_state.pending_decision_ids.clear()
+	decision_state.pending_decision_id_lookup.clear()
+
+
+static func _clear_decision_queue_for_decision_state(
+	decision_state: CityCitizenDecisionRuntimeStateScript
+) -> void:
+	decision_state.pending_decision_ids.clear()
+	decision_state.pending_decision_id_lookup.clear()
 
 
 #endregion
 
 #region Autonomous Hauling
 
-static func _process_bounded_autonomous_hauling(
+static func _process_bounded_autonomous_hauling_for_city_state(
+	city_state: CitySettlementSimulationState,
+	decision_state: CityCitizenDecisionRuntimeStateScript,
 	schedule_phase: String
-) -> void:
-	var city_world: WorldData = WorldPoliticalState.get_current_city_world()
+) -> bool:
+	var city_world: WorldData = city_state.city_world
 
 	if city_world == null:
-		return
+		return false
 
 	var assigned_count := 0
 
 	while assigned_count < MAX_AUTONOMOUS_HAUL_ASSIGNMENTS_PER_TICK:
-		var candidates := _get_bounded_autonomous_haul_candidates(
+		var candidates := _get_bounded_autonomous_haul_candidates_for_city_state(
+			city_state,
+			decision_state,
 			schedule_phase
 		)
 
 		if candidates.is_empty():
-			return
+			return false
 
 		# Loose ground resources are considered before protected workplace
 		# buffers. If no pile is deliverable, citizens may still perform a
 		# different valid workplace-output haul rather than idling.
-		if _try_assign_best_autonomous_haul(
+		if _try_assign_best_autonomous_haul_for_city_state(
+			city_state,
+			decision_state,
 			city_world,
 			candidates,
-			_get_ground_pile_haul_opportunities()
+			_get_ground_pile_haul_opportunities_for_city_state(
+				city_state,
+				decision_state
+			)
 		):
 			assigned_count += 1
 			continue
 
-		if _try_assign_best_autonomous_haul(
+		if _try_assign_best_autonomous_haul_for_city_state(
+			city_state,
+			decision_state,
 			city_world,
 			candidates,
-			_get_workplace_output_haul_opportunities()
+			_get_workplace_output_haul_opportunities_for_city_state(
+				city_state,
+				decision_state
+			)
 		):
 			assigned_count += 1
 			continue
 
-		return
+		return false
+
+	# Reaching the loop bound means every iteration made a real assignment.
+	# There may be more useful matches, so defer the low-priority home queue until
+	# the following bounded decision tick.
+	return assigned_count >= MAX_AUTONOMOUS_HAUL_ASSIGNMENTS_PER_TICK
 
 
-static func _get_bounded_autonomous_haul_candidates(
+static func _get_bounded_autonomous_haul_candidates_for_city_state(
+	city_state: CitySettlementSimulationState,
+	decision_state: CityCitizenDecisionRuntimeStateScript,
 	schedule_phase: String
 ) -> Array:
 	var candidates: Array = []
-	var citizen_count := CityCitizenRegistrySystem.get_current_state().citizens.size()
+	var citizen_count := city_state.citizen_registry_state.citizens.size()
 
 	if citizen_count <= 0:
-		_autonomous_haul_scan_cursor = 0
+		decision_state.autonomous_haul_scan_cursor = 0
 		return candidates
 
 	var scanned_count := 0
@@ -1358,21 +1982,25 @@ static func _get_bounded_autonomous_haul_candidates(
 		< MAX_AUTONOMOUS_HAUL_CANDIDATES_PER_TICK
 	):
 		var citizen_index := (
-			_autonomous_haul_scan_cursor % citizen_count
+			decision_state.autonomous_haul_scan_cursor % citizen_count
 		)
-		_autonomous_haul_scan_cursor = (
-			(_autonomous_haul_scan_cursor + 1) % citizen_count
+		decision_state.autonomous_haul_scan_cursor = (
+			(decision_state.autonomous_haul_scan_cursor + 1) % citizen_count
 		)
 		scanned_count += 1
 
-		var raw_citizen = CityCitizenRegistrySystem.get_current_state().citizens[citizen_index]
+		var raw_citizen = city_state.citizen_registry_state.citizens[
+			citizen_index
+		]
 
 		if not raw_citizen is Dictionary:
 			continue
 
 		var citizen: Dictionary = raw_citizen
 
-		if not _citizen_is_available_for_autonomous_hauling(
+		if not _citizen_is_available_for_autonomous_hauling_for_city_state(
+			city_state,
+			decision_state,
 			citizen,
 			schedule_phase
 		):
@@ -1383,7 +2011,9 @@ static func _get_bounded_autonomous_haul_candidates(
 	return candidates
 
 
-static func _citizen_is_available_for_autonomous_hauling(
+static func _citizen_is_available_for_autonomous_hauling_for_city_state(
+	city_state: CitySettlementSimulationState,
+	decision_state: CityCitizenDecisionRuntimeStateScript,
 	citizen: Dictionary,
 	schedule_phase: String
 ) -> bool:
@@ -1414,8 +2044,14 @@ static func _citizen_is_available_for_autonomous_hauling(
 
 	if (
 		citizen_id <= 0
-		or CitizenNeedsSystem.citizen_should_seek_food(citizen_id)
-		or CityCitizenInventorySystem.get_city_citizen_haul_cargo_amount(citizen_id) > 0
+		or CitizenNeedsSystem.citizen_should_seek_food_for_city_state(
+			city_state,
+			citizen_id
+		)
+		or CityCitizenInventorySystem.get_city_citizen_haul_cargo_amount_for_city_state(
+			city_state,
+			citizen_id
+		) > 0
 		or not citizen.get("city_tile_position") is Vector2i
 	):
 		return false
@@ -1425,7 +2061,9 @@ static func _citizen_is_available_for_autonomous_hauling(
 	# home queue, so allowing these candidates is what lets an unemployed
 	# citizen take the next valid load immediately after completing the previous
 	# one. The home queue is released only after no additional hauler is needed.
-	var scheduled_task_request := _get_next_scheduled_task_request(
+	var scheduled_task_request := _get_next_scheduled_task_request_for_city_state(
+		city_state,
+		decision_state,
 		citizen,
 		schedule_phase
 	)
@@ -1441,23 +2079,17 @@ static func _citizen_is_available_for_autonomous_hauling(
 	) < AUTONOMOUS_WORKPLACE_OUTPUT_HAUL_TASK_PRIORITY
 
 
-static func _has_unassigned_autonomous_haul_work() -> bool:
-	# These opportunity builders already account for source reservations,
-	# resource-specific destination capacity, public-storage tiers, and the open
-	# carrying capacity of active ground-pile pickup chains. A non-empty result
-	# therefore means another unemployed hauler is still useful.
-	if not _get_ground_pile_haul_opportunities().is_empty():
-		return true
-
-	return not _get_workplace_output_haul_opportunities().is_empty()
-
-
-static func _get_ground_pile_haul_opportunities() -> Array:
+static func _get_ground_pile_haul_opportunities_for_city_state(
+	city_state: CitySettlementSimulationState,
+	decision_state: CityCitizenDecisionRuntimeStateScript
+) -> Array:
 	var opportunities: Array = []
 	var deliverable_resource_lookup: Dictionary = {}
 	var total_unreserved_ground_amount := 0
 
-	for raw_ground_pile in CityLogisticsSystem.get_city_ground_pile_snapshot():
+	for raw_ground_pile in CityLogisticsSystem.get_city_ground_pile_snapshot_for_city_state(
+		city_state
+	):
 		if not raw_ground_pile is Dictionary:
 			continue
 
@@ -1472,24 +2104,30 @@ static func _get_ground_pile_haul_opportunities() -> Array:
 
 		if not deliverable_resource_lookup.has(resource):
 			deliverable_resource_lookup[resource] = (
-				_resource_has_unreserved_public_storage_destination(
+				_resource_has_unreserved_public_storage_destination_for_city_state(
+					city_state,
+					decision_state,
 					resource
 				)
 			)
 
 		if (
 			not bool(deliverable_resource_lookup[resource])
-			or not CityLogisticsSystem.city_haul_endpoint_can_provide_resource({
+			or not CityLogisticsSystem.city_haul_endpoint_can_provide_resource_for_city_state(
+				city_state,
+				{
 				"endpoint": source,
 				"resource": resource,
 				"withdrawal_purpose": CityObjectCatalog.CONTAINER_HAUL_PURPOSE_GROUND_PILE_CLEANUP,
 				"require_unreserved_amount": true,
-			})
+				}
+			)
 		):
 			continue
 
 		var unreserved_amount := (
-			CityLogisticsSystem.get_city_haul_endpoint_unreserved_resource_amount(
+			CityLogisticsSystem.get_city_haul_endpoint_unreserved_resource_amount_for_city_state(
+				city_state,
 				source,
 				resource
 			)
@@ -1521,7 +2159,10 @@ static func _get_ground_pile_haul_opportunities() -> Array:
 	# absorb all unreserved loose resources.
 	if (
 		total_unreserved_ground_amount > 0
-		and _get_active_ground_pile_chain_capacity()
+		and _get_active_ground_pile_chain_capacity_for_city_state(
+			city_state,
+			decision_state
+		)
 		>= total_unreserved_ground_amount
 	):
 		return []
@@ -1529,19 +2170,26 @@ static func _get_ground_pile_haul_opportunities() -> Array:
 	return opportunities
 
 
-static func _get_active_ground_pile_chain_capacity() -> int:
+static func _get_active_ground_pile_chain_capacity_for_city_state(
+	city_state: CitySettlementSimulationState,
+	decision_state: CityCitizenDecisionRuntimeStateScript
+) -> int:
 	var open_carry_capacity := 0
 
-	for raw_citizen in CityCitizenRegistrySystem.get_current_state().citizens:
+	for raw_citizen in city_state.citizen_registry_state.citizens:
 		if not raw_citizen is Dictionary:
 			continue
 
 		var citizen: Dictionary = raw_citizen
 		var citizen_id := int(citizen.get("id", -1))
-		var current_task := CityCitizenTaskRuntimeSystem.get_city_citizen_current_task(
+		var current_task := CityCitizenTaskRuntimeSystem.get_city_citizen_current_task_for_city_state(
+			city_state,
 			citizen_id
 		)
-		var haul := CityCitizenTaskRuntimeSystem.get_city_citizen_current_haul(citizen_id)
+		var haul := CityCitizenTaskRuntimeSystem.get_city_citizen_current_haul_for_city_state(
+			city_state,
+			citizen_id
+		)
 
 		if (
 			citizen_id <= 0
@@ -1578,7 +2226,8 @@ static func _get_active_ground_pile_chain_capacity() -> int:
 				CityCitizens.INVALID_CITY_CITIZEN_HAUL_RESERVATION_ID
 			)
 		)
-		var reservation := CityLogisticsSystem.get_city_haul_reservation(
+		var reservation := CityLogisticsSystem.get_city_haul_reservation_for_city_state(
+			city_state,
 			reservation_id
 		)
 
@@ -1586,7 +2235,10 @@ static func _get_active_ground_pile_chain_capacity() -> int:
 			continue
 
 		open_carry_capacity += maxi(
-			CityCitizenInventorySystem.get_city_citizen_available_haul_capacity(citizen_id)
+			CityCitizenInventorySystem.get_city_citizen_available_haul_capacity_for_city_state(
+				city_state,
+				citizen_id
+			)
 			- maxi(
 				int(reservation.get("source_reserved_amount", 0)),
 				0
@@ -1599,14 +2251,20 @@ static func _get_active_ground_pile_chain_capacity() -> int:
 
 	return mini(
 		open_carry_capacity,
-		_get_total_unreserved_public_storage_space()
+		_get_total_unreserved_public_storage_space_for_city_state(
+			city_state,
+			decision_state
+		)
 	)
 
 
-static func _get_total_unreserved_public_storage_space() -> int:
+static func _get_total_unreserved_public_storage_space_for_city_state(
+	city_state: CitySettlementSimulationState,
+	_decision_state: CityCitizenDecisionRuntimeStateScript
+) -> int:
 	var total_space := 0
 
-	for raw_city_object in CityObjectSystem.get_city_objects():
+	for raw_city_object in city_state.object_state.objects:
 		if not raw_city_object is Dictionary:
 			continue
 
@@ -1622,7 +2280,8 @@ static func _get_total_unreserved_public_storage_space() -> int:
 			int(city_object.get("id", -1))
 		)
 		total_space += (
-			CityLogisticsSystem.get_city_haul_endpoint_unreserved_destination_space(
+			CityLogisticsSystem.get_city_haul_endpoint_unreserved_destination_space_for_city_state(
+				city_state,
 				destination
 			)
 		)
@@ -1630,11 +2289,14 @@ static func _get_total_unreserved_public_storage_space() -> int:
 	return total_space
 
 
-static func _get_workplace_output_haul_opportunities() -> Array:
+static func _get_workplace_output_haul_opportunities_for_city_state(
+	city_state: CitySettlementSimulationState,
+	decision_state: CityCitizenDecisionRuntimeStateScript
+) -> Array:
 	var opportunities: Array = []
 	var deliverable_resource_lookup: Dictionary = {}
 
-	for raw_city_object in CityObjectSystem.get_city_objects():
+	for raw_city_object in city_state.object_state.objects:
 		if not raw_city_object is Dictionary:
 			continue
 
@@ -1653,19 +2315,24 @@ static func _get_workplace_output_haul_opportunities() -> Array:
 		):
 			if not deliverable_resource_lookup.has(resource):
 				deliverable_resource_lookup[resource] = (
-					_resource_has_unreserved_public_storage_destination(
+					_resource_has_unreserved_public_storage_destination_for_city_state(
+						city_state,
+						decision_state,
 						resource
 					)
 				)
 
 			if (
 				not bool(deliverable_resource_lookup[resource])
-				or not CityLogisticsSystem.city_haul_endpoint_can_provide_resource({
+				or not CityLogisticsSystem.city_haul_endpoint_can_provide_resource_for_city_state(
+					city_state,
+					{
 					"endpoint": source,
 					"resource": resource,
 					"withdrawal_purpose": CityObjectCatalog.CONTAINER_HAUL_PURPOSE_WORKPLACE_OUTPUT,
 					"require_unreserved_amount": true,
-				})
+					}
+				)
 			):
 				continue
 
@@ -1687,11 +2354,13 @@ static func _get_workplace_output_haul_opportunities() -> Array:
 	return opportunities
 
 
-static func _resource_has_unreserved_public_storage_destination(
+static func _resource_has_unreserved_public_storage_destination_for_city_state(
+	city_state: CitySettlementSimulationState,
+	_decision_state: CityCitizenDecisionRuntimeStateScript,
 	resource: String
 ) -> bool:
 	for storage_tier in CityResourceContainerSystem.get_public_city_storage_tiers():
-		for raw_city_object in CityObjectSystem.get_city_objects():
+		for raw_city_object in city_state.object_state.objects:
 			if not raw_city_object is Dictionary:
 				continue
 
@@ -1707,18 +2376,23 @@ static func _resource_has_unreserved_public_storage_destination(
 				int(city_object.get("id", -1))
 			)
 
-			if CityLogisticsSystem.city_haul_endpoint_can_accept_resource({
+			if CityLogisticsSystem.city_haul_endpoint_can_accept_resource_for_city_state(
+				city_state,
+				{
 				"endpoint": destination,
 				"resource": resource,
 				"deposit_purpose": CityObjectCatalog.CONTAINER_HAUL_PURPOSE_PUBLIC_STORAGE,
 				"require_unreserved_space": true,
-			}):
+				}
+			):
 				return true
 
 	return false
 
 
-static func _try_assign_best_autonomous_haul(
+static func _try_assign_best_autonomous_haul_for_city_state(
+	city_state: CitySettlementSimulationState,
+	decision_state: CityCitizenDecisionRuntimeStateScript,
 	city_world: WorldData,
 	candidates: Array,
 	opportunities: Array
@@ -1726,7 +2400,9 @@ static func _try_assign_best_autonomous_haul(
 	if candidates.is_empty() or opportunities.is_empty():
 		return false
 
-	var source_index := _build_autonomous_haul_source_index(
+	var source_index := _build_autonomous_haul_source_index_for_city_state(
+		city_state,
+		decision_state,
 		city_world,
 		opportunities
 	)
@@ -1735,7 +2411,11 @@ static func _try_assign_best_autonomous_haul(
 	if source_tiles.is_empty():
 		return false
 
-	var matches := _build_autonomous_haul_matches({
+	var matches := _build_autonomous_haul_matches_for_city_state(
+		city_state,
+		decision_state,
+		{
+		"city_state": city_state,
 		"city_world": city_world,
 		"candidates": candidates,
 		"opportunities": opportunities,
@@ -1744,7 +2424,8 @@ static func _try_assign_best_autonomous_haul(
 			"opportunity_indices_by_tile",
 			{}
 		),
-	})
+		}
+	)
 	matches.sort_custom(_sort_autonomous_haul_matches)
 	var build_attempt_count := 0
 
@@ -1758,11 +2439,16 @@ static func _try_assign_best_autonomous_haul(
 		if not raw_match is Dictionary:
 			continue
 
-		var attempt_result := _try_assign_autonomous_haul_match({
+		var attempt_result := _try_assign_autonomous_haul_match_for_city_state(
+			city_state,
+			decision_state,
+			{
+			"city_state": city_state,
 			"city_world": city_world,
 			"match": raw_match,
 			"opportunities": opportunities,
-		})
+			}
+		)
 
 		if bool(attempt_result.get("attempted_build", false)):
 			build_attempt_count += 1
@@ -1773,7 +2459,9 @@ static func _try_assign_best_autonomous_haul(
 	return false
 
 
-static func _build_autonomous_haul_source_index(
+static func _build_autonomous_haul_source_index_for_city_state(
+	city_state: CitySettlementSimulationState,
+	_decision_state: CityCitizenDecisionRuntimeStateScript,
 	city_world: WorldData,
 	opportunities: Array
 ) -> Dictionary:
@@ -1792,7 +2480,8 @@ static func _build_autonomous_haul_source_index(
 		if not raw_source is Dictionary:
 			continue
 
-		for access_tile in CityResourceMatcherScript.get_haul_endpoint_access_tiles(
+		for access_tile in CityResourceMatcherScript.get_haul_endpoint_access_tiles_for_city_state(
+			city_state,
 			city_world,
 			raw_source
 		):
@@ -1814,7 +2503,9 @@ static func _build_autonomous_haul_source_index(
 	}
 
 
-static func _build_autonomous_haul_matches(
+static func _build_autonomous_haul_matches_for_city_state(
+	city_state: CitySettlementSimulationState,
+	_decision_state: CityCitizenDecisionRuntimeStateScript,
 	values: Dictionary
 ) -> Array:
 	var city_world: WorldData = values.get("city_world")
@@ -1850,6 +2541,7 @@ static func _build_autonomous_haul_matches(
 
 		var path_result := (
 			CityNavigationSystemScript.find_path_to_any_city_tile({
+				"city_state": city_state,
 				"city_world": city_world,
 				"start_tile": raw_current_tile,
 				"destination_tiles": source_tiles,
@@ -1901,7 +2593,9 @@ static func _build_autonomous_haul_matches(
 	return matches
 
 
-static func _try_assign_autonomous_haul_match(
+static func _try_assign_autonomous_haul_match_for_city_state(
+	city_state: CitySettlementSimulationState,
+	decision_state: CityCitizenDecisionRuntimeStateScript,
 	values: Dictionary
 ) -> Dictionary:
 	var city_world: WorldData = values.get("city_world")
@@ -1921,7 +2615,10 @@ static func _try_assign_autonomous_haul_match(
 		return {"attempted_build": false, "assigned": false}
 
 	var opportunity: Dictionary = raw_opportunity
-	var citizen := CityCitizenRegistrySystem.get_city_citizen_by_id(citizen_id)
+	var citizen := CityCitizenRegistrySystem.get_city_citizen_by_id_for_city_state(
+		city_state,
+		citizen_id
+	)
 	var source: Dictionary = opportunity.get("source", {})
 	var resource := str(
 		opportunity.get("resource_type", WorldData.RESOURCE_NONE)
@@ -1954,29 +2651,39 @@ static func _try_assign_autonomous_haul_match(
 	if (
 		citizen.is_empty()
 		or int(citizen.get("job_object_id", -1)) > 0
-		or not CityLogisticsSystem.city_haul_endpoint_can_provide_resource({
+		or not CityLogisticsSystem.city_haul_endpoint_can_provide_resource_for_city_state(
+			city_state,
+			{
 			"endpoint": source,
 			"resource": resource,
 			"withdrawal_purpose": source_access_purpose,
 			"require_unreserved_amount": true,
-		})
+			}
+		)
 	):
 		return {"attempted_build": false, "assigned": false}
 
 	if (
 		has_fixed_destination
-		and not CityLogisticsSystem.city_haul_endpoint_can_accept_resource({
+		and not CityLogisticsSystem.city_haul_endpoint_can_accept_resource_for_city_state(
+			city_state,
+			{
 			"endpoint": destination,
 			"resource": resource,
 			"deposit_purpose": destination_access_purpose,
 			"require_unreserved_space": true,
-		})
+			}
+		)
 	):
 		return {"attempted_build": false, "assigned": false}
 
 	var requested_amount := mini(
-		CityCitizenInventorySystem.get_city_citizen_available_haul_capacity(citizen_id),
-		CityLogisticsSystem.get_city_haul_endpoint_unreserved_resource_amount(
+		CityCitizenInventorySystem.get_city_citizen_available_haul_capacity_for_city_state(
+			city_state,
+			citizen_id
+		),
+		CityLogisticsSystem.get_city_haul_endpoint_unreserved_resource_amount_for_city_state(
+			city_state,
 			source,
 			resource
 		)
@@ -1989,7 +2696,8 @@ static func _try_assign_autonomous_haul_match(
 	if has_fixed_destination:
 		requested_amount = mini(
 			requested_amount,
-			CityLogisticsSystem.get_city_haul_endpoint_unreserved_destination_space(
+			CityLogisticsSystem.get_city_haul_endpoint_unreserved_destination_space_for_city_state(
+				city_state,
 				destination
 			)
 		)
@@ -1998,6 +2706,7 @@ static func _try_assign_autonomous_haul_match(
 		return {"attempted_build": false, "assigned": false}
 
 	var request_values := {
+		"city_state": city_state,
 		"city_world": city_world,
 		"citizen": citizen,
 		"source": source,
@@ -2034,11 +2743,22 @@ static func _try_assign_autonomous_haul_match(
 	if task_request.is_empty():
 		return {"attempted_build": true, "assigned": false}
 
-	if not CityCitizenTaskRuntimeSystem.assign_city_citizen_task(citizen_id, task_request):
+	if not CityCitizenTaskRuntimeSystem.assign_city_citizen_task_for_city_state(
+		city_state,
+		citizen_id,
+		task_request
+	):
 		return {"attempted_build": true, "assigned": false}
 
-	CityCitizenMovementRuntimeSystem.cancel_city_citizen_movement(citizen_id)
-	_clear_idle_activity_runtime(citizen_id)
+	CityCitizenMovementRuntimeSystem.cancel_city_citizen_movement_for_city_state(
+		city_state,
+		citizen_id
+	)
+	_clear_idle_activity_runtime_for_city_state(
+		city_state,
+		decision_state,
+		citizen_id
+	)
 	return {"attempted_build": true, "assigned": true}
 
 
@@ -2073,16 +2793,18 @@ static func _sort_autonomous_haul_matches(
 
 #region Idle Behavior
 
-static func _process_bounded_idle_behaviors(
+static func _process_bounded_idle_behaviors_for_city_state(
+	city_state: CitySettlementSimulationState,
+	decision_state: CityCitizenDecisionRuntimeStateScript,
 	work_shift_is_active: bool
 ) -> void:
-	var citizen_count := CityCitizenRegistrySystem.get_current_state().citizens.size()
+	var citizen_count := city_state.citizen_registry_state.citizens.size()
 
 	if citizen_count <= 0:
-		_idle_scan_cursor = 0
+		decision_state.idle_scan_cursor = 0
 		return
 
-	var city_world: WorldData = WorldPoliticalState.get_current_city_world()
+	var city_world: WorldData = city_state.city_world
 
 	if city_world == null:
 		return
@@ -2096,12 +2818,12 @@ static func _process_bounded_idle_behaviors(
 	)
 
 	for _scan_index in range(scan_count):
-		var citizen_index := _idle_scan_cursor % citizen_count
-		_idle_scan_cursor = (
-			(_idle_scan_cursor + 1) % citizen_count
+		var citizen_index := decision_state.idle_scan_cursor % citizen_count
+		decision_state.idle_scan_cursor = (
+			(decision_state.idle_scan_cursor + 1) % citizen_count
 		)
 
-		var raw_citizen = CityCitizenRegistrySystem.get_current_state().citizens[
+		var raw_citizen = city_state.citizen_registry_state.citizens[
 			citizen_index
 		]
 
@@ -2114,11 +2836,17 @@ static func _process_bounded_idle_behaviors(
 		if citizen_id <= 0:
 			continue
 
-		if not _citizen_is_available_for_idle_behavior(
+		if not _citizen_is_available_for_idle_behavior_for_city_state(
+			city_state,
+			decision_state,
 			citizen,
 			work_shift_is_active
 		):
-			_clear_idle_activity_runtime(citizen_id)
+			_clear_idle_activity_runtime_for_city_state(
+				city_state,
+				decision_state,
+				citizen_id
+			)
 			continue
 
 		var raw_current_tile = citizen.get(
@@ -2127,17 +2855,26 @@ static func _process_bounded_idle_behaviors(
 		)
 
 		if not raw_current_tile is Vector2i:
-			_clear_idle_activity_runtime(citizen_id)
+			_clear_idle_activity_runtime_for_city_state(
+				city_state,
+				decision_state,
+				citizen_id
+			)
 			continue
 
 		var current_tile: Vector2i = raw_current_tile
 
-		if not CityNavigationSystem.is_city_tile_walkable_for_citizen(
+		if not CityNavigationSystem.is_city_tile_walkable_for_citizen_for_city_state(
+			city_state,
 			city_world,
 			current_tile,
 			citizen_id
 		):
-			_clear_idle_activity_runtime(citizen_id)
+			_clear_idle_activity_runtime_for_city_state(
+				city_state,
+				decision_state,
+				citizen_id
+			)
 			continue
 
 		var movement_state := str(
@@ -2157,24 +2894,37 @@ static func _process_bounded_idle_behaviors(
 			movement_state
 			== CityCitizens.CITY_CITIZEN_MOVEMENT_STATE_BLOCKED
 		):
-			CityCitizenMovementRuntimeSystem.cancel_city_citizen_movement(citizen_id)
-			_idle_anchor_tile_by_citizen_id.erase(citizen_id)
-			_schedule_next_idle_decision(citizen_id)
+			CityCitizenMovementRuntimeSystem.cancel_city_citizen_movement_for_city_state(
+				city_state,
+				citizen_id
+			)
+			decision_state.idle_anchor_tile_by_citizen_id.erase(citizen_id)
+			_schedule_next_idle_decision_for_city_state(
+				city_state,
+				decision_state,
+				citizen_id
+			)
 			continue
 
-		var anchor_tile := _get_idle_anchor_tile(
+		var anchor_tile := _get_idle_anchor_tile_for_city_state(
+			city_state,
+			decision_state,
 			citizen,
 			current_tile
 		)
 
-		if not _next_idle_decision_minute_by_citizen_id.has(
+		if not decision_state.next_idle_decision_minute_by_citizen_id.has(
 			citizen_id
 		):
-			_schedule_next_idle_decision(citizen_id)
+			_schedule_next_idle_decision_for_city_state(
+				city_state,
+				decision_state,
+				citizen_id
+			)
 			continue
 
 		var next_decision_minute := int(
-			_next_idle_decision_minute_by_citizen_id.get(
+			decision_state.next_idle_decision_minute_by_citizen_id.get(
 				citizen_id,
 				SimulationClock.absolute_world_minutes
 			)
@@ -2187,38 +2937,63 @@ static func _process_bounded_idle_behaviors(
 			continue
 
 		var choice_sequence := (
-			_advance_idle_choice_sequence(citizen_id)
+			_advance_idle_choice_sequence_for_city_state(
+				city_state,
+				decision_state,
+				citizen_id
+			)
 		)
-		_next_idle_decision_minute_by_citizen_id.erase(
+		decision_state.next_idle_decision_minute_by_citizen_id.erase(
 			citizen_id
 		)
 
-		if _idle_choice_is_to_remain_still(
+		if _idle_choice_is_to_remain_still_for_city_state(
+			city_state,
+			decision_state,
 			citizen_id,
 			choice_sequence
 		):
-			_schedule_next_idle_decision(citizen_id)
+			_schedule_next_idle_decision_for_city_state(
+				city_state,
+				decision_state,
+				citizen_id
+			)
 			continue
 
 		if path_requests_remaining <= 0:
-			_schedule_next_idle_decision(citizen_id)
+			_schedule_next_idle_decision_for_city_state(
+				city_state,
+				decision_state,
+				citizen_id
+			)
 			continue
 
 		path_requests_remaining -= 1
 
-		var wander_was_assigned := _try_assign_idle_wander({
+		var wander_was_assigned := _try_assign_idle_wander_for_city_state(
+			city_state,
+			decision_state,
+			{
+			"city_state": city_state,
 			"city_world": city_world,
 			"citizen_id": citizen_id,
 			"current_tile": current_tile,
 			"anchor_tile": anchor_tile,
 			"choice_sequence": choice_sequence,
-		})
+			}
+		)
 
 		if not wander_was_assigned:
-			_schedule_next_idle_decision(citizen_id)
+			_schedule_next_idle_decision_for_city_state(
+				city_state,
+				decision_state,
+				citizen_id
+			)
 
 
-static func _citizen_is_available_for_idle_behavior(
+static func _citizen_is_available_for_idle_behavior_for_city_state(
+	city_state: CitySettlementSimulationState,
+	_decision_state: CityCitizenDecisionRuntimeStateScript,
 	citizen: Dictionary,
 	work_shift_is_active: bool
 ) -> bool:
@@ -2245,7 +3020,8 @@ static func _citizen_is_available_for_idle_behavior(
 		return false
 
 	if (
-		CityCitizenInventorySystem.get_city_citizen_haul_cargo_amount(
+		CityCitizenInventorySystem.get_city_citizen_haul_cargo_amount_for_city_state(
+			city_state,
 			int(citizen.get("id", -1))
 		) > 0
 	):
@@ -2261,7 +3037,8 @@ static func _citizen_is_available_for_idle_behavior(
 	if workplace_id <= 0:
 		return true
 
-	var workplace := CityObjectSystem.get_city_object_by_id(
+	var workplace := CityObjectSystem.get_city_object_by_id_for_city_state(
+		city_state,
 		workplace_id
 	)
 
@@ -2271,14 +3048,22 @@ static func _citizen_is_available_for_idle_behavior(
 	)
 
 
-static func _clear_idle_activity_runtime(citizen_id: int) -> void:
-	_idle_anchor_tile_by_citizen_id.erase(citizen_id)
-	_next_idle_decision_minute_by_citizen_id.erase(citizen_id)
+static func _clear_idle_activity_runtime_for_city_state(
+	_city_state: CitySettlementSimulationState,
+	decision_state: CityCitizenDecisionRuntimeStateScript,
+	citizen_id: int
+) -> void:
+	decision_state.idle_anchor_tile_by_citizen_id.erase(citizen_id)
+	decision_state.next_idle_decision_minute_by_citizen_id.erase(citizen_id)
 
 
-static func _schedule_next_idle_decision(citizen_id: int) -> void:
+static func _schedule_next_idle_decision_for_city_state(
+	city_state: CitySettlementSimulationState,
+	decision_state: CityCitizenDecisionRuntimeStateScript,
+	citizen_id: int
+) -> void:
 	var choice_sequence := int(
-		_idle_choice_sequence_by_citizen_id.get(
+		decision_state.idle_choice_sequence_by_citizen_id.get(
 			citizen_id,
 			0
 		)
@@ -2288,7 +3073,9 @@ static func _schedule_next_idle_decision(citizen_id: int) -> void:
 		- IDLE_MINIMUM_WAIT_MINUTES
 		+ 1
 	)
-	var deterministic_value := _get_idle_deterministic_value(
+	var deterministic_value := _get_idle_deterministic_value_for_city_state(
+		city_state,
+		decision_state,
 		citizen_id,
 		choice_sequence,
 		17
@@ -2298,31 +3085,39 @@ static func _schedule_next_idle_decision(citizen_id: int) -> void:
 		+ posmod(deterministic_value, wait_range)
 	)
 
-	_next_idle_decision_minute_by_citizen_id[citizen_id] = (
+	decision_state.next_idle_decision_minute_by_citizen_id[citizen_id] = (
 		SimulationClock.absolute_world_minutes
 		+ wait_minutes
 	)
 
 
-static func _advance_idle_choice_sequence(citizen_id: int) -> int:
+static func _advance_idle_choice_sequence_for_city_state(
+	_city_state: CitySettlementSimulationState,
+	decision_state: CityCitizenDecisionRuntimeStateScript,
+	citizen_id: int
+) -> int:
 	var next_sequence := (
 		int(
-			_idle_choice_sequence_by_citizen_id.get(
+			decision_state.idle_choice_sequence_by_citizen_id.get(
 				citizen_id,
 				0
 			)
 		)
 		+ 1
 	)
-	_idle_choice_sequence_by_citizen_id[citizen_id] = next_sequence
+	decision_state.idle_choice_sequence_by_citizen_id[citizen_id] = next_sequence
 	return next_sequence
 
 
-static func _idle_choice_is_to_remain_still(
+static func _idle_choice_is_to_remain_still_for_city_state(
+	city_state: CitySettlementSimulationState,
+	decision_state: CityCitizenDecisionRuntimeStateScript,
 	citizen_id: int,
 	choice_sequence: int
 ) -> bool:
-	var deterministic_value := _get_idle_deterministic_value(
+	var deterministic_value := _get_idle_deterministic_value_for_city_state(
+		city_state,
+		decision_state,
 		citizen_id,
 		choice_sequence,
 		31
@@ -2334,12 +3129,18 @@ static func _idle_choice_is_to_remain_still(
 	)
 
 
-static func _get_idle_anchor_tile(
+static func _get_idle_anchor_tile_for_city_state(
+	city_state: CitySettlementSimulationState,
+	decision_state: CityCitizenDecisionRuntimeStateScript,
 	citizen: Dictionary,
 	current_tile: Vector2i
 ) -> Vector2i:
 	var citizen_id := int(citizen.get("id", -1))
-	var life_anchor := _get_citizen_life_anchor_tile(citizen)
+	var life_anchor := _get_citizen_life_anchor_tile_for_city_state(
+		city_state,
+		decision_state,
+		citizen
+	)
 
 	if life_anchor != CityCitizens.INVALID_CITY_TILE_POSITION:
 		var distance_from_life_anchor := (
@@ -2357,10 +3158,10 @@ static func _get_idle_anchor_tile(
 			<= IDLE_ANCHOR_RADIUS_TILES
 			+ IDLE_MAXIMUM_DESTINATION_DISTANCE
 		):
-			_idle_anchor_tile_by_citizen_id[citizen_id] = life_anchor
+			decision_state.idle_anchor_tile_by_citizen_id[citizen_id] = life_anchor
 			return life_anchor
 
-	var raw_anchor_tile = _idle_anchor_tile_by_citizen_id.get(
+	var raw_anchor_tile = decision_state.idle_anchor_tile_by_citizen_id.get(
 		citizen_id,
 		CityCitizens.INVALID_CITY_TILE_POSITION
 	)
@@ -2375,22 +3176,33 @@ static func _get_idle_anchor_tile(
 		if distance_from_anchor <= IDLE_ANCHOR_RADIUS_TILES:
 			return anchor_tile
 
-	_idle_anchor_tile_by_citizen_id[citizen_id] = current_tile
+	decision_state.idle_anchor_tile_by_citizen_id[citizen_id] = current_tile
 	return current_tile
 
 
-static func _get_citizen_life_anchor_tile(citizen: Dictionary) -> Vector2i:
+static func _get_citizen_life_anchor_tile_for_city_state(
+	city_state: CitySettlementSimulationState,
+	_decision_state: CityCitizenDecisionRuntimeStateScript,
+	citizen: Dictionary
+) -> Vector2i:
 	var citizen_id := int(citizen.get("id", -1))
-	var home := CityObjectSystem.get_city_object_by_id(
+	var home := CityObjectSystem.get_city_object_by_id_for_city_state(
+		city_state,
 		int(citizen.get("home_object_id", -1))
 	)
 
 	if (
 		CityResourceMatcher.city_object_is_household_home(home)
-		and CityAssignmentSystem.get_city_object_resident_ids(home).has(citizen_id)
+		and CityAssignmentSystem.get_city_object_resident_ids_for_city_state(
+			city_state,
+			home
+		).has(citizen_id)
 	):
 		var home_tiles := CityObjectSystem.get_city_object_footprint_tiles(home)
-		var resident_ids := CityAssignmentSystem.get_city_object_resident_ids(home)
+		var resident_ids := CityAssignmentSystem.get_city_object_resident_ids_for_city_state(
+			city_state,
+			home
+		)
 		resident_ids.sort()
 		var resident_index := resident_ids.find(citizen_id)
 
@@ -2404,7 +3216,7 @@ static func _get_citizen_life_anchor_tile(citizen: Dictionary) -> Vector2i:
 
 	# Homeless citizens retain a civic center instead of anchoring to a random
 	# roadside tile. City Keep access tiles remain legal without an interior task.
-	for raw_city_object in CityObjectSystem.get_city_objects():
+	for raw_city_object in city_state.object_state.objects:
 		if not raw_city_object is Dictionary:
 			continue
 
@@ -2413,8 +3225,9 @@ static func _get_citizen_life_anchor_tile(citizen: Dictionary) -> Vector2i:
 		if str(city_object.get("type", "")) != CityObjectCatalog.CITY_OBJECT_CITY_CENTER:
 			continue
 
-		var access_tiles := CityNavigationSystem.get_city_object_access_tiles(
-			WorldPoliticalState.get_current_city_world(),
+		var access_tiles := CityNavigationSystem.get_city_object_access_tiles_for_city_state(
+			city_state,
+			city_state.city_world,
 			city_object
 		)
 
@@ -2429,7 +3242,11 @@ static func _get_citizen_life_anchor_tile(citizen: Dictionary) -> Vector2i:
 	return CityCitizens.INVALID_CITY_TILE_POSITION
 
 
-static func _try_assign_idle_wander(values: Dictionary) -> bool:
+static func _try_assign_idle_wander_for_city_state(
+	city_state: CitySettlementSimulationState,
+	decision_state: CityCitizenDecisionRuntimeStateScript,
+	values: Dictionary
+) -> bool:
 	var city_world: WorldData = values.get("city_world")
 	var citizen_id := int(values.get("citizen_id", -1))
 	var current_tile: Vector2i = values.get(
@@ -2441,17 +3258,24 @@ static func _try_assign_idle_wander(values: Dictionary) -> bool:
 		CityCitizens.INVALID_CITY_TILE_POSITION
 	)
 	var choice_sequence := int(values.get("choice_sequence", 0))
-	var candidate_tiles := _get_idle_wander_candidate_tiles({
+	var candidate_tiles := _get_idle_wander_candidate_tiles_for_city_state(
+		city_state,
+		decision_state,
+		{
+		"city_state": city_state,
 		"city_world": city_world,
 		"citizen_id": citizen_id,
 		"current_tile": current_tile,
 		"anchor_tile": anchor_tile,
-	})
+		}
+	)
 
 	if candidate_tiles.is_empty():
 		return false
 
-	var deterministic_value := _get_idle_deterministic_value(
+	var deterministic_value := _get_idle_deterministic_value_for_city_state(
+		city_state,
+		decision_state,
 		citizen_id,
 		choice_sequence,
 		47
@@ -2463,6 +3287,7 @@ static func _try_assign_idle_wander(values: Dictionary) -> bool:
 	var selected_tile: Vector2i = candidate_tiles[selected_index]
 	var path_result := (
 		CityNavigationSystemScript.find_path_to_any_city_tile({
+			"city_state": city_state,
 			"city_world": city_world,
 			"start_tile": current_tile,
 			"destination_tiles": [selected_tile],
@@ -2489,13 +3314,16 @@ static func _try_assign_idle_wander(values: Dictionary) -> bool:
 	):
 		return false
 
-	return CityCitizenMovementRuntimeSystem.assign_city_citizen_movement_order(
+	return CityCitizenMovementRuntimeSystem.assign_city_citizen_movement_order_for_city_state(
+		city_state,
 		citizen_id,
 		movement_path
 	)
 
 
-static func _get_idle_wander_candidate_tiles(
+static func _get_idle_wander_candidate_tiles_for_city_state(
+	city_state: CitySettlementSimulationState,
+	_decision_state: CityCitizenDecisionRuntimeStateScript,
 	values: Dictionary
 ) -> Array[Vector2i]:
 	var city_world: WorldData = values.get("city_world")
@@ -2543,14 +3371,16 @@ static func _get_idle_wander_candidate_tiles(
 			):
 				continue
 
-			if not CityNavigationSystem.is_city_tile_walkable_for_citizen(
+			if not CityNavigationSystem.is_city_tile_walkable_for_citizen_for_city_state(
+				city_state,
 				city_world,
 				candidate_tile,
 				citizen_id
 			):
 				continue
 
-			if CityCitizenSpatialSystem.has_living_city_citizen_at_tile(
+			if CityCitizenSpatialSystem.has_living_city_citizen_at_tile_for_city_state(
+				city_state,
 				candidate_tile
 			):
 				continue
@@ -2560,7 +3390,9 @@ static func _get_idle_wander_candidate_tiles(
 	return candidate_tiles
 
 
-static func _get_idle_deterministic_value(
+static func _get_idle_deterministic_value_for_city_state(
+	_city_state: CitySettlementSimulationState,
+	_decision_state: CityCitizenDecisionRuntimeStateScript,
 	citizen_id: int,
 	choice_sequence: int,
 	salt: int
@@ -2570,5 +3402,6 @@ static func _get_idle_deterministic_value(
 	deterministic_value ^= salt * 83_492_791
 	deterministic_value &= 0x7fffffff
 	return deterministic_value
+
 
 #endregion

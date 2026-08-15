@@ -452,8 +452,10 @@ static func _validate_city_citizen_demographics(
 					+ " name pool."
 			)
 
+	var current_city_state = WorldPoliticalState.get_current_city_simulation_state()
 	if (
-		WorldData.player_city_founded
+		current_city_state is CitySettlementSimulationState
+		and current_city_state.is_city_founded()
 		and (
 			CityCitizenRegistrySystem.get_current_state().citizens.size()
 			== CityCitizenRegistrySystem.STARTING_CITY_POPULATION
@@ -531,52 +533,63 @@ static func _validate_city_citizen_culture_state(
 				+ "."
 			)
 
-	if not WorldData.player_city_founded:
+	var city_state = WorldPoliticalState.get_current_city_simulation_state()
+	if (
+		not city_state is CitySettlementSimulationState
+		or not city_state.is_city_founded()
+	):
 		return
 
 	var primary_culture_id := WorldData.INVALID_CULTURE_ID
 
-	if not WorldPoliticalState.get_current_city_runtime_data().has("primary_culture_id"):
+	if not city_state.city_runtime_data.has("primary_culture_id"):
 		errors.append(
-			"Founded player city is missing primary_culture_id."
+			"Founded settlement is missing primary_culture_id."
 		)
 	elif (
 		typeof(
-			WorldPoliticalState.get_current_city_runtime_data().get("primary_culture_id")
+			city_state.city_runtime_data.get("primary_culture_id")
 		)
 		!= TYPE_INT
 	):
 		errors.append(
-			"Founded player city has a non-integer primary_culture_id."
+			"Founded settlement has a non-integer primary_culture_id."
 		)
 	else:
 		primary_culture_id = int(
-			WorldPoliticalState.get_current_city_runtime_data().get("primary_culture_id")
+			city_state.city_runtime_data.get("primary_culture_id")
 		)
 
 		if primary_culture_id <= 0:
 			errors.append(
-				"Founded player city has a nonpositive primary_culture_id."
+				"Founded settlement has a nonpositive primary_culture_id."
 			)
 		elif not WorldData.has_culture_id(primary_culture_id):
 			errors.append(
-				"Founded player city references nonexistent culture "
+				"Founded settlement references nonexistent culture "
 				+ str(primary_culture_id)
 				+ "."
 			)
 
-	if not WorldData.has_official_founding_identity():
-		errors.append(
-			"Founded player city has no official founding identity."
-		)
-	else:
+	var settlement_context = WorldPoliticalState.get_settlement_context(
+		WorldPoliticalState.active_settlement_id
+	)
+	var is_player_capital: bool = (
+		settlement_context != null
+		and settlement_context.is_player_polity
+		and settlement_context.is_capital
+	)
+
+	if is_player_capital and not WorldData.has_official_founding_identity():
+		errors.append("Founded player capital has no official founding identity.")
+	elif is_player_capital:
 		var player_city_name := str(
-			WorldPoliticalState.get_current_city_runtime_data().get("name", "")
+			city_state.city_runtime_data.get("name", "")
 		)
 
 		if player_city_name != WorldData.get_official_city_name():
 			errors.append(
-				"Founded player city name disagrees with the official city name."
+				"Founded player capital name disagrees with the official city name."
 			)
 
 		if (
@@ -585,7 +598,7 @@ static func _validate_city_citizen_culture_state(
 			!= primary_culture_id
 		):
 			errors.append(
-				"Founded player city culture disagrees with the official founding culture."
+				"Founded player capital culture disagrees with the official founding culture."
 			)
 
 		if (
@@ -595,7 +608,7 @@ static func _validate_city_citizen_culture_state(
 			!= WorldData.get_official_founding_culture_name()
 		):
 			errors.append(
-				"Founded player city culture name disagrees with the official founding culture name."
+				"Founded player capital culture name disagrees with the official founding culture name."
 			)
 
 	if not (

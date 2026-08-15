@@ -80,6 +80,26 @@ static func get_city_home_food_target_nutrition(
 			CityAssignmentSystem.get_city_object_resident_count(home)
 			* CityCitizens.CITIZEN_HUNGER_LOSS_PER_DAY
 			* HOUSEHOLD_FOOD_TARGET_DAY_NUMERATOR
+	)
+		/ float(HOUSEHOLD_FOOD_TARGET_DAY_DENOMINATOR)
+	)
+
+
+static func get_city_home_food_target_nutrition_for_city_state(
+	city_state: CitySettlementSimulationState,
+	home: Dictionary
+) -> int:
+	if not city_object_is_household_home(home):
+		return 0
+
+	return ceili(
+		float(
+			CityAssignmentSystem.get_city_object_resident_count_for_city_state(
+				city_state,
+				home
+			)
+			* CityCitizens.CITIZEN_HUNGER_LOSS_PER_DAY
+			* HOUSEHOLD_FOOD_TARGET_DAY_NUMERATOR
 		)
 		/ float(HOUSEHOLD_FOOD_TARGET_DAY_DENOMINATOR)
 	)
@@ -107,10 +127,35 @@ static func get_living_city_citizen_count() -> int:
 
 	return living_count
 
+
+static func get_living_city_citizen_count_for_city_state(
+	city_state: CitySettlementSimulationState
+) -> int:
+	var living_count := 0
+
+	for raw_citizen in city_state.citizen_registry_state.citizens:
+		if raw_citizen is Dictionary and bool(raw_citizen.get("alive", false)):
+			living_count += 1
+
+	return living_count
+
 static func get_city_public_food_reserve_target_nutrition() -> int:
 	return ceili(
 		float(
 			get_living_city_citizen_count()
+			* CityCitizens.CITIZEN_HUNGER_LOSS_PER_DAY
+			* PUBLIC_FOOD_RESERVE_TARGET_DAY_NUMERATOR
+		)
+		/ float(PUBLIC_FOOD_RESERVE_TARGET_DAY_DENOMINATOR)
+	)
+
+
+static func get_city_public_food_reserve_target_nutrition_for_city_state(
+	city_state: CitySettlementSimulationState
+) -> int:
+	return ceili(
+		float(
+			get_living_city_citizen_count_for_city_state(city_state)
 			* CityCitizens.CITIZEN_HUNGER_LOSS_PER_DAY
 			* PUBLIC_FOOD_RESERVE_TARGET_DAY_NUMERATOR
 		)
@@ -123,6 +168,21 @@ static func get_city_food_task_reserved_source_amount(
 	excluding_citizen_id: int = -1
 ) -> int:
 	return CityCitizenTaskRuntimeSystem.get_city_food_task_reserved_endpoint_amount(
+		CityCitizens.CITY_CITIZEN_HAUL_ENDPOINT_KIND_CITY_OBJECT_CONTAINER,
+		object_id,
+		resource,
+		excluding_citizen_id
+	)
+
+
+static func get_city_food_task_reserved_source_amount_for_city_state(
+	city_state: CitySettlementSimulationState,
+	object_id: int,
+	resource: String,
+	excluding_citizen_id: int = -1
+) -> int:
+	return CityCitizenTaskRuntimeSystem.get_city_food_task_reserved_endpoint_amount_for_city_state(
+		city_state,
 		CityCitizens.CITY_CITIZEN_HAUL_ENDPOINT_KIND_CITY_OBJECT_CONTAINER,
 		object_id,
 		resource,
@@ -145,6 +205,41 @@ static func get_city_object_unreserved_food_amount(
 		CityResourceContainerSystem.get_city_object_stored_resource_amount(city_object, resource)
 		- CityLogisticsSystem.get_city_haul_endpoint_source_reserved_amount(endpoint, resource)
 		- get_city_food_task_reserved_source_amount(
+			object_id,
+			resource,
+			excluding_citizen_id
+		),
+		0
+	)
+
+
+static func get_city_object_unreserved_food_amount_for_city_state(
+	city_state: CitySettlementSimulationState,
+	city_object: Dictionary,
+	resource: String,
+	excluding_citizen_id: int = -1
+) -> int:
+	if (
+		city_object.is_empty()
+		or CityResourceCatalog.get_city_food_hunger_restore(resource) <= 0
+	):
+		return 0
+
+	var object_id := int(city_object.get("id", -1))
+	var endpoint := CityLogisticsSystem.make_city_citizen_haul_endpoint(object_id)
+
+	return maxi(
+		CityResourceContainerSystem.get_city_object_stored_resource_amount(
+			city_object,
+			resource
+		)
+		- CityLogisticsSystem.get_city_haul_endpoint_source_reserved_amount_for_city_state(
+			city_state,
+			endpoint,
+			resource
+		)
+		- get_city_food_task_reserved_source_amount_for_city_state(
+			city_state,
 			object_id,
 			resource,
 			excluding_citizen_id
@@ -176,10 +271,56 @@ static func get_city_public_unreserved_food_nutrition() -> int:
 
 	return total_nutrition
 
+
+static func get_city_public_unreserved_food_nutrition_for_city_state(
+	city_state: CitySettlementSimulationState
+) -> int:
+	var total_nutrition := 0
+
+	for raw_city_object in CityObjectSystem.get_city_objects_for_city_state(
+		city_state
+	):
+		if not raw_city_object is Dictionary:
+			continue
+
+		var city_object: Dictionary = raw_city_object
+
+		if (
+			CityResourceContainerSystem.get_city_object_public_storage_tier(
+				city_object
+			) == CityObjectCatalog.PUBLIC_CITY_STORAGE_TIER_NONE
+			or not CityResourceContainerSystem.city_object_container_is_publicly_usable(
+				city_object
+			)
+		):
+			continue
+
+		for resource in CityResourceCatalog.get_city_food_resource_types():
+			total_nutrition += (
+				get_city_object_unreserved_food_amount_for_city_state(
+					city_state,
+					city_object,
+					resource
+				)
+				* CityResourceCatalog.get_city_food_hunger_restore(resource)
+			)
+
+	return total_nutrition
+
 static func get_city_public_food_surplus_nutrition() -> int:
 	return maxi(
 		get_city_public_unreserved_food_nutrition()
 		- get_city_public_food_reserve_target_nutrition(),
+		0
+	)
+
+
+static func get_city_public_food_surplus_nutrition_for_city_state(
+	city_state: CitySettlementSimulationState
+) -> int:
+	return maxi(
+		get_city_public_unreserved_food_nutrition_for_city_state(city_state)
+		- get_city_public_food_reserve_target_nutrition_for_city_state(city_state),
 		0
 	)
 
@@ -192,6 +333,13 @@ static func get_city_home_stored_food_nutrition(
 	return CityResourceContainerSystem.get_food_nutrition_in_resource_container(
 		home.get("stored_resources", {})
 	)
+
+
+static func get_city_home_stored_food_nutrition_for_city_state(
+	_city_state: CitySettlementSimulationState,
+	home: Dictionary
+) -> int:
+	return get_city_home_stored_food_nutrition(home)
 
 static func get_city_home_incoming_food_nutrition(
 	home: Dictionary,
@@ -250,6 +398,58 @@ static func get_city_home_incoming_food_nutrition(
 
 	return incoming_nutrition
 
+
+static func get_city_home_incoming_food_nutrition_for_city_state(
+	city_state: CitySettlementSimulationState,
+	home: Dictionary,
+	excluding_reservation_id: int = (
+		CityCitizens.INVALID_CITY_CITIZEN_HAUL_RESERVATION_ID
+	)
+) -> int:
+	if not city_object_is_household_home(home):
+		return 0
+
+	var home_endpoint := CityLogisticsSystem.make_city_citizen_haul_endpoint(
+		int(home.get("id", -1))
+	)
+	var incoming_nutrition := 0
+
+	for raw_reservation in CityLogisticsSystem.get_city_haul_reservation_snapshot_for_city_state(
+		city_state
+	):
+		if not raw_reservation is Dictionary:
+			continue
+
+		var reservation: Dictionary = raw_reservation
+		var reservation_id := int(reservation.get("id", -1))
+
+		if reservation_id == excluding_reservation_id:
+			continue
+
+		if (
+			str(
+				reservation.get(
+					"destination_access_purpose",
+					CityObjectCatalog.CONTAINER_HAUL_PURPOSE_NONE
+				)
+			) != CityObjectCatalog.CONTAINER_HAUL_PURPOSE_HOME_DELIVERY
+			or not CityLogisticsSystem.city_citizen_haul_endpoints_match(
+				reservation.get("destination", {}),
+				home_endpoint
+			)
+		):
+			continue
+
+		var resource := str(
+			reservation.get("resource_type", WorldData.RESOURCE_NONE)
+		)
+		incoming_nutrition += (
+			maxi(int(reservation.get("destination_reserved_amount", 0)), 0)
+			* CityResourceCatalog.get_city_food_hunger_restore(resource)
+		)
+
+	return incoming_nutrition
+
 static func get_city_home_unfulfilled_food_nutrition(
 	home: Dictionary,
 	excluding_reservation_id: int = (
@@ -260,6 +460,25 @@ static func get_city_home_unfulfilled_food_nutrition(
 		get_city_home_food_target_nutrition(home)
 		- get_city_home_stored_food_nutrition(home)
 		- get_city_home_incoming_food_nutrition(
+			home,
+			excluding_reservation_id
+		),
+		0
+	)
+
+
+static func get_city_home_unfulfilled_food_nutrition_for_city_state(
+	city_state: CitySettlementSimulationState,
+	home: Dictionary,
+	excluding_reservation_id: int = (
+		CityCitizens.INVALID_CITY_CITIZEN_HAUL_RESERVATION_ID
+	)
+) -> int:
+	return maxi(
+		get_city_home_food_target_nutrition_for_city_state(city_state, home)
+		- get_city_home_stored_food_nutrition_for_city_state(city_state, home)
+		- get_city_home_incoming_food_nutrition_for_city_state(
+			city_state,
 			home,
 			excluding_reservation_id
 		),
@@ -292,6 +511,33 @@ static func get_city_home_requested_food_units(
 		float(unfulfilled_nutrition) / float(hunger_restore)
 	)
 	return pantry_requested_units
+
+
+static func get_city_home_requested_food_units_for_city_state(
+	city_state: CitySettlementSimulationState,
+	home: Dictionary,
+	resource: String,
+	excluding_reservation_id: int = (
+		CityCitizens.INVALID_CITY_CITIZEN_HAUL_RESERVATION_ID
+	)
+) -> int:
+	var hunger_restore := CityResourceCatalog.get_city_food_hunger_restore(resource)
+
+	if hunger_restore <= 0:
+		return 0
+
+	var unfulfilled_nutrition := (
+		get_city_home_unfulfilled_food_nutrition_for_city_state(
+			city_state,
+			home,
+			excluding_reservation_id
+		)
+	)
+
+	if unfulfilled_nutrition <= 0:
+		return 0
+
+	return ceili(float(unfulfilled_nutrition) / float(hunger_restore))
 
 static func get_city_home_food_supply_status(
 	home: Dictionary
@@ -380,6 +626,22 @@ static func get_resource_demand_order_priority_rank_for_destination(
 	):
 		return _get_construction_order_priority_rank(
 			int(destination.get("id", -1))
+		)
+
+	return 0
+
+
+static func get_resource_demand_order_priority_rank_for_destination_for_city_state(
+	city_state: CitySettlementSimulationState,
+	destination: Dictionary
+) -> int:
+	if (
+		str(destination.get("kind", ""))
+		== CityCitizens.CITY_CITIZEN_HAUL_ENDPOINT_KIND_CONSTRUCTION_SITE
+	):
+		return _get_construction_order_priority_rank(
+			int(destination.get("id", -1)),
+			city_state
 		)
 
 	return 0
@@ -481,6 +743,7 @@ static func find_best_cargo_resource_demand(
 static func _find_best_cargo_construction_demand(
 	values: Dictionary
 ) -> Dictionary:
+	var raw_city_state = values.get("city_state")
 	var raw_city_world = values.get("city_world")
 	var raw_start_tile = values.get(
 		"start_tile",
@@ -489,12 +752,14 @@ static func _find_best_cargo_construction_demand(
 	var raw_resources = values.get("resources", {})
 
 	if (
-		not raw_city_world is WorldData
+		(values.has("city_state") and not raw_city_state is CitySettlementSimulationState)
+		or not raw_city_world is WorldData
 		or not raw_start_tile is Vector2i
 		or not raw_resources is Dictionary
 	):
 		return {"candidate": {}, "path_requests_used": 0}
 
+	var city_state: CitySettlementSimulationState = raw_city_state
 	var city_world: WorldData = raw_city_world
 	var start_tile: Vector2i = raw_start_tile
 	var resources: Dictionary = raw_resources
@@ -522,7 +787,15 @@ static func _find_best_cargo_construction_demand(
 	# Build cheap demand descriptors first. Exact route searches are reserved for
 	# the strongest bounded candidates, preventing a city with many blueprints
 	# from performing one full-city pathfind per site at every cargo boundary.
-	for raw_site in CityConstructionSystem.get_city_construction_site_snapshot():
+	var construction_sites := (
+		CityConstructionSystem.get_city_construction_site_snapshot()
+		if city_state == null
+		else CityConstructionSystem.get_city_construction_site_snapshot_for_city_state(
+			city_state
+		)
+	)
+
+	for raw_site in construction_sites:
 		if not raw_site is Dictionary:
 			continue
 
@@ -561,9 +834,22 @@ static func _find_best_cargo_construction_demand(
 					site_id,
 					resource
 				)
+				if city_state == null
+				else CityConstructionSystem.get_city_construction_site_unreserved_resource_space_for_city_state(
+					city_state,
+					site_id,
+					resource
+				)
 			)
 			var soft_reserved_space := (
 				CityLogisticsSystem.get_city_soft_haul_destination_reserved_resource_amount(
+					destination,
+					resource,
+					citizen_id
+				)
+				if city_state == null
+				else CityLogisticsSystem.get_city_soft_haul_destination_reserved_resource_amount_for_city_state(
+					city_state,
 					destination,
 					resource,
 					citizen_id
@@ -597,6 +883,13 @@ static func _find_best_cargo_construction_demand(
 				site,
 				citizen_id
 			)
+			if city_state == null
+			else CityConstructionSystem.get_city_construction_site_access_tiles_for_city_state(
+				city_state,
+				city_world,
+				site,
+				citizen_id
+			)
 		)
 
 		if access_tiles.is_empty():
@@ -608,8 +901,9 @@ static func _find_best_cargo_construction_demand(
 				access_tiles
 			)
 		)
-		var order_priority_rank := (
-			_get_construction_order_priority_rank(site_id)
+		var order_priority_rank := _get_construction_order_priority_rank(
+			site_id,
+			city_state
 		)
 		var preliminary_score := score_resource_destination({
 			"category": RESOURCE_DEMAND_CATEGORY_PLAYER_COMMAND,
@@ -657,15 +951,18 @@ static func _find_best_cargo_construction_demand(
 			continue
 
 		path_requests_used += 1
-		var path_result := (
-			CityNavigationSystemScript.find_path_to_any_city_tile({
+		var path_values := {
 				"city_world": city_world,
 				"start_tile": start_tile,
 				"destination_tiles": access_tiles,
 				"max_expanded_nodes": CityNavigationSystemScript.get_city_wide_path_expansion_limit(city_world),
 				"citizen_id": citizen_id,
 				"heuristic_weight": EXACT_PATH_HEURISTIC_WEIGHT
-			})
+			}
+		if city_state != null:
+			path_values["city_state"] = city_state
+		var path_result := CityNavigationSystemScript.find_path_to_any_city_tile(
+			path_values
 		)
 
 		if not bool(path_result.get("success", false)):
@@ -749,8 +1046,17 @@ static func _sort_preliminary_resource_demand_candidates(
 	return int(a.get("site_id", -1)) < int(b.get("site_id", -1))
 
 
-static func _get_construction_order_priority_rank(site_id: int) -> int:
-	for raw_order in CityWorkSystem.get_city_work_order_snapshot():
+static func _get_construction_order_priority_rank(
+	site_id: int,
+	city_state: CitySettlementSimulationState = null
+) -> int:
+	var work_orders := (
+		CityWorkSystem.get_city_work_order_snapshot()
+		if city_state == null
+		else CityWorkSystem.get_city_work_order_snapshot_for_city_state(city_state)
+	)
+
+	for raw_order in work_orders:
 		if (
 			raw_order is Dictionary
 			and str(raw_order.get("order_type", ""))
@@ -982,11 +1288,15 @@ static func _find_nearest_eligible_destination_in_tier(
 	values: Dictionary,
 	storage_tier: int
 ) -> Dictionary:
+	var raw_city_state = values.get("city_state")
 	var raw_city_world = values.get("city_world")
 	var raw_start_tile = values.get(
 		"start_tile",
 		CityCitizens.INVALID_CITY_TILE_POSITION
 	)
+
+	if values.has("city_state") and not raw_city_state is CitySettlementSimulationState:
+		return {}
 
 	if not raw_city_world is WorldData:
 		return {}
@@ -994,6 +1304,7 @@ static func _find_nearest_eligible_destination_in_tier(
 	if not raw_start_tile is Vector2i:
 		return {}
 
+	var city_state: CitySettlementSimulationState = raw_city_state
 	var city_world: WorldData = raw_city_world
 	var start_tile: Vector2i = raw_start_tile
 	var citizen_id := int(values.get("citizen_id", -1))
@@ -1031,7 +1342,7 @@ static func _find_nearest_eligible_destination_in_tier(
 	# This is the replaceable destination-eligibility policy boundary. The
 	# current policy deliberately scans every compatible public container in
 	# the city; later radii, priorities, filters, and preferences belong here.
-	for raw_city_object in CityObjectSystem.get_city_objects():
+	for raw_city_object in _get_matcher_city_objects(city_state):
 		if not raw_city_object is Dictionary:
 			continue
 
@@ -1054,7 +1365,7 @@ static func _find_nearest_eligible_destination_in_tier(
 			object_id
 		)
 
-		if not CityLogisticsSystem.city_haul_endpoint_can_accept_resource({
+		if not _matcher_endpoint_can_accept_resource(city_state, {
 			"endpoint": endpoint,
 			"resource": resource,
 			"deposit_purpose": destination_access_purpose,
@@ -1063,7 +1374,8 @@ static func _find_nearest_eligible_destination_in_tier(
 		}):
 			continue
 
-		for access_tile in get_haul_endpoint_access_tiles(
+		for access_tile in _get_matcher_haul_endpoint_access_tiles(
+			city_state,
 			city_world,
 			endpoint
 		):
@@ -1080,15 +1392,16 @@ static func _find_nearest_eligible_destination_in_tier(
 	if destination_tiles.is_empty():
 		return {}
 
-	var path_result := (
-		CityNavigationSystemScript.find_path_to_any_city_tile({
+	var path_result := _find_matcher_path_to_any_city_tile(
+		city_state,
+		{
 			"city_world": city_world,
 			"start_tile": start_tile,
 			"destination_tiles": destination_tiles,
 			"max_expanded_nodes": CityNavigationSystemScript.get_city_wide_path_expansion_limit(city_world),
 			"citizen_id": citizen_id,
 			"heuristic_weight": EXACT_PATH_HEURISTIC_WEIGHT
-		})
+		}
 	)
 
 	if not bool(path_result.get("success", false)):
@@ -1124,7 +1437,7 @@ static func _find_nearest_eligible_destination_in_tier(
 			endpoint_id
 		)
 
-		if not CityLogisticsSystem.city_haul_endpoint_can_accept_resource({
+		if not _matcher_endpoint_can_accept_resource(city_state, {
 			"endpoint": endpoint,
 			"resource": resource,
 			"deposit_purpose": destination_access_purpose,
@@ -1133,11 +1446,10 @@ static func _find_nearest_eligible_destination_in_tier(
 		}):
 			continue
 
-		var available_amount := (
-			CityLogisticsSystem.get_city_haul_endpoint_unreserved_destination_space(
-				endpoint,
-				reservation_id
-			)
+		var available_amount := _get_matcher_unreserved_destination_space(
+			city_state,
+			endpoint,
+			reservation_id
 		)
 
 		if requested_amount > 0:
@@ -1186,6 +1498,7 @@ static func _find_nearest_eligible_destination_for_resources_in_tier(
 	values: Dictionary,
 	storage_tier: int
 ) -> Dictionary:
+	var raw_city_state = values.get("city_state")
 	var raw_city_world = values.get("city_world")
 	var raw_start_tile = values.get(
 		"start_tile",
@@ -1194,12 +1507,14 @@ static func _find_nearest_eligible_destination_for_resources_in_tier(
 	var raw_resources = values.get("resources", {})
 
 	if (
-		not raw_city_world is WorldData
+		(values.has("city_state") and not raw_city_state is CitySettlementSimulationState)
+		or not raw_city_world is WorldData
 		or not raw_start_tile is Vector2i
 		or not raw_resources is Dictionary
 	):
 		return {}
 
+	var city_state: CitySettlementSimulationState = raw_city_state
 	var city_world: WorldData = raw_city_world
 	var start_tile: Vector2i = raw_start_tile
 	var resources: Dictionary = raw_resources
@@ -1232,7 +1547,7 @@ static func _find_nearest_eligible_destination_for_resources_in_tier(
 	var endpoint_ids_by_access_tile: Dictionary = {}
 	var destination_tiles: Array = []
 
-	for raw_city_object in CityObjectSystem.get_city_objects():
+	for raw_city_object in _get_matcher_city_objects(city_state):
 		if not raw_city_object is Dictionary:
 			continue
 
@@ -1260,10 +1575,11 @@ static func _find_nearest_eligible_destination_for_resources_in_tier(
 			"resources": resources,
 			"destination_access_purpose": destination_access_purpose,
 			"reservation_id": reservation_id,
-		}):
+		}, city_state):
 			continue
 
-		for access_tile in get_haul_endpoint_access_tiles(
+		for access_tile in _get_matcher_haul_endpoint_access_tiles(
+			city_state,
 			city_world,
 			endpoint
 		):
@@ -1280,15 +1596,16 @@ static func _find_nearest_eligible_destination_for_resources_in_tier(
 	if destination_tiles.is_empty():
 		return {}
 
-	var path_result := (
-		CityNavigationSystemScript.find_path_to_any_city_tile({
+	var path_result := _find_matcher_path_to_any_city_tile(
+		city_state,
+		{
 			"city_world": city_world,
 			"start_tile": start_tile,
 			"destination_tiles": destination_tiles,
 			"max_expanded_nodes": CityNavigationSystemScript.get_city_wide_path_expansion_limit(city_world),
 			"citizen_id": citizen_id,
 			"heuristic_weight": EXACT_PATH_HEURISTIC_WEIGHT
-		})
+		}
 	)
 
 	if not bool(path_result.get("success", false)):
@@ -1326,14 +1643,13 @@ static func _find_nearest_eligible_destination_for_resources_in_tier(
 			"resources": resources,
 			"destination_access_purpose": destination_access_purpose,
 			"reservation_id": reservation_id,
-		}):
+		}, city_state):
 			continue
 
-		var available_amount := (
-			CityLogisticsSystem.get_city_haul_endpoint_unreserved_destination_space(
-				endpoint,
-				reservation_id
-			)
+		var available_amount := _get_matcher_unreserved_destination_space(
+			city_state,
+			endpoint,
+			reservation_id
 		)
 
 		if requested_amount > 0:
@@ -1358,7 +1674,8 @@ static func _find_nearest_eligible_destination_for_resources_in_tier(
 
 
 static func _destination_accepts_resource_manifest(
-	values: Dictionary
+	values: Dictionary,
+	city_state: CitySettlementSimulationState = null
 ) -> bool:
 	var destination: Dictionary = values.get("destination", {})
 	var resources: Dictionary = values.get("resources", {})
@@ -1384,7 +1701,7 @@ static func _destination_accepts_resource_manifest(
 		if (
 			amount <= 0
 			or not CityResourceCatalog.is_city_resource_type(resource)
-			or not CityLogisticsSystem.city_haul_endpoint_can_accept_resource({
+			or not _matcher_endpoint_can_accept_resource(city_state, {
 				"endpoint": destination,
 				"resource": resource,
 				"deposit_purpose": destination_access_purpose,
@@ -1400,6 +1717,7 @@ static func _destination_accepts_resource_manifest(
 static func make_destination_result_for_endpoint_resources(
 	values: Dictionary
 ) -> Dictionary:
+	var raw_city_state = values.get("city_state")
 	var raw_city_world = values.get("city_world")
 	var raw_start_tile = values.get(
 		"start_tile",
@@ -1409,13 +1727,15 @@ static func make_destination_result_for_endpoint_resources(
 	var raw_resources = values.get("resources", {})
 
 	if (
-		not raw_city_world is WorldData
+		(values.has("city_state") and not raw_city_state is CitySettlementSimulationState)
+		or not raw_city_world is WorldData
 		or not raw_start_tile is Vector2i
 		or not raw_destination is Dictionary
 		or not raw_resources is Dictionary
 	):
 		return {}
 
+	var city_state: CitySettlementSimulationState = raw_city_state
 	var city_world: WorldData = raw_city_world
 	var start_tile: Vector2i = raw_start_tile
 	var destination := CityCitizens.make_city_citizen_haul_endpoint(
@@ -1445,18 +1765,18 @@ static func make_destination_result_for_endpoint_resources(
 		"resources": resources,
 		"destination_access_purpose": destination_access_purpose,
 		"reservation_id": reservation_id,
-	}):
+	}, city_state):
 		return {}
 
-	var available_amount := (
-		CityLogisticsSystem.get_city_haul_endpoint_unreserved_destination_space(
-			destination,
-			reservation_id
-		)
+	var available_amount := _get_matcher_unreserved_destination_space(
+		city_state,
+		destination,
+		reservation_id
 	)
 
 	if reservation_id > 0:
-		var reservation := CityLogisticsSystem.get_city_haul_reservation(
+		var reservation := _get_matcher_haul_reservation(
+			city_state,
 			reservation_id
 		)
 
@@ -1489,7 +1809,8 @@ static func make_destination_result_for_endpoint_resources(
 	if available_amount <= 0:
 		return {}
 
-	var destination_tiles := get_haul_endpoint_access_tiles(
+	var destination_tiles := _get_matcher_haul_endpoint_access_tiles(
+		city_state,
 		city_world,
 		destination
 	)
@@ -1497,15 +1818,16 @@ static func make_destination_result_for_endpoint_resources(
 	if destination_tiles.is_empty():
 		return {}
 
-	var path_result := (
-		CityNavigationSystemScript.find_path_to_any_city_tile({
+	var path_result := _find_matcher_path_to_any_city_tile(
+		city_state,
+		{
 			"city_world": city_world,
 			"start_tile": start_tile,
 			"destination_tiles": destination_tiles,
 			"max_expanded_nodes": CityNavigationSystemScript.get_city_wide_path_expansion_limit(city_world),
 			"citizen_id": citizen_id,
 			"heuristic_weight": EXACT_PATH_HEURISTIC_WEIGHT
-		})
+		}
 	)
 
 	if not bool(path_result.get("success", false)):
@@ -1527,7 +1849,7 @@ static func make_destination_result_for_endpoint_resources(
 		"path_cost": int(path_result.get("path_cost", 0)),
 		"available_amount": available_amount,
 		"storage_tier": CityResourceContainerSystem.get_city_object_public_storage_tier(
-			_get_container_object_for_endpoint(destination)
+			_get_matcher_container_object_for_endpoint(city_state, destination)
 		),
 	}
 
@@ -1535,6 +1857,7 @@ static func make_destination_result_for_endpoint_resources(
 static func make_destination_result_for_endpoint(
 	values: Dictionary
 ) -> Dictionary:
+	var raw_city_state = values.get("city_state")
 	var raw_city_world = values.get("city_world")
 	var raw_start_tile = values.get(
 		"start_tile",
@@ -1543,12 +1866,14 @@ static func make_destination_result_for_endpoint(
 	var raw_destination = values.get("destination", {})
 
 	if (
-		not raw_city_world is WorldData
+		(values.has("city_state") and not raw_city_state is CitySettlementSimulationState)
+		or not raw_city_world is WorldData
 		or not raw_start_tile is Vector2i
 		or not raw_destination is Dictionary
 	):
 		return {}
 
+	var city_state: CitySettlementSimulationState = raw_city_state
 	var city_world: WorldData = raw_city_world
 	var start_tile: Vector2i = raw_start_tile
 	var destination := CityCitizens.make_city_citizen_haul_endpoint(
@@ -1575,7 +1900,7 @@ static func make_destination_result_for_endpoint(
 		0
 	)
 
-	if not CityLogisticsSystem.city_haul_endpoint_can_accept_resource({
+	if not _matcher_endpoint_can_accept_resource(city_state, {
 		"endpoint": destination,
 		"resource": resource,
 		"deposit_purpose": destination_access_purpose,
@@ -1584,15 +1909,15 @@ static func make_destination_result_for_endpoint(
 	}):
 		return {}
 
-	var available_amount := (
-		CityLogisticsSystem.get_city_haul_endpoint_unreserved_destination_space(
-			destination,
-			reservation_id
-		)
+	var available_amount := _get_matcher_unreserved_destination_space(
+		city_state,
+		destination,
+		reservation_id
 	)
 
 	if reservation_id > 0:
-		var reservation := CityLogisticsSystem.get_city_haul_reservation(
+		var reservation := _get_matcher_haul_reservation(
+			city_state,
 			reservation_id
 		)
 
@@ -1625,7 +1950,8 @@ static func make_destination_result_for_endpoint(
 	if available_amount <= 0:
 		return {}
 
-	var destination_tiles := get_haul_endpoint_access_tiles(
+	var destination_tiles := _get_matcher_haul_endpoint_access_tiles(
+		city_state,
 		city_world,
 		destination
 	)
@@ -1633,15 +1959,16 @@ static func make_destination_result_for_endpoint(
 	if destination_tiles.is_empty():
 		return {}
 
-	var path_result := (
-		CityNavigationSystemScript.find_path_to_any_city_tile({
+	var path_result := _find_matcher_path_to_any_city_tile(
+		city_state,
+		{
 			"city_world": city_world,
 			"start_tile": start_tile,
 			"destination_tiles": destination_tiles,
 			"max_expanded_nodes": CityNavigationSystemScript.get_city_wide_path_expansion_limit(city_world),
 			"citizen_id": citizen_id,
 			"heuristic_weight": EXACT_PATH_HEURISTIC_WEIGHT
-		})
+		}
 	)
 
 	if not bool(path_result.get("success", false)):
@@ -1663,7 +1990,7 @@ static func make_destination_result_for_endpoint(
 		"path_cost": int(path_result.get("path_cost", 0)),
 		"available_amount": available_amount,
 		"storage_tier": CityResourceContainerSystem.get_city_object_public_storage_tier(
-			_get_container_object_for_endpoint(destination)
+			_get_matcher_container_object_for_endpoint(city_state, destination)
 		),
 	}
 
@@ -1733,6 +2060,136 @@ static func get_resource_supply_candidates(
 
 	candidates.sort_custom(_sort_supply_candidates)
 	return candidates
+
+
+static func get_resource_supply_candidates_for_city_state(
+	city_state: CitySettlementSimulationState,
+	purpose: String,
+	resource: String,
+	requested_amount: int
+) -> Array[Dictionary]:
+	var candidates: Array[Dictionary] = []
+
+	if (
+		city_state == null
+		or purpose != PURPOSE_CONSTRUCTION_SUPPLY
+		or not CityResourceCatalog.is_city_resource_type(resource)
+		or requested_amount <= 0
+	):
+		return candidates
+
+	for raw_object in CityObjectSystem.get_city_objects_for_city_state(city_state):
+		if not raw_object is Dictionary:
+			continue
+
+		var city_object: Dictionary = raw_object
+
+		if not CityResourceContainerSystem.city_object_container_is_publicly_usable(
+			city_object
+		):
+			continue
+
+		_append_supply_candidate_for_city_state(city_state, {
+			"candidates": candidates,
+			"endpoint": CityLogisticsSystem.make_city_citizen_haul_endpoint(
+				int(city_object.get("id", -1))
+			),
+			"resource": resource,
+			"requested_amount": requested_amount,
+			"source_access_purpose": (
+				CityObjectCatalog.CONTAINER_HAUL_PURPOSE_CONSTRUCTION
+			),
+			"source_tier": _get_public_storage_source_tier(city_object),
+			"protect_public_food": true,
+		})
+
+	for raw_pile in CityLogisticsSystem.get_city_ground_pile_snapshot_for_city_state(
+		city_state
+	):
+		if (
+			not raw_pile is Dictionary
+			or CityLogisticsSystem.city_ground_pile_is_construction_reserved(
+				raw_pile
+			)
+		):
+			continue
+
+		_append_supply_candidate_for_city_state(city_state, {
+			"candidates": candidates,
+			"endpoint": CityLogisticsSystem.make_city_ground_pile_haul_endpoint(
+				int(raw_pile.get("id", -1))
+			),
+			"resource": resource,
+			"requested_amount": requested_amount,
+			"source_access_purpose": (
+				CityObjectCatalog.CONTAINER_HAUL_PURPOSE_CONSTRUCTION
+			),
+			"source_tier": 2,
+			"protect_public_food": false,
+		})
+
+	candidates.sort_custom(_sort_supply_candidates)
+	return candidates
+
+
+static func _append_supply_candidate_for_city_state(
+	city_state: CitySettlementSimulationState,
+	values: Dictionary
+) -> void:
+	var candidates: Array[Dictionary] = values.get("candidates", [])
+	var endpoint: Dictionary = values.get("endpoint", {})
+	var resource := str(values.get("resource", WorldData.RESOURCE_NONE))
+	var requested_amount := maxi(int(values.get("requested_amount", 0)), 0)
+	var source_access_purpose := str(
+		values.get(
+			"source_access_purpose",
+			CityObjectCatalog.CONTAINER_HAUL_PURPOSE_NONE
+		)
+	)
+	var source_tier := int(values.get("source_tier", 0))
+	var protect_public_food := bool(values.get("protect_public_food", false))
+
+	if not CityLogisticsSystem.city_haul_endpoint_can_provide_resource_for_city_state(
+		city_state,
+		{
+			"endpoint": endpoint,
+			"resource": resource,
+			"withdrawal_purpose": source_access_purpose,
+			"require_unreserved_amount": true,
+		}
+	):
+		return
+
+	var available_amount := (
+		CityLogisticsSystem.get_city_haul_endpoint_unreserved_resource_amount_for_city_state(
+			city_state,
+			endpoint,
+			resource
+		)
+	)
+	var hunger_restore := CityResourceCatalog.get_city_food_hunger_restore(resource)
+
+	if protect_public_food and hunger_restore > 0:
+		available_amount = mini(
+			available_amount,
+			floori(
+				float(
+					get_city_public_food_surplus_nutrition_for_city_state(
+						city_state
+					)
+				) / float(hunger_restore)
+			)
+		)
+
+	available_amount = mini(available_amount, requested_amount)
+
+	if available_amount > 0:
+		candidates.append({
+			"endpoint": endpoint,
+			"available_amount": available_amount,
+			"source_access_purpose": source_access_purpose,
+			"source_tier": source_tier,
+		})
 
 
 static func _append_supply_candidate(values: Dictionary) -> void:
@@ -2562,6 +3019,793 @@ static func _sort_source_group(group: Array[Dictionary]) -> void:
 			return int(endpoint_a.get("id", -1)) < int(
 				endpoint_b.get("id", -1)
 			)
+	)
+
+#endregion
+
+#region Explicit City-State Food and Endpoint Matching
+
+static func find_best_survival_food_source_for_city_state(
+	city_state: CitySettlementSimulationState,
+	citizen: Dictionary,
+	desired_nutrition: int,
+	available_capacity: int,
+	maximum_path_requests: int
+) -> Dictionary:
+	var citizen_id := int(citizen.get("id", -1))
+	var raw_current_tile = citizen.get(
+		"city_tile_position",
+		CityCitizens.INVALID_CITY_TILE_POSITION
+	)
+
+	if (
+		city_state == null
+		or city_state.city_world == null
+		or citizen_id <= 0
+		or not raw_current_tile is Vector2i
+		or desired_nutrition <= 0
+		or available_capacity <= 0
+		or maximum_path_requests <= 0
+	):
+		return {}
+
+	var home_candidates: Array[Dictionary] = []
+	var alternative_candidates: Array[Dictionary] = []
+	var source_groups := _get_survival_source_groups_for_city_state(
+		city_state,
+		citizen
+	)
+	var source_preference_ranks: Array[int] = [
+		SURVIVAL_SOURCE_PREFERENCE_HOME,
+		SURVIVAL_SOURCE_PREFERENCE_STOCKPILE,
+		SURVIVAL_SOURCE_PREFERENCE_KEEP,
+		SURVIVAL_SOURCE_PREFERENCE_WORKPLACE,
+		SURVIVAL_SOURCE_PREFERENCE_GROUND_PILE,
+	]
+
+	for group_index in range(source_groups.size()):
+		var raw_source_group = source_groups[group_index]
+
+		if not raw_source_group is Array:
+			continue
+
+		var source_preference_rank := (
+			source_preference_ranks[group_index]
+			if group_index < source_preference_ranks.size()
+			else source_preference_ranks.size()
+		)
+
+		for raw_endpoint in raw_source_group:
+			if not raw_endpoint is Dictionary:
+				continue
+
+			var candidate := _make_survival_endpoint_candidate_for_city_state(
+				city_state,
+				citizen_id,
+				raw_endpoint,
+				desired_nutrition,
+				available_capacity,
+				source_preference_rank
+			)
+
+			if candidate.is_empty():
+				continue
+
+			if source_preference_rank == SURVIVAL_SOURCE_PREFERENCE_HOME:
+				home_candidates.append(candidate)
+			else:
+				alternative_candidates.append(candidate)
+
+	var current_tile: Vector2i = raw_current_tile
+	var is_critical := (
+		CitizenNeedsSystem.get_city_citizen_hunger_for_city_state(
+			city_state,
+			citizen_id
+		) <= CityCitizens.CITIZEN_CRITICAL_FOOD_SEEK_TRIGGER_HUNGER
+	)
+
+	if (
+		is_critical
+		or home_candidates.is_empty()
+		or alternative_candidates.is_empty()
+		or maximum_path_requests < 2
+	):
+		var all_candidates: Array[Dictionary] = []
+		all_candidates.append_array(home_candidates)
+		all_candidates.append_array(alternative_candidates)
+		return _find_best_reachable_source_candidate_for_city_state(
+			city_state,
+			citizen_id,
+			current_tile,
+			all_candidates
+		)
+
+	var alternative_result := _find_best_reachable_source_candidate_for_city_state(
+		city_state,
+		citizen_id,
+		current_tile,
+		alternative_candidates
+	)
+	var path_requests_used := int(
+		alternative_result.get("path_requests_used", 0)
+	)
+	var home_result: Dictionary = {}
+
+	if path_requests_used < maximum_path_requests:
+		home_result = _find_best_reachable_source_candidate_for_city_state(
+			city_state,
+			citizen_id,
+			current_tile,
+			home_candidates
+		)
+		path_requests_used += int(home_result.get("path_requests_used", 0))
+
+	var best_result := _choose_normal_survival_food_result(
+		home_result,
+		alternative_result
+	)
+
+	if not best_result.is_empty():
+		best_result["path_requests_used"] = path_requests_used
+		return best_result
+
+	return {"path_requests_used": path_requests_used}
+
+
+static func find_best_household_food_source_for_city_state(
+	city_state: CitySettlementSimulationState,
+	citizen: Dictionary,
+	resource: String,
+	requested_amount: int,
+	maximum_path_requests: int = 32
+) -> Dictionary:
+	var citizen_id := int(citizen.get("id", -1))
+	var raw_current_tile = citizen.get(
+		"city_tile_position",
+		CityCitizens.INVALID_CITY_TILE_POSITION
+	)
+
+	if (
+		city_state == null
+		or city_state.city_world == null
+		or citizen_id <= 0
+		or not raw_current_tile is Vector2i
+		or CityResourceCatalog.get_city_food_hunger_restore(resource) <= 0
+		or requested_amount <= 0
+		or maximum_path_requests <= 0
+		or get_city_public_food_surplus_nutrition_for_city_state(city_state) <= 0
+	):
+		return {}
+
+	var current_tile: Vector2i = raw_current_tile
+	var path_requests_used := 0
+
+	for source_group in _get_household_source_groups_for_city_state(city_state):
+		if path_requests_used >= maximum_path_requests:
+			break
+
+		var candidates: Array[Dictionary] = []
+
+		for raw_source in source_group:
+			if not raw_source is Dictionary:
+				continue
+
+			var candidate := _make_household_source_candidate_for_city_state(
+				city_state,
+				citizen_id,
+				raw_source,
+				resource,
+				requested_amount
+			)
+
+			if not candidate.is_empty():
+				candidates.append(candidate)
+
+		var best_result := _find_best_reachable_source_candidate_for_city_state(
+			city_state,
+			citizen_id,
+			current_tile,
+			candidates
+		)
+		path_requests_used += int(best_result.get("path_requests_used", 0))
+
+		if (
+			best_result.get("endpoint", {}) is Dictionary
+			and int(best_result.get("available_amount", 0)) > 0
+		):
+			best_result["path_requests_used"] = path_requests_used
+			return best_result
+
+	return {"path_requests_used": path_requests_used}
+
+
+static func _get_survival_source_groups_for_city_state(
+	city_state: CitySettlementSimulationState,
+	citizen: Dictionary
+) -> Array:
+	var own_home_group: Array[Dictionary] = []
+	var stockpile_group: Array[Dictionary] = []
+	var keep_group: Array[Dictionary] = []
+	var workplace_group: Array[Dictionary] = []
+	var ground_pile_group: Array[Dictionary] = []
+	var home_id := int(citizen.get("home_object_id", -1))
+	var home := CityObjectSystem.get_city_object_by_id_for_city_state(
+		city_state,
+		home_id
+	)
+
+	if city_object_is_household_home(home):
+		own_home_group.append(
+			CityLogisticsSystem.make_city_citizen_haul_endpoint(home_id)
+		)
+
+	for raw_object in CityObjectSystem.get_city_objects_for_city_state(city_state):
+		if not raw_object is Dictionary:
+			continue
+
+		var city_object: Dictionary = raw_object
+		var object_id := int(city_object.get("id", -1))
+		var endpoint := CityLogisticsSystem.make_city_citizen_haul_endpoint(
+			object_id
+		)
+		var storage_tier := (
+			CityResourceContainerSystem.get_city_object_public_storage_tier(
+				city_object
+			)
+		)
+
+		if storage_tier == CityObjectCatalog.PUBLIC_CITY_STORAGE_TIER_STOCKPILE:
+			stockpile_group.append(endpoint)
+		elif storage_tier == CityObjectCatalog.PUBLIC_CITY_STORAGE_TIER_CITY_KEEP:
+			keep_group.append(endpoint)
+		elif CityResourceContainerSystem.get_city_object_container_type(
+			city_object
+		) == CityObjectCatalog.CONTAINER_TYPE_WORKPLACE_STORAGE:
+			workplace_group.append(endpoint)
+
+	for raw_pile in CityLogisticsSystem.get_city_ground_pile_snapshot_for_city_state(
+		city_state
+	):
+		if (
+			not raw_pile is Dictionary
+			or CityLogisticsSystem.city_ground_pile_is_construction_reserved(
+				raw_pile
+			)
+			or CityResourceCatalog.get_city_food_hunger_restore(
+				str(raw_pile.get("resource_type", WorldData.RESOURCE_NONE))
+			) <= 0
+		):
+			continue
+
+		ground_pile_group.append(
+			CityLogisticsSystem.make_city_ground_pile_haul_endpoint(
+				int(raw_pile.get("id", -1))
+			)
+		)
+
+	_sort_endpoint_group(own_home_group)
+	_sort_endpoint_group(stockpile_group)
+	_sort_endpoint_group(keep_group)
+	_sort_endpoint_group(workplace_group)
+	_sort_endpoint_group(ground_pile_group)
+	return [
+		own_home_group,
+		stockpile_group,
+		keep_group,
+		workplace_group,
+		ground_pile_group,
+	]
+
+
+static func _get_household_source_groups_for_city_state(
+	city_state: CitySettlementSimulationState
+) -> Array:
+	var stockpile_group: Array[Dictionary] = []
+	var keep_group: Array[Dictionary] = []
+	var workplace_group: Array[Dictionary] = []
+	var ground_pile_group: Array[Dictionary] = []
+
+	for raw_object in CityObjectSystem.get_city_objects_for_city_state(city_state):
+		if not raw_object is Dictionary:
+			continue
+
+		var city_object: Dictionary = raw_object
+		var endpoint := CityLogisticsSystem.make_city_citizen_haul_endpoint(
+			int(city_object.get("id", -1))
+		)
+		var storage_tier := (
+			CityResourceContainerSystem.get_city_object_public_storage_tier(
+				city_object
+			)
+		)
+		var source := {
+			"endpoint": endpoint,
+			"source_access_purpose": (
+				CityObjectCatalog.CONTAINER_HAUL_PURPOSE_HOME_DELIVERY
+			),
+			"protect_public_food": true,
+			"source_class": "public_storage",
+		}
+
+		if storage_tier == CityObjectCatalog.PUBLIC_CITY_STORAGE_TIER_STOCKPILE:
+			stockpile_group.append(source)
+		elif storage_tier == CityObjectCatalog.PUBLIC_CITY_STORAGE_TIER_CITY_KEEP:
+			keep_group.append(source)
+		elif CityResourceContainerSystem.get_city_object_container_type(
+			city_object
+		) == CityObjectCatalog.CONTAINER_TYPE_WORKPLACE_STORAGE:
+			source["source_access_purpose"] = (
+				CityObjectCatalog.CONTAINER_HAUL_PURPOSE_HOUSEHOLD_FOOD_SOURCE
+			)
+			source["protect_public_food"] = false
+			source["source_class"] = "workplace_output"
+			workplace_group.append(source)
+
+	for raw_pile in CityLogisticsSystem.get_city_ground_pile_snapshot_for_city_state(
+		city_state
+	):
+		if (
+			not raw_pile is Dictionary
+			or CityLogisticsSystem.city_ground_pile_is_construction_reserved(
+				raw_pile
+			)
+		):
+			continue
+
+		ground_pile_group.append({
+			"endpoint": CityLogisticsSystem.make_city_ground_pile_haul_endpoint(
+				int(raw_pile.get("id", -1))
+			),
+			"source_access_purpose": (
+				CityObjectCatalog.CONTAINER_HAUL_PURPOSE_HOUSEHOLD_FOOD_SOURCE
+			),
+			"protect_public_food": false,
+			"source_class": "ground_pile",
+		})
+
+	_sort_source_group(stockpile_group)
+	_sort_source_group(keep_group)
+	_sort_source_group(workplace_group)
+	_sort_source_group(ground_pile_group)
+	return [
+		stockpile_group,
+		keep_group,
+		workplace_group,
+		ground_pile_group,
+	]
+
+
+static func _make_survival_endpoint_candidate_for_city_state(
+	city_state: CitySettlementSimulationState,
+	citizen_id: int,
+	endpoint: Dictionary,
+	desired_nutrition: int,
+	available_capacity: int,
+	source_preference_rank: int
+) -> Dictionary:
+	var best_resource := WorldData.RESOURCE_NONE
+	var requested_amount := 0
+
+	for resource in CityResourceCatalog.get_city_food_resource_types():
+		if not CitizenNeedsSystem.city_citizen_can_withdraw_food_from_endpoint_for_city_state(
+			city_state,
+			citizen_id,
+			endpoint,
+			resource
+		):
+			continue
+
+		var hunger_restore := (
+			CityResourceCatalog.get_city_food_hunger_restore(resource)
+		)
+		var available_amount := (
+			CitizenNeedsSystem.get_city_food_endpoint_unreserved_amount_for_city_state(
+				city_state,
+				citizen_id,
+				endpoint,
+				resource
+			)
+		)
+
+		if hunger_restore <= 0 or available_amount <= 0:
+			continue
+
+		best_resource = resource
+		requested_amount = mini(
+			available_amount,
+			mini(
+				available_capacity,
+				ceili(float(desired_nutrition) / float(hunger_restore))
+			)
+		)
+		requested_amount = mini(requested_amount, 1)
+		break
+
+	if requested_amount <= 0:
+		return {}
+
+	var target_tiles := (
+		CitizenNeedsSystem.get_city_citizen_food_endpoint_target_tiles_for_city_state(
+			city_state,
+			citizen_id,
+			endpoint
+		)
+	)
+
+	if target_tiles.is_empty():
+		return {}
+
+	return {
+		"endpoint": endpoint,
+		"source_id": int(endpoint.get("id", -1)),
+		"source_kind": str(endpoint.get("kind", "")),
+		"object_id": int(endpoint.get("id", -1)),
+		"resource_type": best_resource,
+		"requested_amount": requested_amount,
+		"source_preference_rank": source_preference_rank,
+		"candidate_access_tiles": target_tiles,
+	}
+
+
+static func _make_household_source_candidate_for_city_state(
+	city_state: CitySettlementSimulationState,
+	citizen_id: int,
+	source: Dictionary,
+	resource: String,
+	requested_amount: int
+) -> Dictionary:
+	var endpoint = source.get("endpoint", {})
+	var source_access_purpose := str(
+		source.get(
+			"source_access_purpose",
+			CityObjectCatalog.CONTAINER_HAUL_PURPOSE_NONE
+		)
+	)
+
+	if not endpoint is Dictionary:
+		return {}
+
+	var available_amount := (
+		CityLogisticsSystem.get_city_haul_endpoint_unreserved_resource_amount_for_city_state(
+			city_state,
+			endpoint,
+			resource
+		)
+	)
+
+	if bool(source.get("protect_public_food", false)):
+		available_amount = mini(
+			available_amount,
+			floori(
+				float(
+					get_city_public_food_surplus_nutrition_for_city_state(
+						city_state
+					)
+				) / float(
+					CityResourceCatalog.get_city_food_hunger_restore(resource)
+				)
+			)
+		)
+
+	if (
+		available_amount <= 0
+		or not CityLogisticsSystem.city_haul_endpoint_can_provide_resource_for_city_state(
+			city_state,
+			{
+				"endpoint": endpoint,
+				"resource": resource,
+				"withdrawal_purpose": source_access_purpose,
+				"require_unreserved_amount": true,
+			}
+		)
+	):
+		return {}
+
+	var access_tiles := _get_endpoint_access_tiles_for_city_state(
+		city_state,
+		endpoint,
+		citizen_id
+	)
+
+	if access_tiles.is_empty():
+		return {}
+
+	return {
+		"endpoint": endpoint,
+		"source_access_purpose": source_access_purpose,
+		"available_amount": mini(available_amount, requested_amount),
+		"source_class": str(source.get("source_class", "")),
+		"candidate_access_tiles": access_tiles,
+	}
+
+
+static func _find_best_reachable_source_candidate_for_city_state(
+	city_state: CitySettlementSimulationState,
+	citizen_id: int,
+	current_tile: Vector2i,
+	candidates: Array[Dictionary]
+) -> Dictionary:
+	var target_tiles: Array = []
+	var candidates_by_target_tile: Dictionary = {}
+
+	for candidate in candidates:
+		var raw_access_tiles = candidate.get("candidate_access_tiles", [])
+
+		if not raw_access_tiles is Array:
+			continue
+
+		for raw_access_tile in raw_access_tiles:
+			if not raw_access_tile is Vector2i:
+				continue
+
+			var access_tile: Vector2i = raw_access_tile
+
+			if not candidates_by_target_tile.has(access_tile):
+				candidates_by_target_tile[access_tile] = []
+				target_tiles.append(access_tile)
+
+			var tile_candidates: Array = candidates_by_target_tile[access_tile]
+			tile_candidates.append(candidate)
+			candidates_by_target_tile[access_tile] = tile_candidates
+
+	if target_tiles.is_empty():
+		return {}
+
+	var path_result := (
+		CityNavigationSystemScript.find_path_to_any_city_tile_for_city_state(
+			city_state,
+			{
+				"city_world": city_state.city_world,
+				"start_tile": current_tile,
+				"destination_tiles": target_tiles,
+				"max_expanded_nodes": (
+					CityNavigationSystemScript.get_city_wide_path_expansion_limit(
+						city_state.city_world
+					)
+				),
+				"citizen_id": citizen_id,
+				"heuristic_weight": EXACT_PATH_HEURISTIC_WEIGHT,
+			}
+		)
+	)
+
+	if not bool(path_result.get("success", false)):
+		return {"path_requests_used": 1}
+
+	var raw_target_tile = path_result.get(
+		"destination_tile",
+		CityCitizens.INVALID_CITY_TILE_POSITION
+	)
+
+	if (
+		not raw_target_tile is Vector2i
+		or not candidates_by_target_tile.has(raw_target_tile)
+	):
+		return {"path_requests_used": 1}
+
+	var best_result: Dictionary = {}
+	var path_cost := int(path_result.get("path_cost", 0))
+
+	for raw_candidate in candidates_by_target_tile[raw_target_tile]:
+		if not raw_candidate is Dictionary:
+			continue
+
+		var result: Dictionary = raw_candidate.duplicate(true)
+		result.erase("candidate_access_tiles")
+		result["target_tile"] = raw_target_tile
+		result["path_cost"] = path_cost
+		result["path_requests_used"] = 1
+
+		if _source_result_is_better(result, best_result):
+			best_result = result
+
+	return best_result
+
+
+static func _get_endpoint_access_tiles_for_city_state(
+	city_state: CitySettlementSimulationState,
+	endpoint: Dictionary,
+	citizen_id: int
+) -> Array:
+	match str(endpoint.get("kind", "")):
+		CityCitizens.CITY_CITIZEN_HAUL_ENDPOINT_KIND_CITY_OBJECT_CONTAINER:
+			return CityNavigationSystem.get_city_object_access_tiles_for_city_state(
+				city_state,
+				city_state.city_world,
+				CityObjectSystem.get_city_object_by_id_for_city_state(
+					city_state,
+					int(endpoint.get("id", -1))
+				)
+			)
+
+		CityCitizens.CITY_CITIZEN_HAUL_ENDPOINT_KIND_GROUND_PILE:
+			var pile := CityLogisticsSystem.get_city_ground_pile_by_id_for_city_state(
+				city_state,
+				int(endpoint.get("id", -1))
+			)
+			var raw_tile = pile.get(
+				"tile_position",
+				CityCitizens.INVALID_CITY_TILE_POSITION
+			)
+
+			if (
+				raw_tile is Vector2i
+				and CityNavigationSystem.is_city_tile_walkable_for_citizen_for_city_state(
+					city_state,
+					city_state.city_world,
+					raw_tile,
+					citizen_id
+				)
+			):
+				return [raw_tile]
+
+	return []
+
+
+static func get_haul_endpoint_access_tiles_for_city_state(
+	city_state: CitySettlementSimulationState,
+	city_world: WorldData,
+	endpoint: Dictionary
+) -> Array:
+	if city_state == null or city_world == null:
+		return []
+
+	var endpoint_kind := str(
+		endpoint.get(
+			"kind",
+			CityCitizens.CITY_CITIZEN_HAUL_ENDPOINT_KIND_NONE
+		)
+	)
+	var endpoint_id := int(endpoint.get("id", -1))
+
+	if endpoint_kind == CityCitizens.CITY_CITIZEN_HAUL_ENDPOINT_KIND_GROUND_PILE:
+		var ground_pile := CityLogisticsSystem.get_city_ground_pile_by_id_for_city_state(
+			city_state,
+			endpoint_id
+		)
+		var raw_tile_position = ground_pile.get(
+			"tile_position",
+			CityCitizens.INVALID_CITY_TILE_POSITION
+		)
+
+		return [raw_tile_position] if raw_tile_position is Vector2i else []
+
+	if endpoint_kind == CityCitizens.CITY_CITIZEN_HAUL_ENDPOINT_KIND_GROUND_TILE:
+		var raw_ground_tile = endpoint.get(
+			"tile_position",
+			CityCitizens.INVALID_CITY_TILE_POSITION
+		)
+
+		if (
+			raw_ground_tile is Vector2i
+			and CityLogisticsSystem.can_city_ground_pile_exist_at_tile_for_city_state(
+				city_state,
+				city_world,
+				raw_ground_tile
+			)
+		):
+			return [raw_ground_tile]
+
+		return []
+
+	if endpoint_kind == CityCitizens.CITY_CITIZEN_HAUL_ENDPOINT_KIND_CONSTRUCTION_SITE:
+		return CityConstructionSystem.get_city_construction_site_access_tiles_for_city_state(
+			city_state,
+			city_world,
+			CityConstructionSystem.get_city_construction_site_by_id_for_city_state(
+				city_state,
+				endpoint_id
+			)
+		)
+
+	var city_object := CityObjectSystem.get_city_object_by_id_for_city_state(
+		city_state,
+		endpoint_id
+	)
+
+	if city_object.is_empty():
+		return []
+
+	return CityNavigationSystem.get_city_object_access_tiles_for_city_state(
+		city_state,
+		city_world,
+		city_object
+	)
+
+
+static func _get_matcher_city_objects(
+	city_state: CitySettlementSimulationState
+) -> Array:
+	if city_state == null:
+		return CityObjectSystem.get_city_objects()
+	return CityObjectSystem.get_city_objects_for_city_state(city_state)
+
+
+static func _matcher_endpoint_can_accept_resource(
+	city_state: CitySettlementSimulationState,
+	values: Dictionary
+) -> bool:
+	if city_state == null:
+		return CityLogisticsSystem.city_haul_endpoint_can_accept_resource(values)
+	return CityLogisticsSystem.city_haul_endpoint_can_accept_resource_for_city_state(
+		city_state,
+		values
+	)
+
+
+static func _get_matcher_unreserved_destination_space(
+	city_state: CitySettlementSimulationState,
+	endpoint: Dictionary,
+	excluding_reservation_id: int
+) -> int:
+	if city_state == null:
+		return CityLogisticsSystem.get_city_haul_endpoint_unreserved_destination_space(
+			endpoint,
+			excluding_reservation_id
+		)
+	return CityLogisticsSystem.get_city_haul_endpoint_unreserved_destination_space_for_city_state(
+		city_state,
+		endpoint,
+		excluding_reservation_id
+	)
+
+
+static func _get_matcher_haul_reservation(
+	city_state: CitySettlementSimulationState,
+	reservation_id: int
+) -> Dictionary:
+	if city_state == null:
+		return CityLogisticsSystem.get_city_haul_reservation(reservation_id)
+	return CityLogisticsSystem.get_city_haul_reservation_for_city_state(
+		city_state,
+		reservation_id
+	)
+
+
+static func _get_matcher_haul_endpoint_access_tiles(
+	city_state: CitySettlementSimulationState,
+	city_world: WorldData,
+	endpoint: Dictionary
+) -> Array:
+	if city_state == null:
+		return get_haul_endpoint_access_tiles(city_world, endpoint)
+	return get_haul_endpoint_access_tiles_for_city_state(
+		city_state,
+		city_world,
+		endpoint
+	)
+
+
+static func _find_matcher_path_to_any_city_tile(
+	city_state: CitySettlementSimulationState,
+	values: Dictionary
+) -> Dictionary:
+	if city_state == null:
+		return CityNavigationSystemScript.find_path_to_any_city_tile(values)
+	return CityNavigationSystemScript.find_path_to_any_city_tile_for_city_state(
+		city_state,
+		values
+	)
+
+
+static func _get_matcher_container_object_for_endpoint(
+	city_state: CitySettlementSimulationState,
+	endpoint: Dictionary
+) -> Dictionary:
+	if city_state == null:
+		return _get_container_object_for_endpoint(endpoint)
+	if (
+		str(
+			endpoint.get(
+				"kind",
+				CityCitizens.CITY_CITIZEN_HAUL_ENDPOINT_KIND_NONE
+			)
+		) != CityCitizens.CITY_CITIZEN_HAUL_ENDPOINT_KIND_CITY_OBJECT_CONTAINER
+	):
+		return {}
+	return CityObjectSystem.get_city_object_by_id_for_city_state(
+		city_state,
+		int(endpoint.get("id", -1))
 	)
 
 #endregion

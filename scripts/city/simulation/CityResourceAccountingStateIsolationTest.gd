@@ -53,6 +53,21 @@ func _test_equal_version_city_isolation() -> void:
 
 	var city_a_id := int(city_a["id"])
 	var city_b_id := int(city_b["id"])
+	var culture_id := int(culture.get("id", -1))
+	var city_a_state = WorldPoliticalState.get_city_simulation_state(city_a_id)
+	var city_b_state = WorldPoliticalState.get_city_simulation_state(city_b_id)
+	_seed_city_runtime_data(
+		city_a_state,
+		city_a_id,
+		"Accounting City A",
+		culture_id
+	)
+	_seed_city_runtime_data(
+		city_b_state,
+		city_b_id,
+		"Accounting City B",
+		culture_id
+	)
 	_expect(
 		WorldPoliticalState.set_active_settlement(city_a_id),
 		"City A must become active."
@@ -60,16 +75,18 @@ func _test_equal_version_city_isolation() -> void:
 	var world_a := _make_world(24, 20, 95_101)
 	WorldPoliticalState.set_current_city_world(world_a)
 	WorldPoliticalState.set_current_city_seed(95_101)
+	var keep_a := _register_keep(world_a)
+	_mark_city_founded(city_a_state, keep_a)
 	var stockpile_a := _register_stockpile(world_a)
 	var stockpile_a_id := int(stockpile_a.get("id", -1))
 	_expect(
-		stockpile_a_id == 1
+		stockpile_a_id == 2
 		and CityResourceContainerSystem.add_resource_to_city_object_storage(
 			stockpile_a_id,
 			WorldData.RESOURCE_FISH,
 			7
 		) == 7,
-		"City A must create local Stockpile 1 with seven fish."
+		"City A must create local Stockpile 2 with seven fish."
 	)
 	var city_a_total := CityResourceAccountingSystem.get_total_owned_city_resource_amount(
 		WorldData.RESOURCE_FISH
@@ -86,8 +103,8 @@ func _test_equal_version_city_isolation() -> void:
 
 	_expect(
 		city_a_total == 7
-		and state_a_container_version == 2
-		and state_a_public_version == 2
+		and state_a_container_version == 3
+		and state_a_public_version == 3
 		and state_a_cache_version == state_a_container_version
 		and int(cache_a.get(WorldData.RESOURCE_FISH, 0)) == 7,
 		"City A accounting must cache its physical Stockpile total."
@@ -100,16 +117,18 @@ func _test_equal_version_city_isolation() -> void:
 	var world_b := _make_world(24, 20, 95_202)
 	WorldPoliticalState.set_current_city_world(world_b)
 	WorldPoliticalState.set_current_city_seed(95_202)
+	var keep_b := _register_keep(world_b)
+	_mark_city_founded(city_b_state, keep_b)
 	var stockpile_b := _register_stockpile(world_b)
 	var stockpile_b_id := int(stockpile_b.get("id", -1))
 	_expect(
-		stockpile_b_id == 1
+		stockpile_b_id == 2
 		and CityResourceContainerSystem.add_resource_to_city_object_storage(
 			stockpile_b_id,
 			WorldData.RESOURCE_FISH,
 			31
 		) == 31,
-		"City B must independently create local Stockpile 1 with 31 fish."
+		"City B must independently create local Stockpile 2 with 31 fish."
 	)
 	var city_b_total := CityResourceAccountingSystem.get_total_owned_city_resource_amount(
 		WorldData.RESOURCE_FISH
@@ -438,13 +457,65 @@ func _register_stockpile(city_world: WorldData) -> Dictionary:
 	})
 
 
+func _register_keep(city_world: WorldData) -> Dictionary:
+	return CityObjectSystem.register_completed_city_object({
+		"object_type": CityObjectCatalog.CITY_OBJECT_CITY_CENTER,
+		"top_left": Vector2i.ZERO,
+		"size_tiles": CityObjectCatalog.get_city_object_size_for_type(
+			CityObjectCatalog.CITY_OBJECT_CITY_CENTER
+		),
+		"object_owner": "player",
+		"city_world": city_world,
+	})
+
+
+func _seed_city_runtime_data(
+	city_state: CitySettlementSimulationState,
+	city_id: int,
+	city_name: String,
+	culture_id: int
+) -> void:
+	if city_state == null:
+		return
+
+	city_state.city_runtime_data.merge({
+		"id": city_id,
+		"name": city_name,
+		"primary_culture_id": culture_id,
+		"founded": false,
+		"can_build": false,
+	}, true)
+
+
+func _mark_city_founded(
+	city_state: CitySettlementSimulationState,
+	keep: Dictionary
+) -> void:
+	if city_state == null or city_state.city_world == null or keep.is_empty():
+		return
+
+	city_state.city_runtime_data.merge({
+		"city_world_seed": city_state.city_seed,
+		"city_map_size": Vector2i(
+			city_state.city_world.width,
+			city_state.city_world.height
+		),
+		"foundation_top_left": keep.get("top_left", Vector2i(-1, -1)),
+		"foundation_size": keep.get("size", Vector2i.ZERO),
+		"foundation_object_id": int(keep.get("id", -1)),
+		"foundation_object_owner": str(keep.get("owner", "")),
+		"founded": true,
+		"can_build": true,
+	}, true)
+
+
 func _make_world(width: int, height: int, seed: int) -> WorldData:
 	var world := WorldData.new()
 	world.setup(width, height, seed)
 
 	for y in range(height):
 		for x in range(width):
-			var tile := world.get_tile(x, y)
+			var tile := world.get_tile_for_internal_read(x, y)
 			tile["terrain"] = WorldData.TERRAIN_LAND
 			tile["biome"] = WorldData.BIOME_PLAIN
 			tile["is_land"] = true

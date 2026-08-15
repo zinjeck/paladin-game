@@ -28,6 +28,7 @@ func _ready() -> void:
 	_test_starving_food_workers_keep_survival_schedule()
 	_test_starving_worker_recovers_and_returns_to_work()
 	_test_starving_residents_keep_return_home_schedule()
+	_test_off_shift_home_queue_survives_unassignable_haul_work()
 	_test_persistent_workplace_staffing_policy()
 	WorldData.reset_runtime_session_state()
 
@@ -397,6 +398,210 @@ func _test_starving_residents_keep_return_home_schedule() -> void:
 	)
 
 
+func _test_off_shift_home_queue_survives_unassignable_haul_work() -> void:
+	_reset_fixture()
+	SimulationClock.start_new_game(1, 18, 0)
+	var raw_city_state = WorldPoliticalState.get_current_city_simulation_state()
+	_expect(
+		raw_city_state is CitySettlementSimulationState,
+		"The off-shift haul fixture must own an explicit settlement state."
+	)
+
+	if not raw_city_state is CitySettlementSimulationState:
+		return
+
+	var city_state: CitySettlementSimulationState = raw_city_state
+	var house := CityObjectSystem.register_completed_city_object_for_city_state(
+		city_state,
+		{
+			"object_type": CityObjectCatalog.CITY_OBJECT_HOUSE,
+			"top_left": Vector2i(20, 12),
+			"size_tiles": CityObjectCatalog.get_city_object_size_for_type(
+				CityObjectCatalog.CITY_OBJECT_HOUSE
+			),
+			"object_owner": "player",
+		}
+	)
+	var fishery := CityObjectSystem.register_completed_city_object_for_city_state(
+		city_state,
+		{
+			"object_type": CityObjectCatalog.CITY_OBJECT_FISHING_GROUNDS,
+			"top_left": Vector2i(15, 8),
+			"size_tiles": CityObjectCatalog.get_city_object_size_for_type(
+				CityObjectCatalog.CITY_OBJECT_FISHING_GROUNDS
+			),
+			"object_owner": "player",
+		}
+	)
+	var stockpile := CityObjectSystem.register_completed_city_object_for_city_state(
+		city_state,
+		{
+			"object_type": CityObjectCatalog.CITY_OBJECT_STOCKPILE,
+			"top_left": Vector2i(8, 12),
+			"size_tiles": CityObjectCatalog.get_city_object_size_for_type(
+				CityObjectCatalog.CITY_OBJECT_STOCKPILE
+			),
+			"object_owner": "player",
+		}
+	)
+	var house_id := int(house.get("id", -1))
+	var fishery_id := int(fishery.get("id", -1))
+	var stockpile_id := int(stockpile.get("id", -1))
+	_expect(
+		house_id > 0 and fishery_id > 0 and stockpile_id > 0,
+		"The off-shift haul fixture must create local home, job, and storage objects."
+	)
+
+	if house_id <= 0 or fishery_id <= 0 or stockpile_id <= 0:
+		return
+
+	var citizen_ids: Array[int] = []
+
+	for index in range(2):
+		var citizen := CityCitizenRegistrySystem.add_city_citizen_for_city_state(
+			city_state,
+			"",
+			Vector2i(3, 4 + index * 2),
+			CityCitizens.CITY_CITIZEN_SEX_FEMALE,
+			test_culture_id
+		)
+		var citizen_id := int(citizen.get("id", -1))
+		citizen_ids.append(citizen_id)
+		_expect(
+			citizen_id > 0
+			and CityAssignmentSystem.assign_city_citizen_home_for_city_state(
+				city_state,
+				citizen_id,
+				house_id
+			)
+			and CityAssignmentSystem.assign_city_citizen_job_for_city_state(
+				city_state,
+				citizen_id,
+				fishery_id
+			),
+			"Every off-shift fixture resident must have one local home and job."
+		)
+
+	var unemployed_hauler_ids: Array[int] = []
+	for index in range(2):
+		var hauler := CityCitizenRegistrySystem.add_city_citizen_for_city_state(
+			city_state,
+			"",
+			Vector2i(5, 8 + index * 2),
+			CityCitizens.CITY_CITIZEN_SEX_MALE,
+			test_culture_id
+		)
+		var hauler_id := int(hauler.get("id", -1))
+		unemployed_hauler_ids.append(hauler_id)
+		CitizenNeedsSystem.set_city_citizen_hunger_state_for_city_state(
+			city_state,
+			hauler_id,
+			0,
+			0
+		)
+
+	var pile_result := (
+		CityLogisticsSystem.add_resource_to_city_ground_piles_with_result_for_city_state(
+			city_state,
+			{
+				"tile_position": Vector2i(6, 10),
+				"resource": WorldData.RESOURCE_STONE,
+				"amount_delta": 20,
+			}
+		)
+	)
+	_expect(
+		int(pile_result.get("added_amount", 0)) == 20,
+		"The off-shift fixture must expose real deliverable loose cargo."
+	)
+
+	CitizenDecisionSystemScript.run_tick_for_city_state(city_state, 1, 1)
+	var current_fishery := CityObjectSystem.get_city_object_by_id_for_city_state(
+		city_state,
+		fishery_id
+	)
+	var assigned_worker_ids := (
+		CityAssignmentSystem.get_city_object_worker_ids_for_city_state(
+			city_state,
+			current_fishery
+		)
+	)
+
+	for citizen_id in citizen_ids:
+		var citizen := CityCitizenRegistrySystem.get_city_citizen_by_id_for_city_state(
+			city_state,
+			citizen_id
+		)
+		var current_task := (
+			CityCitizenTaskRuntimeSystem.get_city_citizen_current_task_for_city_state(
+				city_state,
+				citizen_id
+			)
+		)
+		_expect(
+			str(current_task.get("kind", ""))
+			== CityCitizens.CITY_CITIZEN_TASK_KIND_RETURN_HOME,
+			"Unassignable haul work must not suppress an employed resident's Return Home task."
+		)
+		_expect(
+			int(citizen.get("job_object_id", -1)) == fishery_id
+			and assigned_worker_ids.has(citizen_id),
+			"Return Home scheduling must preserve each settlement-local employment link."
+		)
+
+	# Consume both bounded haul slots on the following tick. Employed residents
+	# must still receive Return Home while that bounded logistics pass is full.
+	for citizen_id in citizen_ids:
+		CityCitizenTaskRuntimeSystem.clear_city_citizen_task_for_city_state(
+			city_state,
+			citizen_id,
+			CityCitizens.CITY_CITIZEN_TASK_SOURCE_SCHEDULE
+		)
+		CityCitizenMovementRuntimeSystem.cancel_city_citizen_movement_for_city_state(
+			city_state,
+			citizen_id
+		)
+	for hauler_id in unemployed_hauler_ids:
+		CitizenNeedsSystem.set_city_citizen_hunger_state_for_city_state(
+			city_state,
+			hauler_id,
+			100,
+			0
+		)
+	city_state.citizen_decision_runtime_state.runtime_initialized = false
+	CitizenDecisionSystemScript.run_tick_for_city_state(city_state, 2, 1)
+
+	var haul_task_count := 0
+	for hauler_id in unemployed_hauler_ids:
+		var haul_task := (
+			CityCitizenTaskRuntimeSystem.get_city_citizen_current_task_for_city_state(
+				city_state,
+				hauler_id
+			)
+		)
+		if (
+			str(haul_task.get("kind", ""))
+			== CityCitizens.CITY_CITIZEN_TASK_KIND_HAUL
+		):
+			haul_task_count += 1
+	_expect(
+		haul_task_count == 2,
+		"The bounded fixture must consume both autonomous haul assignment slots."
+	)
+	for citizen_id in citizen_ids:
+		var home_task := (
+			CityCitizenTaskRuntimeSystem.get_city_citizen_current_task_for_city_state(
+				city_state,
+				citizen_id
+			)
+		)
+		_expect(
+			str(home_task.get("kind", ""))
+			== CityCitizens.CITY_CITIZEN_TASK_KIND_RETURN_HOME,
+			"A full autonomous-haul budget must not suppress an employed resident's Return Home task."
+		)
+
+
 func _test_persistent_workplace_staffing_policy() -> void:
 	var city_world := _reset_fixture()
 	var citizen_ids: Array[int] = []
@@ -461,40 +666,101 @@ func _test_persistent_workplace_staffing_policy() -> void:
 		"The persistent vacancy must fill on a later tick when the deferred citizen becomes available."
 	)
 
-	_expect(
+	var workplace_before_manual_request := fishery.duplicate(true)
+	var object_version_before_manual_request := (
+		CityObjectSystem.get_city_object_version()
+	)
+	var workplace_version_before_manual_request := (
+		CityEmploymentSystemScript.get_city_workplace_version()
+	)
+	var citizen_version_before_manual_request := (
+		CityCitizenRegistrySystem.get_city_citizen_version()
+	)
+	var assignment_version_before_manual_request := (
+		CityAssignmentSystem.get_city_assignment_version()
+	)
+	var worker_ids_before_manual_request: Array = (
+		CityEmploymentSystem.get_city_object_worker_ids(fishery).duplicate()
+	)
+	var citizen_job_ids_before_manual_request := {}
+
+	for citizen_id in citizen_ids:
+		citizen_job_ids_before_manual_request[citizen_id] = int(
+			CityCitizenRegistrySystem.get_city_citizen_by_id(citizen_id).get(
+				"job_object_id",
+				-1
+			)
+		)
+
+	var manual_request_accepted := (
 		CityEmploymentSystemScript.set_workplace_staffing_mode(
 			fishery_id,
 			CityEmploymentSystemScript.STAFFING_MODE_MANUAL
-		),
-		"The employment framework must expose a durable manual staffing mode."
+		)
 	)
-	var removed_worker_id := int(
+	var assignments_unchanged := (
 		CityEmploymentSystem.get_city_object_worker_ids(
 			CityObjectSystem.get_city_object_by_id(fishery_id)
-		)[0]
-	)
-	_expect(
-		CityEmploymentSystemScript.remove_citizen_job(removed_worker_id),
-		"The manual staffing fixture must remove one assigned worker."
-	)
-	CityEmploymentSystemScript.run_tick(3, 2)
-	_expect(
-		CityEmploymentSystem.get_city_object_worker_count(
-			CityObjectSystem.get_city_object_by_id(fishery_id)
-		) == 3,
-		"Manual staffing mode must preserve an intentional vacancy instead of automatically refilling it."
+		)
+		== worker_ids_before_manual_request
 	)
 
-	CityEmploymentSystemScript.set_workplace_staffing_mode(
-		fishery_id,
-		CityEmploymentSystemScript.STAFFING_MODE_AUTOMATIC
-	)
-	CityEmploymentSystemScript.run_tick(4, 2)
+	for citizen_id in citizen_ids:
+		assignments_unchanged = (
+			assignments_unchanged
+			and int(
+				CityCitizenRegistrySystem.get_city_citizen_by_id(citizen_id).get(
+					"job_object_id",
+					-1
+				)
+			)
+			== int(citizen_job_ids_before_manual_request[citizen_id])
+		)
+
 	_expect(
-		CityEmploymentSystem.get_city_object_worker_count(
-			CityObjectSystem.get_city_object_by_id(fishery_id)
-		) == 4,
-		"Returning to automatic staffing must reconcile the open vacancy through the same assignment framework."
+		not manual_request_accepted
+		and CityObjectSystem.get_city_object_by_id(fishery_id)
+		== workplace_before_manual_request
+		and CityObjectSystem.get_city_object_version()
+		== object_version_before_manual_request
+		and CityEmploymentSystemScript.get_city_workplace_version()
+		== workplace_version_before_manual_request
+		and CityCitizenRegistrySystem.get_city_citizen_version()
+		== citizen_version_before_manual_request
+		and CityAssignmentSystem.get_city_assignment_version()
+		== assignment_version_before_manual_request
+		and assignments_unchanged,
+		"Automatic-only staffing must reject manual mode without mutating the workplace, versions, or assignments."
+	)
+
+	var removed_worker_id := int(worker_ids_before_manual_request[0])
+	_expect(
+		CityEmploymentSystemScript.remove_citizen_job(removed_worker_id),
+		"The automatic staffing fixture must remove one assigned worker."
+	)
+	fishery = CityObjectSystem.get_city_object_by_id(fishery_id)
+	_expect(
+		CityEmploymentSystem.get_city_object_worker_count(fishery) == 3
+		and int(
+			CityCitizenRegistrySystem.get_city_citizen_by_id(removed_worker_id).get(
+				"job_object_id",
+				-1
+			)
+		) < 0,
+		"Removing one worker must create a real automatic-staffing vacancy before the next tick."
+	)
+
+	CityEmploymentSystemScript.run_tick(3, 2)
+	fishery = CityObjectSystem.get_city_object_by_id(fishery_id)
+	_expect(
+		CityEmploymentSystem.get_city_object_worker_count(fishery) == 4
+		and int(
+			CityCitizenRegistrySystem.get_city_citizen_by_id(removed_worker_id).get(
+				"job_object_id",
+				-1
+			)
+		) == fishery_id,
+		"Automatic staffing must refill the removed worker's vacancy on the next tick."
 	)
 
 
@@ -507,7 +773,7 @@ func _reset_fixture() -> WorldData:
 
 	for y in range(city_world.height):
 		for x in range(city_world.width):
-			var tile := city_world.get_tile(x, y)
+			var tile := city_world.get_tile_for_internal_read(x, y)
 			tile["terrain"] = WorldData.TERRAIN_LAND
 			tile["biome"] = WorldData.BIOME_PLAIN
 			tile["is_land"] = true
@@ -517,6 +783,12 @@ func _reset_fixture() -> WorldData:
 	WorldData.store_city_world_save(city_world, TEST_WORLD_SEED)
 	var culture := WorldData.create_culture("Employment Test Culture")
 	test_culture_id = int(culture.get("id", -1))
+	WorldPoliticalState.replace_current_city_runtime_data({
+		"name": "Employment Test City",
+		"primary_culture_id": test_culture_id,
+		"founded": true,
+		"can_build": true,
+	})
 	return city_world
 
 

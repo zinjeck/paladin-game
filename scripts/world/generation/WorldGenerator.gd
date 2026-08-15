@@ -514,7 +514,7 @@ func is_coastal_water(world: WorldData, x: int, y: int) -> bool:
 
 
 func is_mountain_or_near_mountain(world: WorldData, x: int, y: int) -> bool:
-	var tile := world.get_tile(x, y)
+	var tile := world.get_tile_for_internal_read(x, y)
 
 	if tile["terrain"] == CityObjectCatalog.TERRAIN_WATER:
 		return false

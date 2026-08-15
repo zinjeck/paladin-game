@@ -8,8 +8,23 @@ class_name CityCitizenInventorySystem
 
 
 static func ensure_city_citizen_inventory_state() -> int:
+	return _ensure_city_citizen_inventory_state(
+		CityCitizenRegistrySystem.get_current_state()
+	)
+
+
+static func ensure_city_citizen_inventory_state_for_city_state(
+	city_state: CitySettlementSimulationState
+) -> int:
+	return _ensure_city_citizen_inventory_state(
+		city_state.citizen_registry_state
+	)
+
+
+static func _ensure_city_citizen_inventory_state(
+	registry_state: CityCitizenRegistryState
+) -> int:
 	var migrated_count := 0
-	var registry_state := CityCitizenRegistrySystem.get_current_state()
 
 	for citizen_index in range(registry_state.citizens.size()):
 		var raw_citizen = registry_state.citizens[citizen_index]
@@ -98,13 +113,76 @@ static func ensure_city_citizen_inventory_state() -> int:
 		migrated_count += 1
 
 	if migrated_count > 0:
-		CityCitizenRegistrySystem.mark_city_citizens_changed()
+		registry_state.citizen_version += 1
 
 	return migrated_count
 
 
-static func get_city_citizen_carry_capacity(citizen_id: int) -> int:
-	var citizen := CityCitizenRegistrySystem.get_city_citizen_by_id(citizen_id)
+static func _resolve_registry_state(
+	registry_state: CityCitizenRegistryState
+) -> CityCitizenRegistryState:
+	if registry_state != null:
+		return registry_state
+	return CityCitizenRegistrySystem.get_current_state()
+
+
+static func _get_city_citizen_index_by_id(
+	registry_state: CityCitizenRegistryState,
+	citizen_id: int
+) -> int:
+	if citizen_id < 0 or not registry_state.citizen_index_by_id.has(citizen_id):
+		return -1
+
+	var citizen_index := int(registry_state.citizen_index_by_id[citizen_id])
+	if citizen_index < 0 or citizen_index >= registry_state.citizens.size():
+		push_error(
+			"Stale city citizen index for citizen ID " + str(citizen_id)
+		)
+		registry_state.citizen_index_by_id.erase(citizen_id)
+		return -1
+
+	var raw_citizen = registry_state.citizens[citizen_index]
+	if not raw_citizen is Dictionary:
+		push_error(
+			"City citizen index points to non-Dictionary data for citizen ID "
+			+ str(citizen_id)
+		)
+		registry_state.citizen_index_by_id.erase(citizen_id)
+		return -1
+
+	if int((raw_citizen as Dictionary).get("id", -1)) != citizen_id:
+		push_error(
+			"City citizen index mismatch for requested ID " + str(citizen_id)
+		)
+		registry_state.citizen_index_by_id.erase(citizen_id)
+		return -1
+
+	return citizen_index
+
+
+static func _get_city_citizen_by_id(
+	registry_state: CityCitizenRegistryState,
+	citizen_id: int
+) -> Dictionary:
+	var citizen_index := _get_city_citizen_index_by_id(
+		registry_state,
+		citizen_id
+	)
+	if citizen_index < 0:
+		return {}
+
+	var raw_citizen = registry_state.citizens[citizen_index]
+	if not raw_citizen is Dictionary:
+		return {}
+	return raw_citizen
+
+
+static func get_city_citizen_carry_capacity(
+	citizen_id: int,
+	registry_state: CityCitizenRegistryState = null
+) -> int:
+	registry_state = _resolve_registry_state(registry_state)
+	var citizen := _get_city_citizen_by_id(registry_state, citizen_id)
 
 	if citizen.is_empty():
 		return 0
@@ -117,18 +195,30 @@ static func get_city_citizen_carry_capacity(citizen_id: int) -> int:
 	return maxi(int(raw_carry_capacity), 0)
 
 
+static func get_city_citizen_carry_capacity_for_city_state(
+	city_state: CitySettlementSimulationState,
+	citizen_id: int
+) -> int:
+	return get_city_citizen_carry_capacity(
+		citizen_id,
+		city_state.citizen_registry_state
+	)
+
+
 static func set_city_citizen_carry_capacity(
 	citizen_id: int,
-	carry_capacity: int
+	carry_capacity: int,
+	registry_state: CityCitizenRegistryState = null
 ) -> bool:
-	var citizen_index := CityCitizenRegistrySystem.get_city_citizen_index_by_id(
+	registry_state = _resolve_registry_state(registry_state)
+	var citizen_index := _get_city_citizen_index_by_id(
+		registry_state,
 		citizen_id
 	)
 
 	if citizen_index < 0:
 		return false
 
-	var registry_state := CityCitizenRegistrySystem.get_current_state()
 	var raw_citizen = registry_state.citizens[citizen_index]
 
 	if not raw_citizen is Dictionary:
@@ -140,7 +230,10 @@ static func set_city_citizen_carry_capacity(
 	if not _record_carried_state_is_interpretable(citizen):
 		return false
 
-	if safe_capacity < get_city_citizen_total_carried_amount(citizen_id):
+	if safe_capacity < get_city_citizen_total_carried_amount(
+		citizen_id,
+		registry_state
+	):
 		return false
 
 	var raw_carry_capacity = citizen.get("carry_capacity")
@@ -154,12 +247,28 @@ static func set_city_citizen_carry_capacity(
 
 	citizen["carry_capacity"] = safe_capacity
 	registry_state.citizens[citizen_index] = citizen
-	CityCitizenRegistrySystem.mark_city_citizens_changed()
+	registry_state.citizen_version += 1
 	return true
 
 
-static func get_city_citizen_inventory(citizen_id: int) -> Dictionary:
-	var citizen := CityCitizenRegistrySystem.get_city_citizen_by_id(citizen_id)
+static func set_city_citizen_carry_capacity_for_city_state(
+	city_state: CitySettlementSimulationState,
+	citizen_id: int,
+	carry_capacity: int
+) -> bool:
+	return set_city_citizen_carry_capacity(
+		citizen_id,
+		carry_capacity,
+		city_state.citizen_registry_state
+	)
+
+
+static func get_city_citizen_inventory(
+	citizen_id: int,
+	registry_state: CityCitizenRegistryState = null
+) -> Dictionary:
+	registry_state = _resolve_registry_state(registry_state)
+	var citizen := _get_city_citizen_by_id(registry_state, citizen_id)
 
 	if citizen.is_empty():
 		return {}
@@ -169,14 +278,25 @@ static func get_city_citizen_inventory(citizen_id: int) -> Dictionary:
 	)
 
 
+static func get_city_citizen_inventory_for_city_state(
+	city_state: CitySettlementSimulationState,
+	citizen_id: int
+) -> Dictionary:
+	return get_city_citizen_inventory(
+		citizen_id,
+		city_state.citizen_registry_state
+	)
+
+
 static func get_city_citizen_inventory_resource_amount(
 	citizen_id: int,
-	resource: String
+	resource: String,
+	registry_state: CityCitizenRegistryState = null
 ) -> int:
 	if not CityResourceCatalog.is_city_resource_type(resource):
 		return 0
 
-	var inventory := get_city_citizen_inventory(citizen_id)
+	var inventory := get_city_citizen_inventory(citizen_id, registry_state)
 	var raw_amount = inventory.get(resource, 0)
 
 	if typeof(raw_amount) != TYPE_INT:
@@ -185,20 +305,50 @@ static func get_city_citizen_inventory_resource_amount(
 	return maxi(int(raw_amount), 0)
 
 
-static func get_city_citizen_inventory_used_capacity(citizen_id: int) -> int:
+static func get_city_citizen_inventory_resource_amount_for_city_state(
+	city_state: CitySettlementSimulationState,
+	citizen_id: int,
+	resource: String
+) -> int:
+	return get_city_citizen_inventory_resource_amount(
+		citizen_id,
+		resource,
+		city_state.citizen_registry_state
+	)
+
+
+static func get_city_citizen_inventory_used_capacity(
+	citizen_id: int,
+	registry_state: CityCitizenRegistryState = null
+) -> int:
 	var total_amount := 0
 
-	for raw_amount in get_city_citizen_inventory(citizen_id).values():
+	for raw_amount in get_city_citizen_inventory(
+		citizen_id,
+		registry_state
+	).values():
 		if typeof(raw_amount) == TYPE_INT:
 			total_amount += maxi(int(raw_amount), 0)
 
 	return total_amount
 
 
-static func get_city_citizen_personal_inventory_free_space(
+static func get_city_citizen_inventory_used_capacity_for_city_state(
+	city_state: CitySettlementSimulationState,
 	citizen_id: int
 ) -> int:
-	var citizen := CityCitizenRegistrySystem.get_city_citizen_by_id(citizen_id)
+	return get_city_citizen_inventory_used_capacity(
+		citizen_id,
+		city_state.citizen_registry_state
+	)
+
+
+static func get_city_citizen_personal_inventory_free_space(
+	citizen_id: int,
+	registry_state: CityCitizenRegistryState = null
+) -> int:
+	registry_state = _resolve_registry_state(registry_state)
+	var citizen := _get_city_citizen_by_id(registry_state, citizen_id)
 
 	if (
 		citizen.is_empty()
@@ -207,14 +357,28 @@ static func get_city_citizen_personal_inventory_free_space(
 		return 0
 
 	return maxi(
-		get_city_citizen_carry_capacity(citizen_id)
-		- get_city_citizen_inventory_used_capacity(citizen_id),
+		get_city_citizen_carry_capacity(citizen_id, registry_state)
+		- get_city_citizen_inventory_used_capacity(citizen_id, registry_state),
 		0
 	)
 
 
-static func get_city_citizen_inventory_free_space(citizen_id: int) -> int:
-	var citizen := CityCitizenRegistrySystem.get_city_citizen_by_id(citizen_id)
+static func get_city_citizen_personal_inventory_free_space_for_city_state(
+	city_state: CitySettlementSimulationState,
+	citizen_id: int
+) -> int:
+	return get_city_citizen_personal_inventory_free_space(
+		citizen_id,
+		city_state.citizen_registry_state
+	)
+
+
+static func get_city_citizen_inventory_free_space(
+	citizen_id: int,
+	registry_state: CityCitizenRegistryState = null
+) -> int:
+	registry_state = _resolve_registry_state(registry_state)
+	var citizen := _get_city_citizen_by_id(registry_state, citizen_id)
 
 	if (
 		citizen.is_empty()
@@ -223,29 +387,41 @@ static func get_city_citizen_inventory_free_space(citizen_id: int) -> int:
 		return 0
 
 	return maxi(
-		get_city_citizen_carry_capacity(citizen_id)
-		- get_city_citizen_inventory_used_capacity(citizen_id)
-		- get_city_citizen_haul_cargo_amount(citizen_id),
+		get_city_citizen_carry_capacity(citizen_id, registry_state)
+		- get_city_citizen_inventory_used_capacity(citizen_id, registry_state)
+		- get_city_citizen_haul_cargo_amount(citizen_id, registry_state),
 		0
+	)
+
+
+static func get_city_citizen_inventory_free_space_for_city_state(
+	city_state: CitySettlementSimulationState,
+	citizen_id: int
+) -> int:
+	return get_city_citizen_inventory_free_space(
+		citizen_id,
+		city_state.citizen_registry_state
 	)
 
 
 static func set_city_citizen_inventory_resource_amount(
 	citizen_id: int,
 	resource: String,
-	amount: int
+	amount: int,
+	registry_state: CityCitizenRegistryState = null
 ) -> int:
 	if not CityResourceCatalog.is_city_resource_type(resource):
 		return 0
 
-	var citizen_index := CityCitizenRegistrySystem.get_city_citizen_index_by_id(
+	registry_state = _resolve_registry_state(registry_state)
+	var citizen_index := _get_city_citizen_index_by_id(
+		registry_state,
 		citizen_id
 	)
 
 	if citizen_index < 0:
 		return 0
 
-	var registry_state := CityCitizenRegistrySystem.get_current_state()
 	var raw_citizen = registry_state.citizens[citizen_index]
 
 	if not raw_citizen is Dictionary:
@@ -269,8 +445,8 @@ static func set_city_citizen_inventory_resource_amount(
 	var safe_amount := mini(
 		maxi(amount, 0),
 		maxi(
-			get_city_citizen_carry_capacity(citizen_id)
-			- get_city_citizen_haul_cargo_amount(citizen_id)
+			get_city_citizen_carry_capacity(citizen_id, registry_state)
+			- get_city_citizen_haul_cargo_amount(citizen_id, registry_state)
 			- total_without_resource,
 			0
 		)
@@ -290,41 +466,74 @@ static func set_city_citizen_inventory_resource_amount(
 
 	citizen["inventory"] = inventory
 	registry_state.citizens[citizen_index] = citizen
-	CityCitizenRegistrySystem.mark_city_citizens_changed()
+	registry_state.citizen_version += 1
 	return safe_amount
+
+
+static func set_city_citizen_inventory_resource_amount_for_city_state(
+	city_state: CitySettlementSimulationState,
+	citizen_id: int,
+	resource: String,
+	amount: int
+) -> int:
+	return set_city_citizen_inventory_resource_amount(
+		citizen_id,
+		resource,
+		amount,
+		city_state.citizen_registry_state
+	)
 
 
 static func add_resource_to_city_citizen_inventory(
 	citizen_id: int,
 	resource: String,
-	amount_delta: int
+	amount_delta: int,
+	registry_state: CityCitizenRegistryState = null
 ) -> int:
 	if amount_delta <= 0:
 		return 0
 
 	var current_amount := get_city_citizen_inventory_resource_amount(
 		citizen_id,
-		resource
+		resource,
+		registry_state
 	)
 	var final_amount := set_city_citizen_inventory_resource_amount(
 		citizen_id,
 		resource,
-		current_amount + amount_delta
+		current_amount + amount_delta,
+		registry_state
 	)
 	return maxi(final_amount - current_amount, 0)
+
+
+static func add_resource_to_city_citizen_inventory_for_city_state(
+	city_state: CitySettlementSimulationState,
+	citizen_id: int,
+	resource: String,
+	amount_delta: int
+) -> int:
+	return add_resource_to_city_citizen_inventory(
+		citizen_id,
+		resource,
+		amount_delta,
+		city_state.citizen_registry_state
+	)
 
 
 static func remove_resource_from_city_citizen_inventory(
 	citizen_id: int,
 	resource: String,
-	requested_amount: int
+	requested_amount: int,
+	registry_state: CityCitizenRegistryState = null
 ) -> int:
 	if requested_amount <= 0:
 		return 0
 
 	var current_amount := get_city_citizen_inventory_resource_amount(
 		citizen_id,
-		resource
+		resource,
+		registry_state
 	)
 	var amount_to_remove := mini(requested_amount, current_amount)
 
@@ -334,13 +543,32 @@ static func remove_resource_from_city_citizen_inventory(
 	var final_amount := set_city_citizen_inventory_resource_amount(
 		citizen_id,
 		resource,
-		current_amount - amount_to_remove
+		current_amount - amount_to_remove,
+		registry_state
 	)
 	return maxi(current_amount - final_amount, 0)
 
 
-static func get_city_citizen_haul_cargo(citizen_id: int) -> Dictionary:
-	var citizen := CityCitizenRegistrySystem.get_city_citizen_by_id(citizen_id)
+static func remove_resource_from_city_citizen_inventory_for_city_state(
+	city_state: CitySettlementSimulationState,
+	citizen_id: int,
+	resource: String,
+	requested_amount: int
+) -> int:
+	return remove_resource_from_city_citizen_inventory(
+		citizen_id,
+		resource,
+		requested_amount,
+		city_state.citizen_registry_state
+	)
+
+
+static func get_city_citizen_haul_cargo(
+	citizen_id: int,
+	registry_state: CityCitizenRegistryState = null
+) -> Dictionary:
+	registry_state = _resolve_registry_state(registry_state)
+	var citizen := _get_city_citizen_by_id(registry_state, citizen_id)
 
 	if citizen.is_empty():
 		return CityCitizens.make_city_citizen_haul_cargo()
@@ -353,10 +581,24 @@ static func get_city_citizen_haul_cargo(citizen_id: int) -> Dictionary:
 	return CityCitizens.make_city_citizen_haul_cargo(raw_cargo)
 
 
-static func get_city_citizen_haul_cargo_resources(
+static func get_city_citizen_haul_cargo_for_city_state(
+	city_state: CitySettlementSimulationState,
 	citizen_id: int
 ) -> Dictionary:
-	var raw_resources = get_city_citizen_haul_cargo(citizen_id).get(
+	return get_city_citizen_haul_cargo(
+		citizen_id,
+		city_state.citizen_registry_state
+	)
+
+
+static func get_city_citizen_haul_cargo_resources(
+	citizen_id: int,
+	registry_state: CityCitizenRegistryState = null
+) -> Dictionary:
+	var raw_resources = get_city_citizen_haul_cargo(
+		citizen_id,
+		registry_state
+	).get(
 		"resources",
 		{}
 	)
@@ -367,16 +609,30 @@ static func get_city_citizen_haul_cargo_resources(
 	return raw_resources.duplicate(true)
 
 
+static func get_city_citizen_haul_cargo_resources_for_city_state(
+	city_state: CitySettlementSimulationState,
+	citizen_id: int
+) -> Dictionary:
+	return get_city_citizen_haul_cargo_resources(
+		citizen_id,
+		city_state.citizen_registry_state
+	)
+
+
 static func get_city_citizen_haul_cargo_resource_amount(
 	citizen_id: int,
-	resource: String
+	resource: String,
+	registry_state: CityCitizenRegistryState = null
 ) -> int:
 	if not CityResourceCatalog.is_city_resource_type(resource):
 		return 0
 
 	return maxi(
 		int(
-			get_city_citizen_haul_cargo_resources(citizen_id).get(
+			get_city_citizen_haul_cargo_resources(
+				citizen_id,
+				registry_state
+			).get(
 				resource,
 				0
 			)
@@ -385,26 +641,82 @@ static func get_city_citizen_haul_cargo_resource_amount(
 	)
 
 
-static func get_city_citizen_haul_cargo_resource(citizen_id: int) -> String:
+static func get_city_citizen_haul_cargo_resource_amount_for_city_state(
+	city_state: CitySettlementSimulationState,
+	citizen_id: int,
+	resource: String
+) -> int:
+	return get_city_citizen_haul_cargo_resource_amount(
+		citizen_id,
+		resource,
+		city_state.citizen_registry_state
+	)
+
+
+static func get_city_citizen_haul_cargo_resource(
+	citizen_id: int,
+	registry_state: CityCitizenRegistryState = null
+) -> String:
 	return str(
-		get_city_citizen_haul_cargo(citizen_id).get(
+		get_city_citizen_haul_cargo(citizen_id, registry_state).get(
 			"resource_type",
 			CityResourceCatalog.RESOURCE_NONE
 		)
 	)
 
 
-static func get_city_citizen_haul_cargo_amount(citizen_id: int) -> int:
+static func get_city_citizen_haul_cargo_resource_for_city_state(
+	city_state: CitySettlementSimulationState,
+	citizen_id: int
+) -> String:
+	return get_city_citizen_haul_cargo_resource(
+		citizen_id,
+		city_state.citizen_registry_state
+	)
+
+
+static func get_city_citizen_haul_cargo_amount(
+	citizen_id: int,
+	registry_state: CityCitizenRegistryState = null
+) -> int:
 	return maxi(
-		int(get_city_citizen_haul_cargo(citizen_id).get("amount", 0)),
+		int(
+			get_city_citizen_haul_cargo(citizen_id, registry_state).get(
+				"amount",
+				0
+			)
+		),
 		0
 	)
 
 
-static func get_city_citizen_total_carried_amount(citizen_id: int) -> int:
+static func get_city_citizen_haul_cargo_amount_for_city_state(
+	city_state: CitySettlementSimulationState,
+	citizen_id: int
+) -> int:
+	return get_city_citizen_haul_cargo_amount(
+		citizen_id,
+		city_state.citizen_registry_state
+	)
+
+
+static func get_city_citizen_total_carried_amount(
+	citizen_id: int,
+	registry_state: CityCitizenRegistryState = null
+) -> int:
 	return (
-		get_city_citizen_inventory_used_capacity(citizen_id)
-		+ get_city_citizen_haul_cargo_amount(citizen_id)
+		get_city_citizen_inventory_used_capacity(citizen_id, registry_state)
+		+ get_city_citizen_haul_cargo_amount(citizen_id, registry_state)
+	)
+
+
+static func get_city_citizen_total_carried_amount_for_city_state(
+	city_state: CitySettlementSimulationState,
+	citizen_id: int
+) -> int:
+	return get_city_citizen_total_carried_amount(
+		citizen_id,
+		city_state.citizen_registry_state
 	)
 
 
@@ -445,8 +757,12 @@ static func get_city_citizen_record_carried_resource_amount(
 	return inventory_amount + cargo_amount
 
 
-static func get_city_citizen_available_haul_capacity(citizen_id: int) -> int:
-	var citizen := CityCitizenRegistrySystem.get_city_citizen_by_id(citizen_id)
+static func get_city_citizen_available_haul_capacity(
+	citizen_id: int,
+	registry_state: CityCitizenRegistryState = null
+) -> int:
+	registry_state = _resolve_registry_state(registry_state)
+	var citizen := _get_city_citizen_by_id(registry_state, citizen_id)
 
 	if (
 		citizen.is_empty()
@@ -455,31 +771,46 @@ static func get_city_citizen_available_haul_capacity(citizen_id: int) -> int:
 		return 0
 
 	return maxi(
-		get_city_citizen_carry_capacity(citizen_id)
-		- get_city_citizen_total_carried_amount(citizen_id),
+		get_city_citizen_carry_capacity(citizen_id, registry_state)
+		- get_city_citizen_total_carried_amount(citizen_id, registry_state),
 		0
+	)
+
+
+static func get_city_citizen_available_haul_capacity_for_city_state(
+	city_state: CitySettlementSimulationState,
+	citizen_id: int
+) -> int:
+	return get_city_citizen_available_haul_capacity(
+		citizen_id,
+		city_state.citizen_registry_state
 	)
 
 
 static func set_city_citizen_haul_cargo_resources(
 	citizen_id: int,
-	requested_resources: Dictionary
+	requested_resources: Dictionary,
+	registry_state: CityCitizenRegistryState = null
 ) -> int:
-	var citizen_index := CityCitizenRegistrySystem.get_city_citizen_index_by_id(
+	registry_state = _resolve_registry_state(registry_state)
+	var citizen_index := _get_city_citizen_index_by_id(
+		registry_state,
 		citizen_id
 	)
 
 	if citizen_index < 0:
 		return 0
 
-	var registry_state := CityCitizenRegistrySystem.get_current_state()
 	var raw_citizen = registry_state.citizens[citizen_index]
 
 	if not raw_citizen is Dictionary:
 		return 0
 
 	var citizen: Dictionary = raw_citizen
-	var existing_cargo_amount := get_city_citizen_haul_cargo_amount(citizen_id)
+	var existing_cargo_amount := get_city_citizen_haul_cargo_amount(
+		citizen_id,
+		registry_state
+	)
 
 	if not _record_carried_state_is_interpretable(citizen):
 		return existing_cargo_amount
@@ -506,8 +837,8 @@ static func set_city_citizen_haul_cargo_resources(
 		requested_total += amount
 
 	var maximum_cargo_amount := maxi(
-		get_city_citizen_carry_capacity(citizen_id)
-		- get_city_citizen_inventory_used_capacity(citizen_id),
+		get_city_citizen_carry_capacity(citizen_id, registry_state)
+		- get_city_citizen_inventory_used_capacity(citizen_id, registry_state),
 		0
 	)
 
@@ -528,19 +859,35 @@ static func set_city_citizen_haul_cargo_resources(
 
 	citizen["haul_cargo"] = final_cargo
 	registry_state.citizens[citizen_index] = citizen
-	CityCitizenRegistrySystem.mark_city_citizens_changed()
+	registry_state.citizen_version += 1
 	return requested_total
+
+
+static func set_city_citizen_haul_cargo_resources_for_city_state(
+	city_state: CitySettlementSimulationState,
+	citizen_id: int,
+	requested_resources: Dictionary
+) -> int:
+	return set_city_citizen_haul_cargo_resources(
+		citizen_id,
+		requested_resources,
+		city_state.citizen_registry_state
+	)
 
 
 static func change_city_citizen_haul_cargo_resource(
 	citizen_id: int,
 	resource: String,
-	amount_delta: int
+	amount_delta: int,
+	registry_state: CityCitizenRegistryState = null
 ) -> int:
 	if not CityResourceCatalog.is_city_resource_type(resource):
 		return 0
 
-	var resources := get_city_citizen_haul_cargo_resources(citizen_id)
+	var resources := get_city_citizen_haul_cargo_resources(
+		citizen_id,
+		registry_state
+	)
 	var old_amount := maxi(int(resources.get(resource, 0)), 0)
 	var final_amount := old_amount + amount_delta
 
@@ -557,30 +904,50 @@ static func change_city_citizen_haul_cargo_resource(
 
 	if set_city_citizen_haul_cargo_resources(
 		citizen_id,
-		resources
+		resources,
+		registry_state
 	) != expected_total:
 		return old_amount
 
 	return final_amount
 
 
+static func change_city_citizen_haul_cargo_resource_for_city_state(
+	city_state: CitySettlementSimulationState,
+	citizen_id: int,
+	resource: String,
+	amount_delta: int
+) -> int:
+	return change_city_citizen_haul_cargo_resource(
+		citizen_id,
+		resource,
+		amount_delta,
+		city_state.citizen_registry_state
+	)
+
+
 static func set_city_citizen_haul_cargo(
 	citizen_id: int,
 	resource: String,
-	amount: int
+	amount: int,
+	registry_state: CityCitizenRegistryState = null
 ) -> int:
 	var requested_amount := maxi(amount, 0)
 	var resources: Dictionary = {}
 
 	if requested_amount > 0:
 		if not CityResourceCatalog.is_city_resource_type(resource):
-			return get_city_citizen_haul_cargo_amount(citizen_id)
+			return get_city_citizen_haul_cargo_amount(
+				citizen_id,
+				registry_state
+			)
 
 		resources[resource] = requested_amount
 
 	var final_total := set_city_citizen_haul_cargo_resources(
 		citizen_id,
-		resources
+		resources,
+		registry_state
 	)
 
 	if requested_amount <= 0:
@@ -589,10 +956,25 @@ static func set_city_citizen_haul_cargo(
 	if final_total != requested_amount:
 		return get_city_citizen_haul_cargo_resource_amount(
 			citizen_id,
-			resource
+			resource,
+			registry_state
 		)
 
 	return requested_amount
+
+
+static func set_city_citizen_haul_cargo_for_city_state(
+	city_state: CitySettlementSimulationState,
+	citizen_id: int,
+	resource: String,
+	amount: int
+) -> int:
+	return set_city_citizen_haul_cargo(
+		citizen_id,
+		resource,
+		amount,
+		city_state.citizen_registry_state
+	)
 
 
 static func _get_resource_manifest_total(resources: Dictionary) -> int:

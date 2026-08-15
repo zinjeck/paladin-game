@@ -12,6 +12,15 @@ static func get_current_state() -> CityResourceAccountingState:
 	return WorldPoliticalState.get_current_city_resource_accounting_state()
 
 
+static func get_state_for_city_state(
+	city_state: CitySettlementSimulationState
+) -> CityResourceAccountingState:
+	if city_state == null:
+		return null
+
+	return city_state.resource_accounting_state
+
+
 static func get_city_container_version() -> int:
 	return get_current_state().container_version
 
@@ -33,6 +42,24 @@ static func mark_city_container_changed(
 		state.public_storage_version += 1
 
 
+static func mark_city_container_changed_for_city_state(
+	city_state: CitySettlementSimulationState,
+	city_object: Dictionary
+) -> void:
+	var accounting_state := get_state_for_city_state(city_state)
+
+	if accounting_state == null:
+		return
+
+	accounting_state.container_version += 1
+
+	if (
+		CityResourceContainerSystem
+		.city_object_counts_as_public_city_storage(city_object)
+	):
+		accounting_state.public_storage_version += 1
+
+
 static func reset_city_resource_accounting_state() -> void:
 	var state := get_current_state()
 	state.owned_resource_amount_cache.clear()
@@ -43,6 +70,37 @@ static func reset_city_resource_accounting_state() -> void:
 	# that aggregate removal rather than publishing once per deleted object.
 	state.container_version += 1
 	state.public_storage_version += 1
+
+
+static func restore_city_resource_accounting_snapshot_for_city_state(
+	city_state: CitySettlementSimulationState,
+	snapshot: Dictionary
+) -> bool:
+	var state := get_state_for_city_state(city_state)
+
+	if state == null:
+		return false
+
+	for key in [
+		"container_version",
+		"public_storage_version",
+		"owned_resource_amount_cache_container_version",
+	]:
+		if not snapshot.get(key) is int:
+			return false
+
+	var raw_cache = snapshot.get("owned_resource_amount_cache")
+	if not raw_cache is Dictionary:
+		return false
+
+	state.container_version = int(snapshot["container_version"])
+	state.public_storage_version = int(snapshot["public_storage_version"])
+	state.owned_resource_amount_cache.clear()
+	state.owned_resource_amount_cache.merge(raw_cache, true)
+	state.owned_resource_amount_cache_container_version = int(
+		snapshot["owned_resource_amount_cache_container_version"]
+	)
+	return true
 
 
 static func get_total_public_city_resource_amount(
@@ -170,6 +228,53 @@ static func get_total_physical_city_resource_amount(
 				resource
 			)
 		)
+
+	return total_amount
+
+
+static func get_total_physical_city_resource_amount_for_city_state(
+	city_state: CitySettlementSimulationState,
+	resource: String
+) -> int:
+	if city_state == null or not CityResourceCatalog.is_city_resource_type(resource):
+		return 0
+
+	var total_amount := 0
+
+	for raw_ground_pile in city_state.logistics_state.ground_piles:
+		if (
+			raw_ground_pile is Dictionary
+			and str(
+				raw_ground_pile.get(
+					"resource_type",
+					WorldData.RESOURCE_NONE
+				)
+			) == resource
+		):
+			total_amount += maxi(int(raw_ground_pile.get("amount", 0)), 0)
+
+	for raw_city_object in city_state.object_state.objects:
+		if raw_city_object is Dictionary:
+			total_amount += (
+				CityResourceContainerSystem.get_city_object_stored_resource_amount(
+					raw_city_object,
+					resource
+				)
+			)
+
+	for raw_citizen in city_state.citizen_registry_state.citizens:
+		if not raw_citizen is Dictionary:
+			continue
+
+		var citizen: Dictionary = raw_citizen
+		if bool(citizen.get("alive", false)):
+			total_amount += (
+				CityCitizenInventorySystem
+				.get_city_citizen_record_carried_resource_amount(
+					citizen,
+					resource
+				)
+			)
 
 	return total_amount
 

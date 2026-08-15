@@ -331,12 +331,28 @@ func _lookup_matches_ids(lookup: Dictionary, expected_ids: Array) -> bool:
 
 func _reset_fixture(seed_value: int) -> Dictionary:
 	WorldData.reset_runtime_session_state()
-	var city_world := _make_world(16, 16, seed_value)
-	WorldPoliticalState.set_current_city_world(city_world)
-	WorldPoliticalState.set_current_city_seed(seed_value)
 	var culture := WorldData.create_culture(
 		"Task Runtime Regression Culture " + str(seed_value)
 	)
+	var culture_id := int(culture.get("id", -1))
+	var city_name := "Task Runtime Regression City " + str(seed_value)
+	var city_state = _create_active_city_fixture(city_name, culture_id)
+	_expect(
+		city_state is CitySettlementSimulationState,
+		"The task fixture must own an active City simulation state."
+	)
+	if not city_state is CitySettlementSimulationState:
+		return {}
+	city_state.city_runtime_data.clear()
+	city_state.city_runtime_data.merge({
+		"name": city_name,
+		"primary_culture_id": culture_id,
+		"founded": true,
+		"can_build": true,
+	}, true)
+	var city_world := _make_world(16, 16, seed_value)
+	WorldPoliticalState.set_current_city_world(city_world)
+	WorldPoliticalState.set_current_city_seed(seed_value)
 	var house := CityObjectSystem.add_city_object({
 		"object_type": CityObjectCatalog.CITY_OBJECT_HOUSE,
 		"top_left": Vector2i(8, 8),
@@ -347,9 +363,35 @@ func _reset_fixture(seed_value: int) -> Dictionary:
 		"city_world": city_world,
 	})
 	return {
-		"culture_id": int(culture.get("id", -1)),
+		"culture_id": culture_id,
 		"house_id": int(house.get("id", -1)),
 	}
+
+
+func _create_active_city_fixture(city_name: String, culture_id: int):
+	if culture_id <= 0:
+		return null
+	var polity := WorldPoliticalState.create_polity({
+		"name": city_name + " Realm",
+		"polity_type": PolityData.POLITY_TYPE_KINGDOM,
+		"primary_culture_id": culture_id,
+	})
+	var polity_id := int(polity.get("id", -1))
+	var city := WorldPoliticalState.create_settlement({
+		"name": city_name,
+		"settlement_type": SettlementData.SETTLEMENT_TYPE_CITY,
+		"polity_id": polity_id,
+		"world_region_top_left": Vector2i.ZERO,
+		"world_region_center": Vector2i.ZERO,
+		"world_region_size": 1,
+		"simulation_backend_kind": (
+			SettlementSimulationContext.BACKEND_CITY_SETTLEMENT_STATE
+		),
+	})
+	var city_id := int(city.get("id", -1))
+	if city_id <= 0 or not WorldPoliticalState.set_active_settlement(city_id):
+		return null
+	return WorldPoliticalState.get_city_simulation_state(city_id)
 
 
 func _add_resident(

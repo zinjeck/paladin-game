@@ -197,7 +197,7 @@ func _reset_fixture() -> WorldData:
 
 	for y in range(city_world.height):
 		for x in range(city_world.width):
-			var tile := city_world.get_tile(x, y)
+			var tile := city_world.get_tile_for_internal_read(x, y)
 			tile["terrain"] = WorldData.TERRAIN_LAND
 			tile["biome"] = WorldData.BIOME_PLAIN
 			tile["is_land"] = true
@@ -205,9 +205,14 @@ func _reset_fixture() -> WorldData:
 
 	city_world.mark_tile_data_changed()
 	WorldData.store_city_world_save(city_world, TEST_WORLD_SEED)
-	WorldData.player_city_founded = true
 	var culture := WorldData.create_culture("Food Allocation Test Culture")
 	test_culture_id = int(culture.get("id", -1))
+	WorldPoliticalState.replace_current_city_runtime_data({
+		"name": "Food Allocation Test City",
+		"primary_culture_id": test_culture_id,
+		"founded": true,
+		"can_build": true,
+	})
 	return city_world
 
 

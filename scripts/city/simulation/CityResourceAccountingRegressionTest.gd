@@ -29,6 +29,7 @@ func _test_container_accounting_and_cache_invalidation() -> void:
 		Vector2i(2, 2),
 		city_world
 	)
+	_mark_fixture_city_founded(keep)
 	var stockpile := _register_container(
 		CityObjectCatalog.CITY_OBJECT_STOCKPILE,
 		Vector2i(8, 2),
@@ -391,7 +392,7 @@ func _reset_fixture(seed: int) -> WorldData:
 
 	for y in range(city_world.height):
 		for x in range(city_world.width):
-			var tile := city_world.get_tile(x, y)
+			var tile := city_world.get_tile_for_internal_read(x, y)
 			tile["terrain"] = WorldData.TERRAIN_LAND
 			tile["biome"] = WorldData.BIOME_PLAIN
 			tile["is_land"] = true
@@ -399,8 +400,63 @@ func _reset_fixture(seed: int) -> WorldData:
 			tile.erase("surface_feature")
 
 	city_world.mark_tile_data_changed()
+	var culture := WorldData.create_culture(
+		"Resource Accounting Regression Culture " + str(seed)
+	)
+	var culture_id := int(culture.get("id", -1))
+	var polity := WorldPoliticalState.create_polity({
+		"name": "Resource Accounting Regression Realm",
+		"polity_type": PolityData.POLITY_TYPE_KINGDOM,
+		"primary_culture_id": culture_id,
+	})
+	var city := WorldPoliticalState.create_settlement({
+		"name": "Resource Accounting Regression City",
+		"settlement_type": SettlementData.SETTLEMENT_TYPE_CITY,
+		"polity_id": int(polity.get("id", -1)),
+		"world_region_top_left": Vector2i.ZERO,
+		"world_region_center": Vector2i.ZERO,
+		"world_region_size": 1,
+		"simulation_backend_kind": (
+			SettlementSimulationContext.BACKEND_CITY_SETTLEMENT_STATE
+		),
+	})
+	var city_id := int(city.get("id", -1))
+	var city_state = WorldPoliticalState.get_city_simulation_state(city_id)
+	_expect(
+		city_state is CitySettlementSimulationState
+		and WorldPoliticalState.set_active_settlement(city_id),
+		"Fixture must create one settlement-owned city state."
+	)
+	if city_state is CitySettlementSimulationState:
+		city_state.city_runtime_data.merge({
+			"id": city_id,
+			"name": "Resource Accounting Regression City",
+			"primary_culture_id": culture_id,
+			"founded": false,
+			"can_build": false,
+		}, true)
 	WorldData.store_city_world_save(city_world, seed)
 	return city_world
+
+
+func _mark_fixture_city_founded(keep: Dictionary) -> void:
+	var city_state = WorldPoliticalState.get_active_city_simulation_state()
+	if not city_state is CitySettlementSimulationState or keep.is_empty():
+		return
+
+	city_state.city_runtime_data.merge({
+		"city_world_seed": city_state.city_seed,
+		"city_map_size": Vector2i(
+			city_state.city_world.width,
+			city_state.city_world.height
+		),
+		"foundation_top_left": keep.get("top_left", Vector2i(-1, -1)),
+		"foundation_size": keep.get("size", Vector2i.ZERO),
+		"foundation_object_id": int(keep.get("id", -1)),
+		"foundation_object_owner": str(keep.get("owner", "")),
+		"founded": true,
+		"can_build": true,
+	}, true)
 
 
 func _expect(condition: bool, message: String) -> void:

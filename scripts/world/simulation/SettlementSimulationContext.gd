@@ -1,6 +1,10 @@
 extends RefCounted
 class_name SettlementSimulationContext
 
+const CityCitizenDecisionRuntimeStateScript = preload(
+	"res://scripts/city/simulation/CityCitizenDecisionRuntimeState.gd"
+)
+
 # Runtime identity passed into settlement-scale simulation. Local mutable city
 # state is carried explicitly so systems can migrate away from WorldData without
 # changing how the world selects or identifies a settlement.
@@ -12,6 +16,7 @@ var settlement_id: int = SettlementData.INVALID_SETTLEMENT_ID
 var polity_id: int = PolityData.INVALID_POLITY_ID
 var settlement_type: String = ""
 var is_capital: bool = false
+var is_player_polity: bool = false
 var backend_kind: String = BACKEND_NONE
 var local_state = null
 
@@ -23,6 +28,7 @@ func _init(values: Dictionary = {}) -> void:
 	polity_id = int(values.get("polity_id", PolityData.INVALID_POLITY_ID))
 	settlement_type = str(values.get("settlement_type", ""))
 	is_capital = bool(values.get("is_capital", false))
+	is_player_polity = bool(values.get("is_player_polity", false))
 	backend_kind = str(values.get("backend_kind", BACKEND_NONE))
 	local_state = values.get("local_state")
 
@@ -52,6 +58,27 @@ func has_instance_owned_city_state() -> bool:
 		backend_kind == BACKEND_CITY_SETTLEMENT_STATE
 		and local_state is CitySettlementSimulationState
 	)
+
+
+func get_city_simulation_state():
+	if not has_instance_owned_city_state():
+		return null
+	return local_state
+
+
+func is_city_founded() -> bool:
+	var city_state = get_city_simulation_state()
+	return city_state != null and city_state.is_city_founded()
+
+
+func can_build_city_objects() -> bool:
+	var city_state = get_city_simulation_state()
+	return city_state != null and city_state.can_build_city_objects()
+
+
+func get_primary_culture_id() -> int:
+	var city_state = get_city_simulation_state()
+	return city_state.get_primary_culture_id() if city_state != null else -1
 
 
 func get_city_work_state():
@@ -127,4 +154,16 @@ func get_city_citizen_task_runtime_state():
 	)
 	if raw_task_runtime_state is CityCitizenTaskRuntimeState:
 		return raw_task_runtime_state
+	return null
+
+
+func get_city_citizen_decision_runtime_state():
+	if not has_instance_owned_city_state():
+		return null
+
+	var raw_decision_runtime_state = (
+		local_state.citizen_decision_runtime_state
+	)
+	if raw_decision_runtime_state is CityCitizenDecisionRuntimeStateScript:
+		return raw_decision_runtime_state
 	return null

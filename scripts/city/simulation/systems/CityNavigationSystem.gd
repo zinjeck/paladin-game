@@ -33,6 +33,15 @@ static func get_current_state() -> CityNavigationState:
 	return WorldPoliticalState.get_current_city_navigation_state()
 
 
+static func get_state_for_city_state(
+	city_state: CitySettlementSimulationState
+) -> CityNavigationState:
+	if city_state == null:
+		return null
+
+	return city_state.navigation_state
+
+
 static func reset_city_navigation_state() -> void:
 	var navigation_state := get_current_state()
 	navigation_state.object_access_tile_cache.clear()
@@ -64,9 +73,40 @@ static func get_city_object_access_tiles(
 	city_world: WorldData,
 	city_object: Dictionary
 ) -> Array:
+	return _get_city_object_access_tiles(
+		city_world,
+		city_object,
+		get_current_state(),
+		null
+	)
+
+
+static func get_city_object_access_tiles_for_city_state(
+	city_state: CitySettlementSimulationState,
+	city_world: WorldData,
+	city_object: Dictionary
+) -> Array:
+	return _get_city_object_access_tiles(
+		city_world,
+		city_object,
+		get_state_for_city_state(city_state),
+		city_state
+	)
+
+
+static func _get_city_object_access_tiles(
+	city_world: WorldData,
+	city_object: Dictionary,
+	navigation_state: CityNavigationState,
+	city_state
+) -> Array:
 	var access_tiles := []
 
-	if city_world == null or city_object.is_empty():
+	if (
+		city_world == null
+		or city_object.is_empty()
+		or navigation_state == null
+	):
 		return access_tiles
 
 	var footprint_tiles := CityObjectSystem.get_city_object_footprint_tiles(
@@ -74,7 +114,7 @@ static func get_city_object_access_tiles(
 	)
 	var object_id := int(city_object.get("id", -1))
 	var footprint_hash_value := int(hash(footprint_tiles))
-	var cache := get_current_state().object_access_tile_cache
+	var cache := navigation_state.object_access_tile_cache
 
 	if object_id > 0:
 		var raw_cache_entry = cache.get(object_id, {})
@@ -86,7 +126,13 @@ static func get_city_object_access_tiles(
 				and int(cache_entry.get("tile_data_version", -1))
 				== city_world.tile_data_version
 				and int(cache_entry.get("city_object_version", -1))
-				== CityObjectSystem.get_city_object_version()
+				== (
+					CityObjectSystem.get_city_object_version()
+					if city_state == null
+					else CityObjectSystem.get_city_object_version_for_city_state(
+						city_state
+					)
+				)
 				and int(cache_entry.get("footprint_hash", -1))
 				== footprint_hash_value
 			):
@@ -110,7 +156,12 @@ static func get_city_object_access_tiles(
 				continue
 			if access_tile_lookup.has(candidate_tile):
 				continue
-			if not is_city_tile_walkable_for_citizen(city_world, candidate_tile):
+			if not _is_city_tile_walkable_for_citizen(
+				city_world,
+				candidate_tile,
+				-1,
+				city_state
+			):
 				continue
 			access_tile_lookup[candidate_tile] = true
 			access_tiles.append(candidate_tile)
@@ -121,7 +172,13 @@ static func get_city_object_access_tiles(
 		cache[object_id] = {
 			"world_instance_id": int(city_world.get_instance_id()),
 			"tile_data_version": city_world.tile_data_version,
-			"city_object_version": CityObjectSystem.get_city_object_version(),
+			"city_object_version": (
+				CityObjectSystem.get_city_object_version()
+				if city_state == null
+				else CityObjectSystem.get_city_object_version_for_city_state(
+					city_state
+				)
+			),
 			"footprint_hash": footprint_hash_value,
 			"access_tiles": access_tiles.duplicate(),
 		}
@@ -149,6 +206,30 @@ static func city_citizen_can_access_object_interior(
 	citizen_id: int,
 	city_object: Dictionary
 ) -> bool:
+	return _city_citizen_can_access_object_interior(
+		citizen_id,
+		city_object,
+		null
+	)
+
+
+static func city_citizen_can_access_object_interior_for_city_state(
+	city_state: CitySettlementSimulationState,
+	citizen_id: int,
+	city_object: Dictionary
+) -> bool:
+	return _city_citizen_can_access_object_interior(
+		citizen_id,
+		city_object,
+		city_state
+	)
+
+
+static func _city_citizen_can_access_object_interior(
+	citizen_id: int,
+	city_object: Dictionary,
+	city_state
+) -> bool:
 	if (
 		citizen_id <= 0
 		or city_object.is_empty()
@@ -156,7 +237,14 @@ static func city_citizen_can_access_object_interior(
 	):
 		return false
 
-	var citizen := CityCitizenRegistrySystem.get_city_citizen_by_id(citizen_id)
+	var citizen := (
+		CityCitizenRegistrySystem.get_city_citizen_by_id(citizen_id)
+		if city_state == null
+		else CityCitizenRegistrySystem.get_city_citizen_by_id_for_city_state(
+			city_state,
+			citizen_id
+		)
+	)
 
 	if (
 		citizen.is_empty()
@@ -180,8 +268,15 @@ static func city_citizen_can_access_object_interior(
 			return (
 				int(citizen.get("home_object_id", -1))
 				== object_id
-				and CityAssignmentSystem.get_city_object_resident_ids(
-					city_object
+				and (
+					CityAssignmentSystem.get_city_object_resident_ids(
+						city_object
+					)
+					if city_state == null
+					else CityAssignmentSystem.get_city_object_resident_ids_for_city_state(
+						city_state,
+						city_object
+					)
 				).has(citizen_id)
 			)
 
@@ -189,8 +284,15 @@ static func city_citizen_can_access_object_interior(
 			return (
 				int(citizen.get("job_object_id", -1))
 				== object_id
-				and CityEmploymentSystem.get_city_object_worker_ids(
-					city_object
+				and (
+					CityEmploymentSystem.get_city_object_worker_ids(
+						city_object
+					)
+					if city_state == null
+					else CityEmploymentSystem.get_city_object_worker_ids_for_city_state(
+						city_state,
+						city_object
+					)
 				).has(citizen_id)
 			)
 
@@ -256,6 +358,26 @@ static func get_city_citizen_movement_step_cost(
 	from_tile: Vector2i,
 	to_tile: Vector2i
 ) -> int:
+	return _get_city_citizen_movement_step_cost(from_tile, to_tile, null)
+
+
+static func get_city_citizen_movement_step_cost_for_city_state(
+	city_state: CitySettlementSimulationState,
+	from_tile: Vector2i,
+	to_tile: Vector2i
+) -> int:
+	return _get_city_citizen_movement_step_cost(
+		from_tile,
+		to_tile,
+		city_state
+	)
+
+
+static func _get_city_citizen_movement_step_cost(
+	from_tile: Vector2i,
+	to_tile: Vector2i,
+	city_state
+) -> int:
 	var delta_x := absi(to_tile.x - from_tile.x)
 	var delta_y := absi(to_tile.y - from_tile.y)
 
@@ -265,8 +387,13 @@ static func get_city_citizen_movement_step_cost(
 	if delta_x == 0 and delta_y == 0:
 		return 0
 
-	var destination_is_road := CityObjectSystem.is_completed_city_road_tile(
-		to_tile
+	var destination_is_road := (
+		CityObjectSystem.is_completed_city_road_tile(to_tile)
+		if city_state == null
+		else CityObjectSystem.is_completed_city_road_tile_for_city_state(
+			city_state,
+			to_tile
+		)
 	)
 
 	if delta_x == 1 and delta_y == 1:
@@ -286,18 +413,52 @@ static func can_city_citizen_traverse_step(
 	to_tile: Vector2i,
 	citizen_id: int = -1
 ) -> bool:
-	var step_cost := get_city_citizen_movement_step_cost(
+	return _can_city_citizen_traverse_step(
+		city_world,
 		from_tile,
-		to_tile
+		to_tile,
+		citizen_id,
+		null
+	)
+
+
+static func can_city_citizen_traverse_step_for_city_state(
+	city_state: CitySettlementSimulationState,
+	city_world: WorldData,
+	from_tile: Vector2i,
+	to_tile: Vector2i,
+	citizen_id: int = -1
+) -> bool:
+	return _can_city_citizen_traverse_step(
+		city_world,
+		from_tile,
+		to_tile,
+		citizen_id,
+		city_state
+	)
+
+
+static func _can_city_citizen_traverse_step(
+	city_world: WorldData,
+	from_tile: Vector2i,
+	to_tile: Vector2i,
+	citizen_id: int,
+	city_state
+) -> bool:
+	var step_cost := _get_city_citizen_movement_step_cost(
+		from_tile,
+		to_tile,
+		city_state
 	)
 
 	if step_cost <= 0:
 		return false
 
-	if not is_city_tile_walkable_for_citizen(
+	if not _is_city_tile_walkable_for_citizen(
 		city_world,
 		to_tile,
-		citizen_id
+		citizen_id,
+		city_state
 	):
 		return false
 
@@ -314,58 +475,79 @@ static func can_city_citizen_traverse_step(
 			to_tile.y
 		)
 
-		if not is_city_tile_walkable_for_citizen(
+		if not _is_city_tile_walkable_for_citizen(
 			city_world,
 			horizontal_side_tile,
-			citizen_id
+			citizen_id,
+			city_state
 		):
 			return false
 
 		if not _city_citizen_can_cross_object_boundary(
 			from_tile,
 			horizontal_side_tile,
-			citizen_id
+			citizen_id,
+			city_state
 		):
 			return false
 
-		if not is_city_tile_walkable_for_citizen(
+		if not _is_city_tile_walkable_for_citizen(
 			city_world,
 			vertical_side_tile,
-			citizen_id
+			citizen_id,
+			city_state
 		):
 			return false
 
 		if not _city_citizen_can_cross_object_boundary(
 			from_tile,
 			vertical_side_tile,
-			citizen_id
+			citizen_id,
+			city_state
 		):
 			return false
 
 	return _city_citizen_can_cross_object_boundary(
 		from_tile,
 		to_tile,
-		citizen_id
+		citizen_id,
+		city_state
 	)
 
 static func _city_citizen_can_cross_object_boundary(
 	from_tile: Vector2i,
 	to_tile: Vector2i,
-	citizen_id: int
+	citizen_id: int,
+	city_state
 ) -> bool:
 	var from_object_id := int(
 		CityObjectSystem.get_city_object_id_at_tile(from_tile)
+		if city_state == null
+		else CityObjectSystem.get_city_object_id_at_tile_for_city_state(
+			city_state,
+			from_tile
+		)
 	)
 	var to_object_id := int(
 		CityObjectSystem.get_city_object_id_at_tile(to_tile)
+		if city_state == null
+		else CityObjectSystem.get_city_object_id_at_tile_for_city_state(
+			city_state,
+			to_tile
+		)
 	)
 
 	if from_object_id == to_object_id:
 		return true
 
 	if from_object_id > 0:
-		var from_object := CityObjectSystem.get_city_object_by_id(
-			from_object_id
+		var from_object := (
+			CityObjectSystem.get_city_object_by_id(from_object_id)
+			if city_state == null
+			else CityObjectSystem.get_city_object_by_id_for_city_state(
+				city_state,
+				from_object_id
+			)
 		)
 
 		if (
@@ -378,12 +560,20 @@ static func _city_citizen_can_cross_object_boundary(
 			return false
 
 	if to_object_id > 0:
-		var to_object := CityObjectSystem.get_city_object_by_id(to_object_id)
+		var to_object := (
+			CityObjectSystem.get_city_object_by_id(to_object_id)
+			if city_state == null
+			else CityObjectSystem.get_city_object_by_id_for_city_state(
+				city_state,
+				to_object_id
+			)
+		)
 
 		if CityObjectSystem.city_object_supports_citizen_interior(to_object):
-			if not city_citizen_can_access_object_interior(
+			if not _city_citizen_can_access_object_interior(
 				citizen_id,
-				to_object
+				to_object,
+				city_state
 			):
 				return false
 
@@ -400,6 +590,34 @@ static func is_city_tile_walkable_for_citizen(
 	tile_position: Vector2i,
 	citizen_id: int = -1
 ) -> bool:
+	return _is_city_tile_walkable_for_citizen(
+		city_world,
+		tile_position,
+		citizen_id,
+		null
+	)
+
+
+static func is_city_tile_walkable_for_citizen_for_city_state(
+	city_state: CitySettlementSimulationState,
+	city_world: WorldData,
+	tile_position: Vector2i,
+	citizen_id: int = -1
+) -> bool:
+	return _is_city_tile_walkable_for_citizen(
+		city_world,
+		tile_position,
+		citizen_id,
+		city_state
+	)
+
+
+static func _is_city_tile_walkable_for_citizen(
+	city_world: WorldData,
+	tile_position: Vector2i,
+	citizen_id: int,
+	city_state
+) -> bool:
 	if city_world == null:
 		return false
 
@@ -409,7 +627,7 @@ static func is_city_tile_walkable_for_citizen(
 	):
 		return false
 
-	var tile: Dictionary = city_world.get_tile(
+	var tile: Dictionary = city_world.get_tile_for_internal_read(
 		tile_position.x,
 		tile_position.y
 	)
@@ -417,13 +635,34 @@ static func is_city_tile_walkable_for_citizen(
 	if str(tile.get("terrain", "")) != WorldData.TERRAIN_LAND:
 		return false
 
-	if not CityObjectSystem.has_city_object_at_tile(tile_position):
+	var has_city_object := (
+		CityObjectSystem.has_city_object_at_tile(tile_position)
+		if city_state == null
+		else CityObjectSystem.has_city_object_at_tile_for_city_state(
+			city_state,
+			tile_position
+		)
+	)
+
+	if not has_city_object:
 		return true
 
 	var object_id := int(
 		CityObjectSystem.get_city_object_id_at_tile(tile_position)
+		if city_state == null
+		else CityObjectSystem.get_city_object_id_at_tile_for_city_state(
+			city_state,
+			tile_position
+		)
 	)
-	var occupying_object := CityObjectSystem.get_city_object_by_id(object_id)
+	var occupying_object := (
+		CityObjectSystem.get_city_object_by_id(object_id)
+		if city_state == null
+		else CityObjectSystem.get_city_object_by_id_for_city_state(
+			city_state,
+			object_id
+		)
+	)
 
 	if occupying_object.is_empty():
 		return false
@@ -437,7 +676,14 @@ static func is_city_tile_walkable_for_citizen(
 	if citizen_id <= 0:
 		return false
 
-	var citizen := CityCitizenRegistrySystem.get_city_citizen_by_id(citizen_id)
+	var citizen := (
+		CityCitizenRegistrySystem.get_city_citizen_by_id(citizen_id)
+		if city_state == null
+		else CityCitizenRegistrySystem.get_city_citizen_by_id_for_city_state(
+			city_state,
+			citizen_id
+		)
+	)
 
 	if (
 		citizen.is_empty()
@@ -456,7 +702,14 @@ static func is_city_tile_walkable_for_citizen(
 	# saves and defensive recovery only, and never authorizes re-entry.
 	if (
 		current_position is Vector2i
-		and CityObjectSystem.get_city_object_id_at_tile(current_position)
+		and (
+			CityObjectSystem.get_city_object_id_at_tile(current_position)
+			if city_state == null
+			else CityObjectSystem.get_city_object_id_at_tile_for_city_state(
+				city_state,
+				current_position
+			)
+		)
 		== object_id
 	):
 		return true
@@ -464,13 +717,20 @@ static func is_city_tile_walkable_for_citizen(
 	if not CityObjectSystem.city_object_supports_citizen_interior(occupying_object):
 		return false
 
-	return city_citizen_can_access_object_interior(
+	return _city_citizen_can_access_object_interior(
 		citizen_id,
-		occupying_object
+		occupying_object,
+		city_state
 	)
 
 static func find_path_to_any_city_tile(values: Dictionary) -> Dictionary:
 	var city_world: WorldData = values.get("city_world")
+	var raw_city_state = values.get("city_state")
+	var city_state = (
+		raw_city_state
+		if raw_city_state is CitySettlementSimulationState
+		else null
+	)
 	var start_tile: Vector2i = values.get(
 		"start_tile",
 		CityCitizens.INVALID_CITY_TILE_POSITION
@@ -507,10 +767,11 @@ static func find_path_to_any_city_tile(values: Dictionary) -> Dictionary:
 			search_start_usec
 		)
 
-	if not CityNavigationSystem.is_city_tile_walkable_for_citizen(
+	if not _is_city_tile_walkable_for_citizen(
 		city_world,
 		start_tile,
-		citizen_id
+		citizen_id,
+		city_state
 	):
 		result["status"] = PATH_STATUS_INVALID_START
 
@@ -523,7 +784,8 @@ static func find_path_to_any_city_tile(values: Dictionary) -> Dictionary:
 		_get_clean_destination_tiles(
 			city_world,
 			raw_destination_tiles,
-			citizen_id
+			citizen_id,
+			city_state
 		)
 	)
 
@@ -562,9 +824,10 @@ static func find_path_to_any_city_tile(values: Dictionary) -> Dictionary:
 	if (
 		max_expanded_nodes >= city_world.width * city_world.height
 		and not _base_land_component_has_destination(
-		city_world,
-		start_tile,
-		destination_tiles
+			city_world,
+			start_tile,
+			destination_tiles,
+			city_state
 		)
 	):
 		result["status"] = PATH_STATUS_UNREACHABLE
@@ -700,18 +963,20 @@ static func find_path_to_any_city_tile(values: Dictionary) -> Dictionary:
 			if closed_tile_lookup.has(neighbor_tile):
 				continue
 
-			if not CityNavigationSystem.can_city_citizen_traverse_step(
+			if not _can_city_citizen_traverse_step(
 				city_world,
 				current_tile,
 				neighbor_tile,
-				citizen_id
+				citizen_id,
+				city_state
 			):
 				continue
 
 			var step_cost := (
-				CityNavigationSystem.get_city_citizen_movement_step_cost(
+				_get_city_citizen_movement_step_cost(
 					current_tile,
-					neighbor_tile
+					neighbor_tile,
+					city_state
 				)
 			)
 
@@ -765,10 +1030,31 @@ static func find_path_to_any_city_tile(values: Dictionary) -> Dictionary:
 	)
 
 
+static func find_path_to_any_city_tile_for_city_state(
+	city_state: CitySettlementSimulationState,
+	values: Dictionary
+) -> Dictionary:
+	if city_state == null:
+		return {
+			"success": false,
+			"status": PATH_STATUS_INVALID_WORLD,
+			"path": [],
+			"destination_tile": CityCitizens.INVALID_CITY_TILE_POSITION,
+			"expanded_node_count": 0,
+			"path_cost": 0,
+		}
+
+	var explicit_values := values.duplicate()
+	explicit_values["city_state"] = city_state
+	explicit_values["city_world"] = city_state.city_world
+	return find_path_to_any_city_tile(explicit_values)
+
+
 static func _get_clean_destination_tiles(
 	city_world: WorldData,
 	raw_destination_tiles: Array,
-	citizen_id: int
+	citizen_id: int,
+	city_state
 ) -> Array:
 	var destination_tiles := []
 	var destination_lookup: Dictionary = {}
@@ -784,10 +1070,11 @@ static func _get_clean_destination_tiles(
 		if destination_lookup.has(destination_tile):
 			continue
 
-		if not CityNavigationSystem.is_city_tile_walkable_for_citizen(
+		if not _is_city_tile_walkable_for_citizen(
 			city_world,
 			destination_tile,
-			citizen_id
+			citizen_id,
+			city_state
 		):
 			continue
 
@@ -804,9 +1091,17 @@ static func _get_clean_destination_tiles(
 static func _base_land_component_has_destination(
 	city_world: WorldData,
 	start_tile: Vector2i,
-	destination_tiles: Array
+	destination_tiles: Array,
+	city_state
 ) -> bool:
-	var navigation_state := get_current_state()
+	var navigation_state := (
+		get_current_state()
+		if city_state == null
+		else get_state_for_city_state(city_state)
+	)
+
+	if navigation_state == null:
+		return true
 	var world_size := Vector2i(city_world.width, city_world.height)
 	var tile_count := city_world.width * city_world.height
 	var cache_key_changed := (
@@ -832,7 +1127,6 @@ static func _base_land_component_has_destination(
 
 	var start_index := start_tile.y * city_world.width + start_tile.x
 	var membership := navigation_state.base_land_component_membership
-	var built_component := false
 
 	if membership[start_index] != 1:
 		membership.fill(0)
@@ -844,62 +1138,12 @@ static func _base_land_component_has_destination(
 			membership,
 			navigation_state.base_land_component_boundary_indices
 		)
-		built_component = true
 
-	if _base_land_component_contains_destination(
+	return _base_land_component_contains_destination(
 		city_world,
 		destination_tiles,
 		membership
-	):
-		return true
-
-	# Existing callers and tests may mutate tile dictionaries directly without
-	# incrementing tile_data_version. A stale positive only permits ordinary A*
-	# and is therefore safe. Before a negative rejection, verify that no water
-	# boundary tile became land; any new connection must first cross this exact
-	# permissive eight-neighbor boundary.
-	if (
-		not built_component
-		and _base_land_component_boundary_changed(
-			city_world,
-			navigation_state.base_land_component_boundary_indices
-		)
-	):
-		membership.fill(0)
-		navigation_state.base_land_component_boundary_indices.clear()
-		navigation_state.base_land_component_seed_tile = start_tile
-		_flood_base_land_component(
-			city_world,
-			start_index,
-			membership,
-			navigation_state.base_land_component_boundary_indices
-		)
-
-		if _base_land_component_contains_destination(
-			city_world,
-			destination_tiles,
-			membership
-		):
-			return true
-
-	return false
-
-
-static func _base_land_component_boundary_changed(
-	city_world: WorldData,
-	boundary_indices: PackedInt32Array
-) -> bool:
-	for tile_index in boundary_indices:
-		var tile_x := tile_index % city_world.width
-		var tile_y := int(tile_index / city_world.width)
-
-		if (
-			city_world.tiles[tile_y][tile_x]["terrain"]
-			== WorldData.TERRAIN_LAND
-		):
-			return true
-
-	return false
+	)
 
 
 static func _base_land_component_contains_destination(

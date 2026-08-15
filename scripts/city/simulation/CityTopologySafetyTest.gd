@@ -367,7 +367,7 @@ func _reset_fixture() -> WorldData:
 
 	for y in range(city_world.height):
 		for x in range(city_world.width):
-			var tile := city_world.get_tile(x, y)
+			var tile := city_world.get_tile_for_internal_read(x, y)
 			tile["terrain"] = WorldData.TERRAIN_LAND
 			tile["biome"] = WorldData.BIOME_PLAIN
 			tile["is_land"] = true

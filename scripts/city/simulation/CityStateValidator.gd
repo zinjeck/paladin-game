@@ -68,6 +68,10 @@ static func validate(
 		errors,
 		citizen_lookup
 	)
+	CityCitizenStateValidator._validate_city_citizen_culture_state(
+		errors,
+		citizen_lookup
+	)
 	CityCitizenStateValidator._validate_city_citizen_need_state(
 		errors,
 		citizen_lookup
@@ -140,6 +144,9 @@ static func validate(
 		"checked_construction_sites": construction_site_lookup.size(),
 		"duration_usec": validation_duration_usec,
 		"object_version": CityObjectSystem.get_city_object_version(),
+		"object_debug_fingerprint": (
+			CityObjectSystem.get_city_object_debug_fingerprint()
+		),
 		"object_state_instance_id": int(
 			CityObjectSystem.get_current_state().get_instance_id()
 		),
@@ -351,6 +358,11 @@ static func _validation_cache_matches_current_state() -> bool:
 	if (
 		int(_cached_result.get("object_version", -1))
 		!= CityObjectSystem.get_city_object_version()
+	):
+		return false
+	if (
+		int(_cached_result.get("object_debug_fingerprint", -1))
+		!= CityObjectSystem.get_city_object_debug_fingerprint()
 	):
 		return false
 

@@ -420,12 +420,34 @@ func _test_visual_event_buffer_is_tick_scoped_and_take_once() -> void:
 
 func _test_completed_road_doubles_visual_travel_speed() -> void:
 	WorldData.reset_runtime_session_state()
+	var culture := WorldData.create_culture(
+		"Movement Presentation Test Culture"
+	)
+	var culture_id := int(culture.get("id", -1))
+	var city_state = _create_active_city_fixture(
+		"Movement Presentation Test City",
+		culture_id
+	)
+	_expect(
+		city_state is CitySettlementSimulationState,
+		"The visual-speed fixture must own an active City simulation state."
+	)
+	if not city_state is CitySettlementSimulationState:
+		return
+	city_state.city_runtime_data.clear()
+	city_state.city_runtime_data.merge({
+		"name": "Movement Presentation Test City",
+		"primary_culture_id": culture_id,
+		"founded": true,
+		"can_build": true,
+	}, true)
+
 	var city_world := WorldData.new()
 	city_world.setup(4, 3, 91_733)
 
 	for y in range(city_world.height):
 		for x in range(city_world.width):
-			var tile := city_world.get_tile(x, y)
+			var tile := city_world.get_tile_for_internal_read(x, y)
 			tile["terrain"] = WorldData.TERRAIN_LAND
 			tile["biome"] = WorldData.BIOME_PLAIN
 			tile["is_land"] = true
@@ -494,6 +516,32 @@ func _test_completed_road_doubles_visual_travel_speed() -> void:
 		Vector2(0.5, 1.0),
 		"The same movement budget must cover only half an ordinary tile."
 	)
+
+
+func _create_active_city_fixture(city_name: String, culture_id: int):
+	if culture_id <= 0:
+		return null
+	var polity := WorldPoliticalState.create_polity({
+		"name": city_name + " Realm",
+		"polity_type": PolityData.POLITY_TYPE_KINGDOM,
+		"primary_culture_id": culture_id,
+	})
+	var polity_id := int(polity.get("id", -1))
+	var city := WorldPoliticalState.create_settlement({
+		"name": city_name,
+		"settlement_type": SettlementData.SETTLEMENT_TYPE_CITY,
+		"polity_id": polity_id,
+		"world_region_top_left": Vector2i.ZERO,
+		"world_region_center": Vector2i.ZERO,
+		"world_region_size": 1,
+		"simulation_backend_kind": (
+			SettlementSimulationContext.BACKEND_CITY_SETTLEMENT_STATE
+		),
+	})
+	var city_id := int(city.get("id", -1))
+	if city_id <= 0 or not WorldPoliticalState.set_active_settlement(city_id):
+		return null
+	return WorldPoliticalState.get_city_simulation_state(city_id)
 
 
 func _make_moving_citizen(

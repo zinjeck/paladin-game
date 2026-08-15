@@ -13,6 +13,28 @@ static func get_current_state() -> CityCitizenMovementRuntimeState:
 	return WorldPoliticalState.get_current_city_citizen_movement_runtime_state()
 
 
+static func _get_runtime_state(
+	city_state = null
+) -> CityCitizenMovementRuntimeState:
+	if city_state is CitySettlementSimulationState:
+		return city_state.citizen_movement_runtime_state
+	return get_current_state()
+
+
+static func _get_registry_state(
+	city_state = null
+) -> CityCitizenRegistryState:
+	if city_state is CitySettlementSimulationState:
+		return city_state.citizen_registry_state
+	return CityCitizenRegistrySystem.get_current_state()
+
+
+static func _get_city_world(city_state = null):
+	if city_state is CitySettlementSimulationState:
+		return city_state.city_world
+	return WorldPoliticalState.get_current_city_world()
+
+
 static var city_active_mover_ids: Array[int]:
 	get:
 		return get_current_state().active_mover_ids
@@ -49,82 +71,127 @@ static var city_citizen_movement_version: int:
 
 
 static func get_city_citizen_movement_version() -> int:
-	return city_citizen_movement_version
+	return _get_runtime_state().citizen_movement_version
+
+
+static func get_city_citizen_movement_version_for_city_state(
+	city_state: CitySettlementSimulationState
+) -> int:
+	return _get_runtime_state(city_state).citizen_movement_version
 
 
 static func reset_city_citizen_movement_runtime_state() -> void:
-	city_active_mover_ids.clear()
-	city_active_mover_id_lookup.clear()
-	city_citizen_movement_visual_events.clear()
-	city_citizen_movement_visual_tick_index = -1
-	mark_city_citizen_movement_changed()
+	_reset_city_citizen_movement_runtime_state(null)
+
+
+static func reset_city_citizen_movement_runtime_state_for_city_state(
+	city_state: CitySettlementSimulationState
+) -> void:
+	_reset_city_citizen_movement_runtime_state(city_state)
+
+
+static func _reset_city_citizen_movement_runtime_state(city_state) -> void:
+	var runtime_state := _get_runtime_state(city_state)
+	runtime_state.active_mover_ids.clear()
+	runtime_state.active_mover_id_lookup.clear()
+	runtime_state.citizen_movement_visual_events.clear()
+	runtime_state.citizen_movement_visual_tick_index = -1
+	_mark_city_citizen_movement_changed(city_state)
 
 
 static func mark_city_citizen_movement_changed() -> void:
-	city_citizen_movement_version += 1
+	_mark_city_citizen_movement_changed(null)
+
+
+static func mark_city_citizen_movement_changed_for_city_state(
+	city_state: CitySettlementSimulationState
+) -> void:
+	_mark_city_citizen_movement_changed(city_state)
+
+
+static func _mark_city_citizen_movement_changed(city_state) -> void:
+	_get_runtime_state(city_state).citizen_movement_version += 1
 
 static func _add_city_active_mover_id(
-	citizen_id: int
+	citizen_id: int,
+	city_state = null
 ) -> bool:
+	var runtime_state := _get_runtime_state(city_state)
+	var active_ids := runtime_state.active_mover_ids
+	var active_lookup := runtime_state.active_mover_id_lookup
 	if citizen_id <= 0:
 		return false
 
-	var insertion_index := city_active_mover_ids.bsearch(citizen_id)
+	var insertion_index := active_ids.bsearch(citizen_id)
 	var array_has_id := (
-		insertion_index < city_active_mover_ids.size()
-		and city_active_mover_ids[insertion_index] == citizen_id
+		insertion_index < active_ids.size()
+		and active_ids[insertion_index] == citizen_id
 	)
 	var lookup_is_valid := (
-		city_active_mover_id_lookup.has(citizen_id)
-		and bool(city_active_mover_id_lookup[citizen_id])
+		active_lookup.has(citizen_id)
+		and bool(active_lookup[citizen_id])
 	)
 	var array_has_duplicate := (
 		array_has_id
-		and insertion_index + 1 < city_active_mover_ids.size()
-		and city_active_mover_ids[insertion_index + 1] == citizen_id
+		and insertion_index + 1 < active_ids.size()
+		and active_ids[insertion_index + 1] == citizen_id
 	)
 
 	if array_has_id and not array_has_duplicate:
 		if lookup_is_valid:
 			return false
-		city_active_mover_id_lookup[citizen_id] = true
+		active_lookup[citizen_id] = true
 		return true
 
 	if not array_has_id:
-		city_active_mover_ids.insert(insertion_index, citizen_id)
-		city_active_mover_id_lookup[citizen_id] = true
+		active_ids.insert(insertion_index, citizen_id)
+		active_lookup[citizen_id] = true
 		return true
 
 	# Repair duplicate mover entries in place; this branch is corruption
 	# handling, not part of the healthy movement hot path.
-	while city_active_mover_ids.has(citizen_id):
-		city_active_mover_ids.erase(citizen_id)
+	while active_ids.has(citizen_id):
+		active_ids.erase(citizen_id)
 
-	city_active_mover_ids.insert(
-		city_active_mover_ids.bsearch(citizen_id),
+	active_ids.insert(
+		active_ids.bsearch(citizen_id),
 		citizen_id
 	)
-	city_active_mover_id_lookup[citizen_id] = true
+	active_lookup[citizen_id] = true
 	return true
 
 static func _remove_city_active_mover_id(
-	citizen_id: int
+	citizen_id: int,
+	city_state = null
 ) -> bool:
-	var changed := city_active_mover_id_lookup.erase(citizen_id)
+	var runtime_state := _get_runtime_state(city_state)
+	var changed := runtime_state.active_mover_id_lookup.erase(citizen_id)
 
-	while city_active_mover_ids.has(citizen_id):
-		city_active_mover_ids.erase(citizen_id)
+	while runtime_state.active_mover_ids.has(citizen_id):
+		runtime_state.active_mover_ids.erase(citizen_id)
 		changed = true
 
 	return changed
 
 static func rebuild_city_active_mover_registry() -> bool:
-	var previous_active_ids := city_active_mover_ids.duplicate()
-	var previous_active_lookup := city_active_mover_id_lookup.duplicate()
+	return _rebuild_city_active_mover_registry(null)
+
+
+static func rebuild_city_active_mover_registry_for_city_state(
+	city_state: CitySettlementSimulationState
+) -> bool:
+	return _rebuild_city_active_mover_registry(city_state)
+
+
+static func _rebuild_city_active_mover_registry(city_state) -> bool:
+	var runtime_state := _get_runtime_state(city_state)
+	var registry_state := _get_registry_state(city_state)
+	var previous_active_ids := runtime_state.active_mover_ids.duplicate()
+	var previous_active_lookup := runtime_state.active_mover_id_lookup.duplicate()
 	var expected_active_ids: Array[int] = []
 	var expected_active_lookup: Dictionary = {}
 
-	for raw_citizen in CityCitizenRegistrySystem.get_current_state().citizens:
+	for raw_citizen in registry_state.citizens:
 		if not raw_citizen is Dictionary:
 			continue
 
@@ -156,50 +223,115 @@ static func rebuild_city_active_mover_registry() -> bool:
 		previous_active_ids != expected_active_ids
 		or previous_active_lookup != expected_active_lookup
 	)
-	city_active_mover_ids.clear()
-	city_active_mover_id_lookup.clear()
-	city_active_mover_ids.append_array(expected_active_ids)
-	city_active_mover_id_lookup.merge(expected_active_lookup)
+	runtime_state.active_mover_ids.clear()
+	runtime_state.active_mover_id_lookup.clear()
+	runtime_state.active_mover_ids.append_array(expected_active_ids)
+	runtime_state.active_mover_id_lookup.merge(expected_active_lookup)
 	if registry_changed:
-		mark_city_citizen_movement_changed()
+		_mark_city_citizen_movement_changed(city_state)
 
 	return registry_changed
 
 static func get_city_active_mover_ids_snapshot() -> Array[int]:
-	return city_active_mover_ids.duplicate()
+	return _get_runtime_state().active_mover_ids.duplicate()
+
+
+static func get_city_active_mover_ids_snapshot_for_city_state(
+	city_state: CitySettlementSimulationState
+) -> Array[int]:
+	return _get_runtime_state(city_state).active_mover_ids.duplicate()
 
 static func begin_city_citizen_movement_visual_tick(
 	tick_index: int
 ) -> void:
-	city_citizen_movement_visual_events.clear()
-	city_citizen_movement_visual_tick_index = tick_index
+	_begin_city_citizen_movement_visual_tick(null, tick_index)
+
+
+static func begin_city_citizen_movement_visual_tick_for_city_state(
+	city_state: CitySettlementSimulationState,
+	tick_index: int
+) -> void:
+	_begin_city_citizen_movement_visual_tick(city_state, tick_index)
+
+
+static func _begin_city_citizen_movement_visual_tick(
+	city_state,
+	tick_index: int
+) -> void:
+	var runtime_state := _get_runtime_state(city_state)
+	runtime_state.citizen_movement_visual_events.clear()
+	runtime_state.citizen_movement_visual_tick_index = tick_index
 
 static func clear_city_citizen_movement_visual_events() -> void:
-	city_citizen_movement_visual_events.clear()
-	city_citizen_movement_visual_tick_index = -1
+	_clear_city_citizen_movement_visual_events(null)
+
+
+static func clear_city_citizen_movement_visual_events_for_city_state(
+	city_state: CitySettlementSimulationState
+) -> void:
+	_clear_city_citizen_movement_visual_events(city_state)
+
+
+static func _clear_city_citizen_movement_visual_events(city_state) -> void:
+	var runtime_state := _get_runtime_state(city_state)
+	runtime_state.citizen_movement_visual_events.clear()
+	runtime_state.citizen_movement_visual_tick_index = -1
 
 static func take_city_citizen_movement_visual_events(
 	expected_tick_index: int
 ) -> Array:
-	if city_citizen_movement_visual_tick_index != expected_tick_index:
-		clear_city_citizen_movement_visual_events()
+	return _take_city_citizen_movement_visual_events(
+		null,
+		expected_tick_index
+	)
+
+
+static func take_city_citizen_movement_visual_events_for_city_state(
+	city_state: CitySettlementSimulationState,
+	expected_tick_index: int
+) -> Array:
+	return _take_city_citizen_movement_visual_events(
+		city_state,
+		expected_tick_index
+	)
+
+
+static func _take_city_citizen_movement_visual_events(
+	city_state,
+	expected_tick_index: int
+) -> Array:
+	var runtime_state := _get_runtime_state(city_state)
+	if runtime_state.citizen_movement_visual_tick_index != expected_tick_index:
+		_clear_city_citizen_movement_visual_events(city_state)
 		return []
 
 	# Transfer ownership instead of deep-copying every route and corner.
-	var events := city_citizen_movement_visual_events
-	city_citizen_movement_visual_events = []
-	city_citizen_movement_visual_tick_index = -1
+	var events := runtime_state.citizen_movement_visual_events
+	runtime_state.citizen_movement_visual_events = []
+	runtime_state.citizen_movement_visual_tick_index = -1
 	return events
 
 static func ensure_city_citizen_movement_state() -> int:
-	if CityCitizenRegistrySystem.get_current_state().citizens.is_empty():
-		rebuild_city_active_mover_registry()
+	return _ensure_city_citizen_movement_state(null)
+
+
+static func ensure_city_citizen_movement_state_for_city_state(
+	city_state: CitySettlementSimulationState
+) -> int:
+	return _ensure_city_citizen_movement_state(city_state)
+
+
+static func _ensure_city_citizen_movement_state(city_state) -> int:
+	var registry_state := _get_registry_state(city_state)
+	var runtime_state := _get_runtime_state(city_state)
+	if registry_state.citizens.is_empty():
+		_rebuild_city_active_mover_registry(city_state)
 		return 0
 
 	var migrated_count := 0
 
-	for citizen_index in range(CityCitizenRegistrySystem.get_current_state().citizens.size()):
-		var raw_citizen = CityCitizenRegistrySystem.get_current_state().citizens[citizen_index]
+	for citizen_index in range(registry_state.citizens.size()):
+		var raw_citizen = registry_state.citizens[citizen_index]
 
 		if not raw_citizen is Dictionary:
 			continue
@@ -217,25 +349,26 @@ static func ensure_city_citizen_movement_state() -> int:
 		CityCitizens.reset_city_citizen_movement_state(
 			citizen
 		)
-		CityCitizenRegistrySystem.get_current_state().citizens[citizen_index] = citizen
+		registry_state.citizens[citizen_index] = citizen
 		migrated_count += 1
 
-	var movement_version_before_rebuild := city_citizen_movement_version
-	rebuild_city_active_mover_registry()
+	var movement_version_before_rebuild := runtime_state.citizen_movement_version
+	_rebuild_city_active_mover_registry(city_state)
 
 	if (
 		migrated_count > 0
-		and city_citizen_movement_version
+		and runtime_state.citizen_movement_version
 		== movement_version_before_rebuild
 	):
-		mark_city_citizen_movement_changed()
+		_mark_city_citizen_movement_changed(city_state)
 
 	return migrated_count
 
 static func _get_clean_city_citizen_movement_path(
 	city_world: WorldData,
 	raw_path: Array,
-	citizen_id: int = -1
+	citizen_id: int = -1,
+	city_state = null
 ) -> Array:
 	var movement_path := []
 
@@ -253,26 +386,56 @@ static func _get_clean_city_citizen_movement_path(
 
 		var path_tile: Vector2i = raw_path_tile
 
-		if not CityNavigationSystem.is_city_tile_walkable_for_citizen(
-			city_world,
-			path_tile,
-			citizen_id
-		):
+		var tile_is_walkable := (
+			CityNavigationSystem.is_city_tile_walkable_for_citizen(
+				city_world,
+				path_tile,
+				citizen_id
+			)
+			if city_state == null
+			else CityNavigationSystem.is_city_tile_walkable_for_citizen_for_city_state(
+				city_state,
+				city_world,
+				path_tile,
+				citizen_id
+			)
+		)
+		if not tile_is_walkable:
 			return []
 
 		if previous_tile != CityCitizens.INVALID_CITY_TILE_POSITION:
-			if CityNavigationSystem.get_city_citizen_movement_step_cost(
-				previous_tile,
-				path_tile
-			) <= 0:
+			var step_cost := (
+				CityNavigationSystem.get_city_citizen_movement_step_cost(
+					previous_tile,
+					path_tile
+				)
+				if city_state == null
+				else CityNavigationSystem.get_city_citizen_movement_step_cost_for_city_state(
+					city_state,
+					previous_tile,
+					path_tile
+				)
+			)
+			if step_cost <= 0:
 				return []
 
-			if not CityNavigationSystem.can_city_citizen_traverse_step(
-				city_world,
-				previous_tile,
-				path_tile,
-				citizen_id
-			):
+			var can_traverse := (
+				CityNavigationSystem.can_city_citizen_traverse_step(
+					city_world,
+					previous_tile,
+					path_tile,
+					citizen_id
+				)
+				if city_state == null
+				else CityNavigationSystem.can_city_citizen_traverse_step_for_city_state(
+					city_state,
+					city_world,
+					previous_tile,
+					path_tile,
+					citizen_id
+				)
+			)
+			if not can_traverse:
 				return []
 
 		movement_path.append(path_tile)
@@ -283,14 +446,29 @@ static func _get_clean_city_citizen_movement_path(
 static func cancel_city_citizen_movement(
 	citizen_id: int
 ) -> bool:
-	var citizen_index := CityCitizenRegistrySystem.get_city_citizen_index_by_id(
-		citizen_id
-	)
+	return _cancel_city_citizen_movement(null, citizen_id)
+
+
+static func cancel_city_citizen_movement_for_city_state(
+	city_state: CitySettlementSimulationState,
+	citizen_id: int
+) -> bool:
+	return _cancel_city_citizen_movement(city_state, citizen_id)
+
+
+static func _cancel_city_citizen_movement(
+	city_state,
+	citizen_id: int
+) -> bool:
+	var registry_state := _get_registry_state(city_state)
+	var citizen_index := -1
+	if registry_state.citizen_index_by_id.has(citizen_id):
+		citizen_index = int(registry_state.citizen_index_by_id[citizen_id])
 
 	if citizen_index < 0:
 		return false
 
-	var raw_citizen = CityCitizenRegistrySystem.get_current_state().citizens[citizen_index]
+	var raw_citizen = registry_state.citizens[citizen_index]
 
 	if not raw_citizen is Dictionary:
 		return false
@@ -301,10 +479,10 @@ static func cancel_city_citizen_movement(
 		citizen,
 		true
 	)
-	CityCitizenRegistrySystem.get_current_state().citizens[citizen_index] = citizen
+	registry_state.citizens[citizen_index] = citizen
 
-	_remove_city_active_mover_id(citizen_id)
-	mark_city_citizen_movement_changed()
+	_remove_city_active_mover_id(citizen_id, city_state)
+	_mark_city_citizen_movement_changed(city_state)
 
 	return true
 
@@ -312,19 +490,40 @@ static func assign_city_citizen_movement_order(
 	citizen_id: int,
 	raw_path: Array
 ) -> bool:
-	var city_world: WorldData = WorldPoliticalState.get_current_city_world()
+	return _assign_city_citizen_movement_order(null, citizen_id, raw_path)
+
+
+static func assign_city_citizen_movement_order_for_city_state(
+	city_state: CitySettlementSimulationState,
+	citizen_id: int,
+	raw_path: Array
+) -> bool:
+	return _assign_city_citizen_movement_order(
+		city_state,
+		citizen_id,
+		raw_path
+	)
+
+
+static func _assign_city_citizen_movement_order(
+	city_state,
+	citizen_id: int,
+	raw_path: Array
+) -> bool:
+	var city_world: WorldData = _get_city_world(city_state)
 
 	if city_world == null:
 		return false
 
-	var citizen_index := CityCitizenRegistrySystem.get_city_citizen_index_by_id(
-		citizen_id
-	)
+	var registry_state := _get_registry_state(city_state)
+	var citizen_index := -1
+	if registry_state.citizen_index_by_id.has(citizen_id):
+		citizen_index = int(registry_state.citizen_index_by_id[citizen_id])
 
 	if citizen_index < 0:
 		return false
 
-	var raw_citizen = CityCitizenRegistrySystem.get_current_state().citizens[citizen_index]
+	var raw_citizen = registry_state.citizens[citizen_index]
 
 	if not raw_citizen is Dictionary:
 		return false
@@ -345,7 +544,8 @@ static func assign_city_citizen_movement_order(
 	var movement_path := _get_clean_city_citizen_movement_path(
 		city_world,
 		raw_path,
-		citizen_id
+		citizen_id,
+		city_state
 	)
 
 	if movement_path.is_empty():
@@ -355,7 +555,7 @@ static func assign_city_citizen_movement_order(
 		return false
 
 	if movement_path.size() == 1:
-		cancel_city_citizen_movement(citizen_id)
+		_cancel_city_citizen_movement(city_state, citizen_id)
 		return true
 
 	var movement_speed := int(
@@ -387,14 +587,42 @@ static func assign_city_citizen_movement_order(
 		CityCitizens.CITY_CITIZEN_MOVEMENT_FAILURE_NONE
 	)
 
-	CityCitizenRegistrySystem.get_current_state().citizens[citizen_index] = citizen
+	registry_state.citizens[citizen_index] = citizen
 
-	_add_city_active_mover_id(citizen_id)
-	mark_city_citizen_movement_changed()
+	_add_city_active_mover_id(citizen_id, city_state)
+	_mark_city_citizen_movement_changed(city_state)
 
 	return true
 
 static func commit_city_citizen_movement_tick(
+	city_world: WorldData,
+	raw_citizen_updates: Array,
+	raw_next_active_mover_ids: Array[int]
+) -> Dictionary:
+	return _commit_city_citizen_movement_tick(
+		null,
+		city_world,
+		raw_citizen_updates,
+		raw_next_active_mover_ids
+	)
+
+
+static func commit_city_citizen_movement_tick_for_city_state(
+	city_state: CitySettlementSimulationState,
+	city_world: WorldData,
+	raw_citizen_updates: Array,
+	raw_next_active_mover_ids: Array[int]
+) -> Dictionary:
+	return _commit_city_citizen_movement_tick(
+		city_state,
+		city_world,
+		raw_citizen_updates,
+		raw_next_active_mover_ids
+	)
+
+
+static func _commit_city_citizen_movement_tick(
+	city_state,
 	city_world: WorldData,
 	raw_citizen_updates: Array,
 	raw_next_active_mover_ids: Array[int]
@@ -411,6 +639,7 @@ static func commit_city_citizen_movement_tick(
 		return result
 
 	var update_normalization := _normalize_city_citizen_movement_updates(
+		city_state,
 		city_world,
 		raw_citizen_updates
 	)
@@ -435,6 +664,7 @@ static func commit_city_citizen_movement_tick(
 			rejected_id_lookup[rejected_id] = true
 
 	var active_normalization := _normalize_next_active_mover_ids(
+		city_state,
 		raw_next_active_mover_ids,
 		clean_update_by_id,
 		rejected_id_lookup
@@ -448,6 +678,7 @@ static func commit_city_citizen_movement_tick(
 	)
 
 	var application_result := _apply_city_citizen_movement_updates(
+		city_state,
 		clean_updates
 	)
 	var moved_citizen_count := int(
@@ -458,11 +689,12 @@ static func commit_city_citizen_movement_tick(
 	)
 	var quarantined_count := (
 		_quarantine_rejected_city_citizen_movement_updates(
+			city_state,
 			rejected_updates
 		)
 	)
 	var active_registry_changed := (
-		_replace_city_active_mover_registry(clean_next_active_ids)
+		_replace_city_active_mover_registry(city_state, clean_next_active_ids)
 	)
 
 	if (
@@ -470,12 +702,17 @@ static func commit_city_citizen_movement_tick(
 		or quarantined_count > 0
 		or active_registry_changed
 	):
-		mark_city_citizen_movement_changed()
+		_mark_city_citizen_movement_changed(city_state)
 
 	if spatial_index_changed:
-		CityCitizenSpatialSystem.mark_city_citizen_spatial_changed()
+		if city_state == null:
+			CityCitizenSpatialSystem.mark_city_citizen_spatial_changed()
+		else:
+			CityCitizenSpatialSystem.mark_city_citizen_spatial_changed_for_city_state(
+				city_state
+			)
 
-	city_citizen_movement_visual_events = application_result.get(
+	_get_runtime_state(city_state).citizen_movement_visual_events = application_result.get(
 		"movement_visual_events",
 		[]
 	)
@@ -487,6 +724,7 @@ static func commit_city_citizen_movement_tick(
 	return result
 
 static func _make_city_citizen_movement_rejection(
+	city_state,
 	citizen_id: int,
 	reason: String,
 	final_tile = CityCitizens.INVALID_CITY_TILE_POSITION,
@@ -500,13 +738,22 @@ static func _make_city_citizen_movement_rejection(
 
 	if final_tile is Vector2i:
 		rejection["final_tile"] = final_tile
-		rejection["occupying_object_id"] = int(
-			CityObjectSystem.get_city_object_id_at_tile(final_tile)
-		)
+		if city_state == null:
+			rejection["occupying_object_id"] = int(
+				CityObjectSystem.get_city_object_id_at_tile(final_tile)
+			)
+		else:
+			rejection["occupying_object_id"] = int(
+				CityObjectSystem.get_city_object_id_at_tile_for_city_state(
+					city_state,
+					final_tile
+				)
+			)
 
 	return rejection
 
 static func _normalize_city_citizen_movement_updates(
+	city_state,
 	city_world: WorldData,
 	raw_citizen_updates: Array
 ) -> Dictionary:
@@ -518,6 +765,7 @@ static func _normalize_city_citizen_movement_updates(
 		if not raw_update is Dictionary:
 			rejected_updates.append(
 				_make_city_citizen_movement_rejection(
+					city_state,
 					-1,
 					"update_is_not_dictionary",
 					CityCitizens.INVALID_CITY_TILE_POSITION,
@@ -538,6 +786,7 @@ static func _normalize_city_citizen_movement_updates(
 		if citizen_id <= 0:
 			rejected_updates.append(
 				_make_city_citizen_movement_rejection(
+					city_state,
 					citizen_id,
 					"invalid_citizen_id",
 					raw_final_tile,
@@ -549,6 +798,7 @@ static func _normalize_city_citizen_movement_updates(
 		if clean_update_by_id.has(citizen_id):
 			rejected_updates.append(
 				_make_city_citizen_movement_rejection(
+					city_state,
 					citizen_id,
 					"duplicate_update",
 					raw_final_tile,
@@ -560,6 +810,7 @@ static func _normalize_city_citizen_movement_updates(
 		if not raw_updated_citizen is Dictionary:
 			rejected_updates.append(
 				_make_city_citizen_movement_rejection(
+					city_state,
 					citizen_id,
 					"updated_citizen_is_not_dictionary",
 					raw_final_tile
@@ -570,6 +821,7 @@ static func _normalize_city_citizen_movement_updates(
 		if not raw_final_tile is Vector2i:
 			rejected_updates.append(
 				_make_city_citizen_movement_rejection(
+					city_state,
 					citizen_id,
 					"final_tile_is_not_vector"
 				)
@@ -579,6 +831,7 @@ static func _normalize_city_citizen_movement_updates(
 		if not raw_traversed_tiles is Array:
 			rejected_updates.append(
 				_make_city_citizen_movement_rejection(
+					city_state,
 					citizen_id,
 					"traversed_tiles_is_not_array",
 					raw_final_tile
@@ -586,11 +839,15 @@ static func _normalize_city_citizen_movement_updates(
 			)
 			continue
 
-		var citizen_index := CityCitizenRegistrySystem.get_city_citizen_index_by_id(citizen_id)
+		var registry_state := _get_registry_state(city_state)
+		var citizen_index := -1
+		if registry_state.citizen_index_by_id.has(citizen_id):
+			citizen_index = int(registry_state.citizen_index_by_id[citizen_id])
 
 		if citizen_index < 0:
 			rejected_updates.append(
 				_make_city_citizen_movement_rejection(
+					city_state,
 					citizen_id,
 					"citizen_not_found",
 					raw_final_tile,
@@ -604,6 +861,7 @@ static func _normalize_city_citizen_movement_updates(
 		if int(updated_citizen.get("id", -1)) != citizen_id:
 			rejected_updates.append(
 				_make_city_citizen_movement_rejection(
+					city_state,
 					citizen_id,
 					"updated_citizen_id_mismatch",
 					raw_final_tile
@@ -611,11 +869,12 @@ static func _normalize_city_citizen_movement_updates(
 			)
 			continue
 
-		var existing_citizen = CityCitizenRegistrySystem.get_current_state().citizens[citizen_index]
+		var existing_citizen = registry_state.citizens[citizen_index]
 
 		if not existing_citizen is Dictionary:
 			rejected_updates.append(
 				_make_city_citizen_movement_rejection(
+					city_state,
 					citizen_id,
 					"authoritative_citizen_is_not_dictionary",
 					raw_final_tile,
@@ -632,6 +891,7 @@ static func _normalize_city_citizen_movement_updates(
 		if not authoritative_position is Vector2i:
 			rejected_updates.append(
 				_make_city_citizen_movement_rejection(
+					city_state,
 					citizen_id,
 					"authoritative_position_invalid",
 					raw_final_tile
@@ -656,6 +916,7 @@ static func _normalize_city_citizen_movement_updates(
 		if includes_non_living_citizen and not is_non_living_same_tile_cleanup:
 			rejected_updates.append(
 				_make_city_citizen_movement_rejection(
+					city_state,
 					citizen_id,
 					"non_living_movement_relocation",
 					raw_final_tile
@@ -663,16 +924,24 @@ static func _normalize_city_citizen_movement_updates(
 			)
 			continue
 
-		if (
-			not is_non_living_same_tile_cleanup
-			and not CityNavigationSystem.is_city_tile_walkable_for_citizen(
+		var final_tile_is_walkable := (
+			CityNavigationSystem.is_city_tile_walkable_for_citizen(
 				city_world,
 				raw_final_tile,
 				citizen_id
 			)
-		):
+			if city_state == null
+			else CityNavigationSystem.is_city_tile_walkable_for_citizen_for_city_state(
+				city_state,
+				city_world,
+				raw_final_tile,
+				citizen_id
+			)
+		)
+		if not is_non_living_same_tile_cleanup and not final_tile_is_walkable:
 			rejected_updates.append(
 				_make_city_citizen_movement_rejection(
+					city_state,
 					citizen_id,
 					"final_tile_not_walkable",
 					raw_final_tile
@@ -697,6 +966,7 @@ static func _normalize_city_citizen_movement_updates(
 	}
 
 static func _normalize_next_active_mover_ids(
+	city_state,
 	raw_next_active_mover_ids: Array[int],
 	clean_update_by_id: Dictionary,
 	rejected_id_lookup: Dictionary
@@ -712,6 +982,7 @@ static func _normalize_next_active_mover_ids(
 		if citizen_id <= 0 or clean_next_active_lookup.has(citizen_id):
 			rejected_updates.append(
 				_make_city_citizen_movement_rejection(
+					city_state,
 					citizen_id,
 					"invalid_or_duplicate_active_mover",
 					CityCitizens.INVALID_CITY_TILE_POSITION,
@@ -720,7 +991,16 @@ static func _normalize_next_active_mover_ids(
 			)
 			continue
 
-		var proposed_citizen := CityCitizenRegistrySystem.get_city_citizen_by_id(citizen_id)
+		var proposed_citizen: Dictionary = {}
+		var registry_state := _get_registry_state(city_state)
+		if registry_state.citizen_index_by_id.has(citizen_id):
+			var citizen_index := int(
+				registry_state.citizen_index_by_id[citizen_id]
+			)
+			if citizen_index >= 0 and citizen_index < registry_state.citizens.size():
+				var raw_citizen = registry_state.citizens[citizen_index]
+				if raw_citizen is Dictionary:
+					proposed_citizen = raw_citizen
 
 		if clean_update_by_id.has(citizen_id):
 			var proposed_update: Dictionary = clean_update_by_id[citizen_id]
@@ -729,6 +1009,7 @@ static func _normalize_next_active_mover_ids(
 		if proposed_citizen.is_empty():
 			rejected_updates.append(
 				_make_city_citizen_movement_rejection(
+					city_state,
 					citizen_id,
 					"active_mover_citizen_missing",
 					CityCitizens.INVALID_CITY_TILE_POSITION,
@@ -740,6 +1021,7 @@ static func _normalize_next_active_mover_ids(
 		if not bool(proposed_citizen.get("alive", false)):
 			rejected_updates.append(
 				_make_city_citizen_movement_rejection(
+					city_state,
 					citizen_id,
 					"active_mover_not_alive",
 					CityCitizens.INVALID_CITY_TILE_POSITION,
@@ -754,6 +1036,7 @@ static func _normalize_next_active_mover_ids(
 		):
 			rejected_updates.append(
 				_make_city_citizen_movement_rejection(
+					city_state,
 					citizen_id,
 					"active_registry_entry_not_moving",
 					CityCitizens.INVALID_CITY_TILE_POSITION,
@@ -772,8 +1055,10 @@ static func _normalize_next_active_mover_ids(
 	}
 
 static func _quarantine_rejected_city_citizen_movement_updates(
+	city_state,
 	rejected_updates: Array
 ) -> int:
+	var registry_state := _get_registry_state(city_state)
 	var quarantined_ids: Dictionary = {}
 
 	for raw_rejection in rejected_updates:
@@ -790,12 +1075,14 @@ static func _quarantine_rejected_city_citizen_movement_updates(
 		):
 			continue
 
-		var citizen_index := CityCitizenRegistrySystem.get_city_citizen_index_by_id(citizen_id)
+		var citizen_index := -1
+		if registry_state.citizen_index_by_id.has(citizen_id):
+			citizen_index = int(registry_state.citizen_index_by_id[citizen_id])
 
 		if citizen_index < 0:
 			continue
 
-		var raw_citizen = CityCitizenRegistrySystem.get_current_state().citizens[citizen_index]
+		var raw_citizen = registry_state.citizens[citizen_index]
 
 		if not raw_citizen is Dictionary:
 			continue
@@ -806,14 +1093,16 @@ static func _quarantine_rejected_city_citizen_movement_updates(
 		citizen["movement_failure_reason"] = (
 			CityCitizens.CITY_CITIZEN_MOVEMENT_FAILURE_INVALID_PATH
 		)
-		CityCitizenRegistrySystem.get_current_state().citizens[citizen_index] = citizen
+		registry_state.citizens[citizen_index] = citizen
 		quarantined_ids[citizen_id] = true
 
 	return quarantined_ids.size()
 
 static func _apply_city_citizen_movement_updates(
+	city_state,
 	clean_updates: Array
 ) -> Dictionary:
+	var registry_state := _get_registry_state(city_state)
 	var moved_citizen_count := 0
 	var spatial_index_changed := false
 	var movement_visual_events: Array = []
@@ -826,12 +1115,13 @@ static func _apply_city_citizen_movement_updates(
 			"final_tile",
 			CityCitizens.INVALID_CITY_TILE_POSITION
 		)
-		var existing_citizen: Dictionary = CityCitizenRegistrySystem.get_current_state().citizens[citizen_index]
+		var existing_citizen: Dictionary = registry_state.citizens[citizen_index]
 		var old_tile: Vector2i = existing_citizen.get(
 			"city_tile_position",
 			CityCitizens.INVALID_CITY_TILE_POSITION
 		)
 		var movement_visual_event := _make_city_citizen_movement_visual_event({
+			"city_state": city_state,
 			"before_citizen": existing_citizen,
 			"after_citizen": updated_citizen,
 			"before_tile": old_tile,
@@ -843,19 +1133,54 @@ static func _apply_city_citizen_movement_updates(
 			movement_visual_events.append(movement_visual_event)
 
 		if old_tile != final_tile:
-			if CityCitizenSpatialSystem.remove_city_citizen_from_spatial_index(citizen_id, old_tile):
+			var removed_from_old_tile := (
+				CityCitizenSpatialSystem.remove_city_citizen_from_spatial_index(
+					citizen_id,
+					old_tile
+				)
+				if city_state == null
+				else CityCitizenSpatialSystem.remove_city_citizen_from_spatial_index_for_city_state(
+					city_state,
+					citizen_id,
+					old_tile
+				)
+			)
+			if removed_from_old_tile:
 				spatial_index_changed = true
 			moved_citizen_count += 1
 		elif not bool(updated_citizen.get("alive", false)):
-			if CityCitizenSpatialSystem.remove_city_citizen_from_spatial_index(citizen_id, old_tile):
+			var removed_dead_citizen := (
+				CityCitizenSpatialSystem.remove_city_citizen_from_spatial_index(
+					citizen_id,
+					old_tile
+				)
+				if city_state == null
+				else CityCitizenSpatialSystem.remove_city_citizen_from_spatial_index_for_city_state(
+					city_state,
+					citizen_id,
+					old_tile
+				)
+			)
+			if removed_dead_citizen:
 				spatial_index_changed = true
 
 		updated_citizen["city_tile_position"] = final_tile
-		CityCitizenRegistrySystem.get_current_state().citizens[citizen_index] = updated_citizen
-		if (
-			bool(updated_citizen.get("alive", false))
-			and CityCitizenSpatialSystem.add_city_citizen_to_spatial_index(citizen_id, final_tile)
-		):
+		registry_state.citizens[citizen_index] = updated_citizen
+		var added_to_final_tile := false
+		if bool(updated_citizen.get("alive", false)):
+			added_to_final_tile = (
+				CityCitizenSpatialSystem.add_city_citizen_to_spatial_index(
+					citizen_id,
+					final_tile
+				)
+				if city_state == null
+				else CityCitizenSpatialSystem.add_city_citizen_to_spatial_index_for_city_state(
+					city_state,
+					citizen_id,
+					final_tile
+				)
+			)
+		if added_to_final_tile:
 			spatial_index_changed = true
 
 	return {
@@ -865,28 +1190,31 @@ static func _apply_city_citizen_movement_updates(
 	}
 
 static func _replace_city_active_mover_registry(
+	city_state,
 	clean_next_active_ids: Array[int]
 ) -> bool:
+	var runtime_state := _get_runtime_state(city_state)
 	var expected_lookup: Dictionary = {}
 	for citizen_id in clean_next_active_ids:
 		expected_lookup[citizen_id] = true
 
 	var registry_changed := (
-		city_active_mover_ids != clean_next_active_ids
-		or city_active_mover_id_lookup != expected_lookup
+		runtime_state.active_mover_ids != clean_next_active_ids
+		or runtime_state.active_mover_id_lookup != expected_lookup
 	)
-	city_active_mover_ids.clear()
-	city_active_mover_id_lookup.clear()
+	runtime_state.active_mover_ids.clear()
+	runtime_state.active_mover_id_lookup.clear()
 
 	for citizen_id in clean_next_active_ids:
-		city_active_mover_ids.append(citizen_id)
-		city_active_mover_id_lookup[citizen_id] = true
+		runtime_state.active_mover_ids.append(citizen_id)
+		runtime_state.active_mover_id_lookup[citizen_id] = true
 
 	return registry_changed
 
 static func _make_city_citizen_movement_visual_event(
 	values: Dictionary
 ) -> Dictionary:
+	var city_state = values.get("city_state")
 	var before_citizen: Dictionary = values.get("before_citizen", {})
 	var after_citizen: Dictionary = values.get("after_citizen", {})
 	var before_tile: Vector2i = values.get(
@@ -909,15 +1237,18 @@ static func _make_city_citizen_movement_visual_event(
 	return {
 		"citizen_id": citizen_id,
 		"before": _make_city_citizen_movement_visual_snapshot(
+			city_state,
 			before_citizen,
 			before_tile
 		),
 		"after": _make_city_citizen_movement_visual_snapshot(
+			city_state,
 			after_citizen,
 			after_tile
 		),
 		"traversed_tiles": (
 			_get_clean_city_citizen_movement_visual_trace(
+				city_state,
 				before_tile,
 				after_tile,
 				raw_traversed_tiles
@@ -926,6 +1257,7 @@ static func _make_city_citizen_movement_visual_event(
 	}
 
 static func _make_city_citizen_movement_visual_snapshot(
+	city_state,
 	citizen: Dictionary,
 	tile_position: Vector2i
 ) -> Dictionary:
@@ -952,9 +1284,17 @@ static func _make_city_citizen_movement_visual_snapshot(
 	):
 		var from_tile: Vector2i = raw_path[movement_path_index - 1]
 		var to_tile: Vector2i = raw_path[movement_path_index]
-		var step_cost := CityNavigationSystem.get_city_citizen_movement_step_cost(
-			from_tile,
-			to_tile
+		var step_cost := (
+			CityNavigationSystem.get_city_citizen_movement_step_cost(
+				from_tile,
+				to_tile
+			)
+			if city_state == null
+			else CityNavigationSystem.get_city_citizen_movement_step_cost_for_city_state(
+				city_state,
+				from_tile,
+				to_tile
+			)
 		)
 
 		if step_cost > 0:
@@ -982,6 +1322,7 @@ static func _make_city_citizen_movement_visual_snapshot(
 	}
 
 static func _get_clean_city_citizen_movement_visual_trace(
+	city_state,
 	before_tile: Vector2i,
 	after_tile: Vector2i,
 	raw_traversed_tiles
@@ -998,24 +1339,36 @@ static func _get_clean_city_citizen_movement_visual_trace(
 			if tile == clean_tiles.back():
 				continue
 
-			if (
+			var step_cost := (
 				CityNavigationSystem.get_city_citizen_movement_step_cost(
 					clean_tiles.back(),
 					tile
 				)
-				<= 0
-			):
+				if city_state == null
+				else CityNavigationSystem.get_city_citizen_movement_step_cost_for_city_state(
+					city_state,
+					clean_tiles.back(),
+					tile
+				)
+			)
+			if step_cost <= 0:
 				break
 
 			clean_tiles.append(tile)
 
-	if (
-		clean_tiles.back() != after_tile
-		and CityNavigationSystem.get_city_citizen_movement_step_cost(
+	var final_step_cost := (
+		CityNavigationSystem.get_city_citizen_movement_step_cost(
 			clean_tiles.back(),
 			after_tile
-		) > 0
-	):
+		)
+		if city_state == null
+		else CityNavigationSystem.get_city_citizen_movement_step_cost_for_city_state(
+			city_state,
+			clean_tiles.back(),
+			after_tile
+		)
+	)
+	if clean_tiles.back() != after_tile and final_step_cost > 0:
 		clean_tiles.append(after_tile)
 
 	return clean_tiles

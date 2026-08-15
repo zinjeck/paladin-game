@@ -66,6 +66,12 @@ func _run_state_isolation_test() -> void:
 	)
 	if player_state == null:
 		return
+	_seed_city_runtime_data(
+		player_state,
+		player_city_id,
+		PLAYER_CITY_NAME,
+		WorldData.get_official_founding_culture_id()
+	)
 
 	_expect(
 		player_state.work_state is CityWorkState,
@@ -86,10 +92,12 @@ func _run_state_isolation_test() -> void:
 
 	# Give the player city unmistakable local state. WorldData remains a
 	# compatibility workspace while individual city subsystems are extracted.
-	var player_city_world := _make_world(5, 5, 91_101)
+	var player_city_world := _make_world(8, 8, 91_101)
 	WorldPoliticalState.set_current_city_world(player_city_world)
 	WorldPoliticalState.set_current_city_seed(91_101)
 	var shared_object_tile := Vector2i(2, 2)
+	var player_keep := _register_keep(player_city_world, Vector2i(4, 0), "player")
+	_mark_city_founded(player_state, player_keep)
 	CityObjectSystem.get_current_state().next_object_id = 16
 	CityObjectSystem.get_current_state().object_version = 3
 	var player_road := CityObjectSystem.add_city_road_object(
@@ -111,8 +119,8 @@ func _run_state_isolation_test() -> void:
 	var player_validation := CityStateValidatorScript.validate(true, false)
 	_expect(
 		bool(player_validation.get("valid", false))
-		and int(player_validation.get("checked_objects", 0)) == 1
-		and int(player_validation.get("checked_occupied_tiles", 0)) == 1,
+		and int(player_validation.get("checked_objects", 0)) == 2
+		and int(player_validation.get("checked_occupied_tiles", 0)) == 22,
 		"The player City's routed object registry must pass full validation."
 	)
 	CityAssignmentSystem.get_current_state().assignment_version = 9
@@ -238,6 +246,12 @@ func _run_state_isolation_test() -> void:
 		and cpu_state.logistics_state != player_state.logistics_state,
 		"Two cities must never share the same logistics-state object."
 	)
+	_seed_city_runtime_data(
+		cpu_state,
+		cpu_city_id,
+		"Marenhold",
+		int(cpu_culture["id"])
+	)
 
 	_expect(
 		WorldPoliticalState.set_active_settlement(cpu_city_id),
@@ -300,9 +314,11 @@ func _run_state_isolation_test() -> void:
 		"The active CPU city context must expose its own local simulation state."
 	)
 
-	var cpu_city_world := _make_world(6, 6, 91_202)
+	var cpu_city_world := _make_world(8, 8, 91_202)
 	WorldPoliticalState.set_current_city_world(cpu_city_world)
 	WorldPoliticalState.set_current_city_seed(91_202)
+	var cpu_keep := _register_keep(cpu_city_world, Vector2i(4, 0), "cpu")
+	_mark_city_founded(cpu_state, cpu_keep)
 	CityObjectSystem.get_current_state().next_object_id = 54
 	CityObjectSystem.get_current_state().object_version = 11
 	var cpu_road := CityObjectSystem.add_city_road_object(
@@ -322,16 +338,16 @@ func _run_state_isolation_test() -> void:
 	var cpu_validation := CityStateValidatorScript.validate(true, false)
 	_expect(
 		bool(cpu_validation.get("valid", false))
-		and int(cpu_validation.get("checked_objects", 0)) == 1
-		and int(cpu_validation.get("checked_occupied_tiles", 0)) == 1,
+		and int(cpu_validation.get("checked_objects", 0)) == 2
+		and int(cpu_validation.get("checked_occupied_tiles", 0)) == 22,
 		"The CPU City's routed object registry must pass full validation."
 	)
 	_expect(
-		player_state.object_state.objects.size() == 1
-		and int(player_state.object_state.objects[0].get("id", -1)) == 16
+		player_state.object_state.objects.size() == 2
+		and int(player_state.object_state.objects[1].get("id", -1)) == 16
 		and int(
 			player_state.object_state.object_index_by_id.get(16, -1)
-		) == 0
+		) == 1
 		and int(
 			player_state.object_state.occupied_tiles.get(
 				shared_object_tile,
@@ -380,8 +396,8 @@ func _run_state_isolation_test() -> void:
 		"Returning to the player city must restore its local generated world."
 	)
 	_expect(
-		int(CityObjectSystem.get_current_state().objects[0].get("id", -1)) == 16
-		and int(CityObjectSystem.get_current_state().object_index_by_id.get(16, -1)) == 0
+		int(CityObjectSystem.get_current_state().objects[1].get("id", -1)) == 16
+		and int(CityObjectSystem.get_current_state().object_index_by_id.get(16, -1)) == 1
 		and int(CityObjectSystem.get_current_state().occupied_tiles.get(shared_object_tile, -1)) == 16,
 		"Returning to the player city must restore its objects."
 	)
@@ -426,8 +442,8 @@ func _run_state_isolation_test() -> void:
 		"Reactivating the CPU city must restore its own generated world."
 	)
 	_expect(
-		int(CityObjectSystem.get_current_state().objects[0].get("id", -1)) == 54
-		and int(CityObjectSystem.get_current_state().object_index_by_id.get(54, -1)) == 0
+		int(CityObjectSystem.get_current_state().objects[1].get("id", -1)) == 54
+		and int(CityObjectSystem.get_current_state().object_index_by_id.get(54, -1)) == 1
 		and int(CityObjectSystem.get_current_state().occupied_tiles.get(shared_object_tile, -1)) == 54,
 		"Reactivating the CPU city must restore its own objects."
 	)
@@ -475,7 +491,17 @@ func _test_validator_cache_tracks_object_state_identity() -> void:
 	WorldPoliticalState.reset_state()
 	WorldData.reset_runtime_session_state()
 	var city_world := _make_world(8, 8, 91_303)
-	WorldData.store_city_world_save(city_world, 91_303)
+	var first_city_state := _create_owned_city_fixture(
+		"Validator Identity City A",
+		"Validator Identity Culture A",
+		city_world,
+		91_303
+	)
+	if first_city_state == null:
+		_expect(false, "The validator-cache fixture must create its first City.")
+		return
+	var first_keep := _register_keep(city_world, Vector2i(4, 0), "first_state")
+	_mark_city_founded(first_city_state, first_keep)
 	var shared_tile := Vector2i(3, 3)
 	var first_road := CityObjectSystem.add_city_road_object(
 		[shared_tile],
@@ -487,14 +513,24 @@ func _test_validator_cache_tracks_object_state_identity() -> void:
 
 	_expect(
 		not first_road.is_empty()
-		and int(first_result.get("checked_objects", -1)) == 1,
-		"The validator-cache fixture must cache one object for its first state."
+		and int(first_result.get("checked_objects", -1)) == 2,
+		"The validator-cache fixture must cache the Keep and road for its first state."
 	)
 
 	# Rotate only the selected object-state owner. Every numeric version used by
 	# the validator remains equal, so identity is the only valid cache boundary.
 	WorldPoliticalState.reset_state()
-	var second_state := CityObjectSystem.get_current_state()
+	var second_city_world := _make_world(8, 8, 91_304)
+	var second_city_state := _create_owned_city_fixture(
+		"Validator Identity City B",
+		"Validator Identity Culture B",
+		second_city_world,
+		91_304
+	)
+	if second_city_state == null:
+		_expect(false, "The validator-cache fixture must create its second City.")
+		return
+	var second_state := second_city_state.object_state
 	second_state.object_version = first_state.object_version
 	var second_result := CityStateValidatorScript.validate(false, false)
 
@@ -505,6 +541,100 @@ func _test_validator_cache_tracks_object_state_identity() -> void:
 		and int(second_result.get("checked_objects", -1)) == 0,
 		"CityStateValidator must invalidate equal-version cache data when object-state identity changes."
 	)
+
+
+func _create_owned_city_fixture(
+	city_name: String,
+	culture_name: String,
+	city_world: WorldData,
+	city_seed: int
+) -> CitySettlementSimulationState:
+	var culture := WorldData.create_culture(culture_name)
+	var culture_id := int(culture.get("id", -1))
+	var polity := WorldPoliticalState.create_polity({
+		"name": city_name + " Realm",
+		"polity_type": PolityData.POLITY_TYPE_KINGDOM,
+		"primary_culture_id": culture_id,
+	})
+	var city := WorldPoliticalState.create_settlement({
+		"name": city_name,
+		"settlement_type": SettlementData.SETTLEMENT_TYPE_CITY,
+		"polity_id": int(polity.get("id", -1)),
+		"world_region_top_left": Vector2i.ZERO,
+		"world_region_center": Vector2i.ZERO,
+		"world_region_size": 1,
+		"simulation_backend_kind": (
+			SettlementSimulationContext.BACKEND_CITY_SETTLEMENT_STATE
+		),
+	})
+	var city_id := int(city.get("id", -1))
+	var city_state = WorldPoliticalState.get_city_simulation_state(city_id)
+	if (
+		not city_state is CitySettlementSimulationState
+		or not WorldPoliticalState.set_active_settlement(city_id)
+	):
+		return null
+
+	city_state.city_world = city_world
+	city_state.city_seed = city_seed
+	_seed_city_runtime_data(city_state, city_id, city_name, culture_id)
+	return city_state
+
+
+func _register_keep(
+	city_world: WorldData,
+	top_left: Vector2i,
+	object_owner: String
+) -> Dictionary:
+	return CityObjectSystem.register_completed_city_object({
+		"object_type": CityObjectCatalog.CITY_OBJECT_CITY_CENTER,
+		"top_left": top_left,
+		"size_tiles": CityObjectCatalog.get_city_object_size_for_type(
+			CityObjectCatalog.CITY_OBJECT_CITY_CENTER
+		),
+		"object_owner": object_owner,
+		"city_world": city_world,
+	})
+
+
+func _seed_city_runtime_data(
+	city_state: CitySettlementSimulationState,
+	city_id: int,
+	city_name: String,
+	culture_id: int
+) -> void:
+	if city_state == null:
+		return
+
+	city_state.city_runtime_data.merge({
+		"id": city_id,
+		"name": city_name,
+		"primary_culture_id": culture_id,
+		"founded": false,
+		"can_build": false,
+	}, true)
+
+
+func _mark_city_founded(
+	city_state: CitySettlementSimulationState,
+	keep: Dictionary
+) -> void:
+	if city_state == null or city_state.city_world == null or keep.is_empty():
+		return
+
+	city_state.city_runtime_data.merge({
+		"city_world_seed": city_state.city_seed,
+		"city_map_size": Vector2i(
+			city_state.city_world.width,
+			city_state.city_world.height
+		),
+		"foundation_top_left": keep.get("top_left", Vector2i(-1, -1)),
+		"foundation_size": keep.get("size", Vector2i.ZERO),
+		"foundation_object_id": int(keep.get("id", -1)),
+		"foundation_object_owner": str(keep.get("owner", "")),
+		"founded": true,
+		"can_build": true,
+	}, true)
 
 
 func _make_world(width: int, height: int, seed: int) -> WorldData:

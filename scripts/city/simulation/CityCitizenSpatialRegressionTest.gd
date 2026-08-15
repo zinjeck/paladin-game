@@ -283,11 +283,7 @@ func _test_dead_active_mover_cleanup() -> void:
 		),
 		"The death-cleanup fixture must begin with an active mover."
 	)
-	var occupied_tile: Dictionary = city_world.tiles[TILE_A.y][TILE_A.x]
-	occupied_tile["terrain"] = CityObjectCatalog.TERRAIN_WATER
-	occupied_tile["is_land"] = false
-	city_world.tiles[TILE_A.y][TILE_A.x] = occupied_tile
-	city_world.mark_tile_data_changed()
+	city_world.set_tile_terrain(TILE_A, CityObjectCatalog.TERRAIN_WATER)
 	_expect(
 		not CityNavigationSystem.is_city_tile_walkable_for_citizen(
 			city_world,

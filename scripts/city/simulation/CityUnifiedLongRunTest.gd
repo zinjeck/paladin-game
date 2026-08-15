@@ -64,7 +64,6 @@ func _run_long_run_test() -> void:
 	await get_tree().process_frame
 
 	_expect(renderer.city_world != null, "The test city world must generate.")
-
 	if renderer.city_world == null:
 		renderer.queue_free()
 		return
@@ -76,6 +75,13 @@ func _run_long_run_test() -> void:
 		await get_tree().process_frame
 		WorldData.reset_runtime_session_state()
 		return
+
+	_expect(
+		SimulationCoordinator.select_detailed_simulation_settlement(
+			WorldPoliticalState.active_settlement_id
+		),
+		"The long-run fixture must explicitly select its detailed simulation target."
+	)
 
 	var initial_validation := CityStateValidatorScript.validate(true, false)
 	_record_validation(initial_validation, 0)
@@ -274,9 +280,12 @@ func _create_mixed_work_fixture(renderer: CityRenderer) -> Dictionary:
 		WorldData.RESOURCE_COAL,
 		keep_capacity
 	)
+	var filled_keep := CityObjectSystem.get_city_object_by_id(keep_id)
 	_expect(
 		accepted_coal == keep_capacity
-		and CityResourceContainerSystem.get_city_object_storage_free_space(keep) == 0,
+		and CityResourceContainerSystem.get_city_object_storage_free_space(
+			filled_keep
+		) == 0,
 		"The public Keep must be completely full for relocation fallback."
 	)
 
@@ -810,16 +819,15 @@ func _prepare_fixture_access_for_all_citizens(
 			continue
 
 		for corridor_tile in corridor:
-			var tile := city_world.get_tile(corridor_tile.x, corridor_tile.y)
-			tile["terrain"] = WorldData.TERRAIN_LAND
-			tile["is_land"] = true
+			city_world.set_tile_terrain(
+				corridor_tile,
+				WorldData.TERRAIN_LAND
+			)
 			_set_surface_feature(
 				city_world,
 				corridor_tile,
 				WorldData.CITY_SURFACE_FEATURE_NONE
 			)
-
-	city_world.mark_tile_data_changed()
 
 
 func _prepare_deterministic_natural_targets(
@@ -855,11 +863,11 @@ func _prepare_deterministic_natural_targets(
 				):
 					continue
 
-				var tile := city_world.get_tile(tile_position.x, tile_position.y)
-				tile["terrain"] = WorldData.TERRAIN_LAND
-				tile["is_land"] = true
+				city_world.set_tile_terrain(
+					tile_position,
+					WorldData.TERRAIN_LAND
+				)
 				_set_surface_feature(city_world, tile_position, feature)
-				city_world.mark_tile_data_changed()
 
 				if not CityWorkSystem.can_designate_city_player_command_at_tile(
 					command_type,
@@ -1014,19 +1022,15 @@ func _find_and_prepare_reachable_rectangle(
 						continue
 
 					var prepared_tile: Vector2i = raw_prepared_tile
-					var tile := city_world.get_tile(
-						prepared_tile.x,
-						prepared_tile.y
+					city_world.set_tile_terrain(
+						prepared_tile,
+						WorldData.TERRAIN_LAND
 					)
-					tile["terrain"] = WorldData.TERRAIN_LAND
-					tile["is_land"] = true
 					_set_surface_feature(
 						city_world,
 						prepared_tile,
 						WorldData.CITY_SURFACE_FEATURE_NONE
 					)
-
-				city_world.mark_tile_data_changed()
 
 				var access_tiles := _make_external_boundary_tiles(
 					city_world,
@@ -1325,19 +1329,10 @@ func _set_surface_feature(
 	tile_position: Vector2i,
 	feature: String
 ) -> void:
-	var tile := city_world.get_tile(tile_position.x, tile_position.y)
-	var previous_feature := WorldData.get_city_surface_feature(tile)
-
 	if feature == WorldData.CITY_SURFACE_FEATURE_NONE:
-		tile.erase("surface_feature")
+		city_world.remove_tile_surface_feature(tile_position)
 	else:
-		tile["surface_feature"] = feature
-
-	city_world.mark_city_surface_feature_changed(
-		tile_position,
-		previous_feature,
-		feature
-	)
+		city_world.set_tile_surface_feature(tile_position, feature)
 
 
 func _find_placeable_rectangle(

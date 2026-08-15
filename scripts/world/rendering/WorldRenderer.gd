@@ -220,7 +220,12 @@ func build_city_preparation_request() -> Dictionary:
 			if not world.is_in_bounds(world_x, world_y):
 				return {}
 
-			row.append(world.get_tile(world_x, world_y).duplicate(true))
+			row.append(
+				world.get_tile_for_internal_read(
+					world_x,
+					world_y
+				).duplicate(true)
+			)
 
 		region_tiles.append(row)
 
@@ -494,7 +499,10 @@ func get_hovered_tile_debug_text() -> String:
 			+ "Tile: none\n"
 		)
 
-	var tile: Dictionary = world.get_tile(hovered_tile.x, hovered_tile.y)
+	var tile: Dictionary = world.get_tile_for_internal_read(
+		hovered_tile.x,
+		hovered_tile.y
+	)
 
 	var elevation: float = float(tile["elevation"])
 	var temperature: float = float(tile["temperature"])
@@ -547,7 +555,7 @@ func is_tile_coastal(tile_x: int, tile_y: int) -> bool:
 	if world == null:
 		return false
 
-	var tile: Dictionary = world.get_tile(tile_x, tile_y)
+	var tile: Dictionary = world.get_tile_for_internal_read(tile_x, tile_y)
 
 	if str(tile["terrain"]) == CityObjectCatalog.TERRAIN_WATER:
 		return false
@@ -566,7 +574,10 @@ func is_tile_coastal(tile_x: int, tile_y: int) -> bool:
 		if neighbor_x < 0 or neighbor_y < 0 or neighbor_x >= world.width or neighbor_y >= world.height:
 			continue
 
-		var neighbor: Dictionary = world.get_tile(neighbor_x, neighbor_y)
+		var neighbor: Dictionary = world.get_tile_for_internal_read(
+			neighbor_x,
+			neighbor_y
+		)
 
 		if str(neighbor["terrain"]) == CityObjectCatalog.TERRAIN_WATER:
 			return true
@@ -832,7 +843,10 @@ func count_region_ocean_tiles(region_top_left: Vector2i) -> int:
 			var tile_x: int = region_top_left.x + x_offset
 			var tile_y: int = region_top_left.y + y_offset
 
-			var tile: Dictionary = world.get_tile(tile_x, tile_y)
+			var tile: Dictionary = world.get_tile_for_internal_read(
+				tile_x,
+				tile_y
+			)
 
 			if is_ocean_region_tile(tile):
 				ocean_tiles += 1

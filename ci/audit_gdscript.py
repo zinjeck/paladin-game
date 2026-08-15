@@ -11,14 +11,21 @@ from __future__ import annotations
 import collections
 import hashlib
 import json
+import os
 import re
 import sys
 from dataclasses import dataclass
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-LOG_DIR = ROOT / "ci-logs"
-LOG_DIR.mkdir(exist_ok=True)
+if os.environ.get("GITHUB_ACTIONS", "").lower() == "true":
+    LOG_DIR = ROOT / "ci-logs"
+else:
+    local_info_root = Path(
+        os.environ.get("PALADIN_INFO_DIR", str(ROOT.parent / "Paladin_Info"))
+    )
+    LOG_DIR = local_info_root / "ci-logs"
+LOG_DIR.mkdir(parents=True, exist_ok=True)
 REPORT_PATH = LOG_DIR / "static-audit.json"
 
 FUNC_RE = re.compile(r"^(?:static\s+)?func\s+([A-Za-z_][A-Za-z0-9_]*)\s*\(", re.MULTILINE)
@@ -98,6 +105,7 @@ WORLD_DATA_FORBIDDEN_CITY_LOGISTICS_SYMBOLS = (
     "get_city_ground_pile_resource_amount",
     "remove_resource_from_city_ground_pile",
     "reserve_city_ground_pile_for_construction",
+    "release_city_construction_site_materials",
     "get_total_city_ground_pile_resource_amount",
     "_get_city_haul_endpoint_key",
     "_get_city_haul_source_reservation_key",
@@ -320,6 +328,7 @@ REQUIRED_CITY_RESOURCE_ACCOUNTING_SYSTEM_FUNCTIONS = (
     "get_city_public_storage_version",
     "mark_city_container_changed",
     "reset_city_resource_accounting_state",
+    "restore_city_resource_accounting_snapshot_for_city_state",
     "get_total_public_city_resource_amount",
     "get_total_public_city_resource_storage_capacity",
     "get_total_stored_city_resource_amount",
@@ -375,6 +384,7 @@ CITIZEN_REGISTRY_STATE_FIELDS = {
     "citizen_index_by_id": ("Dictionary", "{}"),
     "next_citizen_id": ("int", "1"),
     "citizen_version": ("int", "0"),
+    "starting_population_initialized": ("bool", "false"),
 }
 
 WORLD_DATA_CITIZEN_REGISTRY_PROPERTIES = {
@@ -1768,14 +1778,28 @@ def main() -> int:
         construction_system_text = construction_system_path.read_text(
             encoding="utf-8"
         )
-        completion_call_count = construction_system_text.count(
+        legacy_completion_call_count = construction_system_text.count(
+            "CityObjectSystem.register_completed_city_object_from_construction_site("
+        )
+        explicit_completion_call_count = construction_system_text.count(
+            "CityObjectSystem.register_completed_city_object_from_construction_site_for_city_state("
+        )
+        unrestricted_completion_call_count = construction_system_text.count(
             "CityObjectSystem.register_completed_city_object("
         )
-        if completion_call_count != 1:
+        if (
+            legacy_completion_call_count != 1
+            or explicit_completion_call_count != 1
+            or unrestricted_completion_call_count != 0
+        ):
             errors.append(
                 "scripts/city/simulation/systems/CityConstructionSystem.gd: "
-                "construction finalization must call the completed-object API "
-                f"exactly once in source; found {completion_call_count} calls"
+                "construction finalization must use each authoritative "
+                "construction-site completion API exactly once and must not "
+                "call unrestricted registration; found legacy="
+                f"{legacy_completion_call_count}, explicit="
+                f"{explicit_completion_call_count}, unrestricted="
+                f"{unrestricted_completion_call_count}"
             )
 
     resource_accounting_state_path = (
@@ -2069,10 +2093,15 @@ def main() -> int:
             stored_resource_write_count = len(
                 stored_resources_write_pattern.findall(text)
             )
+            expected_object_initializers = (
+                2
+                if "register_completed_city_object_for_city_state" in text
+                else 1
+            )
             if (
                 path == city_object_system_path
                 and (
-                    stored_resource_write_count != 1
+                    stored_resource_write_count != expected_object_initializers
                     or "CityResourceContainerSystem.make_empty_city_object_storage_for_type"
                     not in text
                 )
@@ -2082,7 +2111,8 @@ def main() -> int:
                     "exactly once through CityResourceContainerSystem"
                 )
             elif (
-                path != city_object_system_path
+                not path.name.endswith("Test.gd")
+                and path != city_object_system_path
                 and path != resource_container_system_path
                 and stored_resource_write_count > 0
             ):
@@ -2217,8 +2247,8 @@ def main() -> int:
         if declared_registry_fields != set(CITIZEN_REGISTRY_STATE_FIELDS):
             errors.append(
                 "scripts/city/simulation/CityCitizenRegistryState.gd: must own "
-                "exactly citizens, citizen_index_by_id, next_citizen_id, and "
-                "citizen_version"
+                "exactly citizens, citizen_index_by_id, next_citizen_id, "
+                "citizen_version, and starting_population_initialized"
             )
         if FUNC_RE.search(citizen_registry_state_text):
             errors.append(
@@ -3596,9 +3626,23 @@ def main() -> int:
 
             if function_body is None:
                 continue
-            if (
-                "CityCitizenRegistrySystem.mark_city_citizens_changed()"
-                not in function_body
+            publication_bodies = [function_body]
+            for delegated_name in re.findall(
+                r"\b(_[A-Za-z_][A-Za-z0-9_]*)\s*\(", function_body
+            ):
+                delegated_body = gdscript_function_body(
+                    system_text, delegated_name
+                )
+                if delegated_body is not None:
+                    publication_bodies.append(delegated_body)
+            publication_text = "\n".join(publication_bodies)
+            publication_markers = (
+                "CityCitizenRegistrySystem.mark_city_citizens_changed()",
+                "registry_state.citizen_version += 1",
+                "_mark_city_citizens_changed(",
+            )
+            if not any(
+                marker in publication_text for marker in publication_markers
             ):
                 errors.append(
                     f"{system_relative}: primitive mutator {function_name} "
@@ -3615,11 +3659,12 @@ def main() -> int:
         )
         simulation_bootstrap_body = gdscript_function_body(
             simulation_coordinator_text,
-            "run_settlement_simulation_systems",
+            "_run_city_settlement_simulation_systems",
         )
         required_simulation_bootstrap_calls = (
-            "CityCitizenInventorySystem.ensure_city_citizen_inventory_state()",
-            "CitizenNeedsSystem.ensure_city_citizen_need_state()",
+            "CityCitizenInventorySystem.ensure_city_citizen_inventory_state_for_city_state(",
+            "CitizenNeedsSystem.ensure_city_citizen_need_state_for_city_state(",
+            "CityAssignmentSystem.ensure_city_citizen_assignment_state_for_city_state(",
         )
         if simulation_bootstrap_body is None or any(
             call not in simulation_bootstrap_body
@@ -3630,6 +3675,1382 @@ def main() -> int:
                 "simulation must repair embedded inventory/cargo and need state "
                 "without a renderer"
             )
+
+        required_explicit_tick_calls = (
+            "CitizenNeedsSystem.run_tick_for_city_state(",
+            "CityEmploymentSystem.run_tick_for_city_state(",
+            "CitizenDecisionSystem.run_tick_for_city_state(",
+            "CitizenMovementSystem.run_tick_for_city_state(",
+            "CitizenTaskSystem.run_tick_for_city_state(",
+            "WorkplaceProductionSystem.run_tick_for_city_state(",
+        )
+        if simulation_bootstrap_body is None or any(
+            call not in simulation_bootstrap_body
+            for call in required_explicit_tick_calls
+        ):
+            errors.append(
+                f"{simulation_coordinator_relative}: Pass 4 settlement ticks "
+                "must thread one explicit CitySettlementSimulationState through "
+                "all six simulation roots"
+            )
+
+    pass4_context_relative = (
+        "scripts/world/simulation/SettlementSimulationContext.gd"
+    )
+    pass4_context_path = ROOT / pass4_context_relative
+    if (
+        not pass4_context_path.exists()
+        or "func get_city_simulation_state()" not in pass4_context_path.read_text(
+            encoding="utf-8"
+        )
+    ):
+        errors.append(
+            f"{pass4_context_relative}: Pass 4 requires an explicit city-state "
+            "selection surface"
+        )
+
+    pass4_political_relative = (
+        "scripts/world/simulation/WorldPoliticalState.gd"
+    )
+    pass4_political_path = ROOT / pass4_political_relative
+    if pass4_political_path.exists():
+        pass4_political_text = pass4_political_path.read_text(encoding="utf-8")
+        if "func get_settlement_context(settlement_id: int)" not in pass4_political_text:
+            errors.append(
+                f"{pass4_political_relative}: Pass 4 requires context lookup by "
+                "settlement identity without changing presentation selection"
+            )
+        forbidden_context_stack_tokens = (
+            "settlement_simulation_context_stack",
+            "begin_settlement_simulation",
+            "end_settlement_simulation",
+            "get_current_settlement_simulation_context",
+        )
+        for token in forbidden_context_stack_tokens:
+            if token in pass4_political_text:
+                errors.append(
+                    f"{pass4_political_relative}: Pass 4 forbids hidden global "
+                    f"simulation-target routing ({token})"
+                )
+
+    for pass4_test_relative in (
+        "scripts/world/simulation/ExplicitSettlementSimulationContextTest.gd",
+        "scripts/world/simulation/ExplicitSettlementSimulationContextTest.tscn",
+    ):
+        if not (ROOT / pass4_test_relative).exists():
+            errors.append(
+                f"{pass4_test_relative}: missing Pass 4 explicit-context "
+                "regression coverage"
+            )
+
+    pass5_state_relative = (
+        "scripts/city/simulation/CitySettlementSimulationState.gd"
+    )
+    pass5_state_path = ROOT / pass5_state_relative
+    if pass5_state_path.exists():
+        pass5_state_text = pass5_state_path.read_text(encoding="utf-8")
+        for required_method in (
+            "func is_city_founded()",
+            "func can_build_city_objects()",
+            "func get_primary_culture_id()",
+            "func has_city_foundation_footprint()",
+        ):
+            if required_method not in pass5_state_text:
+                errors.append(
+                    f"{pass5_state_relative}: Pass 5 missing settlement-local "
+                    f"gameplay fact reader {required_method}"
+                )
+
+    pass5_tick_roots = (
+        (
+            "scripts/citizens/simulation/systems/CitizenDecisionSystem.gd",
+            "run_tick_for_city_state",
+        ),
+        (
+            "scripts/citizens/simulation/systems/CitizenNeedsSystem.gd",
+            "_run_tick",
+        ),
+        (
+            "scripts/city/simulation/systems/WorkplaceProductionSystem.gd",
+            "run_tick_for_city_state",
+        ),
+    )
+    for pass5_root_relative, function_name in pass5_tick_roots:
+        pass5_root_path = ROOT / pass5_root_relative
+        if not pass5_root_path.exists():
+            continue
+        pass5_root_text = pass5_root_path.read_text(encoding="utf-8")
+        pass5_root_body = gdscript_function_body(
+            pass5_root_text,
+            function_name,
+        )
+        if pass5_root_body is None:
+            continue
+        for forbidden_global_gate in (
+            "WorldData.player_city_founded",
+            "WorldData.has_player_city()",
+        ):
+            if forbidden_global_gate in pass5_root_body:
+                errors.append(
+                    f"{pass5_root_relative}: Pass 5 explicit target "
+                    f"{function_name} must not depend on player-capital gate "
+                    f"{forbidden_global_gate}"
+                )
+
+    pass5_registry_state_relative = (
+        "scripts/city/simulation/CityCitizenRegistryState.gd"
+    )
+    pass5_registry_state_path = ROOT / pass5_registry_state_relative
+    if (
+        not pass5_registry_state_path.exists()
+        or "var starting_population_initialized: bool = false"
+        not in pass5_registry_state_path.read_text(encoding="utf-8")
+    ):
+        errors.append(
+            f"{pass5_registry_state_relative}: Pass 5 requires a durable "
+            "settlement-local starting-population completion marker"
+        )
+
+    pass5_registry_relative = (
+        "scripts/citizens/simulation/systems/CityCitizenRegistrySystem.gd"
+    )
+    pass5_registry_path = ROOT / pass5_registry_relative
+    if pass5_registry_path.exists():
+        pass5_registry_text = pass5_registry_path.read_text(encoding="utf-8")
+        for required_api in (
+            "resolve_city_citizen_culture_id_for_city_state",
+            "make_city_citizen_for_city_state",
+            "add_city_citizen_for_city_state",
+            "initialize_starting_city_population_for_city_state",
+        ):
+            if not re.search(
+                rf"^static\s+func\s+{re.escape(required_api)}\s*\(",
+                pass5_registry_text,
+                re.MULTILINE,
+            ):
+                errors.append(
+                    f"{pass5_registry_relative}: Pass 5 missing explicit "
+                    f"settlement-local citizen API {required_api}"
+                )
+
+    pass5_object_relative = (
+        "scripts/city/simulation/systems/CityObjectSystem.gd"
+    )
+    pass5_object_path = ROOT / pass5_object_relative
+    if (
+        not pass5_object_path.exists()
+        or "can_use_city_object_definition_for_city_state"
+        not in pass5_object_path.read_text(encoding="utf-8")
+    ):
+        errors.append(
+            f"{pass5_object_relative}: Pass 5 requires explicit local build "
+            "eligibility"
+        )
+
+    pass5_local_gameplay_files = (
+        "scripts/city/rendering/CityRenderer.gd",
+        "scripts/ui/city/CityInformationPanel.gd",
+        "scripts/city/simulation/systems/CityObjectSystem.gd",
+        "scripts/city/simulation/validators/CityObjectStateValidator.gd",
+        "scripts/city/simulation/validators/CityCitizenStateValidator.gd",
+    )
+    for pass5_local_relative in pass5_local_gameplay_files:
+        pass5_local_path = ROOT / pass5_local_relative
+        if not pass5_local_path.exists():
+            continue
+        pass5_local_text = pass5_local_path.read_text(encoding="utf-8")
+        for forbidden_player_fact in (
+            "WorldData.player_city_founded",
+            "WorldData.has_player_city()",
+            "WorldData.has_player_city_foundation()",
+            "WorldData.can_build_in_city()",
+        ):
+            if forbidden_player_fact in pass5_local_text:
+                errors.append(
+                    f"{pass5_local_relative}: Pass 5 settlement-local gameplay "
+                    f"must not use player-capital fact {forbidden_player_fact}"
+                )
+
+    if pass4_political_path.exists():
+        pass5_political_text = pass4_political_path.read_text(encoding="utf-8")
+        if "func found_city_settlement(" not in pass5_political_text:
+            errors.append(
+                f"{pass4_political_relative}: Pass 5 requires target-specific "
+                "settlement foundation"
+            )
+        if '"is_player_polity": polity_id == player_polity_id' not in pass5_political_text:
+            errors.append(
+                f"{pass4_political_relative}: Pass 5 settlement contexts must "
+                "distinguish a polity capital from the player capital"
+            )
+        active_context_body = gdscript_function_body(
+            pass5_political_text,
+            "get_active_settlement_context",
+        )
+        if (
+            active_context_body is not None
+            and "synchronize_foundation_with_world_data" in active_context_body
+        ):
+            errors.append(
+                f"{pass4_political_relative}: Pass 5 active-context lookup "
+                "must not trigger player-foundation synchronization"
+            )
+
+    pass5_world_data_relative = "scripts/world/simulation/WorldData.gd"
+    pass5_world_data_path = ROOT / pass5_world_data_relative
+    if pass5_world_data_path.exists():
+        pass5_world_data_text = pass5_world_data_path.read_text(encoding="utf-8")
+        player_foundation_body = gdscript_function_body(
+            pass5_world_data_text,
+            "found_player_city",
+        )
+        if (
+            player_foundation_body is None
+            or "WorldPoliticalState.found_city_settlement(" not in player_foundation_body
+            or "WorldPoliticalState.replace_current_city_runtime_data(" in player_foundation_body
+        ):
+            errors.append(
+                f"{pass5_world_data_relative}: Pass 5 player founding must "
+                "delegate to the exact player-capital settlement transaction"
+            )
+
+    for pass5_test_relative in (
+        "scripts/world/simulation/SettlementLocalGameplayTest.gd",
+        "scripts/world/simulation/SettlementLocalGameplayTest.tscn",
+    ):
+        if not (ROOT / pass5_test_relative).exists():
+            errors.append(
+                f"{pass5_test_relative}: missing Pass 5 settlement-local "
+                "gameplay regression coverage"
+            )
+
+    # Pass 6: the current employment framework is automatic-only. Staffing
+    # follows each workplace's hard capacity, explicit settlement APIs reject
+    # cross-owner IDs without mutation, and job repair retires obsolete Work
+    # tasks/movement after committing the canonical relationship change.
+    pass6_employment_relative = (
+        "scripts/citizens/simulation/systems/CityEmploymentSystem.gd"
+    )
+    pass6_employment_path = ROOT / pass6_employment_relative
+    if pass6_employment_path.exists():
+        pass6_employment_text = pass6_employment_path.read_text(encoding="utf-8")
+        pass6_required_employment_apis = (
+            "run_tick_for_city_state",
+            "reconcile_automatic_workplaces_for_city_state",
+            "assign_citizen_to_workplace_for_city_state",
+            "remove_citizen_job_for_city_state",
+            "set_workplace_desired_worker_count_for_city_state",
+        )
+        for required_api in pass6_required_employment_apis:
+            if not re.search(
+                rf"^static\s+func\s+{re.escape(required_api)}\s*\(",
+                pass6_employment_text,
+                re.MULTILINE,
+            ):
+                errors.append(
+                    f"{pass6_employment_relative}: Pass 6 missing explicit "
+                    f"settlement employment API {required_api}"
+                )
+
+        valid_mode_body = gdscript_function_body(
+            pass6_employment_text,
+            "is_valid_staffing_mode",
+        )
+        if (
+            valid_mode_body is None
+            or "STAFFING_MODE_AUTOMATIC" not in valid_mode_body
+            or "STAFFING_MODE_MANUAL" in valid_mode_body
+        ):
+            errors.append(
+                f"{pass6_employment_relative}: Pass 6 gameplay staffing must "
+                "remain automatic-only"
+            )
+
+        staffing_normalization_body = gdscript_function_body(
+            pass6_employment_text,
+            "_ensure_workplace_staffing_state",
+        )
+        if (
+            staffing_normalization_body is None
+            or "STAFFING_MODE_AUTOMATIC" not in staffing_normalization_body
+            or "worker_capacity" not in staffing_normalization_body
+        ):
+            errors.append(
+                f"{pass6_employment_relative}: Pass 6 workplace normalization "
+                "must target current hard capacity"
+            )
+
+        reconciliation_body = gdscript_function_body(
+            pass6_employment_text,
+            "_reconcile_automatic_workplaces",
+        )
+        if (
+            reconciliation_body is None
+            or "worker_ids.pop_back()" not in reconciliation_body
+            or "remove_city_citizen_job_for_city_state(" not in reconciliation_body
+        ):
+            errors.append(
+                f"{pass6_employment_relative}: Pass 6 automatic reconciliation "
+                "must deterministically trim surplus workers before refill"
+            )
+
+    pass6_assignment_relative = (
+        "scripts/citizens/simulation/systems/CityAssignmentSystem.gd"
+    )
+    pass6_assignment_path = ROOT / pass6_assignment_relative
+    if pass6_assignment_path.exists():
+        pass6_assignment_text = pass6_assignment_path.read_text(encoding="utf-8")
+        assignment_repair_body = gdscript_function_body(
+            pass6_assignment_text,
+            "_ensure_city_citizen_assignment_state",
+        )
+        assignment_mutation_body = gdscript_function_body(
+            pass6_assignment_text,
+            "_assign_city_citizen_job",
+        )
+        if (
+            assignment_repair_body is None
+            or "clear_return_home_task" not in assignment_repair_body
+            or "clear_work_task" not in assignment_repair_body
+            or "registry_state.citizens[citizen_index] = citizen"
+            not in assignment_repair_body
+        ):
+            errors.append(
+                f"{pass6_assignment_relative}: Pass 6 relationship repair must "
+                "commit canonical links before clearing obsolete behavior"
+            )
+        if (
+            assignment_mutation_body is None
+            or assignment_mutation_body.count(
+                "_clear_city_citizen_work_task_after_job_change("
+            ) < 2
+        ):
+            errors.append(
+                f"{pass6_assignment_relative}: Pass 6 job reassignment must "
+                "retire stale Work tasks and movement"
+            )
+
+    pass6_decision_relative = (
+        "scripts/citizens/simulation/systems/CitizenDecisionSystem.gd"
+    )
+    pass6_decision_path = ROOT / pass6_decision_relative
+    if pass6_decision_path.exists():
+        pass6_decision_text = pass6_decision_path.read_text(encoding="utf-8")
+        autonomous_haul_body = gdscript_function_body(
+            pass6_decision_text,
+            "_process_bounded_autonomous_hauling_for_city_state",
+        )
+        decision_queue_body = gdscript_function_body(
+            pass6_decision_text,
+            "_process_decision_queue_for_city_state",
+        )
+        if (
+            not re.search(
+                r"^static\s+func\s+"
+                r"_process_bounded_autonomous_hauling_for_city_state\s*\("
+                r"[\s\S]*?\)\s*->\s*bool\s*:",
+                pass6_decision_text,
+                re.MULTILINE,
+            )
+            or autonomous_haul_body is None
+            or "MAX_AUTONOMOUS_HAUL_ASSIGNMENTS_PER_TICK" not in autonomous_haul_body
+            or decision_queue_body is None
+            or "employed_only" not in decision_queue_body
+            or "_has_unassigned_autonomous_haul_work_for_city_state" in pass6_decision_text
+        ):
+            errors.append(
+                f"{pass6_decision_relative}: Pass 6 Return Home deferral must "
+                "depend on real bounded haul assignments, not opportunities alone"
+            )
+
+    pass6_test_contracts = {
+        "scripts/city/simulation/CityAssignmentSystemTest.gd": (
+            "_test_automatic_staffing_capacity_and_task_cleanup",
+        ),
+        "scripts/city/simulation/CityEmploymentFoodDeadlockTest.gd": (
+            "_test_off_shift_home_queue_survives_unassignable_haul_work",
+            "_test_persistent_workplace_staffing_policy",
+        ),
+        "scripts/world/simulation/CityEmploymentLifecycleTest.gd": (
+            "_test_settlement_local_employment_lifecycle",
+            "_test_multi_day_fishery_employment",
+        ),
+    }
+    for pass6_test_relative, required_functions in pass6_test_contracts.items():
+        pass6_test_path = ROOT / pass6_test_relative
+        pass6_scene_path = pass6_test_path.with_suffix(".tscn")
+        for required_path in (pass6_test_path, pass6_scene_path):
+            if not required_path.exists():
+                errors.append(
+                    f"{required_path.relative_to(ROOT)}: missing permanent "
+                    "Pass 6 employment regression coverage"
+                )
+        if not pass6_test_path.exists():
+            continue
+        pass6_test_text = pass6_test_path.read_text(encoding="utf-8")
+        for required_function in required_functions:
+            if not re.search(
+                rf"^func\s+{re.escape(required_function)}\s*\(",
+                pass6_test_text,
+                re.MULTILINE,
+            ):
+                errors.append(
+                    f"{pass6_test_relative}: missing Pass 6 regression "
+                    f"{required_function}"
+                )
+
+    # Pass 7: Logistics is the sole owner of ground-pile release mutation.
+    # Construction may retire its own tasks/commands, but material conversion,
+    # reservation cleanup, radius/capacity coalescing, indices, and publication
+    # must remain behind explicit public Logistics operations.
+    pass7_logistics_relative = (
+        "scripts/city/simulation/systems/CityLogisticsSystem.gd"
+    )
+    pass7_construction_relative = (
+        "scripts/city/simulation/systems/CityConstructionSystem.gd"
+    )
+    pass7_logistics_path = ROOT / pass7_logistics_relative
+    pass7_construction_path = ROOT / pass7_construction_relative
+    if pass7_logistics_path.exists():
+        pass7_logistics_text = pass7_logistics_path.read_text(encoding="utf-8")
+        for required_api in (
+            "release_city_construction_site_materials",
+            "release_city_construction_site_materials_for_city_state",
+        ):
+            if not re.search(
+                rf"^static\s+func\s+{re.escape(required_api)}\s*\(",
+                pass7_logistics_text,
+                re.MULTILINE,
+            ):
+                errors.append(
+                    f"{pass7_logistics_relative}: Pass 7 missing public "
+                    f"Logistics owner API {required_api}"
+                )
+
+        pass7_release_body = gdscript_function_body(
+            pass7_logistics_text,
+            "_release_construction_site_materials",
+        )
+        if (
+            pass7_release_body is None
+            or "_release_construction_material_reservations(" not in pass7_release_body
+            or "_coalesce_released_construction_piles(" not in pass7_release_body
+            or "_rebuild_city_ground_pile_index_for_state(" not in pass7_release_body
+            or "ground_pile_version += 1" not in pass7_release_body
+        ):
+            errors.append(
+                f"{pass7_logistics_relative}: Pass 7 release must own "
+                "reservation cleanup, local coalescing, index rebuild, and "
+                "ground-pile publication"
+            )
+
+        for constant_name, expected_value in (
+            ("CITY_GROUND_PILE_CAPACITY", "20"),
+            ("CITY_GROUND_PILE_MERGE_RADIUS_TILES", "2"),
+        ):
+            if not re.search(
+                rf"^const\s+{constant_name}\s*:\s*int\s*=\s*"
+                rf"{expected_value}\s*$",
+                pass7_logistics_text,
+                re.MULTILINE,
+            ):
+                errors.append(
+                    f"{pass7_logistics_relative}: Pass 7 must preserve "
+                    f"{constant_name} = {expected_value}"
+                )
+
+    if pass7_construction_path.exists():
+        pass7_construction_text = pass7_construction_path.read_text(
+            encoding="utf-8"
+        )
+        pass7_cancel_body = gdscript_function_body(
+            pass7_construction_text,
+            "_cancel_city_construction_site",
+        )
+        if (
+            pass7_cancel_body is None
+            or "release_city_construction_site_materials(" not in pass7_cancel_body
+            or "release_city_construction_site_materials_for_city_state("
+            not in pass7_cancel_body
+        ):
+            errors.append(
+                f"{pass7_construction_relative}: Pass 7 cancellation must "
+                "delegate material release to public Logistics APIs"
+            )
+
+        forbidden_pass7_construction_patterns = (
+            r"^static\s+func\s+release_city_construction_site_materials\s*\(",
+            r"^static\s+func\s+_coalesce_ordinary_city_ground_piles\s*\(",
+            r"CityLogisticsSystem\._[A-Za-z0-9_]+\s*\(",
+            r"(?:get_current_state\(\)|logistics_state)\.ground_piles\s*"
+            r"\[[^\]]+\]\s*=",
+            r"(?:get_current_state\(\)|logistics_state)\.ground_piles\."
+            r"(?:append|remove_at|clear)\s*\(",
+        )
+        for pattern in forbidden_pass7_construction_patterns:
+            if re.search(pattern, pass7_construction_text, re.MULTILINE):
+                errors.append(
+                    f"{pass7_construction_relative}: Pass 7 forbids direct "
+                    "Logistics ground-pile mutation or private API use"
+                )
+                break
+
+    pass7_test_relative = (
+        "scripts/city/simulation/CityConstructionCancellationLogisticsTest.gd"
+    )
+    pass7_test_path = ROOT / pass7_test_relative
+    pass7_scene_path = pass7_test_path.with_suffix(".tscn")
+    for required_path in (pass7_test_path, pass7_scene_path):
+        if not required_path.exists():
+            errors.append(
+                f"{required_path.relative_to(ROOT)}: missing permanent "
+                "Pass 7 construction/logistics regression coverage"
+            )
+    if pass7_test_path.exists():
+        pass7_test_text = pass7_test_path.read_text(encoding="utf-8")
+        for required_function in (
+            "_test_partial_cancellation_releases_materials_and_reservations_once",
+            "_test_full_cancellation_preserves_radius_capacity_and_local_overflow",
+            "_test_explicit_release_preserves_active_settlement_and_ordinary_ids",
+        ):
+            if not re.search(
+                rf"^func\s+{re.escape(required_function)}\s*\(",
+                pass7_test_text,
+                re.MULTILINE,
+            ):
+                errors.append(
+                    f"{pass7_test_relative}: missing Pass 7 regression "
+                    f"{required_function}"
+                )
+
+    # Post-Scripts10 PR 8: mutable tile/object state stays behind focused owner
+    # APIs. Public tile reads are detached, allocation-free internal reads are
+    # read-only, catalog/object records are recursively immutable, and the
+    # focused regressions make those boundaries permanent.
+    pr8_world_relative = "scripts/world/simulation/WorldData.gd"
+    pr8_world_path = ROOT / pr8_world_relative
+    if not pr8_world_path.exists():
+        errors.append(f"{pr8_world_relative}: missing PR 8 tile owner")
+    else:
+        pr8_world_text = pr8_world_path.read_text(encoding="utf-8")
+        pr8_world_functions = {
+            match.group(1) for match in FUNC_RE.finditer(pr8_world_text)
+        }
+        for required_api in (
+            "get_tile",
+            "get_tile_for_internal_read",
+            "set_tile",
+            "set_tile_terrain",
+            "set_tile_resource_value",
+            "set_tile_surface_feature",
+            "remove_tile_surface_feature",
+        ):
+            if required_api not in pr8_world_functions:
+                errors.append(
+                    f"{pr8_world_relative}: PR 8 missing tile boundary API "
+                    f"{required_api}"
+                )
+
+        pr8_public_tile_body = gdscript_function_body(
+            pr8_world_text,
+            "get_tile",
+        ) or ""
+        if (
+            "get_tile_for_internal_read(" not in pr8_public_tile_body
+            or ".duplicate(true)" not in pr8_public_tile_body
+        ):
+            errors.append(
+                f"{pr8_world_relative}: PR 8 public get_tile must return a "
+                "recursively detached snapshot"
+            )
+
+        pr8_set_tile_body = gdscript_function_body(
+            pr8_world_text,
+            "set_tile",
+        ) or ""
+        if (
+            "data.duplicate(true)" not in pr8_set_tile_body
+            or "tiles[y][x] == replacement_tile" not in pr8_set_tile_body
+            or "mark_tile_data_changed()" not in pr8_set_tile_body
+        ):
+            errors.append(
+                f"{pr8_world_relative}: PR 8 set_tile must detach input, "
+                "short-circuit equality, and publish broad invalidation"
+            )
+
+        for focused_api in (
+            "set_tile_terrain",
+            "set_tile_resource_value",
+        ):
+            focused_body = gdscript_function_body(
+                pr8_world_text,
+                focused_api,
+            ) or ""
+            if "return set_tile(" not in focused_body:
+                errors.append(
+                    f"{pr8_world_relative}: PR 8 {focused_api} must route its "
+                    "write through set_tile"
+                )
+
+        pr8_feature_set_body = gdscript_function_body(
+            pr8_world_text,
+            "set_tile_surface_feature",
+        ) or ""
+        pr8_feature_remove_body = gdscript_function_body(
+            pr8_world_text,
+            "remove_tile_surface_feature",
+        ) or ""
+        if (
+            "mark_city_surface_feature_changed(" not in pr8_feature_set_body
+            or "mark_tile_data_changed()" in pr8_feature_set_body
+            or "return set_tile_surface_feature(" not in pr8_feature_remove_body
+        ):
+            errors.append(
+                f"{pr8_world_relative}: PR 8 surface-feature writes must use "
+                "focused publication and compare-aware owner removal"
+            )
+
+        pr8_clear_features_body = gdscript_function_body(
+            pr8_world_text,
+            "clear_city_surface_features_at_tiles",
+        ) or ""
+        if "remove_tile_surface_feature(" not in pr8_clear_features_body:
+            errors.append(
+                f"{pr8_world_relative}: PR 8 bulk feature clearing must route "
+                "through the WorldData owner API"
+            )
+
+    pr8_work_relative = (
+        "scripts/city/simulation/systems/CityWorkSystem.gd"
+    )
+    pr8_work_path = ROOT / pr8_work_relative
+    if pr8_work_path.exists():
+        pr8_work_text = pr8_work_path.read_text(encoding="utf-8")
+        for completion_function in (
+            "complete_city_player_command",
+            "complete_city_player_command_for_city_state",
+        ):
+            completion_body = gdscript_function_body(
+                pr8_work_text,
+                completion_function,
+            ) or ""
+            if (
+                "remove_tile_surface_feature(" not in completion_body
+                or "set_tile_surface_feature(" not in completion_body
+            ):
+                errors.append(
+                    f"{pr8_work_relative}: PR 8 {completion_function} must use "
+                    "owner remove/restore APIs"
+                )
+
+    pr8_catalog_relative = "scripts/city/data/CityObjectCatalog.gd"
+    pr8_catalog_path = ROOT / pr8_catalog_relative
+    if not pr8_catalog_path.exists():
+        errors.append(f"{pr8_catalog_relative}: missing PR 8 immutable catalog")
+    else:
+        pr8_catalog_text = pr8_catalog_path.read_text(encoding="utf-8")
+        pr8_catalog_freeze_body = gdscript_function_body(
+            pr8_catalog_text,
+            "_make_variant_read_only_recursive",
+        ) or ""
+        pr8_catalog_setup_body = gdscript_function_body(
+            pr8_catalog_text,
+            "_setup_city_object_definitions",
+        ) or ""
+        pr8_catalog_view_body = gdscript_function_body(
+            pr8_catalog_text,
+            "get_city_object_definitions",
+        ) or ""
+        if any(
+            token not in pr8_catalog_freeze_body
+            for token in (
+                "dictionary.make_read_only()",
+                "array.make_read_only()",
+                "_make_variant_read_only_recursive(",
+            )
+        ):
+            errors.append(
+                f"{pr8_catalog_relative}: PR 8 catalog values must be frozen "
+                "recursively"
+            )
+        if pr8_catalog_setup_body.count(
+            "_make_variant_read_only_recursive("
+        ) < 2:
+            errors.append(
+                f"{pr8_catalog_relative}: PR 8 setup must freeze definitions "
+                "and derived resource lookups"
+            )
+        if "return _city_object_definitions.duplicate()" not in pr8_catalog_view_body:
+            errors.append(
+                f"{pr8_catalog_relative}: PR 8 definitions lookup must return "
+                "a shallow outer copy over immutable records"
+            )
+
+    pr8_object_relative = (
+        "scripts/city/simulation/systems/CityObjectSystem.gd"
+    )
+    pr8_object_path = ROOT / pr8_object_relative
+    if not pr8_object_path.exists():
+        errors.append(f"{pr8_object_relative}: missing PR 8 object owner")
+    else:
+        pr8_object_text = pr8_object_path.read_text(encoding="utf-8")
+        pr8_object_functions = {
+            match.group(1) for match in FUNC_RE.finditer(pr8_object_text)
+        }
+        for required_api in (
+            "get_city_objects",
+            "get_city_objects_for_city_state",
+            "get_city_object_by_id",
+            "get_city_object_by_id_for_city_state",
+            "get_city_object_at_tile",
+            "get_city_object_at_tile_for_city_state",
+            "patch_city_object_assignment_fields",
+            "patch_city_object_assignment_fields_for_city_state",
+            "patch_city_object_workplace_fields",
+            "patch_city_object_workplace_fields_for_city_state",
+            "patch_city_object_storage_fields",
+            "patch_city_object_storage_fields_for_city_state",
+            "write_city_object_at_index",
+            "write_city_object_at_index_for_city_state",
+        ):
+            if required_api not in pr8_object_functions:
+                errors.append(
+                    f"{pr8_object_relative}: PR 8 missing immutable/COW object "
+                    f"boundary {required_api}"
+                )
+
+        pr8_record_freeze_body = gdscript_function_body(
+            pr8_object_text,
+            "_make_read_only_city_object_record",
+        ) or ""
+        pr8_object_recursive_freeze_body = gdscript_function_body(
+            pr8_object_text,
+            "_make_variant_read_only_recursive",
+        ) or ""
+        pr8_patch_body = gdscript_function_body(
+            pr8_object_text,
+            "_patch_city_object_fields_at_index",
+        ) or ""
+        pr8_compatibility_body = gdscript_function_body(
+            pr8_object_text,
+            "_write_compatible_city_object_record",
+        ) or ""
+        if (
+            "city_object.duplicate(true)" not in pr8_record_freeze_body
+            or "_make_variant_read_only_recursive(" not in pr8_record_freeze_body
+            or "dictionary.make_read_only()"
+            not in pr8_object_recursive_freeze_body
+            or "array.make_read_only()" not in pr8_object_recursive_freeze_body
+            or "existing.duplicate(true)" not in pr8_patch_body
+            or "_make_read_only_city_object_record(updated)" not in pr8_patch_body
+        ):
+            errors.append(
+                f"{pr8_object_relative}: PR 8 object commits must be detached, "
+                "copy-on-write, and recursively read-only"
+            )
+        if any(
+            token not in pr8_compatibility_body
+            for token in (
+                "_get_city_object_changed_fields(",
+                "field_domain.is_empty()",
+                "mutation_domain != field_domain",
+                "_patch_city_object_fields_at_index(",
+            )
+        ):
+            errors.append(
+                f"{pr8_object_relative}: PR 8 compatibility writes must reject "
+                "topology/unknown and cross-domain record replacement"
+            )
+        for registry_function in (
+            "get_city_objects",
+            "get_city_objects_for_city_state",
+        ):
+            registry_body = gdscript_function_body(
+                pr8_object_text,
+                registry_function,
+            ) or ""
+            if (
+                "_ensure_city_object_records_are_read_only(" not in registry_body
+                or ".objects.duplicate()" not in registry_body
+            ):
+                errors.append(
+                    f"{pr8_object_relative}: PR 8 {registry_function} must "
+                    "return a shallow outer copy over read-only records"
+                )
+        for by_id_function in (
+            "get_city_object_by_id",
+            "get_city_object_by_id_for_city_state",
+        ):
+            by_id_body = gdscript_function_body(
+                pr8_object_text,
+                by_id_function,
+            ) or ""
+            if "_ensure_city_object_record_is_read_only(" not in by_id_body:
+                errors.append(
+                    f"{pr8_object_relative}: PR 8 {by_id_function} must return "
+                    "the authoritative recursively read-only record"
+                )
+        for at_tile_function, required_reader in (
+            ("get_city_object_at_tile", "get_city_object_by_id("),
+            (
+                "get_city_object_at_tile_for_city_state",
+                "get_city_object_by_id_for_city_state(",
+            ),
+        ):
+            at_tile_body = gdscript_function_body(
+                pr8_object_text,
+                at_tile_function,
+            ) or ""
+            if required_reader not in at_tile_body:
+                errors.append(
+                    f"{pr8_object_relative}: PR 8 {at_tile_function} must "
+                    "delegate to the read-only by-ID boundary"
+                )
+        if pr8_object_text.count(
+            "var stored_city_object := _make_read_only_city_object_record(city_object)"
+        ) < 2:
+            errors.append(
+                f"{pr8_object_relative}: PR 8 active and explicit registration "
+                "must publish recursively read-only records"
+            )
+
+    pr8_focused_owner_contracts = (
+        (
+            "scripts/citizens/simulation/systems/CityAssignmentSystem.gd",
+            "_set_city_object_resident_capacity",
+            (
+                "patch_city_object_assignment_fields(",
+                "patch_city_object_assignment_fields_for_city_state(",
+            ),
+        ),
+        (
+            "scripts/citizens/simulation/systems/CityEmploymentSystem.gd",
+            "_set_city_workplace_worker_capacity",
+            (
+                "patch_city_object_workplace_fields(",
+                "patch_city_object_workplace_fields_for_city_state(",
+            ),
+        ),
+        (
+            "scripts/city/simulation/systems/CityResourceContainerSystem.gd",
+            "",
+            (
+                "patch_city_object_storage_fields(",
+                "patch_city_object_storage_fields_for_city_state(",
+            ),
+        ),
+    )
+    for owner_relative, owner_function, required_calls in pr8_focused_owner_contracts:
+        owner_path = ROOT / owner_relative
+        if not owner_path.exists():
+            continue
+        owner_text = owner_path.read_text(encoding="utf-8")
+        owner_scope = (
+            gdscript_function_body(owner_text, owner_function) or ""
+            if owner_function
+            else owner_text
+        )
+        if any(call not in owner_scope for call in required_calls):
+            errors.append(
+                f"{owner_relative}: PR 8 focused owner routing is incomplete"
+            )
+
+    pr8_tile_owner_write_paths = {
+        "scripts/world/simulation/WorldData.gd",
+        "scripts/world/generation/WorldGenerator.gd",
+        "scripts/city/generation/CityWorldGenerator.gd",
+    }
+    pr8_assignment_operator = r"(?:\+=|-=|\*=|/=|(?<![=!<>])=(?!=))"
+    pr8_mutating_method = r"(?:erase|clear|merge|assign|append|remove_at|set)"
+
+    def pr8_alias_is_mutated(function_body: str, alias: str) -> bool:
+        mutation_pattern = re.compile(
+            rf"^\s*{re.escape(alias)}\s*(?:"
+            rf"\[[^\n]+\]\s*{pr8_assignment_operator}|"
+            rf"\.{pr8_mutating_method}\s*\()",
+            re.MULTILINE,
+        )
+        return mutation_pattern.search(function_body) is not None
+
+    for path in scripts:
+        relative = path.relative_to(ROOT).as_posix()
+        if relative.endswith("Test.gd"):
+            continue
+        text = path.read_text(encoding="utf-8")
+        masked_text = gdscript_masked_code(text)
+
+        if relative not in pr8_tile_owner_write_paths:
+            if re.search(
+                rf"\.tiles\s*\[[^\n]+\]\s*{pr8_assignment_operator}",
+                masked_text,
+            ):
+                errors.append(
+                    f"{relative}: PR 8 forbids direct runtime tiles writes "
+                    "outside WorldData and the two generators"
+                )
+
+        if (
+            relative != pr8_object_relative
+            and re.search(
+                r"\bCityObjectSystem\.write_city_object_at_index"
+                r"(?:_for_city_state)?\s*\(",
+                masked_text,
+            )
+        ):
+            errors.append(
+                f"{relative}: PR 8 forbids external generic city-object record "
+                "replacement; use a focused owner API"
+            )
+
+        for function_name in set(FUNC_RE.findall(text)):
+            raw_body = gdscript_function_body(text, function_name) or ""
+            masked_body = gdscript_masked_code(raw_body)
+
+            if relative not in pr8_tile_owner_write_paths:
+                tile_alias_pattern = re.compile(
+                    r"^\s*(?:var\s+)?(?P<alias>[A-Za-z_]\w*)"
+                    r"(?:\s*:\s*[^=:\n]+)?\s*(?::=|=)\s*[^\n]*"
+                    r"\.tiles\s*\[",
+                    re.MULTILINE,
+                )
+                if any(
+                    pr8_alias_is_mutated(masked_body, match.group("alias"))
+                    for match in tile_alias_pattern.finditer(masked_body)
+                ):
+                    errors.append(
+                        f"{relative}: PR 8 forbids aliased runtime tiles "
+                        f"mutation in {function_name}"
+                    )
+
+            for accessor in ("get_tile", "get_tile_for_internal_read"):
+                accessor_alias_pattern = re.compile(
+                    r"^\s*(?:var\s+)?(?P<alias>[A-Za-z_]\w*)"
+                    r"(?:\s*:\s*[^=:\n]+)?\s*(?::=|=)\s*[^\n]*\b"
+                    + re.escape(accessor)
+                    + r"\s*\(",
+                    re.MULTILINE,
+                )
+                mutated_aliases = [
+                    match.group("alias")
+                    for match in accessor_alias_pattern.finditer(masked_body)
+                    if pr8_alias_is_mutated(
+                        masked_body,
+                        match.group("alias"),
+                    )
+                ]
+                direct_mutation_pattern = re.compile(
+                    rf"\b{re.escape(accessor)}\s*\([^\n]*\)\s*(?:"
+                    rf"\[[^\n]+\]\s*{pr8_assignment_operator}|"
+                    rf"\.{pr8_mutating_method}\s*\()"
+                )
+                if mutated_aliases or direct_mutation_pattern.search(masked_body):
+                    errors.append(
+                        f"{relative}: PR 8 forbids production {accessor} "
+                        f"reference mutation in {function_name}"
+                    )
+
+    pr8_test_contracts = (
+        (
+            "scripts/city/simulation/CityWorldDataBoundaryTest.gd",
+            "_ready",
+            "_test_tile_owner_mutation_boundary",
+            (
+                "set_tile(",
+                "set_tile_terrain(",
+                "set_tile_resource_value(",
+                "set_tile_surface_feature(",
+                "remove_tile_surface_feature(",
+                "prepared_city_feature_tile_data_version",
+            ),
+        ),
+        (
+            "scripts/city/simulation/CityWorldDataBoundaryTest.gd",
+            "_ready",
+            "_test_catalog_recursive_readonly_boundary",
+            ("get_city_object_definitions(", "is_read_only()"),
+        ),
+        (
+            "scripts/city/simulation/CityWorldDataBoundaryTest.gd",
+            "_ready",
+            "_test_environmental_resource_cache_invalidation",
+            (
+                "get_resource_source_evaluation(",
+                "set_tile_resource_value(",
+            ),
+        ),
+        (
+            "scripts/city/simulation/CityObjectSystemTest.gd",
+            "_ready",
+            "_test_snapshots_do_not_alias_authoritative_state",
+            (
+                "get_city_objects(",
+                "get_city_objects_for_city_state(",
+                "get_city_object_at_tile_for_city_state(",
+                "is_read_only()",
+                "write_city_object_at_index(",
+                "write_city_object_at_index_for_city_state(",
+                "add_resource_to_city_object_storage(",
+            ),
+        ),
+        (
+            "scripts/city/rendering/CityRendererRefactorSmokeTest.gd",
+            "_run_smoke_test",
+            "_test_city_natural_features",
+            (
+                "remove_tile_surface_feature(",
+                "set_tile_surface_feature(",
+                "session_prepared_city_payload",
+                "city_surface_feature_change_version",
+                "rebuild_city_natural_feature_multimeshes()",
+            ),
+        ),
+    )
+    for test_relative, caller_name, test_name, required_tokens in pr8_test_contracts:
+        test_path = ROOT / test_relative
+        if not test_path.exists():
+            errors.append(
+                f"{test_relative}: missing permanent PR 8 regression coverage"
+            )
+            continue
+        test_text = test_path.read_text(encoding="utf-8")
+        test_body = gdscript_function_body(test_text, test_name)
+        caller_body = gdscript_masked_code(
+            gdscript_function_body(test_text, caller_name) or ""
+        )
+        if test_body is None:
+            errors.append(
+                f"{test_relative}: missing permanent PR 8 regression {test_name}"
+            )
+            continue
+        if not re.search(
+            rf"^\s*{re.escape(test_name)}\s*\(",
+            caller_body,
+            re.MULTILINE,
+        ):
+            errors.append(
+                f"{test_relative}: PR 8 regression is not invoked by "
+                f"{caller_name}: {test_name}"
+            )
+        if any(token not in test_body for token in required_tokens):
+            errors.append(
+                f"{test_relative}: PR 8 regression is missing a required "
+                f"boundary assertion: {test_name}"
+            )
+
+    # Post-Scripts10 PR 9: detailed settlement switching is one presentation
+    # transaction. GameSession alone selects the target; CityRenderer clears
+    # settlement-bound interaction state and rebuilds every retained cache
+    # without resetting either settlement's gameplay owners.
+    pr9_session_relative = "scripts/session/GameSession.gd"
+    pr9_renderer_relative = "scripts/city/rendering/CityRenderer.gd"
+    pr9_test_relative = "scripts/session/SettlementPresentationRebindTest.gd"
+    pr9_scene_relative = "scripts/session/SettlementPresentationRebindTest.tscn"
+    pr9_session_path = ROOT / pr9_session_relative
+    pr9_renderer_path = ROOT / pr9_renderer_relative
+    pr9_test_path = ROOT / pr9_test_relative
+    pr9_scene_path = ROOT / pr9_scene_relative
+
+    if not pr9_session_path.exists():
+        errors.append(f"{pr9_session_relative}: missing PR 9 presentation owner")
+    else:
+        pr9_session_text = pr9_session_path.read_text(encoding="utf-8")
+        pr9_switch_body = gdscript_function_body(
+            pr9_session_text,
+            "show_settlement_city_view",
+        ) or ""
+        for required_token in (
+            "cancel_city_preparation()",
+            "SimulationClock.set_simulation_paused(true)",
+            "WorldPoliticalState.set_active_settlement(settlement_id)",
+            '"rebind_city_presentation"',
+            '"validate_city_presentation_binding"',
+            "SimulationClock.set_speed_multiplier(simulation_speed_before)",
+            "SimulationClock.set_simulation_paused(simulation_was_paused)",
+        ):
+            if required_token not in pr9_switch_body:
+                errors.append(
+                    f"{pr9_session_relative}: PR 9 settlement switch is missing "
+                    f"transaction step {required_token}"
+                )
+        for forbidden_reset in (
+            "reset_runtime_session_state(",
+            "reset_city_simulation_runtime_state(",
+            "reset_player_city_state(",
+        ):
+            if forbidden_reset in pr9_switch_body:
+                errors.append(
+                    f"{pr9_session_relative}: PR 9 presentation switching must "
+                    f"not invoke gameplay reset {forbidden_reset}"
+                )
+
+    if not pr9_renderer_path.exists():
+        errors.append(f"{pr9_renderer_relative}: missing PR 9 renderer rebind")
+    else:
+        pr9_renderer_text = pr9_renderer_path.read_text(encoding="utf-8")
+        pr9_renderer_functions = {
+            match.group(1) for match in FUNC_RE.finditer(pr9_renderer_text)
+        }
+        for required_api in (
+            "can_rebind_city_presentation",
+            "rebind_city_presentation",
+            "validate_city_presentation_binding",
+            "_clear_city_presentation_interactions",
+            "_reset_city_presentation_observers",
+            "_capture_bound_city_presentation_versions",
+            "_configure_city_camera_for_bound_settlement",
+            "_finish_city_presentation_rebind",
+        ):
+            if required_api not in pr9_renderer_functions:
+                errors.append(
+                    f"{pr9_renderer_relative}: PR 9 missing presentation rebind "
+                    f"boundary {required_api}"
+                )
+
+        pr9_rebind_body = gdscript_function_body(
+            pr9_renderer_text,
+            "rebind_city_presentation",
+        ) or ""
+        for required_token in (
+            "_set_city_render_layers_visible(false)",
+            "_clear_city_presentation_interactions()",
+            "_reset_city_presentation_observers()",
+            "workplace_zone_overlay_cache.invalidate_all()",
+            "city_citizen_movement_presentation.initialize()",
+            "rebuild_city_terrain_texture()",
+            "rebuild_city_natural_feature_multimeshes()",
+            "_configure_city_camera_for_bound_settlement()",
+            "_capture_bound_city_presentation_versions(target_state)",
+            "city_information_ui.refresh_all()",
+            "_request_all_city_render_layers_redraw_even_if_hidden()",
+        ):
+            if required_token not in pr9_rebind_body:
+                errors.append(
+                    f"{pr9_renderer_relative}: PR 9 renderer rebind is missing "
+                    f"presentation step {required_token}"
+                )
+        if "WorldPoliticalState.set_active_settlement(" in pr9_renderer_text:
+            errors.append(
+                f"{pr9_renderer_relative}: PR 9 renderer must not select its own "
+                "settlement; GameSession owns the transaction"
+            )
+        for forbidden_reset in (
+            "reset_runtime_session_state(",
+            "reset_city_simulation_runtime_state(",
+            "reset_player_city_state(",
+        ):
+            if forbidden_reset in pr9_rebind_body:
+                errors.append(
+                    f"{pr9_renderer_relative}: PR 9 rebind must not invoke "
+                    f"gameplay reset {forbidden_reset}"
+                )
+
+    for required_path in (pr9_test_path, pr9_scene_path):
+        if not required_path.exists():
+            errors.append(
+                f"{required_path.relative_to(ROOT)}: missing permanent PR 9 "
+                "A/B/A presentation regression"
+            )
+    if pr9_test_path.exists():
+        pr9_test_text = pr9_test_path.read_text(encoding="utf-8")
+        pr9_ready_body = gdscript_function_body(pr9_test_text, "_ready") or ""
+        pr9_test_name = "_test_atomic_settlement_presentation_rebind"
+        pr9_test_body = gdscript_function_body(
+            pr9_test_text,
+            pr9_test_name,
+        ) or ""
+        if pr9_test_name + "()" not in pr9_ready_body:
+            errors.append(
+                f"{pr9_test_relative}: PR 9 A/B/A regression is not invoked"
+            )
+        for required_token in (
+            "show_settlement_city_view(city_b_id)",
+            "show_settlement_city_view(city_a_id)",
+            "city_tree_multimesh_index_by_tile",
+            "city_rock_multimesh_index_by_tile",
+            "city_information_ui.city_name_label.text",
+            "city_presentation_rebind_pending",
+            "_capture_gameplay_snapshot(state_a)",
+            "_capture_gameplay_snapshot(state_b)",
+            "_gameplay_identities_match(state_a",
+            "_gameplay_identities_match(state_b",
+        ):
+            if required_token not in pr9_test_body:
+                errors.append(
+                    f"{pr9_test_relative}: PR 9 regression is missing required "
+                    f"A/B/A assertion {required_token}"
+                )
+
+    # Post-Scripts10 PR 10: exactly one explicitly selected settlement receives
+    # the current full-detail simulation pipeline. Presentation selection must
+    # remain independent, while inactive settlements retain their state and
+    # accrue explicit elapsed-time debt for a future catch-up policy.
+    pr10_coordinator_relative = (
+        "scripts/world/simulation/SimulationCoordinator.gd"
+    )
+    pr10_session_relative = "scripts/session/GameSession.gd"
+    pr10_test_relative = (
+        "scripts/world/simulation/InactiveSettlementSimulationPolicyTest.gd"
+    )
+    pr10_scene_relative = (
+        "scripts/world/simulation/InactiveSettlementSimulationPolicyTest.tscn"
+    )
+    pr10_long_run_relative = (
+        "scripts/city/simulation/CityUnifiedLongRunTest.gd"
+    )
+    pr10_coordinator_path = ROOT / pr10_coordinator_relative
+    pr10_session_path = ROOT / pr10_session_relative
+    pr10_test_path = ROOT / pr10_test_relative
+    pr10_scene_path = ROOT / pr10_scene_relative
+    pr10_long_run_path = ROOT / pr10_long_run_relative
+
+    if not pr10_coordinator_path.exists():
+        errors.append(
+            f"{pr10_coordinator_relative}: missing PR 10 simulation policy owner"
+        )
+    else:
+        pr10_coordinator_text = pr10_coordinator_path.read_text(encoding="utf-8")
+        pr10_coordinator_functions = {
+            match.group(1) for match in FUNC_RE.finditer(pr10_coordinator_text)
+        }
+        for required_api in (
+            "select_detailed_simulation_settlement",
+            "clear_detailed_simulation_settlement",
+            "reset_settlement_simulation_policy",
+            "get_detailed_simulation_settlement_id",
+            "get_settlement_simulation_tier",
+            "get_pending_inactive_minutes",
+            "consume_pending_inactive_minutes",
+            "get_settlement_simulation_policy_snapshot",
+            "_record_settlement_elapsed_time_policy",
+        ):
+            if required_api not in pr10_coordinator_functions:
+                errors.append(
+                    f"{pr10_coordinator_relative}: PR 10 missing explicit "
+                    f"simulation policy boundary {required_api}"
+                )
+        for required_token in (
+            "SETTLEMENT_SIMULATION_TIER_FULL_DETAIL",
+            "SETTLEMENT_SIMULATION_TIER_INACTIVE_RETAINED",
+            "MEDIUM_RESOLUTION_FUTURE",
+            "AGGREGATE_FUTURE",
+            "pending_inactive_minutes_by_settlement_id",
+            "full_detail_minutes_by_settlement_id",
+            "last_full_detail_tick_by_settlement_id",
+            "settlement_registry_reset",
+        ):
+            if required_token not in pr10_coordinator_text:
+                errors.append(
+                    f"{pr10_coordinator_relative}: PR 10 policy is missing "
+                    f"required tier/ledger token {required_token}"
+                )
+        pr10_run_body = gdscript_function_body(
+            pr10_coordinator_text,
+            "run_simulation_systems",
+        ) or ""
+        for required_token in (
+            "_record_settlement_elapsed_time_policy(",
+            "get_settlement_context(",
+            "detailed_simulation_settlement_id",
+            "run_settlement_simulation_systems(",
+        ):
+            if required_token not in pr10_run_body:
+                errors.append(
+                    f"{pr10_coordinator_relative}: PR 10 clock entry is missing "
+                    f"explicit target step {required_token}"
+                )
+        for forbidden_token in (
+            "get_active_settlement_context(",
+            "active_settlement_id",
+            "set_active_settlement(",
+        ):
+            if forbidden_token in pr10_run_body:
+                errors.append(
+                    f"{pr10_coordinator_relative}: PR 10 clock entry must not "
+                    f"discover or swap the presentation target via {forbidden_token}"
+                )
+
+    if not pr10_session_path.exists():
+        errors.append(f"{pr10_session_relative}: missing PR 10 target selection")
+    else:
+        pr10_session_text = pr10_session_path.read_text(encoding="utf-8")
+        for function_name, required_token in (
+            (
+                "show_settlement_city_view",
+                "select_detailed_simulation_settlement(settlement_id)",
+            ),
+            (
+                "_prepare_first_city_entry",
+                "_select_first_city_detailed_simulation_target()",
+            ),
+        ):
+            function_body = gdscript_function_body(
+                pr10_session_text,
+                function_name,
+            ) or ""
+            if required_token not in function_body:
+                errors.append(
+                    f"{pr10_session_relative}: PR 10 {function_name} must "
+                    "select the exact detailed simulation target"
+                )
+
+        pr10_first_target_body = gdscript_function_body(
+            pr10_session_text,
+            "_select_first_city_detailed_simulation_target",
+        ) or ""
+        if "select_detailed_simulation_settlement(" not in pr10_first_target_body:
+            errors.append(
+                f"{pr10_session_relative}: PR 10 first-entry target seam must "
+                "delegate to the coordinator's explicit selection policy"
+            )
+
+    for required_path in (pr10_test_path, pr10_scene_path):
+        if not required_path.exists():
+            errors.append(
+                f"{required_path.relative_to(ROOT)}: missing permanent PR 10 "
+                "inactive-settlement policy regression"
+            )
+    if pr10_test_path.exists():
+        pr10_test_text = pr10_test_path.read_text(encoding="utf-8")
+        pr10_ready_body = gdscript_function_body(pr10_test_text, "_ready") or ""
+        pr10_test_name = "_test_inactive_settlement_simulation_policy"
+        pr10_test_body = gdscript_function_body(
+            pr10_test_text,
+            pr10_test_name,
+        ) or ""
+        if pr10_test_name + "()" not in pr10_ready_body:
+            errors.append(
+                f"{pr10_test_relative}: PR 10 regression is not invoked"
+            )
+        for required_token in (
+            "select_detailed_simulation_settlement(",
+            "city_a_id",
+            "set_active_settlement(city_b_id)",
+            "get_pending_inactive_minutes(city_b_id)",
+            "consume_pending_inactive_minutes(city_b_id, 7)",
+            "select_detailed_simulation_settlement(city_b_id)",
+            "clear_detailed_simulation_settlement()",
+            "_capture_gameplay(state_a)",
+            "_capture_gameplay(state_b)",
+            "_identities_match(state_a",
+            "_identities_match(state_b",
+        ):
+            if required_token not in pr10_test_body:
+                errors.append(
+                    f"{pr10_test_relative}: PR 10 regression is missing "
+                    f"required policy assertion {required_token}"
+                )
+
+    if not pr10_long_run_path.exists():
+        errors.append(
+            f"{pr10_long_run_relative}: missing PR 10 long-run compatibility"
+        )
+    elif "select_detailed_simulation_settlement(" not in (
+        pr10_long_run_path.read_text(encoding="utf-8")
+    ):
+        errors.append(
+            f"{pr10_long_run_relative}: PR 10 clock-driven regression must "
+            "select its detailed settlement explicitly"
+        )
 
     matcher_relative = "scripts/city/simulation/systems/CityResourceMatcher.gd"
     matcher_path = ROOT / matcher_relative
@@ -4477,7 +5898,7 @@ def main() -> int:
             "scripts/city/simulation/CityAssignmentSystemTest.gd",
         }
         for path in scripts:
-            relative = str(path.relative_to(ROOT))
+            relative = path.relative_to(ROOT).as_posix()
             if relative in direct_relationship_write_allowlist:
                 continue
             masked_text = gdscript_masked_code(path.read_text(encoding="utf-8"))
@@ -4535,7 +5956,7 @@ def main() -> int:
                 encoding="utf-8"
             )
             if (
-                "CityAssignmentSystem.ensure_city_citizen_assignment_state()"
+                "CityAssignmentSystem.ensure_city_citizen_assignment_state_for_city_state("
                 not in coordinator_text
             ):
                 errors.append(

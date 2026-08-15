@@ -172,7 +172,7 @@ static func get_panel_text(values: Dictionary) -> String:
 			+ get_selection_text(values)
 		)
 
-	var tile: Dictionary = city_world.get_tile(
+	var tile: Dictionary = city_world.get_tile_for_internal_read(
 		inspected_tile.x,
 		inspected_tile.y
 	)

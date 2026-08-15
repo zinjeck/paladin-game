@@ -12,3 +12,4 @@ var citizens: Array = []
 var citizen_index_by_id: Dictionary = {}
 var next_citizen_id: int = 1
 var citizen_version: int = 0
+var starting_population_initialized: bool = false

@@ -122,6 +122,10 @@ func make_default_tile() -> Dictionary:
 	}
 
 func get_tile(x: int, y: int) -> Dictionary:
+	return get_tile_for_internal_read(x, y).duplicate(true)
+
+
+func get_tile_for_internal_read(x: int, y: int) -> Dictionary:
 	if not is_in_bounds(x, y):
 		return make_default_tile()
 
@@ -136,13 +140,131 @@ func is_in_bounds(x: int, y: int) -> bool:
 
 	return true
 
-func set_tile(x: int, y: int, data: Dictionary) -> void:
+func set_tile(x: int, y: int, data: Dictionary) -> bool:
 	if not is_in_bounds(x, y):
-		return
+		return false
 
-	tiles[y][x] = data
-	tile_data_version += 1
-	_invalidate_prepared_city_feature_tiles()
+	var replacement_tile := data.duplicate(true)
+
+	if tiles[y][x] == replacement_tile:
+		return false
+
+	tiles[y][x] = replacement_tile
+	mark_tile_data_changed()
+	return true
+
+
+func set_tile_terrain(
+	tile_position: Vector2i,
+	terrain: String
+) -> bool:
+	if (
+		not is_in_bounds(tile_position.x, tile_position.y)
+		or terrain not in [
+			TERRAIN_WATER,
+			TERRAIN_LAND,
+			TERRAIN_MOUNTAIN,
+		]
+	):
+		return false
+
+	var current_tile: Dictionary = tiles[tile_position.y][tile_position.x]
+	var is_land := terrain != TERRAIN_WATER
+
+	if (
+		str(current_tile.get("terrain", "")) == terrain
+		and bool(current_tile.get("is_land", false)) == is_land
+	):
+		return false
+
+	var replacement_tile := current_tile.duplicate(true)
+	replacement_tile["terrain"] = terrain
+	replacement_tile["is_land"] = is_land
+	return set_tile(tile_position.x, tile_position.y, replacement_tile)
+
+
+func set_tile_resource_value(
+	tile_position: Vector2i,
+	resource: String
+) -> bool:
+	if (
+		not is_in_bounds(tile_position.x, tile_position.y)
+		or (
+			resource != RESOURCE_NONE
+			and not CityResourceCatalogScript.is_city_resource_type(resource)
+		)
+	):
+		return false
+
+	var current_tile: Dictionary = tiles[tile_position.y][tile_position.x]
+
+	if str(current_tile.get("resource", RESOURCE_NONE)) == resource:
+		return false
+
+	var replacement_tile := current_tile.duplicate(true)
+	replacement_tile["resource"] = resource
+	return set_tile(tile_position.x, tile_position.y, replacement_tile)
+
+
+func set_tile_surface_feature(
+	tile_position: Vector2i,
+	surface_feature: String
+) -> bool:
+	if (
+		not is_in_bounds(tile_position.x, tile_position.y)
+		or (
+			surface_feature != CITY_SURFACE_FEATURE_NONE
+			and not is_city_surface_feature(surface_feature)
+		)
+	):
+		return false
+
+	var current_tile: Dictionary = tiles[tile_position.y][tile_position.x]
+	var previous_feature := get_city_surface_feature(current_tile)
+
+	if previous_feature == surface_feature:
+		return false
+
+	var replacement_tile := current_tile.duplicate(true)
+
+	if surface_feature == CITY_SURFACE_FEATURE_NONE:
+		replacement_tile.erase("surface_feature")
+	else:
+		replacement_tile["surface_feature"] = surface_feature
+
+	tiles[tile_position.y][tile_position.x] = replacement_tile
+	mark_city_surface_feature_changed(
+		tile_position,
+		previous_feature,
+		surface_feature
+	)
+	return true
+
+
+func remove_tile_surface_feature(
+	tile_position: Vector2i,
+	expected_feature: String = ""
+) -> bool:
+	if not is_in_bounds(tile_position.x, tile_position.y):
+		return false
+
+	var current_feature := get_city_surface_feature(
+		tiles[tile_position.y][tile_position.x]
+	)
+
+	if (
+		current_feature == CITY_SURFACE_FEATURE_NONE
+		or (
+			not expected_feature.is_empty()
+			and current_feature != expected_feature
+		)
+	):
+		return false
+
+	return set_tile_surface_feature(
+		tile_position,
+		CITY_SURFACE_FEATURE_NONE
+	)
 
 
 func mark_tile_data_changed() -> void:
@@ -164,6 +286,7 @@ func mark_city_surface_feature_changed(
 	if previous_feature == current_feature:
 		return
 
+	_invalidate_prepared_city_feature_tiles()
 	pending_city_surface_feature_changes.append({
 		"tile_position": tile_position,
 		"previous_feature": previous_feature,
@@ -356,7 +479,10 @@ static func _make_city_start_region_tiles(
 			var tile_x: int = region_top_left.x + x_offset
 			var tile_y: int = region_top_left.y + y_offset
 			var source_tile := (
-				source_world.get_tile(tile_x, tile_y).duplicate(true)
+				source_world.get_tile_for_internal_read(
+					tile_x,
+					tile_y
+				).duplicate(true)
 			)
 
 			source_tile["source_world_x"] = tile_x
@@ -587,8 +713,39 @@ static func store_city_world_save(city_world: WorldData, city_seed: int) -> void
 	WorldPoliticalState.store_current_city_world(city_world, city_seed)
 	MapTextureCacheStateScript.clear_city_cache()
 
+
+static func _clear_player_city_mirrors() -> void:
+	player_city_founded = false
+	player_city_foundation_top_left = Vector2i(-1, -1)
+	player_city_foundation_size = Vector2i.ZERO
+
+
+static func _synchronize_player_city_mirrors_from_capital_state() -> void:
+	var capital_state = (
+		WorldPoliticalState.get_player_capital_city_simulation_state()
+	)
+	if capital_state == null or not capital_state.is_city_founded():
+		_clear_player_city_mirrors()
+		return
+
+	player_city_founded = true
+	if not capital_state.has_city_foundation_footprint():
+		player_city_foundation_top_left = Vector2i(-1, -1)
+		player_city_foundation_size = Vector2i.ZERO
+		return
+
+	player_city_foundation_top_left = capital_state.city_runtime_data.get(
+		"foundation_top_left",
+		Vector2i(-1, -1)
+	)
+	player_city_foundation_size = capital_state.city_runtime_data.get(
+		"foundation_size",
+		Vector2i.ZERO
+	)
+
+
 static func found_player_city(values: Dictionary) -> void:
-	if player_city_founded:
+	if has_player_city():
 		return
 
 	if not has_active_world_save():
@@ -648,46 +805,55 @@ static func found_player_city(values: Dictionary) -> void:
 	var city_map_size: Vector2i = values["city_map_size"]
 	var foundation_top_left: Vector2i = foundation_top_left_value
 	var foundation_size: Vector2i = foundation_size_value
-	var primary_culture_id := official_founding_culture_id
 
-	player_city_founded = true
-	player_city_foundation_top_left = foundation_top_left
-	player_city_foundation_size = foundation_size
+	if not WorldPoliticalState.synchronize_foundation_with_world_data():
+		push_error("Cannot found the player city without its capital settlement.")
+		return
 
-	WorldPoliticalState.replace_current_city_runtime_data({
-		"id": 1,
-		"name": official_city_name,
-		"primary_culture_id": primary_culture_id,
-		"city_world_seed": city_world_seed,
-		"city_map_size": city_map_size,
-		"foundation_top_left": foundation_top_left,
-		"foundation_size": foundation_size,
-		"can_build": true,
-		"founded": true
-	})
+	var capital_settlement_id := (
+		WorldPoliticalState.get_player_capital_settlement_id()
+	)
+	if not WorldPoliticalState.found_city_settlement(
+		capital_settlement_id,
+		{
+			"city_world_seed": city_world_seed,
+			"city_map_size": city_map_size,
+			"foundation_top_left": foundation_top_left,
+			"foundation_size": foundation_size,
+			"primary_culture_id": get_official_founding_culture_id(),
+			"can_build": true,
+		}
+	):
+		push_error("Player-capital foundation failed without committing global state.")
+		return
 
-	CityCitizenRegistrySystem.initialize_starting_city_population()
+	var capital_state = (
+		WorldPoliticalState.get_player_capital_city_simulation_state()
+	)
+	if capital_state == null:
+		push_error("Founded player capital has no city simulation state.")
+		return
+
+	_synchronize_player_city_mirrors_from_capital_state()
 
 static func has_player_city_foundation() -> bool:
-	return (
-		player_city_founded
-		and player_city_foundation_top_left != Vector2i(-1, -1)
-		and player_city_foundation_size.x > 0
-		and player_city_foundation_size.y > 0
+	_synchronize_player_city_mirrors_from_capital_state()
+	var capital_state = (
+		WorldPoliticalState.get_player_capital_city_simulation_state()
 	)
+	return capital_state != null and capital_state.has_city_foundation_footprint()
 
 static func has_player_city() -> bool:
-	return player_city_founded
+	_synchronize_player_city_mirrors_from_capital_state()
+	var capital_state = (
+		WorldPoliticalState.get_player_capital_city_simulation_state()
+	)
+	return capital_state != null and capital_state.is_city_founded()
 
 
 static func can_build_in_city() -> bool:
-	if not player_city_founded:
-		return false
-
-	if not WorldPoliticalState.get_current_city_runtime_data().has("can_build"):
-		return false
-
-	return bool(WorldPoliticalState.get_current_city_runtime_data()["can_build"])
+	var city_state = WorldPoliticalState.get_active_city_simulation_state()
+	return city_state != null and city_state.can_build_city_objects()
 
 #endregion
 
@@ -755,21 +921,22 @@ static func clear_city_surface_features_at_tiles(
 		):
 			continue
 
-		var tile: Dictionary = city_world.get_tile(
-			tile_position.x,
-			tile_position.y
+		var surface_feature := get_city_surface_feature(
+			city_world.get_tile_for_internal_read(
+				tile_position.x,
+				tile_position.y
+			)
 		)
-		var surface_feature := get_city_surface_feature(tile)
 
 		if not is_city_surface_feature(surface_feature):
 			continue
 
-		tile.erase("surface_feature")
-		city_world.mark_city_surface_feature_changed(
+		if not city_world.remove_tile_surface_feature(
 			tile_position,
-			surface_feature,
-			CITY_SURFACE_FEATURE_NONE
-		)
+			surface_feature
+		):
+			continue
+
 		cleared_count += 1
 
 	return cleared_count
@@ -839,24 +1006,19 @@ static func clear_city_surface_features_at_tiles(
 
 
 static func reset_player_city_state() -> void:
-	player_city_founded = false
-	WorldPoliticalState.clear_current_city_runtime_data()
-	player_city_foundation_top_left = Vector2i(-1, -1)
-	player_city_foundation_size = Vector2i.ZERO
-	WorldPoliticalState.reset_extracted_city_state()
-	CityLogisticsSystem.reset_city_haul_reservation_state()
-	CityLogisticsSystem.reset_city_ground_pile_state()
-	CityConstructionSystem.reset_city_construction_state()
-	CityNavigationSystem.reset_city_navigation_state()
-	CityObjectSystem.reset_city_object_state()
-	CityEmploymentSystem.mark_city_workplaces_changed()
+	_clear_player_city_mirrors()
 
-	CityResourceAccountingSystem.reset_city_resource_accounting_state()
+	# Reset the exact player-capital owner without switching presentation to it.
+	# The compatibility subsystem reset entry points resolve the active city and
+	# therefore must not be used here while an NPC settlement may be active.
+	var player_capital_id := (
+		WorldPoliticalState.get_player_capital_settlement_id()
+	)
+	if player_capital_id <= 0:
+		return
 
-	# Houses and workplaces no longer exist, so assignment observers must
-	# invalidate any relationship displays.
-	CityAssignmentSystem.mark_city_assignments_changed()
-	CityCitizenRegistrySystem.reset_city_citizen_state()
+	WorldPoliticalState.reset_city_simulation_runtime_state(player_capital_id)
+	WorkplaceProductionSystem.clear_resource_source_evaluation_cache()
 
 #endregion
 

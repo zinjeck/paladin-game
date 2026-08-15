@@ -53,19 +53,47 @@ static func drop_citizen_haul_cargo_for_priority_interrupt(
 		CityCitizens.CITY_CITIZEN_TASK_SOURCE_PLAYER
 	)
 ) -> bool:
+	var city_state = WorldPoliticalState.get_current_city_simulation_state()
+	if not city_state is CitySettlementSimulationState:
+		return false
+	return drop_citizen_haul_cargo_for_priority_interrupt_for_city_state(
+		city_state,
+		city_world,
+		citizen_id,
+		requesting_source
+	)
+
+
+static func drop_citizen_haul_cargo_for_priority_interrupt_for_city_state(
+	city_state: CitySettlementSimulationState,
+	city_world: WorldData,
+	citizen_id: int,
+	requesting_source: String = (
+		CityCitizens.CITY_CITIZEN_TASK_SOURCE_PLAYER
+	)
+) -> bool:
 	if city_world == null or citizen_id <= 0:
 		return false
 
-	var citizen := CityCitizenRegistrySystem.get_city_citizen_by_id(citizen_id)
+	var citizen := CityCitizenRegistrySystem.get_city_citizen_by_id_for_city_state(
+		city_state,
+		citizen_id
+	)
 
 	if citizen.is_empty() or not bool(citizen.get("alive", false)):
 		return false
 
 	var cargo_resources := (
-		CityCitizenInventorySystem.get_city_citizen_haul_cargo_resources(citizen_id)
+		CityCitizenInventorySystem.get_city_citizen_haul_cargo_resources_for_city_state(
+			city_state,
+			citizen_id
+		)
 	)
 	var cargo_amount := (
-		CityCitizenInventorySystem.get_city_citizen_haul_cargo_amount(citizen_id)
+		CityCitizenInventorySystem.get_city_citizen_haul_cargo_amount_for_city_state(
+			city_state,
+			citizen_id
+		)
 	)
 	var drop_tile := CityCitizens.INVALID_CITY_TILE_POSITION
 	var added_placements_by_resource: Dictionary = {}
@@ -79,7 +107,8 @@ static func drop_citizen_haul_cargo_for_priority_interrupt(
 		if not raw_current_tile is Vector2i:
 			return false
 
-		drop_tile = _find_nearest_valid_ground_pile_drop_tile(
+		drop_tile = _find_nearest_valid_ground_pile_drop_tile_for_city_state(
+			city_state,
 			city_world,
 			citizen_id,
 			raw_current_tile
@@ -102,18 +131,22 @@ static func drop_citizen_haul_cargo_for_priority_interrupt(
 				continue
 
 			var add_result := (
-				CityLogisticsSystem.add_resource_to_city_ground_piles_with_result({
+				CityLogisticsSystem.add_resource_to_city_ground_piles_with_result_for_city_state(
+					city_state,
+					{
 					"tile_position": drop_tile,
 					"resource": resource,
 					"amount_delta": amount,
-				})
+					}
+				)
 			)
 			var added_amount := int(
 				add_result.get("added_amount", 0)
 			)
 
 			if added_amount != amount:
-				_rollback_interrupted_cargo_ground_piles(
+				_rollback_interrupted_cargo_ground_piles_for_city_state(
+					city_state,
 					added_placements_by_resource
 				)
 				return false
@@ -122,27 +155,32 @@ static func drop_citizen_haul_cargo_for_priority_interrupt(
 				add_result.get("placements", [])
 			)
 
-		if CityCitizenInventorySystem.set_city_citizen_haul_cargo_resources(
+		if CityCitizenInventorySystem.set_city_citizen_haul_cargo_resources_for_city_state(
+			city_state,
 			citizen_id,
 			{}
 		) != 0:
-			_rollback_interrupted_cargo_ground_piles(
+			_rollback_interrupted_cargo_ground_piles_for_city_state(
+				city_state,
 				added_placements_by_resource
 			)
 			return false
 
-	if not CityCitizenTaskRuntimeSystem.clear_city_citizen_task(
+	if not CityCitizenTaskRuntimeSystem.clear_city_citizen_task_for_city_state(
+		city_state,
 		citizen_id,
 		requesting_source
 	):
 		if cargo_amount > 0:
 			var restored_total := (
-				CityCitizenInventorySystem.set_city_citizen_haul_cargo_resources(
+				CityCitizenInventorySystem.set_city_citizen_haul_cargo_resources_for_city_state(
+					city_state,
 					citizen_id,
 					cargo_resources
 				)
 			)
-			_rollback_interrupted_cargo_ground_piles(
+			_rollback_interrupted_cargo_ground_piles_for_city_state(
+				city_state,
 				added_placements_by_resource
 			)
 
@@ -154,20 +192,26 @@ static func drop_citizen_haul_cargo_for_priority_interrupt(
 
 		return false
 
-	CityCitizenMovementRuntimeSystem.cancel_city_citizen_movement(citizen_id)
-	CityCitizenTaskRuntimeSystem.set_city_citizen_current_haul(
+	CityCitizenMovementRuntimeSystem.cancel_city_citizen_movement_for_city_state(
+		city_state,
+		citizen_id
+	)
+	CityCitizenTaskRuntimeSystem.set_city_citizen_current_haul_for_city_state(
+		city_state,
 		citizen_id,
 		CityCitizens.make_city_citizen_haul()
 	)
 	return true
 
 
-static func _find_nearest_valid_ground_pile_drop_tile(
+static func _find_nearest_valid_ground_pile_drop_tile_for_city_state(
+	city_state: CitySettlementSimulationState,
 	city_world: WorldData,
 	citizen_id: int,
 	origin_tile: Vector2i
 ) -> Vector2i:
-	if CityLogisticsSystem.can_city_ground_pile_exist_at_tile(
+	if CityLogisticsSystem.can_city_ground_pile_exist_at_tile_for_city_state(
+		city_state,
 		city_world,
 		origin_tile
 	):
@@ -194,7 +238,8 @@ static func _find_nearest_valid_ground_pile_drop_tile(
 					origin_tile + Vector2i(offset_x, offset_y)
 				)
 
-				if not CityLogisticsSystem.can_city_ground_pile_exist_at_tile(
+				if not CityLogisticsSystem.can_city_ground_pile_exist_at_tile_for_city_state(
+					city_state,
 					city_world,
 					candidate_tile
 				):
@@ -207,6 +252,7 @@ static func _find_nearest_valid_ground_pile_drop_tile(
 
 		var path_result := (
 			CityNavigationSystemScript.find_path_to_any_city_tile({
+				"city_state": city_state,
 				"city_world": city_world,
 				"start_tile": origin_tile,
 				"destination_tiles": candidate_tiles,
@@ -230,7 +276,8 @@ static func _find_nearest_valid_ground_pile_drop_tile(
 	return CityCitizens.INVALID_CITY_TILE_POSITION
 
 
-static func _rollback_interrupted_cargo_ground_piles(
+static func _rollback_interrupted_cargo_ground_piles_for_city_state(
+	city_state: CitySettlementSimulationState,
 	placements_by_resource: Dictionary
 ) -> void:
 	for raw_resource in placements_by_resource.keys():
@@ -240,7 +287,8 @@ static func _rollback_interrupted_cargo_ground_piles(
 			[]
 		)
 
-		if not CityLogisticsSystem.rollback_city_ground_pile_additions(
+		if not CityLogisticsSystem.rollback_city_ground_pile_additions_for_city_state(
+			city_state,
 			resource,
 			placements
 		):
@@ -255,9 +303,40 @@ static func _rollback_interrupted_cargo_ground_piles(
 
 #region Haul Task Request Construction
 
+static func make_public_storage_haul_task_request_for_city_state(
+	city_state: CitySettlementSimulationState,
+	values: Dictionary
+) -> Dictionary:
+	if city_state == null or city_state.city_world == null:
+		return {}
+
+	var explicit_values := values.duplicate(false)
+	explicit_values["city_state"] = city_state
+	explicit_values["city_world"] = city_state.city_world
+	return make_public_storage_haul_task_request(explicit_values)
+
+
+static func make_directed_haul_task_request_for_city_state(
+	city_state: CitySettlementSimulationState,
+	values: Dictionary
+) -> Dictionary:
+	if city_state == null or city_state.city_world == null:
+		return {}
+
+	var explicit_values := values.duplicate(false)
+	explicit_values["city_state"] = city_state
+	explicit_values["city_world"] = city_state.city_world
+	return make_directed_haul_task_request(explicit_values)
+
 static func make_public_storage_haul_task_request(
 	values: Dictionary
 ) -> Dictionary:
+	var raw_city_state = values.get("city_state")
+	if not values.has("city_state"):
+		raw_city_state = WorldPoliticalState.get_current_city_simulation_state()
+	if not raw_city_state is CitySettlementSimulationState:
+		return {}
+
 	var raw_city_world = values.get("city_world")
 	var raw_citizen = values.get("citizen", {})
 	var raw_source = values.get("source", {})
@@ -275,6 +354,7 @@ static func make_public_storage_haul_task_request(
 	if not raw_requester is Dictionary:
 		return {}
 
+	var city_state: CitySettlementSimulationState = raw_city_state
 	var city_world: WorldData = raw_city_world
 	var citizen: Dictionary = raw_citizen
 	var source: Dictionary = (
@@ -352,12 +432,16 @@ static func make_public_storage_haul_task_request(
 
 	var current_tile: Vector2i = raw_current_tile
 	var cargo_resources := (
-		CityCitizenInventorySystem.get_city_citizen_haul_cargo_resources(
+		CityCitizenInventorySystem.get_city_citizen_haul_cargo_resources_for_city_state(
+			city_state,
 			citizen_id
 		)
 	)
 	var cargo_amount := (
-		CityCitizenInventorySystem.get_city_citizen_haul_cargo_amount(citizen_id)
+		CityCitizenInventorySystem.get_city_citizen_haul_cargo_amount_for_city_state(
+			city_state,
+			citizen_id
+		)
 	)
 	var destination_result: Dictionary = {}
 	var initial_phase: String = (
@@ -372,6 +456,7 @@ static func make_public_storage_haul_task_request(
 			CityCitizens.CITY_CITIZEN_HAUL_PHASE_PENDING_DESTINATION
 		)
 		destination_result = CityResourceMatcherScript.find_nearest_eligible_destination_for_resources({
+			"city_state": city_state,
 			"city_world": city_world,
 			"start_tile": current_tile,
 			"citizen_id": citizen_id,
@@ -382,21 +467,26 @@ static func make_public_storage_haul_task_request(
 			"requested_amount": cargo_amount,
 		})
 	else:
-		if not CityLogisticsSystem.city_haul_endpoint_can_provide_resource({
+		if not CityLogisticsSystem.city_haul_endpoint_can_provide_resource_for_city_state(
+			city_state,
+			{
 			"endpoint": source,
 			"resource": resource,
 			"withdrawal_purpose": source_access_purpose,
 			"require_unreserved_amount": true,
-		}):
+			}
+		):
 			return {}
 
 		var remaining_capacity := (
-			CityCitizenInventorySystem.get_city_citizen_available_haul_capacity(
+			CityCitizenInventorySystem.get_city_citizen_available_haul_capacity_for_city_state(
+				city_state,
 				citizen_id
 			)
 		)
 		var source_amount := (
-			CityLogisticsSystem.get_city_haul_endpoint_unreserved_resource_amount(
+			CityLogisticsSystem.get_city_haul_endpoint_unreserved_resource_amount_for_city_state(
+				city_state,
 				source,
 				resource
 			)
@@ -410,7 +500,8 @@ static func make_public_storage_haul_task_request(
 		if requested_amount <= 0:
 			return {}
 
-		var source_access_tiles := CityResourceMatcherScript.get_haul_endpoint_access_tiles(
+		var source_access_tiles := CityResourceMatcherScript.get_haul_endpoint_access_tiles_for_city_state(
+			city_state,
 			city_world,
 			source
 		)
@@ -420,6 +511,7 @@ static func make_public_storage_haul_task_request(
 
 		var source_path_result := (
 			CityNavigationSystemScript.find_path_to_any_city_tile({
+				"city_state": city_state,
 				"city_world": city_world,
 				"start_tile": current_tile,
 				"destination_tiles": source_access_tiles,
@@ -448,6 +540,7 @@ static func make_public_storage_haul_task_request(
 		selection_path = raw_source_path.duplicate()
 		source_tile = raw_source_tile
 		destination_result = CityResourceMatcherScript.find_nearest_eligible_destination({
+			"city_state": city_state,
 			"city_world": city_world,
 			"start_tile": source_tile,
 			"citizen_id": citizen_id,
@@ -535,6 +628,12 @@ static func make_public_storage_haul_task_request(
 static func make_directed_haul_task_request(
 	values: Dictionary
 ) -> Dictionary:
+	var raw_city_state = values.get("city_state")
+	if not values.has("city_state"):
+		raw_city_state = WorldPoliticalState.get_current_city_simulation_state()
+	if not raw_city_state is CitySettlementSimulationState:
+		return {}
+
 	var raw_city_world = values.get("city_world")
 	var raw_citizen = values.get("citizen", {})
 	var raw_source = values.get("source", {})
@@ -550,6 +649,7 @@ static func make_directed_haul_task_request(
 	):
 		return {}
 
+	var city_state: CitySettlementSimulationState = raw_city_state
 	var city_world: WorldData = raw_city_world
 	var citizen: Dictionary = raw_citizen
 	var source := CityCitizens.make_city_citizen_haul_endpoint(
@@ -603,7 +703,10 @@ static func make_directed_haul_task_request(
 		citizen_id <= 0
 		or not bool(citizen.get("alive", false))
 		or not raw_current_tile is Vector2i
-		or CityCitizenInventorySystem.get_city_citizen_haul_cargo_amount(citizen_id) > 0
+		or CityCitizenInventorySystem.get_city_citizen_haul_cargo_amount_for_city_state(
+			city_state,
+			citizen_id
+		) > 0
 		or not CityResourceCatalog.is_city_resource_type(resource)
 		or requested_amount <= 0
 		or reason == CityCitizens.CITY_CITIZEN_HAUL_REASON_NONE
@@ -619,33 +722,42 @@ static func make_directed_haul_task_request(
 			destination
 		)
 		or not CityCitizens.is_valid_city_citizen_haul_endpoint(requester)
-		or not CityLogisticsSystem.city_haul_endpoint_can_provide_resource({
+		or not CityLogisticsSystem.city_haul_endpoint_can_provide_resource_for_city_state(
+			city_state,
+			{
 			"endpoint": source,
 			"resource": resource,
 			"withdrawal_purpose": source_access_purpose,
 			"require_unreserved_amount": true,
-		})
-		or not CityLogisticsSystem.city_haul_endpoint_can_accept_resource({
+			}
+		)
+		or not CityLogisticsSystem.city_haul_endpoint_can_accept_resource_for_city_state(
+			city_state,
+			{
 			"endpoint": destination,
 			"resource": resource,
 			"deposit_purpose": destination_access_purpose,
 			"require_unreserved_space": true,
-		})
+			}
+		)
 	):
 		return {}
 
 	requested_amount = mini(
 		requested_amount,
 		mini(
-			CityCitizenInventorySystem.get_city_citizen_available_haul_capacity(
+			CityCitizenInventorySystem.get_city_citizen_available_haul_capacity_for_city_state(
+				city_state,
 				citizen_id
 			),
 			mini(
-				CityLogisticsSystem.get_city_haul_endpoint_unreserved_resource_amount(
+				CityLogisticsSystem.get_city_haul_endpoint_unreserved_resource_amount_for_city_state(
+					city_state,
 					source,
 					resource
 				),
-				CityLogisticsSystem.get_city_haul_endpoint_unreserved_destination_space(
+				CityLogisticsSystem.get_city_haul_endpoint_unreserved_destination_space_for_city_state(
+					city_state,
 					destination
 				)
 			)
@@ -656,7 +768,8 @@ static func make_directed_haul_task_request(
 		return {}
 
 	var current_tile: Vector2i = raw_current_tile
-	var source_access_tiles := CityResourceMatcherScript.get_haul_endpoint_access_tiles(
+	var source_access_tiles := CityResourceMatcherScript.get_haul_endpoint_access_tiles_for_city_state(
+		city_state,
 		city_world,
 		source
 	)
@@ -666,6 +779,7 @@ static func make_directed_haul_task_request(
 
 	var source_path_result := (
 		CityNavigationSystemScript.find_path_to_any_city_tile({
+			"city_state": city_state,
 			"city_world": city_world,
 			"start_tile": current_tile,
 			"destination_tiles": source_access_tiles,
@@ -693,6 +807,7 @@ static func make_directed_haul_task_request(
 
 	var source_tile: Vector2i = raw_source_tile
 	var destination_result := CityResourceMatcherScript.make_destination_result_for_endpoint({
+		"city_state": city_state,
 		"city_world": city_world,
 		"start_tile": source_tile,
 		"citizen_id": citizen_id,
@@ -754,6 +869,29 @@ static func advance_haul_task(
 	city_world: WorldData,
 	values: Dictionary
 ) -> int:
+	var city_state = WorldPoliticalState.get_current_city_simulation_state()
+	if not city_state is CitySettlementSimulationState:
+		return maxi(int(values.get("path_requests_remaining", 0)), 0)
+	return advance_haul_task_for_city_state(city_state, city_world, values)
+
+
+static func advance_haul_task_for_city_state(
+	city_state: CitySettlementSimulationState,
+	city_world: WorldData,
+	values: Dictionary
+) -> int:
+	if city_state == null:
+		return maxi(int(values.get("path_requests_remaining", 0)), 0)
+	var explicit_values := values.duplicate(false)
+	explicit_values["city_state"] = city_state
+	return _advance_haul_task_with_explicit_state(city_world, explicit_values)
+
+
+static func _advance_haul_task_with_explicit_state(
+	city_world: WorldData,
+	values: Dictionary
+) -> int:
+	var city_state: CitySettlementSimulationState = values.get("city_state")
 	var citizen_id := int(values.get("citizen_id", -1))
 	var citizen: Dictionary = values.get("citizen", {})
 	var current_task: Dictionary = values.get("current_task", {})
@@ -770,11 +908,15 @@ static func advance_haul_task(
 	):
 		return path_requests_remaining
 
-	var haul := CityCitizenTaskRuntimeSystem.get_city_citizen_current_haul(
+	var haul := CityCitizenTaskRuntimeSystem.get_city_citizen_current_haul_for_city_state(
+		city_state,
 		citizen_id
 	)
 	var cargo_amount := (
-		CityCitizenInventorySystem.get_city_citizen_haul_cargo_amount(citizen_id)
+		CityCitizenInventorySystem.get_city_citizen_haul_cargo_amount_for_city_state(
+			city_state,
+			citizen_id
+		)
 	)
 	var haul_resource := str(
 		haul.get("resource_type", WorldData.RESOURCE_NONE)
@@ -787,7 +929,11 @@ static func advance_haul_task(
 	)
 
 	if not CityResourceCatalog.is_city_resource_type(haul_resource):
-		_finish_haul_without_pickup(citizen_id, current_task)
+		_finish_haul_without_pickup_for_city_state(
+			city_state,
+			citizen_id,
+			current_task
+		)
 		return path_requests_remaining
 
 	if cargo_amount > 0:
@@ -797,7 +943,8 @@ static func advance_haul_task(
 				CityCitizens.INVALID_CITY_CITIZEN_HAUL_RESERVATION_ID
 			)
 		)
-		var reservation := CityLogisticsSystem.get_city_haul_reservation(
+		var reservation := CityLogisticsSystem.get_city_haul_reservation_for_city_state(
+			city_state,
 			reservation_id
 		)
 		var has_reserved_next_source := (
@@ -824,11 +971,15 @@ static func advance_haul_task(
 			)
 			and not has_reserved_next_source
 		):
-			CityCitizenMovementRuntimeSystem.cancel_city_citizen_movement(citizen_id)
+			CityCitizenMovementRuntimeSystem.cancel_city_citizen_movement_for_city_state(
+				city_state,
+				citizen_id
+			)
 			haul["phase"] = (
 				CityCitizens.CITY_CITIZEN_HAUL_PHASE_PENDING_DESTINATION
 			)
-			CityCitizenTaskRuntimeSystem.set_city_citizen_current_haul(
+			CityCitizenTaskRuntimeSystem.set_city_citizen_current_haul_for_city_state(
+				city_state,
 				citizen_id,
 				haul
 			)
@@ -843,18 +994,24 @@ static func advance_haul_task(
 		or haul_phase == CityCitizens.CITY_CITIZEN_HAUL_PHASE_DEPOSITING
 		or haul_phase == CityCitizens.CITY_CITIZEN_HAUL_PHASE_RETARGETING
 	):
-		_finish_haul_without_pickup(citizen_id, current_task)
+		_finish_haul_without_pickup_for_city_state(
+			city_state,
+			citizen_id,
+			current_task
+		)
 		return path_requests_remaining
 
 	if haul_phase == CityCitizens.CITY_CITIZEN_HAUL_PHASE_BLOCKED:
-		if not _prepare_blocked_haul_retry(
+		if not _prepare_blocked_haul_retry_for_city_state(
+			city_state,
 			citizen_id,
 			current_task,
 			cargo_amount > 0
 		):
 			return path_requests_remaining
 
-		haul = CityCitizenTaskRuntimeSystem.get_city_citizen_current_haul(
+		haul = CityCitizenTaskRuntimeSystem.get_city_citizen_current_haul_for_city_state(
+			city_state,
 			citizen_id
 		)
 		haul_phase = str(
@@ -863,8 +1020,12 @@ static func advance_haul_task(
 				CityCitizens.CITY_CITIZEN_HAUL_PHASE_NONE
 			)
 		)
-		citizen = CityCitizenRegistrySystem.get_city_citizen_by_id(citizen_id)
-		current_task = CityCitizenTaskRuntimeSystem.get_city_citizen_current_task(
+		citizen = CityCitizenRegistrySystem.get_city_citizen_by_id_for_city_state(
+			city_state,
+			citizen_id
+		)
+		current_task = CityCitizenTaskRuntimeSystem.get_city_citizen_current_task_for_city_state(
+			city_state,
 			citizen_id
 		)
 
@@ -894,13 +1055,15 @@ static func advance_haul_task(
 			)
 
 		CityCitizens.CITY_CITIZEN_HAUL_PHASE_PENDING_DESTINATION:
-			return _advance_pending_destination(
+			return _advance_pending_destination_for_city_state(
+				city_state,
 				city_world,
 				values
 			)
 
 		CityCitizens.CITY_CITIZEN_HAUL_PHASE_RETARGETING:
-			return _advance_pending_destination(
+			return _advance_pending_destination_for_city_state(
+				city_state,
 				city_world,
 				values
 			)
@@ -918,7 +1081,7 @@ static func advance_haul_task(
 			)
 
 		_:
-			_set_haul_blocked(citizen_id, haul)
+			_set_haul_blocked_for_city_state(city_state, citizen_id, haul)
 
 	return path_requests_remaining
 
@@ -927,6 +1090,7 @@ static func _advance_pending_source(
 	city_world: WorldData,
 	values: Dictionary
 ) -> int:
+	var city_state: CitySettlementSimulationState = values.get("city_state")
 	var citizen_id := int(values.get("citizen_id", -1))
 	var citizen: Dictionary = values.get("citizen", {})
 	var current_task: Dictionary = values.get("current_task", {})
@@ -951,7 +1115,8 @@ static func _advance_pending_source(
 			CityCitizens.INVALID_CITY_CITIZEN_HAUL_RESERVATION_ID
 		)
 	)
-	var reservation := CityLogisticsSystem.get_city_haul_reservation(
+	var reservation := CityLogisticsSystem.get_city_haul_reservation_for_city_state(
+		city_state,
 		reservation_id
 	)
 
@@ -966,71 +1131,116 @@ static func _advance_pending_source(
 			reservation.get("source_reserved_amount", 0)
 		) <= 0
 	):
-		if CityCitizenInventorySystem.get_city_citizen_haul_cargo_amount(citizen_id) > 0:
+		if CityCitizenInventorySystem.get_city_citizen_haul_cargo_amount_for_city_state(
+			city_state,
+			citizen_id
+		) > 0:
 			haul["phase"] = (
 				CityCitizens.CITY_CITIZEN_HAUL_PHASE_PENDING_DESTINATION
 			)
-			CityCitizenTaskRuntimeSystem.set_city_citizen_current_haul(citizen_id, haul)
-			return _advance_pending_destination(
+			CityCitizenTaskRuntimeSystem.set_city_citizen_current_haul_for_city_state(
+				city_state,
+				citizen_id,
+				haul
+			)
+			return _advance_pending_destination_for_city_state(
+				city_state,
 				city_world,
 				values
 			)
 
-		_finish_haul_without_pickup(citizen_id, current_task)
+		_finish_haul_without_pickup_for_city_state(
+			city_state,
+			citizen_id,
+			current_task
+		)
 		return path_requests_remaining
 
-	if not CityLogisticsSystem.city_haul_endpoint_can_provide_resource({
+	if not CityLogisticsSystem.city_haul_endpoint_can_provide_resource_for_city_state(
+		city_state,
+		{
 		"endpoint": source,
 		"resource": resource,
 		"withdrawal_purpose": source_access_purpose,
 		"require_unreserved_amount": true,
 		"excluding_reservation_id": reservation_id,
-	}):
-		if CityCitizenInventorySystem.get_city_citizen_haul_cargo_amount(citizen_id) > 0:
+		}
+	):
+		if CityCitizenInventorySystem.get_city_citizen_haul_cargo_amount_for_city_state(
+			city_state,
+			citizen_id
+		) > 0:
 			haul["phase"] = (
 				CityCitizens.CITY_CITIZEN_HAUL_PHASE_PENDING_DESTINATION
 			)
-			CityCitizenTaskRuntimeSystem.set_city_citizen_current_haul(citizen_id, haul)
-			return _advance_pending_destination(
+			CityCitizenTaskRuntimeSystem.set_city_citizen_current_haul_for_city_state(
+				city_state,
+				citizen_id,
+				haul
+			)
+			return _advance_pending_destination_for_city_state(
+				city_state,
 				city_world,
 				values
 			)
 
-		_finish_haul_without_pickup(citizen_id, current_task)
+		_finish_haul_without_pickup_for_city_state(
+			city_state,
+			citizen_id,
+			current_task
+		)
 		return path_requests_remaining
 
 	if (
-		CityCitizenInventorySystem.get_city_citizen_available_haul_capacity(
+		CityCitizenInventorySystem.get_city_citizen_available_haul_capacity_for_city_state(
+			city_state,
 			citizen_id
 		) <= 0
 	):
 		haul["phase"] = (
 			CityCitizens.CITY_CITIZEN_HAUL_PHASE_PENDING_DESTINATION
 		)
-		CityCitizenTaskRuntimeSystem.set_city_citizen_current_haul(citizen_id, haul)
-		return _advance_pending_destination(city_world, values)
+		CityCitizenTaskRuntimeSystem.set_city_citizen_current_haul_for_city_state(
+			city_state,
+			citizen_id,
+			haul
+		)
+		return _advance_pending_destination_for_city_state(
+			city_state,
+			city_world,
+			values
+		)
 
 	var raw_current_tile = citizen.get(
 		"city_tile_position",
 		CityCitizens.INVALID_CITY_TILE_POSITION
 	)
-	var source_access_tiles := CityResourceMatcherScript.get_haul_endpoint_access_tiles(
+	var source_access_tiles := CityResourceMatcherScript.get_haul_endpoint_access_tiles_for_city_state(
+		city_state,
 		city_world,
 		source
 	)
 
 	if not raw_current_tile is Vector2i or source_access_tiles.is_empty():
-		_set_haul_blocked(citizen_id, haul)
+		_set_haul_blocked_for_city_state(city_state, citizen_id, haul)
 		return path_requests_remaining
 
 	var current_tile: Vector2i = raw_current_tile
 
 	if source_access_tiles.has(current_tile):
-		CityCitizenMovementRuntimeSystem.cancel_city_citizen_movement(citizen_id)
+		CityCitizenMovementRuntimeSystem.cancel_city_citizen_movement_for_city_state(
+			city_state,
+			citizen_id
+		)
 		haul["phase"] = CityCitizens.CITY_CITIZEN_HAUL_PHASE_PICKING_UP
 		haul["source_tile"] = current_tile
-		CityCitizenTaskRuntimeSystem.set_city_citizen_current_haul(citizen_id, haul)
-		CityCitizenTaskRuntimeSystem.set_city_citizen_task_phase(
+		CityCitizenTaskRuntimeSystem.set_city_citizen_current_haul_for_city_state(
+			city_state,
+			citizen_id,
+			haul
+		)
+		CityCitizenTaskRuntimeSystem.set_city_citizen_task_phase_for_city_state(
+			city_state,
 			citizen_id,
 			CityCitizens.CITY_CITIZEN_TASK_PHASE_PERFORMING
 		)
@@ -1044,6 +1254,7 @@ static func _advance_pending_source(
 	path_requests_remaining -= 1
 	var path_result := (
 		CityNavigationSystemScript.find_path_to_any_city_tile({
+			"city_state": city_state,
 			"city_world": city_world,
 			"start_tile": current_tile,
 			"destination_tiles": source_access_tiles,
@@ -1054,7 +1265,7 @@ static func _advance_pending_source(
 	)
 
 	if not bool(path_result.get("success", false)):
-		_set_haul_blocked(citizen_id, haul)
+		_set_haul_blocked_for_city_state(city_state, citizen_id, haul)
 		return path_requests_remaining
 
 	var raw_path = path_result.get("path", [])
@@ -1064,7 +1275,7 @@ static func _advance_pending_source(
 	)
 
 	if not raw_path is Array or not raw_destination_tile is Vector2i:
-		_set_haul_blocked(citizen_id, haul)
+		_set_haul_blocked_for_city_state(city_state, citizen_id, haul)
 		return path_requests_remaining
 
 	var movement_path: Array = raw_path
@@ -1074,29 +1285,43 @@ static func _advance_pending_source(
 		CityCitizens.CITY_CITIZEN_HAUL_PHASE_TRAVELING_TO_SOURCE
 	)
 	haul["source_tile"] = source_tile
-	CityCitizenTaskRuntimeSystem.set_city_citizen_current_haul(citizen_id, haul)
-	CityCitizenTaskRuntimeSystem.set_city_citizen_task_activity_state({
+	CityCitizenTaskRuntimeSystem.set_city_citizen_current_haul_for_city_state(
+		city_state,
+		citizen_id,
+		haul
+	)
+	CityCitizenTaskRuntimeSystem.set_city_citizen_task_activity_state_for_city_state(
+		city_state,
+		{
 		"citizen_id": citizen_id,
 		"target_tile": source_tile,
-	})
+		}
+	)
 
 	if movement_path.size() <= 1:
 		haul["phase"] = CityCitizens.CITY_CITIZEN_HAUL_PHASE_PICKING_UP
-		CityCitizenTaskRuntimeSystem.set_city_citizen_current_haul(citizen_id, haul)
-		CityCitizenTaskRuntimeSystem.set_city_citizen_task_phase(
+		CityCitizenTaskRuntimeSystem.set_city_citizen_current_haul_for_city_state(
+			city_state,
+			citizen_id,
+			haul
+		)
+		CityCitizenTaskRuntimeSystem.set_city_citizen_task_phase_for_city_state(
+			city_state,
 			citizen_id,
 			CityCitizens.CITY_CITIZEN_TASK_PHASE_PERFORMING
 		)
 		return path_requests_remaining
 
-	if not CityCitizenMovementRuntimeSystem.assign_city_citizen_movement_order(
+	if not CityCitizenMovementRuntimeSystem.assign_city_citizen_movement_order_for_city_state(
+		city_state,
 		citizen_id,
 		movement_path
 	):
-		_set_haul_blocked(citizen_id, haul)
+		_set_haul_blocked_for_city_state(city_state, citizen_id, haul)
 		return path_requests_remaining
 
-	CityCitizenTaskRuntimeSystem.set_city_citizen_task_phase(
+	CityCitizenTaskRuntimeSystem.set_city_citizen_task_phase_for_city_state(
+		city_state,
 		citizen_id,
 		CityCitizens.CITY_CITIZEN_TASK_PHASE_TRAVELING
 	)
@@ -1107,6 +1332,7 @@ static func _advance_traveling_to_source(
 	city_world: WorldData,
 	values: Dictionary
 ) -> int:
+	var city_state: CitySettlementSimulationState = values.get("city_state")
 	var citizen_id := int(values.get("citizen_id", -1))
 	var citizen: Dictionary = values.get("citizen", {})
 	var current_task: Dictionary = values.get("current_task", {})
@@ -1126,7 +1352,7 @@ static func _advance_traveling_to_source(
 		return path_requests_remaining
 
 	if movement_state == CityCitizens.CITY_CITIZEN_MOVEMENT_STATE_BLOCKED:
-		_set_haul_blocked(citizen_id, haul)
+		_set_haul_blocked_for_city_state(city_state, citizen_id, haul)
 		return path_requests_remaining
 
 	var raw_current_tile = citizen.get(
@@ -1134,7 +1360,8 @@ static func _advance_traveling_to_source(
 		CityCitizens.INVALID_CITY_TILE_POSITION
 	)
 	var source: Dictionary = haul.get("source", {})
-	var source_access_tiles := CityResourceMatcherScript.get_haul_endpoint_access_tiles(
+	var source_access_tiles := CityResourceMatcherScript.get_haul_endpoint_access_tiles_for_city_state(
+		city_state,
 		city_world,
 		source
 	)
@@ -1145,16 +1372,26 @@ static func _advance_traveling_to_source(
 	):
 		haul["phase"] = CityCitizens.CITY_CITIZEN_HAUL_PHASE_PICKING_UP
 		haul["source_tile"] = raw_current_tile
-		CityCitizenTaskRuntimeSystem.set_city_citizen_current_haul(citizen_id, haul)
-		CityCitizenTaskRuntimeSystem.set_city_citizen_task_phase(
+		CityCitizenTaskRuntimeSystem.set_city_citizen_current_haul_for_city_state(
+			city_state,
+			citizen_id,
+			haul
+		)
+		CityCitizenTaskRuntimeSystem.set_city_citizen_task_phase_for_city_state(
+			city_state,
 			citizen_id,
 			CityCitizens.CITY_CITIZEN_TASK_PHASE_PERFORMING
 		)
 		return path_requests_remaining
 
 	haul["phase"] = CityCitizens.CITY_CITIZEN_HAUL_PHASE_PENDING_SOURCE
-	CityCitizenTaskRuntimeSystem.set_city_citizen_current_haul(citizen_id, haul)
-	CityCitizenTaskRuntimeSystem.set_city_citizen_task_phase(
+	CityCitizenTaskRuntimeSystem.set_city_citizen_current_haul_for_city_state(
+		city_state,
+		citizen_id,
+		haul
+	)
+	CityCitizenTaskRuntimeSystem.set_city_citizen_task_phase_for_city_state(
+		city_state,
 		citizen_id,
 		CityCitizens.CITY_CITIZEN_TASK_PHASE_PENDING
 	)
@@ -1168,6 +1405,7 @@ static func _attempt_pickup(
 	city_world: WorldData,
 	values: Dictionary
 ) -> int:
+	var city_state: CitySettlementSimulationState = values.get("city_state")
 	var citizen_id := int(values.get("citizen_id", -1))
 	var citizen: Dictionary = values.get("citizen", {})
 	var current_task: Dictionary = values.get("current_task", {})
@@ -1181,7 +1419,8 @@ static func _attempt_pickup(
 		CityCitizens.INVALID_CITY_TILE_POSITION
 	)
 	var source: Dictionary = haul.get("source", {})
-	var source_access_tiles := CityResourceMatcherScript.get_haul_endpoint_access_tiles(
+	var source_access_tiles := CityResourceMatcherScript.get_haul_endpoint_access_tiles_for_city_state(
+		city_state,
 		city_world,
 		source
 	)
@@ -1191,7 +1430,11 @@ static func _attempt_pickup(
 		or not source_access_tiles.has(raw_current_tile)
 	):
 		haul["phase"] = CityCitizens.CITY_CITIZEN_HAUL_PHASE_PENDING_SOURCE
-		CityCitizenTaskRuntimeSystem.set_city_citizen_current_haul(citizen_id, haul)
+		CityCitizenTaskRuntimeSystem.set_city_citizen_current_haul_for_city_state(
+			city_state,
+			citizen_id,
+			haul
+		)
 		return path_requests_remaining
 
 	var resource := str(
@@ -1209,7 +1452,8 @@ static func _attempt_pickup(
 			CityCitizens.INVALID_CITY_CITIZEN_HAUL_RESERVATION_ID
 		)
 	)
-	var reservation := CityLogisticsSystem.get_city_haul_reservation(
+	var reservation := CityLogisticsSystem.get_city_haul_reservation_for_city_state(
+		city_state,
 		reservation_id
 	)
 
@@ -1224,27 +1468,46 @@ static func _attempt_pickup(
 			reservation.get("resource_type", WorldData.RESOURCE_NONE)
 		) != resource
 	):
-		_finish_haul_without_pickup(citizen_id, current_task)
+		_finish_haul_without_pickup_for_city_state(
+			city_state,
+			citizen_id,
+			current_task
+		)
 		return path_requests_remaining
 
-	if not CityLogisticsSystem.city_haul_endpoint_can_provide_resource({
+	if not CityLogisticsSystem.city_haul_endpoint_can_provide_resource_for_city_state(
+		city_state,
+		{
 		"endpoint": source,
 		"resource": resource,
 		"withdrawal_purpose": source_access_purpose,
 		"require_unreserved_amount": true,
 		"excluding_reservation_id": reservation_id,
-	}):
-		if CityCitizenInventorySystem.get_city_citizen_haul_cargo_amount(citizen_id) > 0:
+		}
+	):
+		if CityCitizenInventorySystem.get_city_citizen_haul_cargo_amount_for_city_state(
+			city_state,
+			citizen_id
+		) > 0:
 			haul["phase"] = (
 				CityCitizens.CITY_CITIZEN_HAUL_PHASE_PENDING_DESTINATION
 			)
-			CityCitizenTaskRuntimeSystem.set_city_citizen_current_haul(citizen_id, haul)
-			return _advance_pending_destination(
+			CityCitizenTaskRuntimeSystem.set_city_citizen_current_haul_for_city_state(
+				city_state,
+				citizen_id,
+				haul
+			)
+			return _advance_pending_destination_for_city_state(
+				city_state,
 				city_world,
 				values
 			)
 
-		_finish_haul_without_pickup(citizen_id, current_task)
+		_finish_haul_without_pickup_for_city_state(
+			city_state,
+			citizen_id,
+			current_task
+		)
 		return path_requests_remaining
 
 	var amount_to_pick_up := mini(
@@ -1260,12 +1523,14 @@ static func _attempt_pickup(
 				0
 			),
 			mini(
-				CityLogisticsSystem.get_city_haul_endpoint_unreserved_resource_amount(
+				CityLogisticsSystem.get_city_haul_endpoint_unreserved_resource_amount_for_city_state(
+					city_state,
 					source,
 					resource,
 					reservation_id
 				),
-				CityCitizenInventorySystem.get_city_citizen_available_haul_capacity(
+				CityCitizenInventorySystem.get_city_citizen_available_haul_capacity_for_city_state(
+					city_state,
 					citizen_id
 				)
 			)
@@ -1274,27 +1539,41 @@ static func _attempt_pickup(
 
 	amount_to_pick_up = mini(
 		amount_to_pick_up,
-		CityLogisticsSystem.get_city_haul_reservation_destination_resource_amount(
+		CityLogisticsSystem.get_city_haul_reservation_destination_resource_amount_for_city_state(
+			city_state,
 			reservation_id,
 			resource
 		)
 	)
 
 	if amount_to_pick_up <= 0:
-		if CityCitizenInventorySystem.get_city_citizen_haul_cargo_amount(citizen_id) > 0:
+		if CityCitizenInventorySystem.get_city_citizen_haul_cargo_amount_for_city_state(
+			city_state,
+			citizen_id
+		) > 0:
 			haul["phase"] = (
 				CityCitizens.CITY_CITIZEN_HAUL_PHASE_PENDING_DESTINATION
 			)
-			CityCitizenTaskRuntimeSystem.set_city_citizen_current_haul(citizen_id, haul)
-			return _advance_pending_destination(
+			CityCitizenTaskRuntimeSystem.set_city_citizen_current_haul_for_city_state(
+				city_state,
+				citizen_id,
+				haul
+			)
+			return _advance_pending_destination_for_city_state(
+				city_state,
 				city_world,
 				values
 			)
 
-		_finish_haul_without_pickup(citizen_id, current_task)
+		_finish_haul_without_pickup_for_city_state(
+			city_state,
+			citizen_id,
+			current_task
+		)
 		return path_requests_remaining
 
 	var picked_up_amount := _pickup_from_endpoint({
+		"city_state": city_state,
 		"citizen_id": citizen_id,
 		"endpoint": source,
 		"resource_type": resource,
@@ -1304,17 +1583,29 @@ static func _attempt_pickup(
 	})
 
 	if picked_up_amount <= 0:
-		if CityCitizenInventorySystem.get_city_citizen_haul_cargo_amount(citizen_id) > 0:
+		if CityCitizenInventorySystem.get_city_citizen_haul_cargo_amount_for_city_state(
+			city_state,
+			citizen_id
+		) > 0:
 			haul["phase"] = (
 				CityCitizens.CITY_CITIZEN_HAUL_PHASE_PENDING_DESTINATION
 			)
-			CityCitizenTaskRuntimeSystem.set_city_citizen_current_haul(citizen_id, haul)
-			return _advance_pending_destination(
+			CityCitizenTaskRuntimeSystem.set_city_citizen_current_haul_for_city_state(
+				city_state,
+				citizen_id,
+				haul
+			)
+			return _advance_pending_destination_for_city_state(
+				city_state,
 				city_world,
 				values
 			)
 
-		_finish_haul_without_pickup(citizen_id, current_task)
+		_finish_haul_without_pickup_for_city_state(
+			city_state,
+			citizen_id,
+			current_task
+		)
 		return path_requests_remaining
 
 	haul["pickup_stop_count"] = maxi(
@@ -1331,6 +1622,7 @@ static func _continue_after_successful_pickup(
 	city_world: WorldData,
 	values: Dictionary
 ) -> int:
+	var city_state: CitySettlementSimulationState = values.get("city_state")
 	var citizen_id := int(values.get("citizen_id", -1))
 	var citizen: Dictionary = values.get("citizen", {})
 	var current_task: Dictionary = values.get("current_task", {})
@@ -1355,7 +1647,10 @@ static func _continue_after_successful_pickup(
 	# in hand should satisfy a stronger live demand instead. The current storage
 	# route is scored as if it were adjacent, so only a genuinely higher policy
 	# priority can interrupt efficient batch collection.
-	var reservation := CityLogisticsSystem.get_city_haul_reservation(reservation_id)
+	var reservation := CityLogisticsSystem.get_city_haul_reservation_for_city_state(
+		city_state,
+		reservation_id
+	)
 	var current_destination_result: Dictionary = {}
 
 	if (
@@ -1371,15 +1666,22 @@ static func _continue_after_successful_pickup(
 		}
 
 	var cargo_resources_after_pickup := (
-		CityCitizenInventorySystem.get_city_citizen_haul_cargo_resources(citizen_id)
+		CityCitizenInventorySystem.get_city_citizen_haul_cargo_resources_for_city_state(
+			city_state,
+			citizen_id
+		)
 	)
 	var cargo_amount_after_pickup := (
-		CityCitizenInventorySystem.get_city_citizen_haul_cargo_amount(citizen_id)
+		CityCitizenInventorySystem.get_city_citizen_haul_cargo_amount_for_city_state(
+			city_state,
+			citizen_id
+		)
 	)
 	var immediate_routing_result := (
 		_try_route_cargo_to_best_resource_demand(
 			city_world,
 			{
+				"city_state": city_state,
 				"citizen_id": citizen_id,
 				"start_tile": raw_current_tile,
 				"cargo_resources": cargo_resources_after_pickup,
@@ -1419,8 +1721,13 @@ static func _continue_after_successful_pickup(
 			haul["phase"] = (
 				CityCitizens.CITY_CITIZEN_HAUL_PHASE_PENDING_DESTINATION
 			)
-			CityCitizenTaskRuntimeSystem.set_city_citizen_current_haul(citizen_id, haul)
-			CityCitizenTaskRuntimeSystem.set_city_citizen_task_phase(
+			CityCitizenTaskRuntimeSystem.set_city_citizen_current_haul_for_city_state(
+				city_state,
+				citizen_id,
+				haul
+			)
+			CityCitizenTaskRuntimeSystem.set_city_citizen_task_phase_for_city_state(
+				city_state,
 				citizen_id,
 				CityCitizens.CITY_CITIZEN_TASK_PHASE_PENDING
 			)
@@ -1436,11 +1743,13 @@ static func _continue_after_successful_pickup(
 				false
 			)
 		)
-		and CityCitizenInventorySystem.get_city_citizen_available_haul_capacity(
+		and CityCitizenInventorySystem.get_city_citizen_available_haul_capacity_for_city_state(
+			city_state,
 			citizen_id
 		) > 0
 	):
 		var chain_result := _begin_next_ground_pile_pickup({
+			"city_state": city_state,
 			"city_world": city_world,
 			"citizen_id": citizen_id,
 			"current_task": current_task,
@@ -1458,7 +1767,10 @@ static func _continue_after_successful_pickup(
 		if bool(chain_result.get("started", false)):
 			return path_requests_remaining
 
-	reservation = CityLogisticsSystem.get_city_haul_reservation(reservation_id)
+	reservation = CityLogisticsSystem.get_city_haul_reservation_for_city_state(
+		city_state,
+		reservation_id
+	)
 	haul["destination"] = reservation.get(
 		"destination",
 		CityCitizens.make_city_citizen_haul_endpoint()
@@ -1466,15 +1778,27 @@ static func _continue_after_successful_pickup(
 	haul["phase"] = (
 		CityCitizens.CITY_CITIZEN_HAUL_PHASE_PENDING_DESTINATION
 	)
-	CityCitizenTaskRuntimeSystem.set_city_citizen_current_haul(citizen_id, haul)
-	CityCitizenTaskRuntimeSystem.set_city_citizen_task_phase(
+	CityCitizenTaskRuntimeSystem.set_city_citizen_current_haul_for_city_state(
+		city_state,
+		citizen_id,
+		haul
+	)
+	CityCitizenTaskRuntimeSystem.set_city_citizen_task_phase_for_city_state(
+		city_state,
 		citizen_id,
 		CityCitizens.CITY_CITIZEN_TASK_PHASE_PENDING
 	)
-	values["citizen"] = CityCitizenRegistrySystem.get_city_citizen_by_id(citizen_id)
+	values["citizen"] = CityCitizenRegistrySystem.get_city_citizen_by_id_for_city_state(
+		city_state,
+		citizen_id
+	)
 	values["haul"] = haul
 	values["path_requests_remaining"] = path_requests_remaining
-	return _advance_pending_destination(city_world, values)
+	return _advance_pending_destination_for_city_state(
+		city_state,
+		city_world,
+		values
+	)
 
 
 #endregion
@@ -1484,6 +1808,7 @@ static func _continue_after_successful_pickup(
 static func _begin_next_ground_pile_pickup(
 	values: Dictionary
 ) -> Dictionary:
+	var raw_city_state = values.get("city_state")
 	var raw_city_world = values.get("city_world")
 	var raw_current_task = values.get("current_task", {})
 	var raw_haul = values.get("haul", {})
@@ -1496,7 +1821,8 @@ static func _begin_next_ground_pile_pickup(
 	)
 
 	if (
-		not raw_city_world is WorldData
+		not raw_city_state is CitySettlementSimulationState
+		or not raw_city_world is WorldData
 		or not raw_current_task is Dictionary
 		or not raw_haul is Dictionary
 		or not raw_current_tile is Vector2i
@@ -1507,6 +1833,7 @@ static func _begin_next_ground_pile_pickup(
 			"path_requests_remaining": path_requests_remaining,
 		}
 
+	var city_state: CitySettlementSimulationState = raw_city_state
 	var city_world: WorldData = raw_city_world
 	var current_task: Dictionary = raw_current_task
 	var haul: Dictionary = raw_haul
@@ -1518,7 +1845,8 @@ static func _begin_next_ground_pile_pickup(
 			CityCitizens.INVALID_CITY_CITIZEN_HAUL_RESERVATION_ID
 		)
 	)
-	var reservation := CityLogisticsSystem.get_city_haul_reservation(
+	var reservation := CityLogisticsSystem.get_city_haul_reservation_for_city_state(
+		city_state,
 		reservation_id
 	)
 	var destination: Dictionary = reservation.get("destination", {})
@@ -1529,12 +1857,14 @@ static func _begin_next_ground_pile_pickup(
 		)
 	)
 	var remaining_capacity := (
-		CityCitizenInventorySystem.get_city_citizen_available_haul_capacity(
+		CityCitizenInventorySystem.get_city_citizen_available_haul_capacity_for_city_state(
+			city_state,
 			citizen_id
 		)
 	)
 	var additional_destination_space := (
-		CityLogisticsSystem.get_city_haul_endpoint_unreserved_destination_space(
+		CityLogisticsSystem.get_city_haul_endpoint_unreserved_destination_space_for_city_state(
+			city_state,
 			destination
 		)
 	)
@@ -1555,7 +1885,9 @@ static func _begin_next_ground_pile_pickup(
 
 	# One ground-pile scan and one multi-target path request choose the nearest
 	# reachable next pickup. No city-tile scan or per-pile pathfinding occurs.
-	for raw_ground_pile in CityLogisticsSystem.get_city_ground_pile_snapshot():
+	for raw_ground_pile in CityLogisticsSystem.get_city_ground_pile_snapshot_for_city_state(
+		city_state
+	):
 		if not raw_ground_pile is Dictionary:
 			continue
 
@@ -1574,19 +1906,25 @@ static func _begin_next_ground_pile_pickup(
 		if (
 			ground_pile_id <= 0
 			or not CityResourceCatalog.is_city_resource_type(resource)
-			or not CityLogisticsSystem.city_haul_endpoint_can_provide_resource({
+			or not CityLogisticsSystem.city_haul_endpoint_can_provide_resource_for_city_state(
+				city_state,
+				{
 				"endpoint": source,
 				"resource": resource,
 				"withdrawal_purpose": CityObjectCatalog.CONTAINER_HAUL_PURPOSE_GROUND_PILE_CLEANUP,
 				"require_unreserved_amount": true,
-			})
-			or not CityLogisticsSystem.city_haul_endpoint_can_accept_resource({
+				}
+			)
+			or not CityLogisticsSystem.city_haul_endpoint_can_accept_resource_for_city_state(
+				city_state,
+				{
 				"endpoint": destination,
 				"resource": resource,
 				"deposit_purpose": destination_access_purpose,
 				"require_unreserved_space": true,
 				"excluding_reservation_id": reservation_id,
-			})
+				}
+			)
 		):
 			continue
 
@@ -1594,7 +1932,8 @@ static func _begin_next_ground_pile_pickup(
 			remaining_capacity,
 			mini(
 				additional_destination_space,
-				CityLogisticsSystem.get_city_haul_endpoint_unreserved_resource_amount(
+				CityLogisticsSystem.get_city_haul_endpoint_unreserved_resource_amount_for_city_state(
+					city_state,
 					source,
 					resource
 				)
@@ -1604,7 +1943,8 @@ static func _begin_next_ground_pile_pickup(
 		if pickup_amount <= 0:
 			continue
 
-		for access_tile in CityResourceMatcherScript.get_haul_endpoint_access_tiles(
+		for access_tile in CityResourceMatcherScript.get_haul_endpoint_access_tiles_for_city_state(
+			city_state,
 			city_world,
 			source
 		):
@@ -1630,6 +1970,7 @@ static func _begin_next_ground_pile_pickup(
 	path_requests_remaining -= 1
 	var path_result := (
 		CityNavigationSystemScript.find_path_to_any_city_tile({
+			"city_state": city_state,
 			"city_world": city_world,
 			"start_tile": current_tile,
 			"destination_tiles": candidate_access_tiles,
@@ -1688,7 +2029,9 @@ static func _begin_next_ground_pile_pickup(
 		selected.get("resource_type", WorldData.RESOURCE_NONE)
 	)
 	var reserved_amount := (
-		CityLogisticsSystem.retarget_city_haul_reservation_source({
+		CityLogisticsSystem.retarget_city_haul_reservation_source_for_city_state(
+			city_state,
+			{
 			"reservation_id": reservation_id,
 			"source": source,
 			"resource": resource,
@@ -1696,7 +2039,8 @@ static func _begin_next_ground_pile_pickup(
 			"source_access_purpose": (
 				CityObjectCatalog.CONTAINER_HAUL_PURPOSE_GROUND_PILE_CLEANUP
 			),
-		})
+			}
+		)
 	)
 
 	if reserved_amount <= 0:
@@ -1712,21 +2056,30 @@ static func _begin_next_ground_pile_pickup(
 		CityObjectCatalog.CONTAINER_HAUL_PURPOSE_GROUND_PILE_CLEANUP
 	)
 	haul["source_tile"] = source_tile
-	CityCitizenTaskRuntimeSystem.set_city_citizen_task_target_object_id(
+	CityCitizenTaskRuntimeSystem.set_city_citizen_task_target_object_id_for_city_state(
+		city_state,
 		citizen_id,
 		int(source.get("id", -1))
 	)
-	CityCitizenTaskRuntimeSystem.set_city_citizen_task_activity_state({
+	CityCitizenTaskRuntimeSystem.set_city_citizen_task_activity_state_for_city_state(
+		city_state,
+		{
 		"citizen_id": citizen_id,
 		"target_tile": source_tile,
-	})
+		}
+	)
 
 	var movement_path: Array = raw_path
 
 	if movement_path.size() <= 1:
 		haul["phase"] = CityCitizens.CITY_CITIZEN_HAUL_PHASE_PICKING_UP
-		CityCitizenTaskRuntimeSystem.set_city_citizen_current_haul(citizen_id, haul)
-		CityCitizenTaskRuntimeSystem.set_city_citizen_task_phase(
+		CityCitizenTaskRuntimeSystem.set_city_citizen_current_haul_for_city_state(
+			city_state,
+			citizen_id,
+			haul
+		)
+		CityCitizenTaskRuntimeSystem.set_city_citizen_task_phase_for_city_state(
+			city_state,
 			citizen_id,
 			CityCitizens.CITY_CITIZEN_TASK_PHASE_PERFORMING
 		)
@@ -1734,19 +2087,25 @@ static func _begin_next_ground_pile_pickup(
 		haul["phase"] = (
 			CityCitizens.CITY_CITIZEN_HAUL_PHASE_TRAVELING_TO_SOURCE
 		)
-		CityCitizenTaskRuntimeSystem.set_city_citizen_current_haul(citizen_id, haul)
+		CityCitizenTaskRuntimeSystem.set_city_citizen_current_haul_for_city_state(
+			city_state,
+			citizen_id,
+			haul
+		)
 
-		if not CityCitizenMovementRuntimeSystem.assign_city_citizen_movement_order(
+		if not CityCitizenMovementRuntimeSystem.assign_city_citizen_movement_order_for_city_state(
+			city_state,
 			citizen_id,
 			movement_path
 		):
-			_set_haul_blocked(citizen_id, haul)
+			_set_haul_blocked_for_city_state(city_state, citizen_id, haul)
 			return {
 				"started": true,
 				"path_requests_remaining": path_requests_remaining,
 			}
 
-		CityCitizenTaskRuntimeSystem.set_city_citizen_task_phase(
+		CityCitizenTaskRuntimeSystem.set_city_citizen_task_phase_for_city_state(
+			city_state,
 			citizen_id,
 			CityCitizens.CITY_CITIZEN_TASK_PHASE_TRAVELING
 		)
@@ -1765,6 +2124,7 @@ static func _try_route_cargo_to_best_resource_demand(
 	city_world: WorldData,
 	values: Dictionary
 ) -> Dictionary:
+	var city_state: CitySettlementSimulationState = values.get("city_state")
 	var citizen_id := int(values.get("citizen_id", -1))
 	var start_tile: Vector2i = values.get(
 		"start_tile",
@@ -1798,6 +2158,7 @@ static func _try_route_cargo_to_best_resource_demand(
 	)
 	var match_result := (
 		CityResourceMatcherScript.find_best_cargo_resource_demand({
+			"city_state": city_state,
 			"city_world": city_world,
 			"start_tile": start_tile,
 			"citizen_id": citizen_id,
@@ -1893,7 +2254,8 @@ static func _try_route_cargo_to_best_resource_demand(
 					),
 					"order_priority_rank": (
 						CityResourceMatcherScript
-						.get_resource_demand_order_priority_rank_for_destination(
+						.get_resource_demand_order_priority_rank_for_destination_for_city_state(
+							city_state,
 							current_endpoint
 						)
 					),
@@ -1936,7 +2298,8 @@ static func _try_route_cargo_to_best_resource_demand(
 			continue
 
 		var preemption_result := (
-			CityLogisticsSystem.preempt_soft_city_haul_reservations_for_destination_resource(
+			CityLogisticsSystem.preempt_soft_city_haul_reservations_for_destination_resource_for_city_state(
+				city_state,
 				demand_endpoint,
 				resource,
 				required_amount,
@@ -1961,7 +2324,8 @@ static func _try_route_cargo_to_best_resource_demand(
 	if requested_amount <= 0:
 		return result
 
-	var reservation := CityLogisticsSystem.get_city_haul_reservation(
+	var reservation := CityLogisticsSystem.get_city_haul_reservation_for_city_state(
+		city_state,
 		reservation_id
 	)
 	var reserved_amount := 0
@@ -1971,7 +2335,8 @@ static func _try_route_cargo_to_best_resource_demand(
 		and int(reservation.get("citizen_id", -1)) == citizen_id
 	):
 		reserved_amount = (
-			CityLogisticsSystem.retarget_city_haul_destination_reservation(
+			CityLogisticsSystem.retarget_city_haul_destination_reservation_for_city_state(
+				city_state,
 				reservation_id,
 				demand_endpoint,
 				requested_amount,
@@ -1980,11 +2345,14 @@ static func _try_route_cargo_to_best_resource_demand(
 		)
 	else:
 		var primary_resource := (
-			CityCitizenInventorySystem.get_city_citizen_haul_cargo_resource(
+			CityCitizenInventorySystem.get_city_citizen_haul_cargo_resource_for_city_state(
+				city_state,
 				citizen_id
 			)
 		)
-		reservation = CityLogisticsSystem.create_city_haul_reservation({
+		reservation = CityLogisticsSystem.create_city_haul_reservation_for_city_state(
+			city_state,
+			{
 			"citizen_id": citizen_id,
 			"source": haul.get("source", {}),
 			"destination": demand_endpoint,
@@ -1999,7 +2367,8 @@ static func _try_route_cargo_to_best_resource_demand(
 			"destination_access_purpose": (
 				candidate_destination_access_purpose
 			),
-		})
+			}
+		)
 
 		if not reservation.is_empty():
 			reservation_id = int(reservation.get("id", -1))
@@ -2013,7 +2382,10 @@ static func _try_route_cargo_to_best_resource_demand(
 	if reserved_amount <= 0:
 		return result
 
-	reservation = CityLogisticsSystem.get_city_haul_reservation(reservation_id)
+	reservation = CityLogisticsSystem.get_city_haul_reservation_for_city_state(
+		city_state,
+		reservation_id
+	)
 
 	if reservation.is_empty():
 		return result
@@ -2056,6 +2428,22 @@ static func _advance_pending_destination(
 	city_world: WorldData,
 	values: Dictionary
 ) -> int:
+	var city_state = WorldPoliticalState.get_current_city_simulation_state()
+	if not city_state is CitySettlementSimulationState:
+		return maxi(int(values.get("path_requests_remaining", 0)), 0)
+	return _advance_pending_destination_for_city_state(
+		city_state,
+		city_world,
+		values
+	)
+
+
+static func _advance_pending_destination_for_city_state(
+	city_state: CitySettlementSimulationState,
+	city_world: WorldData,
+	values: Dictionary
+) -> int:
+	values["city_state"] = city_state
 	var citizen_id := int(values.get("citizen_id", -1))
 	var citizen: Dictionary = values.get("citizen", {})
 	var current_task: Dictionary = values.get("current_task", {})
@@ -2065,16 +2453,20 @@ static func _advance_pending_destination(
 		0
 	)
 	var cargo_resources := (
-		CityCitizenInventorySystem.get_city_citizen_haul_cargo_resources(
+		CityCitizenInventorySystem.get_city_citizen_haul_cargo_resources_for_city_state(
+			city_state,
 			citizen_id
 		)
 	)
 	var cargo_amount := (
-		CityCitizenInventorySystem.get_city_citizen_haul_cargo_amount(citizen_id)
+		CityCitizenInventorySystem.get_city_citizen_haul_cargo_amount_for_city_state(
+			city_state,
+			citizen_id
+		)
 	)
 
 	if cargo_amount <= 0 or cargo_resources.is_empty():
-		_complete_haul(citizen_id, current_task)
+		_complete_haul_for_city_state(city_state, citizen_id, current_task)
 		return path_requests_remaining
 
 	var raw_current_tile = citizen.get(
@@ -2083,7 +2475,7 @@ static func _advance_pending_destination(
 	)
 
 	if not raw_current_tile is Vector2i:
-		_set_haul_blocked(citizen_id, haul)
+		_set_haul_blocked_for_city_state(city_state, citizen_id, haul)
 		return path_requests_remaining
 
 	if path_requests_remaining <= 0:
@@ -2102,7 +2494,8 @@ static func _advance_pending_destination(
 			CityCitizens.INVALID_CITY_CITIZEN_HAUL_RESERVATION_ID
 		)
 	)
-	var reservation := CityLogisticsSystem.get_city_haul_reservation(
+	var reservation := CityLogisticsSystem.get_city_haul_reservation_for_city_state(
+		city_state,
 		reservation_id
 	)
 	var destination_result: Dictionary = {}
@@ -2116,12 +2509,14 @@ static func _advance_pending_destination(
 		) > 0
 	):
 		var reserved_resources := (
-			CityLogisticsSystem.get_city_haul_reservation_destination_resources(
+			CityLogisticsSystem.get_city_haul_reservation_destination_resources_for_city_state(
+				city_state,
 				reservation_id
 			)
 		)
 		destination_result = (
 			CityResourceMatcherScript.make_destination_result_for_endpoint_resources({
+				"city_state": city_state,
 				"city_world": city_world,
 				"start_tile": raw_current_tile,
 				"citizen_id": citizen_id,
@@ -2144,10 +2539,12 @@ static func _advance_pending_destination(
 		)
 
 		if destination_result.is_empty():
-			CityLogisticsSystem.release_city_haul_destination_reservation(
+			CityLogisticsSystem.release_city_haul_destination_reservation_for_city_state(
+				city_state,
 				reservation_id
 			)
-			reservation = CityLogisticsSystem.get_city_haul_reservation(
+			reservation = CityLogisticsSystem.get_city_haul_reservation_for_city_state(
+				city_state,
 				reservation_id
 			)
 			destination_reservation_is_active = false
@@ -2160,6 +2557,7 @@ static func _advance_pending_destination(
 		):
 			var home_resource := str(cargo_resources.keys()[0])
 			destination_result = CityResourceMatcherScript.make_destination_result_for_endpoint({
+				"city_state": city_state,
 				"city_world": city_world,
 				"start_tile": raw_current_tile,
 				"citizen_id": citizen_id,
@@ -2170,6 +2568,7 @@ static func _advance_pending_destination(
 			})
 		else:
 			destination_result = CityResourceMatcherScript.find_nearest_eligible_destination_for_resources({
+				"city_state": city_state,
 				"city_world": city_world,
 				"start_tile": raw_current_tile,
 				"citizen_id": citizen_id,
@@ -2185,6 +2584,7 @@ static func _advance_pending_destination(
 		_try_route_cargo_to_best_resource_demand(
 			city_world,
 			{
+				"city_state": city_state,
 				"citizen_id": citizen_id,
 				"start_tile": raw_current_tile,
 				"cargo_resources": cargo_resources,
@@ -2247,7 +2647,8 @@ static func _advance_pending_destination(
 		# Cargo is already physical. If every eligible container is full or no
 		# destination is reachable, spill it back into mono-resource ground piles
 		# instead of leaving the citizen blocked while carrying it indefinitely.
-		if drop_citizen_haul_cargo_for_priority_interrupt(
+		if drop_citizen_haul_cargo_for_priority_interrupt_for_city_state(
+			city_state,
 			city_world,
 			citizen_id,
 			str(
@@ -2259,7 +2660,7 @@ static func _advance_pending_destination(
 		):
 			return path_requests_remaining
 
-		_set_haul_blocked(citizen_id, haul)
+		_set_haul_blocked_for_city_state(city_state, citizen_id, haul)
 		return path_requests_remaining
 
 	if destination_reservation_is_active:
@@ -2269,9 +2670,14 @@ static func _advance_pending_destination(
 		or int(reservation.get("citizen_id", -1)) != citizen_id
 	):
 		var primary_resource := (
-			CityCitizenInventorySystem.get_city_citizen_haul_cargo_resource(citizen_id)
+			CityCitizenInventorySystem.get_city_citizen_haul_cargo_resource_for_city_state(
+				city_state,
+				citizen_id
+			)
 		)
-		reservation = CityLogisticsSystem.create_city_haul_reservation({
+		reservation = CityLogisticsSystem.create_city_haul_reservation_for_city_state(
+			city_state,
+			{
 			"citizen_id": citizen_id,
 			"source": haul.get("source", {}),
 			"destination": destination_result.get("endpoint", {}),
@@ -2286,17 +2692,19 @@ static func _advance_pending_destination(
 			"destination_access_purpose": (
 				destination_access_purpose
 			),
-		})
+			}
+		)
 
 		if reservation.is_empty():
-			_set_haul_blocked(citizen_id, haul)
+			_set_haul_blocked_for_city_state(city_state, citizen_id, haul)
 			return path_requests_remaining
 
 		reservation_id = int(reservation.get("id", -1))
 		haul["reservation_id"] = reservation_id
 	else:
 		var reserved_amount := (
-			CityLogisticsSystem.reserve_city_haul_destination(
+			CityLogisticsSystem.reserve_city_haul_destination_for_city_state(
+				city_state,
 				reservation_id,
 				destination_result.get("endpoint", {}),
 				cargo_amount
@@ -2304,15 +2712,22 @@ static func _advance_pending_destination(
 		)
 
 		if reserved_amount <= 0:
-			_set_haul_blocked(citizen_id, haul)
+			_set_haul_blocked_for_city_state(city_state, citizen_id, haul)
 			return path_requests_remaining
 
-	reservation = CityLogisticsSystem.get_city_haul_reservation(reservation_id)
+	reservation = CityLogisticsSystem.get_city_haul_reservation_for_city_state(
+		city_state,
+		reservation_id
+	)
 	haul["destination"] = reservation.get(
 		"destination",
 		CityCitizens.make_city_citizen_haul_endpoint()
 	)
-	CityCitizenTaskRuntimeSystem.set_city_citizen_current_haul(citizen_id, haul)
+	CityCitizenTaskRuntimeSystem.set_city_citizen_current_haul_for_city_state(
+		city_state,
+		citizen_id,
+		haul
+	)
 
 	values["haul"] = haul
 	values["destination_result"] = destination_result
@@ -2324,6 +2739,7 @@ static func _begin_destination_with_result(
 	city_world: WorldData,
 	values: Dictionary
 ) -> int:
+	var city_state: CitySettlementSimulationState = values.get("city_state")
 	var citizen_id := int(values.get("citizen_id", -1))
 	var current_task: Dictionary = values.get("current_task", {})
 	var haul: Dictionary = values.get("haul", {})
@@ -2350,7 +2766,7 @@ static func _begin_destination_with_result(
 		or not raw_destination_tile is Vector2i
 		or not raw_destination is Dictionary
 	):
-		_set_haul_blocked(citizen_id, haul)
+		_set_haul_blocked_for_city_state(city_state, citizen_id, haul)
 		return path_requests_remaining
 
 	var movement_path: Array = raw_path
@@ -2362,15 +2778,23 @@ static func _begin_destination_with_result(
 		)
 	)
 	haul["destination_tile"] = destination_tile
-	CityCitizenTaskRuntimeSystem.set_city_citizen_task_activity_state({
+	CityCitizenTaskRuntimeSystem.set_city_citizen_task_activity_state_for_city_state(
+		city_state,
+		{
 		"citizen_id": citizen_id,
 		"target_tile": destination_tile,
-	})
+		}
+	)
 
 	if movement_path.size() <= 1:
 		haul["phase"] = CityCitizens.CITY_CITIZEN_HAUL_PHASE_DEPOSITING
-		CityCitizenTaskRuntimeSystem.set_city_citizen_current_haul(citizen_id, haul)
-		CityCitizenTaskRuntimeSystem.set_city_citizen_task_phase(
+		CityCitizenTaskRuntimeSystem.set_city_citizen_current_haul_for_city_state(
+			city_state,
+			citizen_id,
+			haul
+		)
+		CityCitizenTaskRuntimeSystem.set_city_citizen_task_phase_for_city_state(
+			city_state,
 			citizen_id,
 			CityCitizens.CITY_CITIZEN_TASK_PHASE_PERFORMING
 		)
@@ -2381,16 +2805,22 @@ static func _begin_destination_with_result(
 	haul["phase"] = (
 		CityCitizens.CITY_CITIZEN_HAUL_PHASE_TRAVELING_TO_DESTINATION
 	)
-	CityCitizenTaskRuntimeSystem.set_city_citizen_current_haul(citizen_id, haul)
+	CityCitizenTaskRuntimeSystem.set_city_citizen_current_haul_for_city_state(
+		city_state,
+		citizen_id,
+		haul
+	)
 
-	if not CityCitizenMovementRuntimeSystem.assign_city_citizen_movement_order(
+	if not CityCitizenMovementRuntimeSystem.assign_city_citizen_movement_order_for_city_state(
+		city_state,
 		citizen_id,
 		movement_path
 	):
-		_set_haul_blocked(citizen_id, haul)
+		_set_haul_blocked_for_city_state(city_state, citizen_id, haul)
 		return path_requests_remaining
 
-	CityCitizenTaskRuntimeSystem.set_city_citizen_task_phase(
+	CityCitizenTaskRuntimeSystem.set_city_citizen_task_phase_for_city_state(
+		city_state,
 		citizen_id,
 		CityCitizens.CITY_CITIZEN_TASK_PHASE_TRAVELING
 	)
@@ -2401,6 +2831,7 @@ static func _advance_traveling_to_destination(
 	city_world: WorldData,
 	values: Dictionary
 ) -> int:
+	var city_state: CitySettlementSimulationState = values.get("city_state")
 	var citizen_id := int(values.get("citizen_id", -1))
 	var citizen: Dictionary = values.get("citizen", {})
 	var current_task: Dictionary = values.get("current_task", {})
@@ -2420,8 +2851,12 @@ static func _advance_traveling_to_destination(
 		return path_requests_remaining
 
 	if movement_state == CityCitizens.CITY_CITIZEN_MOVEMENT_STATE_BLOCKED:
-		CityCitizenMovementRuntimeSystem.cancel_city_citizen_movement(citizen_id)
-		CityLogisticsSystem.release_city_haul_destination_reservation(
+		CityCitizenMovementRuntimeSystem.cancel_city_citizen_movement_for_city_state(
+			city_state,
+			citizen_id
+		)
+		CityLogisticsSystem.release_city_haul_destination_reservation_for_city_state(
+			city_state,
 			int(
 				haul.get(
 					"reservation_id",
@@ -2434,17 +2869,29 @@ static func _advance_traveling_to_destination(
 			CityCitizens.make_city_citizen_haul_endpoint()
 		)
 		haul["destination_tile"] = CityCitizens.INVALID_CITY_TILE_POSITION
-		CityCitizenTaskRuntimeSystem.set_city_citizen_current_haul(citizen_id, haul)
-		values["citizen"] = CityCitizenRegistrySystem.get_city_citizen_by_id(citizen_id)
+		CityCitizenTaskRuntimeSystem.set_city_citizen_current_haul_for_city_state(
+			city_state,
+			citizen_id,
+			haul
+		)
+		values["citizen"] = CityCitizenRegistrySystem.get_city_citizen_by_id_for_city_state(
+			city_state,
+			citizen_id
+		)
 		values["haul"] = haul
-		return _advance_pending_destination(city_world, values)
+		return _advance_pending_destination_for_city_state(
+			city_state,
+			city_world,
+			values
+		)
 
 	var raw_current_tile = citizen.get(
 		"city_tile_position",
 		CityCitizens.INVALID_CITY_TILE_POSITION
 	)
 	var destination: Dictionary = haul.get("destination", {})
-	var destination_access_tiles := CityResourceMatcherScript.get_haul_endpoint_access_tiles(
+	var destination_access_tiles := CityResourceMatcherScript.get_haul_endpoint_access_tiles_for_city_state(
+		city_state,
 		city_world,
 		destination
 	)
@@ -2455,15 +2902,21 @@ static func _advance_traveling_to_destination(
 	):
 		haul["phase"] = CityCitizens.CITY_CITIZEN_HAUL_PHASE_DEPOSITING
 		haul["destination_tile"] = raw_current_tile
-		CityCitizenTaskRuntimeSystem.set_city_citizen_current_haul(citizen_id, haul)
-		CityCitizenTaskRuntimeSystem.set_city_citizen_task_phase(
+		CityCitizenTaskRuntimeSystem.set_city_citizen_current_haul_for_city_state(
+			city_state,
+			citizen_id,
+			haul
+		)
+		CityCitizenTaskRuntimeSystem.set_city_citizen_task_phase_for_city_state(
+			city_state,
 			citizen_id,
 			CityCitizens.CITY_CITIZEN_TASK_PHASE_PERFORMING
 		)
 		return path_requests_remaining
 
 	haul["phase"] = CityCitizens.CITY_CITIZEN_HAUL_PHASE_RETARGETING
-	CityLogisticsSystem.release_city_haul_destination_reservation(
+	CityLogisticsSystem.release_city_haul_destination_reservation_for_city_state(
+		city_state,
 		int(
 			haul.get(
 				"reservation_id",
@@ -2475,8 +2928,13 @@ static func _advance_traveling_to_destination(
 		CityCitizens.make_city_citizen_haul_endpoint()
 	)
 	haul["destination_tile"] = CityCitizens.INVALID_CITY_TILE_POSITION
-	CityCitizenTaskRuntimeSystem.set_city_citizen_current_haul(citizen_id, haul)
-	return _advance_pending_destination(
+	CityCitizenTaskRuntimeSystem.set_city_citizen_current_haul_for_city_state(
+		city_state,
+		citizen_id,
+		haul
+	)
+	return _advance_pending_destination_for_city_state(
+		city_state,
 		city_world,
 		values
 	)
@@ -2486,6 +2944,7 @@ static func _deposit_and_retarget(
 	city_world: WorldData,
 	values: Dictionary
 ) -> int:
+	var city_state: CitySettlementSimulationState = values.get("city_state")
 	var citizen_id := int(values.get("citizen_id", -1))
 	var current_task: Dictionary = values.get("current_task", {})
 	var haul: Dictionary = values.get("haul", {})
@@ -2493,7 +2952,10 @@ static func _deposit_and_retarget(
 		int(values.get("path_requests_remaining", 0)),
 		0
 	)
-	var citizen := CityCitizenRegistrySystem.get_city_citizen_by_id(citizen_id)
+	var citizen := CityCitizenRegistrySystem.get_city_citizen_by_id_for_city_state(
+		city_state,
+		citizen_id
+	)
 	var raw_current_tile = citizen.get(
 		"city_tile_position",
 		CityCitizens.INVALID_CITY_TILE_POSITION
@@ -2506,7 +2968,8 @@ static func _deposit_and_retarget(
 			raw_destination
 		)
 
-	var destination_access_tiles := CityResourceMatcherScript.get_haul_endpoint_access_tiles(
+	var destination_access_tiles := CityResourceMatcherScript.get_haul_endpoint_access_tiles_for_city_state(
+		city_state,
 		city_world,
 		destination
 	)
@@ -2515,12 +2978,16 @@ static func _deposit_and_retarget(
 		not raw_current_tile is Vector2i
 		or destination_access_tiles.is_empty()
 	):
-		_set_haul_blocked(citizen_id, haul)
+		_set_haul_blocked_for_city_state(city_state, citizen_id, haul)
 		return path_requests_remaining
 
 	if not destination_access_tiles.has(raw_current_tile):
-		CityCitizenMovementRuntimeSystem.cancel_city_citizen_movement(citizen_id)
-		CityLogisticsSystem.release_city_haul_destination_reservation(
+		CityCitizenMovementRuntimeSystem.cancel_city_citizen_movement_for_city_state(
+			city_state,
+			citizen_id
+		)
+		CityLogisticsSystem.release_city_haul_destination_reservation_for_city_state(
+			city_state,
 			int(
 				haul.get(
 					"reservation_id",
@@ -2533,23 +3000,36 @@ static func _deposit_and_retarget(
 			CityCitizens.make_city_citizen_haul_endpoint()
 		)
 		haul["destination_tile"] = CityCitizens.INVALID_CITY_TILE_POSITION
-		CityCitizenTaskRuntimeSystem.set_city_citizen_current_haul(citizen_id, haul)
-		CityCitizenTaskRuntimeSystem.set_city_citizen_task_phase(
+		CityCitizenTaskRuntimeSystem.set_city_citizen_current_haul_for_city_state(
+			city_state,
+			citizen_id,
+			haul
+		)
+		CityCitizenTaskRuntimeSystem.set_city_citizen_task_phase_for_city_state(
+			city_state,
 			citizen_id,
 			CityCitizens.CITY_CITIZEN_TASK_PHASE_PENDING
 		)
-		values["citizen"] = CityCitizenRegistrySystem.get_city_citizen_by_id(citizen_id)
+		values["citizen"] = CityCitizenRegistrySystem.get_city_citizen_by_id_for_city_state(
+			city_state,
+			citizen_id
+		)
 		values["haul"] = haul
-		return _advance_pending_destination(city_world, values)
+		return _advance_pending_destination_for_city_state(
+			city_state,
+			city_world,
+			values
+		)
 
 	var cargo_resources := (
-		CityCitizenInventorySystem.get_city_citizen_haul_cargo_resources(
+		CityCitizenInventorySystem.get_city_citizen_haul_cargo_resources_for_city_state(
+			city_state,
 			citizen_id
 		)
 	)
 
 	if cargo_resources.is_empty():
-		_complete_haul(citizen_id, current_task)
+		_complete_haul_for_city_state(city_state, citizen_id, current_task)
 		return path_requests_remaining
 
 	var reservation_id := int(
@@ -2564,7 +3044,8 @@ static func _deposit_and_retarget(
 	for raw_resource in resource_names:
 		var resource := str(raw_resource)
 		var cargo_amount := (
-			CityCitizenInventorySystem.get_city_citizen_haul_cargo_resource_amount(
+			CityCitizenInventorySystem.get_city_citizen_haul_cargo_resource_amount_for_city_state(
+				city_state,
 				citizen_id,
 				resource
 			)
@@ -2574,6 +3055,7 @@ static func _deposit_and_retarget(
 			continue
 
 		_deposit_to_endpoint({
+			"city_state": city_state,
 			"citizen_id": citizen_id,
 			"endpoint": destination,
 			"resource_type": resource,
@@ -2587,29 +3069,45 @@ static func _deposit_and_retarget(
 			"reservation_id": reservation_id,
 		})
 
-	if CityCitizenInventorySystem.get_city_citizen_haul_cargo_amount(citizen_id) <= 0:
-		_complete_haul(citizen_id, current_task)
+	if CityCitizenInventorySystem.get_city_citizen_haul_cargo_amount_for_city_state(
+		city_state,
+		citizen_id
+	) <= 0:
+		_complete_haul_for_city_state(city_state, citizen_id, current_task)
 		return path_requests_remaining
 
 	# A partially filled or externally changed container may accept only part of
 	# a mixed manifest. The physical remainder keeps its exact resource amounts
 	# and is routed to the next eligible public container.
 	haul["phase"] = CityCitizens.CITY_CITIZEN_HAUL_PHASE_RETARGETING
-	CityLogisticsSystem.release_city_haul_destination_reservation(
+	CityLogisticsSystem.release_city_haul_destination_reservation_for_city_state(
+		city_state,
 		reservation_id
 	)
 	haul["destination"] = (
 		CityCitizens.make_city_citizen_haul_endpoint()
 	)
 	haul["destination_tile"] = CityCitizens.INVALID_CITY_TILE_POSITION
-	CityCitizenTaskRuntimeSystem.set_city_citizen_current_haul(citizen_id, haul)
-	CityCitizenTaskRuntimeSystem.set_city_citizen_task_phase(
+	CityCitizenTaskRuntimeSystem.set_city_citizen_current_haul_for_city_state(
+		city_state,
+		citizen_id,
+		haul
+	)
+	CityCitizenTaskRuntimeSystem.set_city_citizen_task_phase_for_city_state(
+		city_state,
 		citizen_id,
 		CityCitizens.CITY_CITIZEN_TASK_PHASE_PENDING
 	)
-	values["citizen"] = CityCitizenRegistrySystem.get_city_citizen_by_id(citizen_id)
+	values["citizen"] = CityCitizenRegistrySystem.get_city_citizen_by_id_for_city_state(
+		city_state,
+		citizen_id
+	)
 	values["haul"] = haul
-	return _advance_pending_destination(city_world, values)
+	return _advance_pending_destination_for_city_state(
+		city_state,
+		city_world,
+		values
+	)
 
 
 #endregion
@@ -2617,6 +3115,7 @@ static func _deposit_and_retarget(
 #region Endpoint Resource Transfers
 
 static func _pickup_from_endpoint(values: Dictionary) -> int:
+	var city_state: CitySettlementSimulationState = values.get("city_state")
 	var citizen_id := int(values.get("citizen_id", -1))
 	var endpoint: Dictionary = values.get("endpoint", {})
 	var resource := str(
@@ -2638,7 +3137,8 @@ static func _pickup_from_endpoint(values: Dictionary) -> int:
 			CityCitizens.INVALID_CITY_CITIZEN_HAUL_RESERVATION_ID
 		)
 	)
-	var reservation := CityLogisticsSystem.get_city_haul_reservation(
+	var reservation := CityLogisticsSystem.get_city_haul_reservation_for_city_state(
+		city_state,
 		reservation_id
 	)
 
@@ -2652,13 +3152,16 @@ static func _pickup_from_endpoint(values: Dictionary) -> int:
 		or str(
 			reservation.get("resource_type", WorldData.RESOURCE_NONE)
 		) != resource
-		or not CityLogisticsSystem.city_haul_endpoint_can_provide_resource({
+		or not CityLogisticsSystem.city_haul_endpoint_can_provide_resource_for_city_state(
+			city_state,
+			{
 			"endpoint": endpoint,
 			"resource": resource,
 			"withdrawal_purpose": withdrawal_purpose,
 			"require_unreserved_amount": true,
 			"excluding_reservation_id": reservation_id,
-		})
+			}
+		)
 	):
 		return 0
 
@@ -2675,12 +3178,14 @@ static func _pickup_from_endpoint(values: Dictionary) -> int:
 				0
 			),
 			mini(
-				CityLogisticsSystem.get_city_haul_endpoint_unreserved_resource_amount(
+				CityLogisticsSystem.get_city_haul_endpoint_unreserved_resource_amount_for_city_state(
+					city_state,
 					endpoint,
 					resource,
 					reservation_id
 				),
-				CityCitizenInventorySystem.get_city_citizen_available_haul_capacity(
+				CityCitizenInventorySystem.get_city_citizen_available_haul_capacity_for_city_state(
+					city_state,
 					citizen_id
 				)
 			)
@@ -2689,7 +3194,8 @@ static func _pickup_from_endpoint(values: Dictionary) -> int:
 
 	amount_to_remove = mini(
 		amount_to_remove,
-		CityLogisticsSystem.get_city_haul_reservation_destination_resource_amount(
+		CityLogisticsSystem.get_city_haul_reservation_destination_resource_amount_for_city_state(
+			city_state,
 			reservation_id,
 			resource
 		)
@@ -2699,13 +3205,15 @@ static func _pickup_from_endpoint(values: Dictionary) -> int:
 		return 0
 
 	var old_cargo_amount := (
-		CityCitizenInventorySystem.get_city_citizen_haul_cargo_resource_amount(
+		CityCitizenInventorySystem.get_city_citizen_haul_cargo_resource_amount_for_city_state(
+			city_state,
 			citizen_id,
 			resource
 		)
 	)
 	var final_cargo_amount := (
-		CityCitizenInventorySystem.change_city_citizen_haul_cargo_resource(
+		CityCitizenInventorySystem.change_city_citizen_haul_cargo_resource_for_city_state(
+			city_state,
 			citizen_id,
 			resource,
 			amount_to_remove
@@ -2716,6 +3224,7 @@ static func _pickup_from_endpoint(values: Dictionary) -> int:
 		return 0
 
 	var removed_amount := _remove_resource_from_endpoint({
+		"city_state": city_state,
 		"endpoint": endpoint,
 		"resource_type": resource,
 		"requested_amount": amount_to_remove,
@@ -2723,13 +3232,15 @@ static func _pickup_from_endpoint(values: Dictionary) -> int:
 	})
 
 	if removed_amount != amount_to_remove:
-		CityCitizenInventorySystem.change_city_citizen_haul_cargo_resource(
+		CityCitizenInventorySystem.change_city_citizen_haul_cargo_resource_for_city_state(
+			city_state,
 			citizen_id,
 			resource,
 			-(amount_to_remove - maxi(removed_amount, 0))
 		)
 
-	if not CityLogisticsSystem.commit_city_haul_source_reservation(
+	if not CityLogisticsSystem.commit_city_haul_source_reservation_for_city_state(
+		city_state,
 		reservation_id,
 		removed_amount
 	):
@@ -2743,6 +3254,7 @@ static func _pickup_from_endpoint(values: Dictionary) -> int:
 
 
 static func _remove_resource_from_endpoint(values: Dictionary) -> int:
+	var city_state: CitySettlementSimulationState = values.get("city_state")
 	var endpoint: Dictionary = values.get("endpoint", {})
 	var resource := str(
 		values.get("resource_type", WorldData.RESOURCE_NONE)
@@ -2767,7 +3279,8 @@ static func _remove_resource_from_endpoint(values: Dictionary) -> int:
 
 	match endpoint_kind:
 		CityCitizens.CITY_CITIZEN_HAUL_ENDPOINT_KIND_CITY_OBJECT_CONTAINER:
-			return CityResourceContainerSystem.remove_resource_from_city_object_storage(
+			return CityResourceContainerSystem.remove_resource_from_city_object_storage_for_city_state(
+				city_state,
 				endpoint_id,
 				resource,
 				requested_amount,
@@ -2775,7 +3288,8 @@ static func _remove_resource_from_endpoint(values: Dictionary) -> int:
 			)
 
 		CityCitizens.CITY_CITIZEN_HAUL_ENDPOINT_KIND_GROUND_PILE:
-			return CityLogisticsSystem.remove_resource_from_city_ground_pile(
+			return CityLogisticsSystem.remove_resource_from_city_ground_pile_for_city_state(
+				city_state,
 				endpoint_id,
 				resource,
 				requested_amount,
@@ -2786,6 +3300,7 @@ static func _remove_resource_from_endpoint(values: Dictionary) -> int:
 
 
 static func _deposit_to_endpoint(values: Dictionary) -> int:
+	var city_state: CitySettlementSimulationState = values.get("city_state")
 	var citizen_id := int(values.get("citizen_id", -1))
 	var endpoint: Dictionary = values.get("endpoint", {})
 	var resource := str(
@@ -2807,11 +3322,13 @@ static func _deposit_to_endpoint(values: Dictionary) -> int:
 			CityCitizens.INVALID_CITY_CITIZEN_HAUL_RESERVATION_ID
 		)
 	)
-	var reservation := CityLogisticsSystem.get_city_haul_reservation(
+	var reservation := CityLogisticsSystem.get_city_haul_reservation_for_city_state(
+		city_state,
 		reservation_id
 	)
 	var reserved_resource_amount := (
-		CityLogisticsSystem.get_city_haul_reservation_destination_resource_amount(
+		CityLogisticsSystem.get_city_haul_reservation_destination_resource_amount_for_city_state(
+			city_state,
 			reservation_id,
 			resource
 		)
@@ -2825,18 +3342,22 @@ static func _deposit_to_endpoint(values: Dictionary) -> int:
 			endpoint
 		)
 		or reserved_resource_amount <= 0
-		or not CityLogisticsSystem.city_haul_endpoint_can_accept_resource({
+		or not CityLogisticsSystem.city_haul_endpoint_can_accept_resource_for_city_state(
+			city_state,
+			{
 			"endpoint": endpoint,
 			"resource": resource,
 			"deposit_purpose": deposit_purpose,
 			"require_unreserved_space": true,
 			"excluding_reservation_id": reservation_id,
-		})
+			}
+		)
 	):
 		return 0
 
 	var cargo_amount := (
-		CityCitizenInventorySystem.get_city_citizen_haul_cargo_resource_amount(
+		CityCitizenInventorySystem.get_city_citizen_haul_cargo_resource_amount_for_city_state(
+			city_state,
 			citizen_id,
 			resource
 		)
@@ -2864,7 +3385,8 @@ static func _deposit_to_endpoint(values: Dictionary) -> int:
 		== CityCitizens.CITY_CITIZEN_HAUL_ENDPOINT_KIND_CONSTRUCTION_SITE
 	):
 		accepted_amount = (
-			CityConstructionSystem.add_resource_to_city_construction_site(
+			CityConstructionSystem.add_resource_to_city_construction_site_for_city_state(
+				city_state,
 				object_id,
 				resource,
 				amount_to_deposit
@@ -2890,18 +3412,22 @@ static func _deposit_to_endpoint(values: Dictionary) -> int:
 
 		if raw_ground_tile is Vector2i:
 			var add_result := (
-				CityLogisticsSystem.add_resource_to_city_ground_piles_with_result({
+				CityLogisticsSystem.add_resource_to_city_ground_piles_with_result_for_city_state(
+					city_state,
+					{
 					"tile_position": raw_ground_tile,
 					"resource": resource,
 					"amount_delta": amount_to_deposit,
 					"construction_site_id": -1,
 					"excluded_ground_pile_ids": excluded_pile_ids,
-				})
+					}
+				)
 			)
 			accepted_amount = int(add_result.get("added_amount", 0))
 			ground_drop_placements = add_result.get("placements", [])
 	else:
-		accepted_amount = CityResourceContainerSystem.add_resource_to_city_object_storage(
+		accepted_amount = CityResourceContainerSystem.add_resource_to_city_object_storage_for_city_state(
+			city_state,
 			object_id,
 			resource,
 			amount_to_deposit,
@@ -2912,7 +3438,8 @@ static func _deposit_to_endpoint(values: Dictionary) -> int:
 		return 0
 
 	var final_resource_amount := (
-		CityCitizenInventorySystem.change_city_citizen_haul_cargo_resource(
+		CityCitizenInventorySystem.change_city_citizen_haul_cargo_resource_for_city_state(
+			city_state,
 			citizen_id,
 			resource,
 			-accepted_amount
@@ -2921,7 +3448,8 @@ static func _deposit_to_endpoint(values: Dictionary) -> int:
 	var expected_remaining := cargo_amount - accepted_amount
 
 	if final_resource_amount == expected_remaining:
-		if not CityLogisticsSystem.commit_city_haul_destination_reservation(
+		if not CityLogisticsSystem.commit_city_haul_destination_reservation_for_city_state(
+			city_state,
 			reservation_id,
 			resource,
 			accepted_amount
@@ -2940,7 +3468,8 @@ static func _deposit_to_endpoint(values: Dictionary) -> int:
 		== CityCitizens.CITY_CITIZEN_HAUL_ENDPOINT_KIND_CONSTRUCTION_SITE
 	):
 		removed_from_destination = (
-			CityConstructionSystem.remove_resource_from_city_construction_site(
+			CityConstructionSystem.remove_resource_from_city_construction_site_for_city_state(
+				city_state,
 				object_id,
 				resource,
 				accepted_amount
@@ -2950,20 +3479,23 @@ static func _deposit_to_endpoint(values: Dictionary) -> int:
 		endpoint_kind
 		== CityCitizens.CITY_CITIZEN_HAUL_ENDPOINT_KIND_GROUND_TILE
 	):
-		if CityLogisticsSystem.rollback_city_ground_pile_additions(
+		if CityLogisticsSystem.rollback_city_ground_pile_additions_for_city_state(
+			city_state,
 			resource,
 			ground_drop_placements
 		):
 			removed_from_destination = accepted_amount
 	else:
 		removed_from_destination = (
-			CityResourceContainerSystem.remove_resource_from_city_object_storage(
+			CityResourceContainerSystem.remove_resource_from_city_object_storage_for_city_state(
+				city_state,
 				object_id,
 				resource,
 				accepted_amount
 			)
 		)
-	CityCitizenInventorySystem.change_city_citizen_haul_cargo_resource(
+	CityCitizenInventorySystem.change_city_citizen_haul_cargo_resource_for_city_state(
+		city_state,
 		citizen_id,
 		resource,
 		accepted_amount
@@ -2983,20 +3515,32 @@ static func _deposit_to_endpoint(values: Dictionary) -> int:
 
 #region Haul Completion, Blocking, and Retry
 
-static func _complete_haul(
+static func _complete_haul_for_city_state(
+	city_state: CitySettlementSimulationState,
 	citizen_id: int,
 	current_task: Dictionary
 ) -> void:
-	if CityCitizenInventorySystem.get_city_citizen_haul_cargo_amount(citizen_id) > 0:
+	if CityCitizenInventorySystem.get_city_citizen_haul_cargo_amount_for_city_state(
+		city_state,
+		citizen_id
+	) > 0:
 		return
 
-	CityCitizenMovementRuntimeSystem.cancel_city_citizen_movement(citizen_id)
-	CityLogisticsSystem.release_city_haul_reservation_for_citizen(citizen_id)
-	CityCitizenTaskRuntimeSystem.set_city_citizen_current_haul(
+	CityCitizenMovementRuntimeSystem.cancel_city_citizen_movement_for_city_state(
+		city_state,
+		citizen_id
+	)
+	CityLogisticsSystem.release_city_haul_reservation_for_citizen_for_city_state(
+		city_state,
+		citizen_id
+	)
+	CityCitizenTaskRuntimeSystem.set_city_citizen_current_haul_for_city_state(
+		city_state,
 		citizen_id,
 		CityCitizens.make_city_citizen_haul()
 	)
-	CityCitizenTaskRuntimeSystem.clear_city_citizen_task(
+	CityCitizenTaskRuntimeSystem.clear_city_citizen_task_for_city_state(
+		city_state,
 		citizen_id,
 		str(
 			current_task.get(
@@ -3007,22 +3551,33 @@ static func _complete_haul(
 	)
 
 
-static func _finish_haul_without_pickup(
+static func _finish_haul_without_pickup_for_city_state(
+	city_state: CitySettlementSimulationState,
 	citizen_id: int,
 	current_task: Dictionary
 ) -> void:
-	if CityCitizenInventorySystem.get_city_citizen_haul_cargo_amount(citizen_id) > 0:
+	if CityCitizenInventorySystem.get_city_citizen_haul_cargo_amount_for_city_state(
+		city_state,
+		citizen_id
+	) > 0:
 		return
 
-	_complete_haul(citizen_id, current_task)
+	_complete_haul_for_city_state(city_state, citizen_id, current_task)
 
 
-static func _set_haul_blocked(
+static func _set_haul_blocked_for_city_state(
+	city_state: CitySettlementSimulationState,
 	citizen_id: int,
 	haul: Dictionary
 ) -> void:
-	CityCitizenMovementRuntimeSystem.cancel_city_citizen_movement(citizen_id)
-	CityLogisticsSystem.release_city_haul_reservation_for_citizen(citizen_id)
+	CityCitizenMovementRuntimeSystem.cancel_city_citizen_movement_for_city_state(
+		city_state,
+		citizen_id
+	)
+	CityLogisticsSystem.release_city_haul_reservation_for_citizen_for_city_state(
+		city_state,
+		citizen_id
+	)
 	haul["reservation_id"] = (
 		CityCitizens.INVALID_CITY_CITIZEN_HAUL_RESERVATION_ID
 	)
@@ -3034,12 +3589,21 @@ static func _set_haul_blocked(
 	# Before pickup there is no physical obligation to retain. Releasing the
 	# claim lets a different citizen try immediately instead of locking goods
 	# and capacity for a blocked retry window.
-	if CityCitizenInventorySystem.get_city_citizen_haul_cargo_amount(citizen_id) <= 0:
-		var current_task := CityCitizenTaskRuntimeSystem.get_city_citizen_current_task(
+	if CityCitizenInventorySystem.get_city_citizen_haul_cargo_amount_for_city_state(
+		city_state,
+		citizen_id
+	) <= 0:
+		var current_task := CityCitizenTaskRuntimeSystem.get_city_citizen_current_task_for_city_state(
+			city_state,
 			citizen_id
 		)
-		CityCitizenTaskRuntimeSystem.set_city_citizen_current_haul(citizen_id, haul)
-		CityCitizenTaskRuntimeSystem.clear_city_citizen_task(
+		CityCitizenTaskRuntimeSystem.set_city_citizen_current_haul_for_city_state(
+			city_state,
+			citizen_id,
+			haul
+		)
+		CityCitizenTaskRuntimeSystem.clear_city_citizen_task_for_city_state(
+			city_state,
 			citizen_id,
 			str(
 				current_task.get(
@@ -3051,8 +3615,14 @@ static func _set_haul_blocked(
 		return
 
 	haul["phase"] = CityCitizens.CITY_CITIZEN_HAUL_PHASE_BLOCKED
-	CityCitizenTaskRuntimeSystem.set_city_citizen_current_haul(citizen_id, haul)
-	CityCitizenTaskRuntimeSystem.set_city_citizen_task_activity_state({
+	CityCitizenTaskRuntimeSystem.set_city_citizen_current_haul_for_city_state(
+		city_state,
+		citizen_id,
+		haul
+	)
+	CityCitizenTaskRuntimeSystem.set_city_citizen_task_activity_state_for_city_state(
+		city_state,
+		{
 		"citizen_id": citizen_id,
 		"target_tile": CityCitizens.INVALID_CITY_TILE_POSITION,
 		"previous_target_tile": CityCitizens.INVALID_CITY_TILE_POSITION,
@@ -3061,14 +3631,17 @@ static func _set_haul_blocked(
 			+ BLOCKED_HAUL_RETRY_DELAY_MINUTES
 		),
 		"relocation_count": 0,
-	})
-	CityCitizenTaskRuntimeSystem.set_city_citizen_task_phase(
+		}
+	)
+	CityCitizenTaskRuntimeSystem.set_city_citizen_task_phase_for_city_state(
+		city_state,
 		citizen_id,
 		CityCitizens.CITY_CITIZEN_TASK_PHASE_BLOCKED
 	)
 
 
-static func _prepare_blocked_haul_retry(
+static func _prepare_blocked_haul_retry_for_city_state(
+	city_state: CitySettlementSimulationState,
 	citizen_id: int,
 	current_task: Dictionary,
 	has_cargo: bool
@@ -3084,17 +3657,25 @@ static func _prepare_blocked_haul_retry(
 		retry_world_minute
 		== CityCitizens.INVALID_CITY_CITIZEN_TASK_ACTION_WORLD_MINUTE
 	):
-		_set_haul_blocked(
+		_set_haul_blocked_for_city_state(
+			city_state,
 			citizen_id,
-			CityCitizenTaskRuntimeSystem.get_city_citizen_current_haul(citizen_id)
+			CityCitizenTaskRuntimeSystem.get_city_citizen_current_haul_for_city_state(
+				city_state,
+				citizen_id
+			)
 		)
 		return false
 
 	if SimulationClock.absolute_world_minutes < retry_world_minute:
 		return false
 
-	CityCitizenMovementRuntimeSystem.cancel_city_citizen_movement(citizen_id)
-	var haul := CityCitizenTaskRuntimeSystem.get_city_citizen_current_haul(
+	CityCitizenMovementRuntimeSystem.cancel_city_citizen_movement_for_city_state(
+		city_state,
+		citizen_id
+	)
+	var haul := CityCitizenTaskRuntimeSystem.get_city_citizen_current_haul_for_city_state(
+		city_state,
 		citizen_id
 	)
 
@@ -3105,8 +3686,14 @@ static func _prepare_blocked_haul_retry(
 		haul["phase"] = CityCitizens.CITY_CITIZEN_HAUL_PHASE_PENDING_SOURCE
 		haul["source_tile"] = CityCitizens.INVALID_CITY_TILE_POSITION
 
-	CityCitizenTaskRuntimeSystem.set_city_citizen_current_haul(citizen_id, haul)
-	CityCitizenTaskRuntimeSystem.set_city_citizen_task_activity_state({
+	CityCitizenTaskRuntimeSystem.set_city_citizen_current_haul_for_city_state(
+		city_state,
+		citizen_id,
+		haul
+	)
+	CityCitizenTaskRuntimeSystem.set_city_citizen_task_activity_state_for_city_state(
+		city_state,
+		{
 		"citizen_id": citizen_id,
 		"target_tile": CityCitizens.INVALID_CITY_TILE_POSITION,
 		"previous_target_tile": CityCitizens.INVALID_CITY_TILE_POSITION,
@@ -3114,8 +3701,10 @@ static func _prepare_blocked_haul_retry(
 			CityCitizens.INVALID_CITY_CITIZEN_TASK_ACTION_WORLD_MINUTE
 		),
 		"relocation_count": 0,
-	})
-	CityCitizenTaskRuntimeSystem.set_city_citizen_task_phase(
+		}
+	)
+	CityCitizenTaskRuntimeSystem.set_city_citizen_task_phase_for_city_state(
+		city_state,
 		citizen_id,
 		CityCitizens.CITY_CITIZEN_TASK_PHASE_PENDING
 	)

@@ -324,7 +324,8 @@ func _test_board_sync_reuses_runtime_reachability_candidate() -> void:
 	var citizen := _add_citizen("Cached Pathfinder", Vector2i(2, 4))
 	var citizen_id := int(citizen.get("id", -1))
 	var target_tile := Vector2i(18, 4)
-	city_world.get_tile(target_tile.x, target_tile.y)["surface_feature"] = (
+	city_world.set_tile_surface_feature(
+		target_tile,
 		WorldData.CITY_SURFACE_FEATURE_TREE
 	)
 	_expect(
@@ -474,9 +475,11 @@ func _test_unreachable_order_runtime_diagnostics() -> void:
 		barrier_tile["biome"] = WorldData.BIOME_OCEAN
 		barrier_tile["is_land"] = false
 		barrier_tile.erase("surface_feature")
+		city_world.set_tile(10, y, barrier_tile)
 
 	var target_tile := Vector2i(18, 4)
-	city_world.get_tile(target_tile.x, target_tile.y)["surface_feature"] = (
+	city_world.set_tile_surface_feature(
+		target_tile,
 		WorldData.CITY_SURFACE_FEATURE_TREE
 	)
 	_expect(
@@ -544,6 +547,7 @@ func _test_unreachable_order_runtime_diagnostics() -> void:
 	gate_tile["terrain"] = WorldData.TERRAIN_LAND
 	gate_tile["biome"] = WorldData.BIOME_PLAIN
 	gate_tile["is_land"] = true
+	city_world.set_tile(10, 4, gate_tile)
 	CityWorkSystemScript.synchronize_player_work_board()
 	var recovered_order: Dictionary = (
 		CityWorkSystem.get_city_work_order_snapshot()[0]
@@ -578,7 +582,8 @@ func _test_parent_orders_and_two_level_fairness() -> void:
 
 	for x in range(18, 28):
 		var tile_position := Vector2i(x, 4)
-		city_world.get_tile(x, 4)["surface_feature"] = (
+		city_world.set_tile_surface_feature(
+			tile_position,
 			WorldData.CITY_SURFACE_FEATURE_TREE
 		)
 		command_tiles.append(tile_position)
@@ -1057,7 +1062,8 @@ func _test_rebalance_preserves_active_construction_clearing() -> void:
 	var citizen := _add_citizen("Active Clearer", Vector2i(9, 8))
 	var citizen_id := int(citizen.get("id", -1))
 	var tree_tile := Vector2i(10, 8)
-	city_world.get_tile(tree_tile.x, tree_tile.y)["surface_feature"] = (
+	city_world.set_tile_surface_feature(
+		tree_tile,
 		WorldData.CITY_SURFACE_FEATURE_TREE
 	)
 	var clearing_site := CityConstructionSystemScript.create_road_site(
@@ -1137,11 +1143,12 @@ func _test_unreachable_blueprint_does_not_churn_construction_travel() -> void:
 	var assignment_before := _get_assignment_snapshot(citizen_id)
 
 	for y in range(city_world.height):
-		var barrier_tile := city_world.get_tile(10, y)
-		barrier_tile["terrain"] = CityObjectCatalog.TERRAIN_WATER
-		barrier_tile["biome"] = WorldData.BIOME_OCEAN
-		barrier_tile["is_land"] = false
-		barrier_tile.erase("surface_feature")
+		var barrier_position := Vector2i(10, y)
+		city_world.set_tile_terrain(
+			barrier_position,
+			CityObjectCatalog.TERRAIN_WATER
+		)
+		city_world.remove_tile_surface_feature(barrier_position)
 
 	var unreachable_site := _create_ready_labor_site(
 		[Vector2i(18, 4)],
@@ -1309,10 +1316,10 @@ func _test_workplace_fish_production_accounting() -> void:
 
 	for y in range(city_world.height):
 		for x in range(city_world.width):
-			city_world.get_tile(x, y)["resource"] = WorldData.RESOURCE_FISH
-
-	city_world.mark_tile_data_changed()
-	WorkplaceProductionSystem.clear_resource_source_evaluation_cache()
+			city_world.set_tile_resource_value(
+				Vector2i(x, y),
+				WorldData.RESOURCE_FISH
+			)
 
 	var fishery := CityObjectSystem.add_city_object({
 		"object_type": CityObjectCatalog.CITY_OBJECT_FISHING_GROUNDS,
@@ -1724,11 +1731,10 @@ func _test_unreachable_food_tier_does_not_hide_fallbacks() -> void:
 	# its own side but unreachable from the hungry citizen. The eight-request
 	# decision budget must still reach later source tiers in this same call.
 	for y in range(city_world.height):
-		var wall_tile := city_world.get_tile(15, y)
-		wall_tile["terrain"] = WorldData.TERRAIN_MOUNTAIN
-		wall_tile["is_land"] = false
-
-	city_world.mark_tile_data_changed()
+		city_world.set_tile_terrain(
+			Vector2i(15, y),
+			WorldData.TERRAIN_MOUNTAIN
+		)
 	var survival_workplace_match := (
 		CityResourceMatcherScript.find_best_survival_food_source(
 			citizen,
@@ -1837,13 +1843,7 @@ func _test_unified_food_search_avoids_budget_starvation() -> void:
 		"object_owner": "player",
 		"city_world": city_world,
 	})
-	var keep := CityObjectSystem.add_city_object({
-		"object_type": CityObjectCatalog.CITY_OBJECT_CITY_CENTER,
-		"top_left": Vector2i(15, 1),
-		"size_tiles": CityObjectCatalog.get_city_object_size_for_type(CityObjectCatalog.CITY_OBJECT_CITY_CENTER),
-		"object_owner": "player",
-		"city_world": city_world,
-	})
+	var keep := _add_keep(city_world, Vector2i(15, 1))
 	var fishery := CityObjectSystem.add_city_object({
 		"object_type": CityObjectCatalog.CITY_OBJECT_FISHING_GROUNDS,
 		"top_left": Vector2i(21, 2),
@@ -1885,16 +1885,16 @@ func _test_unified_food_search_avoids_budget_starvation() -> void:
 	_expect(pile_id > 0, "The later citizen needs a reachable food pile.")
 
 	for y in range(city_world.height):
-		var vertical_wall_tile := city_world.get_tile(5, y)
-		vertical_wall_tile["terrain"] = WorldData.TERRAIN_MOUNTAIN
-		vertical_wall_tile["is_land"] = false
+		city_world.set_tile_terrain(
+			Vector2i(5, y),
+			WorldData.TERRAIN_MOUNTAIN
+		)
 
 	for x in range(6, city_world.width):
-		var horizontal_wall_tile := city_world.get_tile(x, 10)
-		horizontal_wall_tile["terrain"] = WorldData.TERRAIN_MOUNTAIN
-		horizontal_wall_tile["is_land"] = false
-
-	city_world.mark_tile_data_changed()
+		city_world.set_tile_terrain(
+			Vector2i(x, 10),
+			WorldData.TERRAIN_MOUNTAIN
+		)
 	first = CityCitizenRegistrySystem.get_city_citizen_by_id(first_id)
 	second = CityCitizenRegistrySystem.get_city_citizen_by_id(second_id)
 	var first_probe := CityResourceMatcherScript.find_best_survival_food_source(
@@ -2250,18 +2250,9 @@ func _test_cargo_ready_demand_preempts_soft_claim() -> void:
 		)
 		+ [Vector2i(24, 10)]
 	):
-		city_world.get_tile(
-			tile_position.x,
-			tile_position.y
-		).erase("surface_feature")
+		city_world.remove_tile_surface_feature(tile_position)
 
-	var keep := CityObjectSystem.add_city_object({
-		"object_type": CityObjectCatalog.CITY_OBJECT_CITY_CENTER,
-		"top_left": Vector2i(2, 2),
-		"size_tiles": keep_size,
-		"object_owner": "player",
-		"city_world": city_world,
-	})
+	var keep := _add_keep(city_world, Vector2i(2, 2))
 	var keep_id := int(keep.get("id", -1))
 	var keep_endpoint := CityLogisticsSystem.make_city_citizen_haul_endpoint(
 		keep_id
@@ -2512,15 +2503,7 @@ func _test_resource_demand_priorities_are_adjustable() -> void:
 func _test_off_shift_homeless_idle_wander() -> void:
 	var city_world := _reset_fixture()
 	CitizenDecisionSystemScript.reset_runtime_state()
-	var keep := CityObjectSystem.add_city_object({
-		"object_type": CityObjectCatalog.CITY_OBJECT_CITY_CENTER,
-		"top_left": Vector2i(2, 2),
-		"size_tiles": CityObjectCatalog.get_city_object_size_for_type(
-			CityObjectCatalog.CITY_OBJECT_CITY_CENTER
-		),
-		"object_owner": "player",
-		"city_world": city_world,
-	})
+	var keep := _add_keep(city_world, Vector2i(2, 2))
 	_expect(
 		not keep.is_empty(),
 		"The idle-wander fixture must create a civic anchor."
@@ -2644,7 +2627,7 @@ func _reset_fixture() -> WorldData:
 
 	for y in range(city_world.height):
 		for x in range(city_world.width):
-			var tile := city_world.get_tile(x, y)
+			var tile := city_world.get_tile_for_internal_read(x, y)
 			tile["terrain"] = WorldData.TERRAIN_LAND
 			tile["biome"] = WorldData.BIOME_PLAIN
 			tile["is_land"] = true
@@ -2656,6 +2639,12 @@ func _reset_fixture() -> WorldData:
 		"Work System Test Culture"
 	)
 	test_culture_id = int(test_culture.get("id", -1))
+	WorldPoliticalState.replace_current_city_runtime_data({
+		"name": "Work System Test City",
+		"primary_culture_id": test_culture_id,
+		"founded": true,
+		"can_build": true,
+	})
 	return city_world
 
 
@@ -2667,6 +2656,40 @@ func _add_citizen(_display_name: String, tile_position: Vector2i) -> Dictionary:
 		CityCitizens.CITY_CITIZEN_SEX_FEMALE,
 		test_culture_id
 	)
+
+
+func _add_keep(
+	city_world: WorldData,
+	top_left: Vector2i
+) -> Dictionary:
+	var city_state = WorldPoliticalState.get_current_city_simulation_state()
+	if not city_state is CitySettlementSimulationState:
+		return {}
+
+	var runtime_data: Dictionary = city_state.city_runtime_data
+	var was_founded := bool(runtime_data.get("founded", false))
+	var could_build := bool(runtime_data.get("can_build", false))
+	runtime_data["founded"] = false
+	runtime_data["can_build"] = false
+	var keep := CityObjectSystem.add_city_object({
+		"object_type": CityObjectCatalog.CITY_OBJECT_CITY_CENTER,
+		"top_left": top_left,
+		"size_tiles": CityObjectCatalog.get_city_object_size_for_type(
+			CityObjectCatalog.CITY_OBJECT_CITY_CENTER
+		),
+		"object_owner": "player",
+		"city_world": city_world,
+	})
+	runtime_data["founded"] = was_founded
+	runtime_data["can_build"] = could_build
+	if not keep.is_empty() and was_founded:
+		runtime_data["foundation_top_left"] = top_left
+		runtime_data["foundation_size"] = keep.get("size", Vector2i.ZERO)
+		runtime_data["foundation_object_id"] = int(keep.get("id", -1))
+		runtime_data["foundation_object_owner"] = str(
+			keep.get("owner", "player")
+		)
+	return keep
 
 
 func _add_hungry_citizen(

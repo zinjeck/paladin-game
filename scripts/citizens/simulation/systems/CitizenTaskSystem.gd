@@ -31,34 +31,45 @@ const WORK_ACTIVITY_DWELL_REQUIRED_KEYS := [
 	"maximum_relocations_per_task",
 ]
 
-static var _work_activity_claim_counts: Dictionary = {}
-
-
 #region Task Tick Entry Point
 
 static func run_tick(
 	tick_index: int,
 	minutes_advanced: int
 ) -> void:
-	_work_activity_claim_counts.clear()
+	var city_state = WorldPoliticalState.get_current_city_simulation_state()
+	run_tick_for_city_state(city_state, tick_index, minutes_advanced)
 
+
+static func _make_legacy_city_state_view() -> CitySettlementSimulationState:
+	return WorldPoliticalState.get_current_city_simulation_state()
+
+
+static func run_tick_for_city_state(
+	city_state: CitySettlementSimulationState,
+	tick_index: int,
+	minutes_advanced: int
+) -> void:
 	if minutes_advanced <= 0:
 		return
 
-	var city_world: WorldData = WorldPoliticalState.get_current_city_world()
+	var city_world: WorldData = city_state.city_world
 
 	if city_world == null:
 		return
 
 	var active_task_ids := (
-		CityCitizenTaskRuntimeSystem.get_city_active_task_ids_snapshot()
+		CityCitizenTaskRuntimeSystem.get_city_active_task_ids_snapshot_for_city_state(
+			city_state
+		)
 	)
 
 	if active_task_ids.is_empty():
 		return
 
-	_work_activity_claim_counts = (
+	var work_activity_claim_counts := (
 		_build_work_activity_claim_counts(
+			city_state,
 			active_task_ids
 		)
 	)
@@ -79,19 +90,18 @@ static func run_tick(
 		)
 
 	for citizen_id in ordered_active_task_ids:
-		var citizen := CityCitizenRegistrySystem.get_city_citizen_by_id(
-			citizen_id
-		)
+		var citizen := _get_city_citizen_by_id(city_state, citizen_id)
 
 		if citizen.is_empty():
 			continue
 
 		if not bool(citizen.get("alive", false)):
-			_clear_invalid_task(citizen_id)
+			_clear_invalid_task(city_state, citizen_id)
 			continue
 
 		var current_task := (
-			CityCitizenTaskRuntimeSystem.get_city_citizen_current_task(
+			CityCitizenTaskRuntimeSystem.get_city_citizen_current_task_for_city_state(
+				city_state,
 				citizen_id
 			)
 		)
@@ -103,12 +113,14 @@ static func run_tick(
 			"path_requests_remaining": path_requests_remaining,
 			"tick_index": tick_index,
 			"minutes_advanced": minutes_advanced,
+			"work_activity_claim_counts": work_activity_claim_counts,
 		}
 
 		match str(current_task.get("kind", "")):
 			CityCitizens.CITY_CITIZEN_TASK_KIND_PLAYER_COMMAND:
 				path_requests_remaining = (
 					_advance_player_command_task(
+						city_state,
 						city_world,
 						task_advance_context
 					)
@@ -117,6 +129,7 @@ static func run_tick(
 			CityCitizens.CITY_CITIZEN_TASK_KIND_WORK:
 				path_requests_remaining = (
 					_advance_work_task(
+						city_state,
 						city_world,
 						task_advance_context
 					)
@@ -125,6 +138,7 @@ static func run_tick(
 			CityCitizens.CITY_CITIZEN_TASK_KIND_ACQUIRE_FOOD:
 				path_requests_remaining = (
 					_advance_acquire_food_task(
+						city_state,
 						city_world,
 						task_advance_context
 					)
@@ -132,7 +146,8 @@ static func run_tick(
 
 			CityCitizens.CITY_CITIZEN_TASK_KIND_HAUL:
 				path_requests_remaining = (
-					CitizenHaulingSystemScript.advance_haul_task(
+					CitizenHaulingSystemScript.advance_haul_task_for_city_state(
+						city_state,
 						city_world,
 						task_advance_context
 					)
@@ -140,7 +155,8 @@ static func run_tick(
 
 			CityCitizens.CITY_CITIZEN_TASK_KIND_CONSTRUCTION:
 				path_requests_remaining = (
-					CityConstructionSystemScript.advance_labor_task(
+					CityConstructionSystemScript.advance_labor_task_for_city_state(
+						city_state,
 						city_world,
 						task_advance_context
 					)
@@ -149,16 +165,33 @@ static func run_tick(
 			CityCitizens.CITY_CITIZEN_TASK_KIND_RETURN_HOME:
 				path_requests_remaining = (
 					_advance_return_home_task(
+						city_state,
 						city_world,
 						task_advance_context
 					)
 				)
 
 			CityCitizens.CITY_CITIZEN_TASK_KIND_NONE:
-				_clear_invalid_task(citizen_id)
+				_clear_invalid_task(city_state, citizen_id)
 
 			_:
-				_clear_invalid_task(citizen_id)
+				_clear_invalid_task(city_state, citizen_id)
+
+
+static func _get_city_citizen_by_id(
+	city_state: CitySettlementSimulationState,
+	citizen_id: int
+) -> Dictionary:
+	var registry_state := city_state.citizen_registry_state
+	if not registry_state.citizen_index_by_id.has(citizen_id):
+		return {}
+	var citizen_index := int(registry_state.citizen_index_by_id[citizen_id])
+	if citizen_index < 0 or citizen_index >= registry_state.citizens.size():
+		return {}
+	var raw_citizen = registry_state.citizens[citizen_index]
+	if not raw_citizen is Dictionary:
+		return {}
+	return raw_citizen
 
 
 # Hunger never releases work speculatively. The decision system first finds a
@@ -171,12 +204,25 @@ static func run_tick(
 static func prepare_citizen_for_normal_food_interrupt(
 	citizen_id: int
 ) -> bool:
-	var citizen := CityCitizenRegistrySystem.get_city_citizen_by_id(citizen_id)
+	return prepare_citizen_for_normal_food_interrupt_for_city_state(
+		_make_legacy_city_state_view(),
+		citizen_id
+	)
+
+
+static func prepare_citizen_for_normal_food_interrupt_for_city_state(
+	city_state: CitySettlementSimulationState,
+	citizen_id: int
+) -> bool:
+	var citizen := _get_city_citizen_by_id(city_state, citizen_id)
 
 	if citizen.is_empty() or not bool(citizen.get("alive", false)):
 		return false
 
-	var current_task := CityCitizenTaskRuntimeSystem.get_city_citizen_current_task(citizen_id)
+	var current_task := CityCitizenTaskRuntimeSystem.get_city_citizen_current_task_for_city_state(
+		city_state,
+		citizen_id
+	)
 	var current_task_kind := str(
 		current_task.get(
 			"kind",
@@ -190,19 +236,31 @@ static func prepare_citizen_for_normal_food_interrupt(
 	# A matched food source should end the current haul after its existing
 	# physical obligation. Do not let a cargo-bearing citizen chain another
 	# pickup while waiting for that safe delivery boundary.
-	_disable_additional_haul_pickups_for_food(citizen_id, current_task)
+	_disable_additional_haul_pickups_for_food(
+		city_state,
+		citizen_id,
+		current_task
+	)
 
-	if not _task_is_at_normal_food_safe_boundary(citizen_id, current_task):
+	if not _task_is_at_normal_food_safe_boundary(
+		city_state,
+		citizen_id,
+		current_task
+	):
 		return false
 
-	return _release_task_for_normal_food(citizen_id, current_task)
+	return _release_task_for_normal_food(city_state, citizen_id, current_task)
 
 
 static func _task_is_at_normal_food_safe_boundary(
+	city_state: CitySettlementSimulationState,
 	citizen_id: int,
 	current_task: Dictionary
 ) -> bool:
-	if CityCitizenInventorySystem.get_city_citizen_haul_cargo_amount(citizen_id) > 0:
+	if CityCitizenInventorySystem.get_city_citizen_haul_cargo_amount_for_city_state(
+		city_state,
+		citizen_id
+	) > 0:
 		return false
 
 	var task_kind := str(
@@ -217,7 +275,10 @@ static func _task_is_at_normal_food_safe_boundary(
 			return false
 
 		CityCitizens.CITY_CITIZEN_TASK_KIND_HAUL:
-			var haul := CityCitizenTaskRuntimeSystem.get_city_citizen_current_haul(citizen_id)
+			var haul := CityCitizenTaskRuntimeSystem.get_city_citizen_current_haul_for_city_state(
+				city_state,
+				citizen_id
+			)
 			return (
 				str(
 					haul.get(
@@ -244,6 +305,7 @@ static func _task_is_at_normal_food_safe_boundary(
 
 
 static func _disable_additional_haul_pickups_for_food(
+	city_state: CitySettlementSimulationState,
 	citizen_id: int,
 	current_task: Dictionary
 ) -> void:
@@ -253,7 +315,10 @@ static func _disable_additional_haul_pickups_for_food(
 	):
 		return
 
-	var haul := CityCitizenTaskRuntimeSystem.get_city_citizen_current_haul(citizen_id)
+	var haul := CityCitizenTaskRuntimeSystem.get_city_citizen_current_haul_for_city_state(
+		city_state,
+		citizen_id
+	)
 
 	if not bool(haul.get("allow_ground_pile_pickup_chaining", false)):
 		return
@@ -261,17 +326,28 @@ static func _disable_additional_haul_pickups_for_food(
 	# Hunger may arrive during the visible pickup pass. Preserve that pickup,
 	# but prevent it from expanding into another stop before delivery.
 	haul["allow_ground_pile_pickup_chaining"] = false
-	CityCitizenTaskRuntimeSystem.set_city_citizen_current_haul(citizen_id, haul)
+	CityCitizenTaskRuntimeSystem.set_city_citizen_current_haul_for_city_state(
+		city_state,
+		citizen_id,
+		haul
+	)
 
 
 static func _release_task_for_normal_food(
+	city_state: CitySettlementSimulationState,
 	citizen_id: int,
 	expected_task: Dictionary
 ) -> bool:
-	if CityCitizenInventorySystem.get_city_citizen_haul_cargo_amount(citizen_id) > 0:
+	if CityCitizenInventorySystem.get_city_citizen_haul_cargo_amount_for_city_state(
+		city_state,
+		citizen_id
+	) > 0:
 		return false
 
-	var current_task := CityCitizenTaskRuntimeSystem.get_city_citizen_current_task(citizen_id)
+	var current_task := CityCitizenTaskRuntimeSystem.get_city_citizen_current_task_for_city_state(
+		city_state,
+		citizen_id
+	)
 	var expected_kind := str(expected_task.get("kind", ""))
 
 	if (
@@ -292,20 +368,25 @@ static func _release_task_for_normal_food(
 	if expected_kind == CityCitizens.CITY_CITIZEN_TASK_KIND_HAUL:
 		released = (
 			CitizenHaulingSystemScript
-			.drop_citizen_haul_cargo_for_priority_interrupt(
-				WorldPoliticalState.get_current_city_world(),
+			.drop_citizen_haul_cargo_for_priority_interrupt_for_city_state(
+				city_state,
+				city_state.city_world,
 				citizen_id,
 				task_source
 			)
 		)
 	else:
-		released = CityCitizenTaskRuntimeSystem.clear_city_citizen_task(
+		released = CityCitizenTaskRuntimeSystem.clear_city_citizen_task_for_city_state(
+			city_state,
 			citizen_id,
 			task_source
 		)
 
 	if released:
-		CityCitizenMovementRuntimeSystem.cancel_city_citizen_movement(citizen_id)
+		CityCitizenMovementRuntimeSystem.cancel_city_citizen_movement_for_city_state(
+			city_state,
+			citizen_id
+		)
 
 	return released
 
@@ -319,12 +400,25 @@ static func _release_task_for_normal_food(
 static func prepare_citizen_for_critical_food_interrupt(
 	citizen_id: int
 ) -> bool:
-	var citizen := CityCitizenRegistrySystem.get_city_citizen_by_id(citizen_id)
+	return prepare_citizen_for_critical_food_interrupt_for_city_state(
+		_make_legacy_city_state_view(),
+		citizen_id
+	)
+
+
+static func prepare_citizen_for_critical_food_interrupt_for_city_state(
+	city_state: CitySettlementSimulationState,
+	citizen_id: int
+) -> bool:
+	var citizen := _get_city_citizen_by_id(city_state, citizen_id)
 
 	if citizen.is_empty() or not bool(citizen.get("alive", false)):
 		return false
 
-	var current_task := CityCitizenTaskRuntimeSystem.get_city_citizen_current_task(citizen_id)
+	var current_task := CityCitizenTaskRuntimeSystem.get_city_citizen_current_task_for_city_state(
+		city_state,
+		citizen_id
+	)
 	var current_task_kind := str(
 		current_task.get("kind", CityCitizens.CITY_CITIZEN_TASK_KIND_NONE)
 	)
@@ -332,27 +426,39 @@ static func prepare_citizen_for_critical_food_interrupt(
 	if current_task_kind == CityCitizens.CITY_CITIZEN_TASK_KIND_PLAYER_COMMAND:
 		var command_id := int(current_task.get("target_object_id", -1))
 
-		CityWorkSystem.release_city_player_command_claim(
+		CityWorkSystem.release_city_player_command_claim_for_city_state(
+			city_state,
 			command_id,
 			citizen_id
 		)
-		CityCitizenMovementRuntimeSystem.cancel_city_citizen_movement(citizen_id)
-		return CityCitizenTaskRuntimeSystem.clear_city_citizen_task(
+		CityCitizenMovementRuntimeSystem.cancel_city_citizen_movement_for_city_state(
+			city_state,
+			citizen_id
+		)
+		return CityCitizenTaskRuntimeSystem.clear_city_citizen_task_for_city_state(
+			city_state,
 			citizen_id,
 			CityCitizens.CITY_CITIZEN_TASK_SOURCE_PLAYER
 		)
 
 	if (
 		CityConstructionSystemScript
-		.citizen_task_is_interruptible_construction(citizen_id)
+		.citizen_task_is_interruptible_construction_for_city_state(
+			city_state,
+			citizen_id
+		)
 	):
 		return (
 			CityConstructionSystemScript
-			.interrupt_citizen_construction_for_food(citizen_id)
+			.interrupt_citizen_construction_for_food_for_city_state(
+				city_state,
+				citizen_id
+			)
 		)
 
-	return CitizenHaulingSystemScript.drop_citizen_haul_cargo_for_priority_interrupt(
-		WorldPoliticalState.get_current_city_world(),
+	return CitizenHaulingSystemScript.drop_citizen_haul_cargo_for_priority_interrupt_for_city_state(
+		city_state,
+		city_state.city_world,
 		citizen_id,
 		CityCitizens.CITY_CITIZEN_TASK_SOURCE_AUTONOMY
 	)
@@ -363,6 +469,7 @@ static func prepare_citizen_for_critical_food_interrupt(
 #region Acquire Food Task
 
 static func _advance_acquire_food_task(
+	city_state: CitySettlementSimulationState,
 	city_world: WorldData,
 	values: Dictionary
 ) -> int:
@@ -416,21 +523,26 @@ static func _advance_acquire_food_task(
 		or not CityCitizens.is_valid_city_citizen_haul_endpoint(
 			source_endpoint
 		)
-		or not CitizenNeedsSystem.get_city_citizen_food_endpoint_target_tiles(
+		or not CitizenNeedsSystem.get_city_citizen_food_endpoint_target_tiles_for_city_state(
+			city_state,
 			citizen_id,
 			source_endpoint
 		).has(raw_target_tile)
-		or not CitizenNeedsSystem.city_citizen_can_withdraw_food_from_endpoint(
+		or not CitizenNeedsSystem.city_citizen_can_withdraw_food_from_endpoint_for_city_state(
+			city_state,
 			citizen_id,
 			source_endpoint,
 			resource
 		)
 	):
-		_clear_invalid_task(citizen_id)
+		_clear_invalid_task(city_state, citizen_id)
 		return path_requests_remaining
 
-	if CitizenNeedsSystem.get_citizen_food_need_nutrition(citizen_id) <= 0:
-		_complete_acquire_food_task(citizen_id)
+	if CitizenNeedsSystem.get_citizen_food_need_nutrition_for_city_state(
+		city_state,
+		citizen_id
+	) <= 0:
+		_complete_acquire_food_task(city_state, citizen_id)
 		return path_requests_remaining
 
 	var target_tile: Vector2i = raw_target_tile
@@ -443,7 +555,8 @@ static func _advance_acquire_food_task(
 	)
 
 	if current_tile == target_tile:
-		var desired_nutrition := CitizenNeedsSystem.get_citizen_food_need_nutrition(
+		var desired_nutrition := CitizenNeedsSystem.get_citizen_food_need_nutrition_for_city_state(
+			city_state,
 			citizen_id
 		)
 		var hunger_restore := CityResourceCatalog.get_city_food_hunger_restore(resource)
@@ -452,7 +565,8 @@ static func _advance_acquire_food_task(
 			ceili(float(desired_nutrition) / float(hunger_restore))
 		)
 		var transferred_amount := (
-			CitizenNeedsSystem.transfer_city_food_endpoint_to_citizen_inventory(
+			CitizenNeedsSystem.transfer_city_food_endpoint_to_citizen_inventory_for_city_state(
+				city_state,
 				citizen_id,
 				source_endpoint,
 				resource,
@@ -461,32 +575,38 @@ static func _advance_acquire_food_task(
 		)
 
 		if transferred_amount > 0:
-			CitizenNeedsSystem.eat_personal_food_if_hungry(citizen_id)
+			CitizenNeedsSystem.eat_personal_food_if_hungry_for_city_state(
+				city_state,
+				citizen_id
+			)
 
-		_complete_acquire_food_task(citizen_id)
+		_complete_acquire_food_task(city_state, citizen_id)
 		return path_requests_remaining
 
 	if movement_state == CityCitizens.CITY_CITIZEN_MOVEMENT_STATE_MOVING:
 		return path_requests_remaining
 
 	if movement_state == CityCitizens.CITY_CITIZEN_MOVEMENT_STATE_BLOCKED:
-		_clear_invalid_task(citizen_id)
+		_clear_invalid_task(city_state, citizen_id)
 		return path_requests_remaining
 
 	if path_requests_remaining <= 0:
 		return path_requests_remaining
 
 	path_requests_remaining -= 1
-	var path_result := CityNavigationSystemScript.find_path_to_any_city_tile({
+	var path_result := CityNavigationSystemScript.find_path_to_any_city_tile_for_city_state(
+		city_state,
+		{
 		"city_world": city_world,
 		"start_tile": current_tile,
 		"destination_tiles": [target_tile],
 		"max_expanded_nodes": CityNavigationSystemScript.get_city_wide_path_expansion_limit(city_world),
 		"citizen_id": citizen_id,
 		"heuristic_weight": 1,
-	})
+		}
+	)
 	if not bool(path_result.get("success", false)):
-		_clear_invalid_task(citizen_id)
+		_clear_invalid_task(city_state, citizen_id)
 		return path_requests_remaining
 
 	var raw_path = path_result.get("path", [])
@@ -500,26 +620,37 @@ static func _advance_acquire_food_task(
 		or not raw_destination_tile is Vector2i
 		or raw_destination_tile != target_tile
 	):
-		_clear_invalid_task(citizen_id)
+		_clear_invalid_task(city_state, citizen_id)
 		return path_requests_remaining
 
 	if raw_path.size() <= 1:
-		_clear_invalid_task(citizen_id)
+		_clear_invalid_task(city_state, citizen_id)
 		return path_requests_remaining
 
-	if not CityCitizenMovementRuntimeSystem.assign_city_citizen_movement_order(citizen_id, raw_path):
-		_clear_invalid_task(citizen_id)
+	if not CityCitizenMovementRuntimeSystem.assign_city_citizen_movement_order_for_city_state(
+		city_state,
+		citizen_id,
+		raw_path
+	):
+		_clear_invalid_task(city_state, citizen_id)
 		return path_requests_remaining
 
-	CityCitizenTaskRuntimeSystem.set_city_citizen_task_phase(
+	CityCitizenTaskRuntimeSystem.set_city_citizen_task_phase_for_city_state(
+		city_state,
 		citizen_id,
 		CityCitizens.CITY_CITIZEN_TASK_PHASE_TRAVELING
 	)
 	return path_requests_remaining
 
 
-static func _complete_acquire_food_task(citizen_id: int) -> void:
-	var current_task := CityCitizenTaskRuntimeSystem.get_city_citizen_current_task(citizen_id)
+static func _complete_acquire_food_task(
+	city_state: CitySettlementSimulationState,
+	citizen_id: int
+) -> void:
+	var current_task := CityCitizenTaskRuntimeSystem.get_city_citizen_current_task_for_city_state(
+		city_state,
+		citizen_id
+	)
 	var task_source := str(
 		current_task.get(
 			"source",
@@ -527,8 +658,15 @@ static func _complete_acquire_food_task(citizen_id: int) -> void:
 		)
 	)
 
-	CityCitizenMovementRuntimeSystem.cancel_city_citizen_movement(citizen_id)
-	CityCitizenTaskRuntimeSystem.clear_city_citizen_task(citizen_id, task_source)
+	CityCitizenMovementRuntimeSystem.cancel_city_citizen_movement_for_city_state(
+		city_state,
+		citizen_id
+	)
+	CityCitizenTaskRuntimeSystem.clear_city_citizen_task_for_city_state(
+		city_state,
+		citizen_id,
+		task_source
+	)
 
 
 # Normal player work may preempt an unemployed citizen before pickup. Once the
@@ -541,7 +679,17 @@ static func _complete_acquire_food_task(citizen_id: int) -> void:
 static func prepare_unemployed_citizen_for_priority_interrupt(
 	citizen_id: int
 ) -> bool:
-	var citizen := CityCitizenRegistrySystem.get_city_citizen_by_id(citizen_id)
+	return prepare_unemployed_citizen_for_priority_interrupt_for_city_state(
+		_make_legacy_city_state_view(),
+		citizen_id
+	)
+
+
+static func prepare_unemployed_citizen_for_priority_interrupt_for_city_state(
+	city_state: CitySettlementSimulationState,
+	citizen_id: int
+) -> bool:
+	var citizen := _get_city_citizen_by_id(city_state, citizen_id)
 
 	if (
 		citizen.is_empty()
@@ -550,19 +698,26 @@ static func prepare_unemployed_citizen_for_priority_interrupt(
 	):
 		return false
 
-	var current_task := CityCitizenTaskRuntimeSystem.get_city_citizen_current_task(citizen_id)
+	var current_task := CityCitizenTaskRuntimeSystem.get_city_citizen_current_task_for_city_state(
+		city_state,
+		citizen_id
+	)
 
 	if (
 		str(current_task.get("kind", ""))
 		== CityCitizens.CITY_CITIZEN_TASK_KIND_ACQUIRE_FOOD
-		or CityCitizenInventorySystem.get_city_citizen_haul_cargo_amount(citizen_id) > 0
+		or CityCitizenInventorySystem.get_city_citizen_haul_cargo_amount_for_city_state(
+			city_state,
+			citizen_id
+		) > 0
 	):
 		return false
 
 	return (
 		CitizenHaulingSystemScript
-		.drop_citizen_haul_cargo_for_priority_interrupt(
-			WorldPoliticalState.get_current_city_world(),
+		.drop_citizen_haul_cargo_for_priority_interrupt_for_city_state(
+			city_state,
+			city_state.city_world,
 			citizen_id,
 			CityCitizens.CITY_CITIZEN_TASK_SOURCE_PLAYER
 		)
@@ -576,15 +731,30 @@ static func prepare_unemployed_citizen_for_player_command(
 	return prepare_unemployed_citizen_for_priority_interrupt(citizen_id)
 
 
+static func prepare_unemployed_citizen_for_player_command_for_city_state(
+	city_state: CitySettlementSimulationState,
+	citizen_id: int
+) -> bool:
+	return prepare_unemployed_citizen_for_priority_interrupt_for_city_state(
+		city_state,
+		citizen_id
+	)
+
+
 #endregion
 
 #region Player Command Task
 
 static func _advance_player_command_task(
+	city_state: CitySettlementSimulationState,
 	city_world: WorldData,
 	values: Dictionary
 ) -> int:
-	var context := _make_player_command_task_context(city_world, values)
+	var context := _make_player_command_task_context(
+		city_state,
+		city_world,
+		values
+	)
 	var path_requests_remaining := maxi(
 		int(values.get("path_requests_remaining", 0)),
 		0
@@ -600,28 +770,33 @@ static func _advance_player_command_task(
 		)
 	):
 		CityCitizens.CITY_CITIZEN_TASK_PHASE_PENDING:
-			return _advance_pending_player_command_task(context)
+			return _advance_pending_player_command_task(city_state, context)
 
 		CityCitizens.CITY_CITIZEN_TASK_PHASE_TRAVELING:
-			return _advance_traveling_player_command_task(context)
+			return _advance_traveling_player_command_task(city_state, context)
 
 		CityCitizens.CITY_CITIZEN_TASK_PHASE_PERFORMING:
-			return _advance_performing_player_command_task(context)
+			return _advance_performing_player_command_task(city_state, context)
 
 		CityCitizens.CITY_CITIZEN_TASK_PHASE_BLOCKED:
 			_release_player_command_task(
+				city_state,
 				int(context.get("citizen_id", -1)),
 				int(context.get("command_id", -1)),
 				true
 			)
 
 		_:
-			_clear_invalid_task(int(context.get("citizen_id", -1)))
+			_clear_invalid_task(
+				city_state,
+				int(context.get("citizen_id", -1))
+			)
 
 	return int(context.get("path_requests_remaining", 0))
 
 
 static func _make_player_command_task_context(
+	city_state: CitySettlementSimulationState,
 	city_world: WorldData,
 	values: Dictionary
 ) -> Dictionary:
@@ -633,18 +808,27 @@ static func _make_player_command_task_context(
 		0
 	)
 	var command_id := int(current_task.get("target_object_id", -1))
-	var command := CityWorkSystem.get_city_player_command_by_id(command_id)
+	var command := CityWorkSystem.get_city_player_command_by_id_for_city_state(
+		city_state,
+		command_id
+	)
 
 	if (
 		command.is_empty()
 		or int(command.get("claimed_citizen_id", -1)) != citizen_id
 		or int(citizen.get("job_object_id", -1)) > 0
 	):
-		_clear_invalid_task(citizen_id)
+		_clear_invalid_task(city_state, citizen_id)
 		return {}
 
-	if not CityWorkSystem.is_city_player_command_target_valid(command):
-		CityWorkSystem.cancel_city_player_command(command_id)
+	if not CityWorkSystem.is_city_player_command_target_valid_for_city_state(
+		city_state,
+		command
+	):
+		CityWorkSystem.cancel_city_player_command_for_city_state(
+			city_state,
+			command_id
+		)
 		return {}
 
 	var raw_command_tile = command.get(
@@ -657,16 +841,27 @@ static func _make_player_command_task_context(
 	)
 
 	if not raw_command_tile is Vector2i or not raw_current_tile is Vector2i:
-		_release_player_command_task(citizen_id, command_id, true)
+		_release_player_command_task(
+			city_state,
+			citizen_id,
+			command_id,
+			true
+		)
 		return {}
 
-	var work_tiles := CityWorkSystem.get_city_player_command_work_tiles(
+	var work_tiles := CityWorkSystem.get_city_player_command_work_tiles_for_city_state(
+		city_state,
 		command,
 		citizen_id
 	)
 
 	if work_tiles.is_empty():
-		_release_player_command_task(citizen_id, command_id, true)
+		_release_player_command_task(
+			city_state,
+			citizen_id,
+			command_id,
+			true
+		)
 		return {}
 
 	var raw_task_target_tile = current_task.get(
@@ -705,6 +900,7 @@ static func _make_player_command_task_context(
 
 
 static func _advance_pending_player_command_task(
+	city_state: CitySettlementSimulationState,
 	context: Dictionary
 ) -> int:
 	var city_world: WorldData = context.get("city_world")
@@ -722,8 +918,18 @@ static func _advance_pending_player_command_task(
 	)
 
 	if work_tiles.has(current_tile):
-		if not _begin_player_command_work(citizen_id, current_tile, command):
-			_release_player_command_task(citizen_id, command_id, true)
+		if not _begin_player_command_work(
+			city_state,
+			citizen_id,
+			current_tile,
+			command
+		):
+			_release_player_command_task(
+				city_state,
+				citizen_id,
+				command_id,
+				true
+			)
 		return path_requests_remaining
 
 	if movement_state == CityCitizens.CITY_CITIZEN_MOVEMENT_STATE_MOVING:
@@ -733,16 +939,19 @@ static func _advance_pending_player_command_task(
 		return path_requests_remaining
 
 	path_requests_remaining -= 1
-	var path_result := CityNavigationSystemScript.find_path_to_any_city_tile({
+	var path_result := CityNavigationSystemScript.find_path_to_any_city_tile_for_city_state(
+		city_state,
+		{
 		"city_world": city_world,
 		"start_tile": current_tile,
 		"destination_tiles": work_tiles,
 		"max_expanded_nodes": CityNavigationSystemScript.get_city_wide_path_expansion_limit(city_world),
 		"citizen_id": citizen_id,
 		"heuristic_weight": 1,
-	})
+		}
+	)
 	if not bool(path_result.get("success", false)):
-		_release_player_command_task(citizen_id, command_id, true)
+		_release_player_command_task(city_state, citizen_id, command_id, true)
 		return path_requests_remaining
 
 	var raw_path = path_result.get("path", [])
@@ -755,22 +964,27 @@ static func _advance_pending_player_command_task(
 		not raw_path is Array
 		or not raw_destination_tile is Vector2i
 		or not work_tiles.has(raw_destination_tile)
-		or not CityCitizenTaskRuntimeSystem.set_city_citizen_task_activity_state({
+		or not CityCitizenTaskRuntimeSystem.set_city_citizen_task_activity_state_for_city_state(
+			city_state,
+			{
 			"citizen_id": citizen_id,
 			"target_tile": raw_destination_tile,
 			"next_action_world_minute": (
 				CityCitizens.INVALID_CITY_CITIZEN_TASK_ACTION_WORLD_MINUTE
 			),
-		})
-		or not CityCitizenMovementRuntimeSystem.assign_city_citizen_movement_order(
+			}
+		)
+		or not CityCitizenMovementRuntimeSystem.assign_city_citizen_movement_order_for_city_state(
+			city_state,
 			citizen_id,
 			raw_path
 		)
 	):
-		_release_player_command_task(citizen_id, command_id, true)
+		_release_player_command_task(city_state, citizen_id, command_id, true)
 		return path_requests_remaining
 
-	CityCitizenTaskRuntimeSystem.set_city_citizen_task_phase(
+	CityCitizenTaskRuntimeSystem.set_city_citizen_task_phase_for_city_state(
+		city_state,
 		citizen_id,
 		CityCitizens.CITY_CITIZEN_TASK_PHASE_TRAVELING
 	)
@@ -778,6 +992,7 @@ static func _advance_pending_player_command_task(
 
 
 static func _advance_traveling_player_command_task(
+	city_state: CitySettlementSimulationState,
 	context: Dictionary
 ) -> int:
 	var citizen_id := int(context.get("citizen_id", -1))
@@ -798,18 +1013,29 @@ static func _advance_traveling_player_command_task(
 	)
 
 	if work_tiles.has(current_tile) and current_tile == target_tile:
-		if not _begin_player_command_work(citizen_id, target_tile, command):
-			_release_player_command_task(citizen_id, command_id, true)
+		if not _begin_player_command_work(
+			city_state,
+			citizen_id,
+			target_tile,
+			command
+		):
+			_release_player_command_task(
+				city_state,
+				citizen_id,
+				command_id,
+				true
+			)
 		return path_requests_remaining
 
 	if movement_state == CityCitizens.CITY_CITIZEN_MOVEMENT_STATE_MOVING:
 		return path_requests_remaining
 
 	if movement_state == CityCitizens.CITY_CITIZEN_MOVEMENT_STATE_BLOCKED:
-		_release_player_command_task(citizen_id, command_id, true)
+		_release_player_command_task(city_state, citizen_id, command_id, true)
 		return path_requests_remaining
 
-	CityCitizenTaskRuntimeSystem.set_city_citizen_task_phase(
+	CityCitizenTaskRuntimeSystem.set_city_citizen_task_phase_for_city_state(
+		city_state,
 		citizen_id,
 		CityCitizens.CITY_CITIZEN_TASK_PHASE_PENDING
 	)
@@ -817,6 +1043,7 @@ static func _advance_traveling_player_command_task(
 
 
 static func _advance_performing_player_command_task(
+	city_state: CitySettlementSimulationState,
 	context: Dictionary
 ) -> int:
 	var citizen_id := int(context.get("citizen_id", -1))
@@ -835,14 +1062,18 @@ static func _advance_performing_player_command_task(
 	)
 
 	if current_tile != target_tile:
-		CityCitizenTaskRuntimeSystem.set_city_citizen_task_activity_state({
+		CityCitizenTaskRuntimeSystem.set_city_citizen_task_activity_state_for_city_state(
+			city_state,
+			{
 			"citizen_id": citizen_id,
 			"target_tile": target_tile,
 			"next_action_world_minute": (
 				CityCitizens.INVALID_CITY_CITIZEN_TASK_ACTION_WORLD_MINUTE
 			),
-		})
-		CityCitizenTaskRuntimeSystem.set_city_citizen_task_phase(
+			}
+		)
+		CityCitizenTaskRuntimeSystem.set_city_citizen_task_phase_for_city_state(
+			city_state,
 			citizen_id,
 			CityCitizens.CITY_CITIZEN_TASK_PHASE_PENDING
 		)
@@ -861,24 +1092,36 @@ static func _advance_performing_player_command_task(
 	):
 		return path_requests_remaining
 
-	if CityWorkSystem.complete_city_player_command(command_id, citizen_id):
-		CityCitizenTaskRuntimeSystem.clear_city_citizen_task(
+	if CityWorkSystem.complete_city_player_command_for_city_state(
+		city_state,
+		command_id,
+		citizen_id
+	):
+		CityCitizenTaskRuntimeSystem.clear_city_citizen_task_for_city_state(
+			city_state,
 			citizen_id,
 			CityCitizens.CITY_CITIZEN_TASK_SOURCE_PLAYER
 		)
-		CityCitizenMovementRuntimeSystem.cancel_city_citizen_movement(citizen_id)
+		CityCitizenMovementRuntimeSystem.cancel_city_citizen_movement_for_city_state(
+			city_state,
+			citizen_id
+		)
 	else:
-		_release_player_command_task(citizen_id, command_id, true)
+		_release_player_command_task(city_state, citizen_id, command_id, true)
 
 	return path_requests_remaining
 
 
 static func _begin_player_command_work(
+	city_state: CitySettlementSimulationState,
 	citizen_id: int,
 	target_tile: Vector2i,
 	command: Dictionary
 ) -> bool:
-	CityCitizenMovementRuntimeSystem.cancel_city_citizen_movement(citizen_id)
+	CityCitizenMovementRuntimeSystem.cancel_city_citizen_movement_for_city_state(
+		city_state,
+		citizen_id
+	)
 
 	var work_duration_minutes := maxi(
 		int(
@@ -890,23 +1133,28 @@ static func _begin_player_command_work(
 		1
 	)
 
-	if not CityCitizenTaskRuntimeSystem.set_city_citizen_task_activity_state({
+	if not CityCitizenTaskRuntimeSystem.set_city_citizen_task_activity_state_for_city_state(
+		city_state,
+		{
 		"citizen_id": citizen_id,
 		"target_tile": target_tile,
 		"next_action_world_minute": (
 			SimulationClock.absolute_world_minutes
 			+ work_duration_minutes
 		),
-	}):
+		}
+	):
 		return false
 
-	return CityCitizenTaskRuntimeSystem.set_city_citizen_task_phase(
+	return CityCitizenTaskRuntimeSystem.set_city_citizen_task_phase_for_city_state(
+		city_state,
 		citizen_id,
 		CityCitizens.CITY_CITIZEN_TASK_PHASE_PERFORMING
 	)
 
 
 static func _release_player_command_task(
+	city_state: CitySettlementSimulationState,
 	citizen_id: int,
 	command_id: int,
 	blocked: bool
@@ -919,16 +1167,21 @@ static func _release_player_command_task(
 			+ CityWorkSystem.CITY_PLAYER_COMMAND_BLOCKED_RETRY_DELAY_MINUTES
 		)
 
-	CityWorkSystem.release_city_player_command_claim(
+	CityWorkSystem.release_city_player_command_claim_for_city_state(
+		city_state,
 		command_id,
 		citizen_id,
 		retry_minute
 	)
-	CityCitizenTaskRuntimeSystem.clear_city_citizen_task(
+	CityCitizenTaskRuntimeSystem.clear_city_citizen_task_for_city_state(
+		city_state,
 		citizen_id,
 		CityCitizens.CITY_CITIZEN_TASK_SOURCE_PLAYER
 	)
-	CityCitizenMovementRuntimeSystem.cancel_city_citizen_movement(citizen_id)
+	CityCitizenMovementRuntimeSystem.cancel_city_citizen_movement_for_city_state(
+		city_state,
+		citizen_id
+	)
 
 
 #endregion
@@ -936,10 +1189,15 @@ static func _release_player_command_task(
 #region Work Task
 
 static func _advance_work_task(
+	city_state: CitySettlementSimulationState,
 	city_world: WorldData,
 	values: Dictionary
 ) -> int:
-	var context := _make_work_task_advance_context(city_world, values)
+	var context := _make_work_task_advance_context(
+		city_state,
+		city_world,
+		values
+	)
 	var path_requests_remaining := maxi(
 		int(values.get("path_requests_remaining", 0)),
 		0
@@ -955,23 +1213,28 @@ static func _advance_work_task(
 		)
 	):
 		CityCitizens.CITY_CITIZEN_TASK_PHASE_PENDING:
-			return _advance_pending_work_task(context)
+			return _advance_pending_work_task(city_state, context)
 
 		CityCitizens.CITY_CITIZEN_TASK_PHASE_TRAVELING:
-			return _advance_traveling_work_task(context)
+			return _advance_traveling_work_task(city_state, context)
 
 		CityCitizens.CITY_CITIZEN_TASK_PHASE_PERFORMING:
-			return _advance_performing_work_task(context)
+			return _advance_performing_work_task(city_state, context)
 
 		CityCitizens.CITY_CITIZEN_TASK_PHASE_BLOCKED:
-			return _advance_blocked_work_task(context)
+			return _advance_blocked_work_task(city_state, context)
 
 		_:
-			_set_work_task_blocked(int(context.get("citizen_id", -1)))
+			_set_work_task_blocked(
+				city_state,
+				context.get("work_activity_claim_counts", {}),
+				int(context.get("citizen_id", -1))
+			)
 			return int(context.get("path_requests_remaining", 0))
 
 
 static func _make_work_task_advance_context(
+	city_state: CitySettlementSimulationState,
 	city_world: WorldData,
 	values: Dictionary
 ) -> Dictionary:
@@ -983,7 +1246,14 @@ static func _make_work_task_advance_context(
 		0
 	)
 	var workplace_id := int(current_task.get("target_object_id", -1))
-	var workplace := CityObjectSystem.get_city_object_by_id(workplace_id)
+	var workplace := CityObjectSystem.get_city_object_by_id_for_city_state(
+		city_state,
+		workplace_id
+	)
+	var work_activity_claim_counts: Dictionary = values.get(
+		"work_activity_claim_counts",
+		{}
+	)
 
 	if (
 		workplace_id <= 0
@@ -991,7 +1261,7 @@ static func _make_work_task_advance_context(
 		or not CityObjectCatalog.city_object_is_workplace(workplace)
 		or int(citizen.get("job_object_id", -1)) != workplace_id
 	):
-		_clear_invalid_task(citizen_id)
+		_clear_invalid_task(city_state, citizen_id)
 		return {}
 
 	var movement_policy := CityObjectCatalog.get_city_object_work_movement_policy(
@@ -1006,14 +1276,17 @@ static func _make_work_task_advance_context(
 		dwell_min_minutes
 	)
 	var activity_tiles := (
-		CityActivityLocationResolverScript.get_work_activity_tiles(
+		CityActivityLocationResolverScript.get_work_activity_tiles_for_city_state(
+			city_state,
 			city_world,
 			workplace
 		)
 	)
 	var preferred_activity_tiles := _get_preferred_work_activity_tiles(
+		city_state,
 		activity_tiles,
-		citizen_id
+		citizen_id,
+		work_activity_claim_counts
 	)
 	var raw_current_tile = citizen.get(
 		"city_tile_position",
@@ -1021,7 +1294,11 @@ static func _make_work_task_advance_context(
 	)
 
 	if not raw_current_tile is Vector2i:
-		_set_work_task_blocked(citizen_id)
+		_set_work_task_blocked(
+			city_state,
+			work_activity_claim_counts,
+			citizen_id
+		)
 		return {}
 
 	return {
@@ -1029,6 +1306,7 @@ static func _make_work_task_advance_context(
 		"citizen_id": citizen_id,
 		"citizen": citizen,
 		"current_task": current_task,
+		"work_activity_claim_counts": work_activity_claim_counts,
 		"path_requests_remaining": path_requests_remaining,
 		"tick_index": int(values.get("tick_index", 0)),
 		"workplace_id": workplace_id,
@@ -1080,6 +1358,7 @@ static func _make_work_task_advance_context(
 
 
 static func _make_work_activity_dwell_values(
+	_city_state: CitySettlementSimulationState,
 	context: Dictionary,
 	values: Dictionary = {}
 ) -> Dictionary:
@@ -1110,7 +1389,10 @@ static func _make_work_activity_dwell_values(
 	return dwell_values
 
 
-static func _advance_pending_work_task(context: Dictionary) -> int:
+static func _advance_pending_work_task(
+	city_state: CitySettlementSimulationState,
+	context: Dictionary
+) -> int:
 	var city_world: WorldData = context.get("city_world")
 	var citizen_id := int(context.get("citizen_id", -1))
 	var workplace_id := int(context.get("workplace_id", -1))
@@ -1128,19 +1410,36 @@ static func _advance_pending_work_task(context: Dictionary) -> int:
 	var path_requests_remaining := int(
 		context.get("path_requests_remaining", 0)
 	)
+	var work_activity_claim_counts: Dictionary = context.get(
+		"work_activity_claim_counts",
+		{}
+	)
 
 	if activity_tiles.is_empty():
-		_set_work_task_blocked(citizen_id)
+		_set_work_task_blocked(
+			city_state,
+			work_activity_claim_counts,
+			citizen_id
+		)
 		return path_requests_remaining
 
 	if preferred_activity_tiles.has(current_tile):
 		if movement_state != CityCitizens.CITY_CITIZEN_MOVEMENT_STATE_IDLE:
-			CityCitizenMovementRuntimeSystem.cancel_city_citizen_movement(citizen_id)
+			CityCitizenMovementRuntimeSystem.cancel_city_citizen_movement_for_city_state(
+				city_state,
+				citizen_id
+			)
 
 		if not _begin_work_activity_dwell(
-			_make_work_activity_dwell_values(context)
+			city_state,
+			work_activity_claim_counts,
+			_make_work_activity_dwell_values(city_state, context)
 		):
-			_set_work_task_blocked(citizen_id)
+			_set_work_task_blocked(
+				city_state,
+				work_activity_claim_counts,
+				citizen_id
+			)
 
 		return path_requests_remaining
 
@@ -1148,23 +1447,34 @@ static func _advance_pending_work_task(context: Dictionary) -> int:
 		return path_requests_remaining
 
 	if movement_state == CityCitizens.CITY_CITIZEN_MOVEMENT_STATE_BLOCKED:
-		_set_work_task_blocked(citizen_id)
+		_set_work_task_blocked(
+			city_state,
+			work_activity_claim_counts,
+			citizen_id
+		)
 		return path_requests_remaining
 
 	if path_requests_remaining <= 0:
 		return path_requests_remaining
 
 	path_requests_remaining -= 1
-	var path_result := CityNavigationSystemScript.find_path_to_any_city_tile({
+	var path_result := CityNavigationSystemScript.find_path_to_any_city_tile_for_city_state(
+		city_state,
+		{
 		"city_world": city_world,
 		"start_tile": current_tile,
 		"destination_tiles": preferred_activity_tiles,
 		"max_expanded_nodes": CityNavigationSystemScript.get_city_wide_path_expansion_limit(city_world),
 		"citizen_id": citizen_id,
 		"heuristic_weight": CityNavigationSystem.HEURISTIC_WEIGHT,
-	})
+		}
+	)
 	if not bool(path_result.get("success", false)):
-		_set_work_task_blocked(citizen_id)
+		_set_work_task_blocked(
+			city_state,
+			work_activity_claim_counts,
+			citizen_id
+		)
 		push_warning(
 			"Citizen "
 			+ str(citizen_id)
@@ -1178,7 +1488,11 @@ static func _advance_pending_work_task(context: Dictionary) -> int:
 	var raw_path = path_result.get("path", [])
 
 	if not raw_path is Array:
-		_set_work_task_blocked(citizen_id)
+		_set_work_task_blocked(
+			city_state,
+			work_activity_claim_counts,
+			citizen_id
+		)
 		return path_requests_remaining
 
 	var movement_path: Array = raw_path
@@ -1188,44 +1502,70 @@ static func _advance_pending_work_task(context: Dictionary) -> int:
 	)
 
 	if not raw_selected_destination is Vector2i:
-		_set_work_task_blocked(citizen_id)
+		_set_work_task_blocked(
+			city_state,
+			work_activity_claim_counts,
+			citizen_id
+		)
 		return path_requests_remaining
 
 	var selected_destination: Vector2i = raw_selected_destination
 
 	if not preferred_activity_tiles.has(selected_destination):
-		_set_work_task_blocked(citizen_id)
+		_set_work_task_blocked(
+			city_state,
+			work_activity_claim_counts,
+			citizen_id
+		)
 		return path_requests_remaining
 
-	if not _set_work_task_activity_state({
+	if not _set_work_task_activity_state(
+		city_state,
+		work_activity_claim_counts,
+		{
 		"citizen_id": citizen_id,
 		"target_tile": selected_destination,
-	}):
-		_set_work_task_blocked(citizen_id)
+		}
+	):
+		_set_work_task_blocked(
+			city_state,
+			work_activity_claim_counts,
+			citizen_id
+		)
 		return path_requests_remaining
 
 	if movement_path.size() <= 1:
-		CityCitizenTaskRuntimeSystem.set_city_citizen_task_phase(
+		CityCitizenTaskRuntimeSystem.set_city_citizen_task_phase_for_city_state(
+			city_state,
 			citizen_id,
 			CityCitizens.CITY_CITIZEN_TASK_PHASE_PERFORMING
 		)
 		return path_requests_remaining
 
-	if not CityCitizenMovementRuntimeSystem.assign_city_citizen_movement_order(
+	if not CityCitizenMovementRuntimeSystem.assign_city_citizen_movement_order_for_city_state(
+		city_state,
 		citizen_id,
 		movement_path
 	):
-		_set_work_task_blocked(citizen_id)
+		_set_work_task_blocked(
+			city_state,
+			work_activity_claim_counts,
+			citizen_id
+		)
 		return path_requests_remaining
 
-	CityCitizenTaskRuntimeSystem.set_city_citizen_task_phase(
+	CityCitizenTaskRuntimeSystem.set_city_citizen_task_phase_for_city_state(
+		city_state,
 		citizen_id,
 		CityCitizens.CITY_CITIZEN_TASK_PHASE_TRAVELING
 	)
 	return path_requests_remaining
 
 
-static func _advance_traveling_work_task(context: Dictionary) -> int:
+static func _advance_traveling_work_task(
+	city_state: CitySettlementSimulationState,
+	context: Dictionary
+) -> int:
 	var citizen_id := int(context.get("citizen_id", -1))
 	var workplace_id := int(context.get("workplace_id", -1))
 	var current_task: Dictionary = context.get("current_task", {})
@@ -1238,9 +1578,17 @@ static func _advance_traveling_work_task(context: Dictionary) -> int:
 	var path_requests_remaining := int(
 		context.get("path_requests_remaining", 0)
 	)
+	var work_activity_claim_counts: Dictionary = context.get(
+		"work_activity_claim_counts",
+		{}
+	)
 
 	if movement_state == CityCitizens.CITY_CITIZEN_MOVEMENT_STATE_BLOCKED:
-		_set_work_task_blocked(citizen_id)
+		_set_work_task_blocked(
+			city_state,
+			work_activity_claim_counts,
+			citizen_id
+		)
 	elif movement_state == CityCitizens.CITY_CITIZEN_MOVEMENT_STATE_IDLE:
 		var target_tile: Vector2i = current_task.get(
 			"target_tile",
@@ -1249,16 +1597,29 @@ static func _advance_traveling_work_task(context: Dictionary) -> int:
 
 		if activity_tiles.has(current_tile) and current_tile == target_tile:
 			if not _begin_work_activity_dwell(
-				_make_work_activity_dwell_values(context)
+				city_state,
+				work_activity_claim_counts,
+				_make_work_activity_dwell_values(city_state, context)
 			):
-				_set_work_task_blocked(citizen_id)
+				_set_work_task_blocked(
+					city_state,
+					work_activity_claim_counts,
+					citizen_id
+				)
 		else:
-			_set_work_task_blocked(citizen_id)
+			_set_work_task_blocked(
+				city_state,
+				work_activity_claim_counts,
+				citizen_id
+			)
 
 	return path_requests_remaining
 
 
-static func _advance_performing_work_task(context: Dictionary) -> int:
+static func _advance_performing_work_task(
+	city_state: CitySettlementSimulationState,
+	context: Dictionary
+) -> int:
 	var city_world: WorldData = context.get("city_world")
 	var citizen_id := int(context.get("citizen_id", -1))
 	var workplace_id := int(context.get("workplace_id", -1))
@@ -1279,13 +1640,22 @@ static func _advance_performing_work_task(context: Dictionary) -> int:
 	var maximum_relocations_per_task := int(
 		context.get("maximum_relocations_per_task", 0)
 	)
+	var work_activity_claim_counts: Dictionary = context.get(
+		"work_activity_claim_counts",
+		{}
+	)
 
-	if not CityEmploymentSystem.is_city_citizen_attending_workplace(
+	if not CityEmploymentSystem.is_city_citizen_attending_workplace_for_city_state(
+		city_state,
 		citizen_id,
 		workplace_id,
 		city_world
 	):
-		_set_work_task_blocked(citizen_id)
+		_set_work_task_blocked(
+			city_state,
+			work_activity_claim_counts,
+			citizen_id
+		)
 		return path_requests_remaining
 
 	if (
@@ -1309,9 +1679,15 @@ static func _advance_performing_work_task(context: Dictionary) -> int:
 		== CityCitizens.INVALID_CITY_CITIZEN_TASK_ACTION_WORLD_MINUTE
 	):
 		if not _begin_work_activity_dwell(
-			_make_work_activity_dwell_values(context)
+			city_state,
+			work_activity_claim_counts,
+			_make_work_activity_dwell_values(city_state, context)
 		):
-			_set_work_task_blocked(citizen_id)
+			_set_work_task_blocked(
+				city_state,
+				work_activity_claim_counts,
+				citizen_id
+			)
 		return path_requests_remaining
 
 	if SimulationClock.absolute_world_minutes < next_action_world_minute:
@@ -1352,55 +1728,87 @@ static func _advance_performing_work_task(context: Dictionary) -> int:
 	)
 
 	if new_target_tile == CityCitizens.INVALID_CITY_TILE_POSITION:
-		_set_work_task_blocked(citizen_id)
+		_set_work_task_blocked(
+			city_state,
+			work_activity_claim_counts,
+			citizen_id
+		)
 		return path_requests_remaining
 
 	if new_target_tile == current_tile:
 		if not _begin_work_activity_dwell(
-			_make_work_activity_dwell_values(context, {
+			city_state,
+			work_activity_claim_counts,
+			_make_work_activity_dwell_values(city_state, context, {
 				"relocation_count": relocation_count + 1,
 			})
 		):
-			_set_work_task_blocked(citizen_id)
+			_set_work_task_blocked(
+				city_state,
+				work_activity_claim_counts,
+				citizen_id
+			)
 		return path_requests_remaining
 
 	path_requests_remaining -= 1
 	var relocation_path_result := (
-		CityNavigationSystemScript.find_path_to_any_city_tile({
+		CityNavigationSystemScript.find_path_to_any_city_tile_for_city_state(
+			city_state,
+			{
 			"city_world": city_world,
 			"start_tile": current_tile,
 			"destination_tiles": [new_target_tile],
 			"max_expanded_nodes": CityNavigationSystemScript.get_city_wide_path_expansion_limit(city_world),
 			"citizen_id": citizen_id,
 			"heuristic_weight": CityNavigationSystem.HEURISTIC_WEIGHT
-		})
+			}
+		)
 	)
 
 	if not bool(relocation_path_result.get("success", false)):
 		if not _begin_work_activity_dwell(
-			_make_work_activity_dwell_values(context)
+			city_state,
+			work_activity_claim_counts,
+			_make_work_activity_dwell_values(city_state, context)
 		):
-			_set_work_task_blocked(citizen_id)
+			_set_work_task_blocked(
+				city_state,
+				work_activity_claim_counts,
+				citizen_id
+			)
 		return path_requests_remaining
 
 	var raw_relocation_path = relocation_path_result.get("path", [])
 
 	if not raw_relocation_path is Array:
-		_set_work_task_blocked(citizen_id)
+		_set_work_task_blocked(
+			city_state,
+			work_activity_claim_counts,
+			citizen_id
+		)
 		return path_requests_remaining
 
 	var relocation_path: Array = raw_relocation_path
 
 	if relocation_path.size() <= 1:
 		if not _begin_work_activity_dwell(
-			_make_work_activity_dwell_values(context, {
+			city_state,
+			work_activity_claim_counts,
+			_make_work_activity_dwell_values(city_state, context, {
 				"relocation_count": relocation_count + 1,
 			})
 		):
-			_set_work_task_blocked(citizen_id)
+			_set_work_task_blocked(
+				city_state,
+				work_activity_claim_counts,
+				citizen_id
+			)
 		return path_requests_remaining
 
-	if not _set_work_task_activity_state({
+	if not _set_work_task_activity_state(
+		city_state,
+		work_activity_claim_counts,
+		{
 		"citizen_id": citizen_id,
 		"target_tile": new_target_tile,
 		"previous_target_tile": departing_tile,
@@ -1408,26 +1816,42 @@ static func _advance_performing_work_task(context: Dictionary) -> int:
 			CityCitizens.INVALID_CITY_CITIZEN_TASK_ACTION_WORLD_MINUTE
 		),
 		"relocation_count": relocation_count + 1,
-	}):
-		_set_work_task_blocked(citizen_id)
+		}
+	):
+		_set_work_task_blocked(
+			city_state,
+			work_activity_claim_counts,
+			citizen_id
+		)
 		return path_requests_remaining
 
-	if not CityCitizenMovementRuntimeSystem.assign_city_citizen_movement_order(
+	if not CityCitizenMovementRuntimeSystem.assign_city_citizen_movement_order_for_city_state(
+		city_state,
 		citizen_id,
 		relocation_path
 	):
-		_set_work_task_blocked(citizen_id)
+		_set_work_task_blocked(
+			city_state,
+			work_activity_claim_counts,
+			citizen_id
+		)
 		return path_requests_remaining
 
-	CityCitizenTaskRuntimeSystem.set_city_citizen_task_phase(
+	CityCitizenTaskRuntimeSystem.set_city_citizen_task_phase_for_city_state(
+		city_state,
 		citizen_id,
 		CityCitizens.CITY_CITIZEN_TASK_PHASE_TRAVELING
 	)
 	return path_requests_remaining
 
 
-static func _advance_blocked_work_task(context: Dictionary) -> int:
+static func _advance_blocked_work_task(
+	city_state: CitySettlementSimulationState,
+	context: Dictionary
+) -> int:
 	_retry_blocked_work_task_if_due(
+		city_state,
+		context.get("work_activity_claim_counts", {}),
 		int(context.get("citizen_id", -1)),
 		context.get("current_task", {}),
 		int(context.get("relocation_count", 0))
@@ -1440,10 +1864,15 @@ static func _advance_blocked_work_task(context: Dictionary) -> int:
 #region Return Home Task
 
 static func _advance_return_home_task(
+	city_state: CitySettlementSimulationState,
 	city_world: WorldData,
 	values: Dictionary
 ) -> int:
-	var context := _make_return_home_task_context(city_world, values)
+	var context := _make_return_home_task_context(
+		city_state,
+		city_world,
+		values
+	)
 	var path_requests_remaining := maxi(
 		int(values.get("path_requests_remaining", 0)),
 		0
@@ -1452,7 +1881,7 @@ static func _advance_return_home_task(
 	if context.is_empty():
 		return path_requests_remaining
 
-	if not _prepare_return_home_task_phase(context):
+	if not _prepare_return_home_task_phase(city_state, context):
 		return path_requests_remaining
 
 	var citizen_id := int(context.get("citizen_id", -1))
@@ -1471,7 +1900,10 @@ static func _advance_return_home_task(
 		movement_state == CityCitizens.CITY_CITIZEN_MOVEMENT_STATE_MOVING
 		and task_phase != CityCitizens.CITY_CITIZEN_TASK_PHASE_TRAVELING
 	):
-		CityCitizenMovementRuntimeSystem.cancel_city_citizen_movement(citizen_id)
+		CityCitizenMovementRuntimeSystem.cancel_city_citizen_movement_for_city_state(
+			city_state,
+			citizen_id
+		)
 		movement_state = CityCitizens.CITY_CITIZEN_MOVEMENT_STATE_IDLE
 		context["movement_state"] = movement_state
 
@@ -1479,8 +1911,8 @@ static func _advance_return_home_task(
 		current_tile == assigned_home_tile
 		and movement_state != CityCitizens.CITY_CITIZEN_MOVEMENT_STATE_MOVING
 	):
-		if not _complete_return_home_task(citizen_id):
-			_set_return_home_task_blocked(citizen_id)
+		if not _complete_return_home_task(city_state, citizen_id):
+			_set_return_home_task_blocked(city_state, citizen_id)
 		return path_requests_remaining
 
 	if (
@@ -1490,13 +1922,14 @@ static func _advance_return_home_task(
 		return path_requests_remaining
 
 	if movement_state == CityCitizens.CITY_CITIZEN_MOVEMENT_STATE_BLOCKED:
-		_set_return_home_task_blocked(citizen_id)
+		_set_return_home_task_blocked(city_state, citizen_id)
 		return path_requests_remaining
 
-	return _start_return_home_path(context)
+	return _start_return_home_path(city_state, context)
 
 
 static func _make_return_home_task_context(
+	city_state: CitySettlementSimulationState,
 	city_world: WorldData,
 	values: Dictionary
 ) -> Dictionary:
@@ -1508,8 +1941,14 @@ static func _make_return_home_task_context(
 		0
 	)
 	var home_id := int(current_task.get("target_object_id", -1))
-	var home := CityObjectSystem.get_city_object_by_id(home_id)
-	var resident_ids := CityAssignmentSystem.get_city_object_resident_ids(home)
+	var home := CityObjectSystem.get_city_object_by_id_for_city_state(
+		city_state,
+		home_id
+	)
+	var resident_ids := CityAssignmentSystem.get_city_object_resident_ids_for_city_state(
+		city_state,
+		home
+	)
 
 	if (
 		home_id <= 0
@@ -1518,16 +1957,18 @@ static func _make_return_home_task_context(
 		or not CityObjectSystem.city_object_supports_citizen_interior(home)
 		or int(citizen.get("home_object_id", -1)) != home_id
 		or not resident_ids.has(citizen_id)
-		or not CityNavigationSystem.city_citizen_can_access_object_interior(
+		or not CityNavigationSystem.city_citizen_can_access_object_interior_for_city_state(
+			city_state,
 			citizen_id,
 			home
 		)
 	):
-		_clear_invalid_task(citizen_id)
+		_clear_invalid_task(city_state, citizen_id)
 		return {}
 
 	var home_tiles := (
-		CityActivityLocationResolverScript.get_object_interior_activity_tiles(
+		CityActivityLocationResolverScript.get_object_interior_activity_tiles_for_city_state(
+			city_state,
 			city_world,
 			home,
 			citizen_id
@@ -1539,14 +1980,14 @@ static func _make_return_home_task_context(
 	)
 
 	if not raw_current_tile is Vector2i or home_tiles.is_empty():
-		_set_return_home_task_blocked(citizen_id)
+		_set_return_home_task_blocked(city_state, citizen_id)
 		return {}
 
 	resident_ids.sort()
 	var resident_index := resident_ids.find(citizen_id)
 
 	if resident_index < 0:
-		_clear_invalid_task(citizen_id)
+		_clear_invalid_task(city_state, citizen_id)
 		return {}
 
 	return {
@@ -1574,6 +2015,7 @@ static func _make_return_home_task_context(
 
 
 static func _prepare_return_home_task_phase(
+	city_state: CitySettlementSimulationState,
 	context: Dictionary
 ) -> bool:
 	var citizen_id := int(context.get("citizen_id", -1))
@@ -1592,15 +2034,20 @@ static func _prepare_return_home_task_phase(
 			retry_world_minute
 			== CityCitizens.INVALID_CITY_CITIZEN_TASK_ACTION_WORLD_MINUTE
 		):
-			_set_return_home_task_blocked(citizen_id)
+			_set_return_home_task_blocked(city_state, citizen_id)
 			return false
 
 		if SimulationClock.absolute_world_minutes < retry_world_minute:
 			return false
 
-		CityCitizenMovementRuntimeSystem.cancel_city_citizen_movement(citizen_id)
+		CityCitizenMovementRuntimeSystem.cancel_city_citizen_movement_for_city_state(
+			city_state,
+			citizen_id
+		)
 
-		if not CityCitizenTaskRuntimeSystem.set_city_citizen_task_activity_state({
+		if not CityCitizenTaskRuntimeSystem.set_city_citizen_task_activity_state_for_city_state(
+			city_state,
+			{
 			"citizen_id": citizen_id,
 			"target_tile": CityCitizens.INVALID_CITY_TILE_POSITION,
 			"previous_target_tile": CityCitizens.INVALID_CITY_TILE_POSITION,
@@ -1608,15 +2055,17 @@ static func _prepare_return_home_task_phase(
 				CityCitizens.INVALID_CITY_CITIZEN_TASK_ACTION_WORLD_MINUTE
 			),
 			"relocation_count": 0,
-		}):
-			_set_return_home_task_blocked(citizen_id)
+			}
+		):
+			_set_return_home_task_blocked(city_state, citizen_id)
 			return false
 
-		if not CityCitizenTaskRuntimeSystem.set_city_citizen_task_phase(
+		if not CityCitizenTaskRuntimeSystem.set_city_citizen_task_phase_for_city_state(
+			city_state,
 			citizen_id,
 			CityCitizens.CITY_CITIZEN_TASK_PHASE_PENDING
 		):
-			_set_return_home_task_blocked(citizen_id)
+			_set_return_home_task_blocked(city_state, citizen_id)
 			return false
 
 		context["task_phase"] = CityCitizens.CITY_CITIZEN_TASK_PHASE_PENDING
@@ -1630,13 +2079,16 @@ static func _prepare_return_home_task_phase(
 		and task_phase != CityCitizens.CITY_CITIZEN_TASK_PHASE_TRAVELING
 		and task_phase != CityCitizens.CITY_CITIZEN_TASK_PHASE_PERFORMING
 	):
-		_set_return_home_task_blocked(citizen_id)
+		_set_return_home_task_blocked(city_state, citizen_id)
 		return false
 
 	return true
 
 
-static func _start_return_home_path(context: Dictionary) -> int:
+static func _start_return_home_path(
+	city_state: CitySettlementSimulationState,
+	context: Dictionary
+) -> int:
 	var path_requests_remaining := int(
 		context.get("path_requests_remaining", 0)
 	)
@@ -1655,16 +2107,19 @@ static func _start_return_home_path(context: Dictionary) -> int:
 		CityCitizens.INVALID_CITY_TILE_POSITION
 	)
 	path_requests_remaining -= 1
-	var path_result := CityNavigationSystemScript.find_path_to_any_city_tile({
+	var path_result := CityNavigationSystemScript.find_path_to_any_city_tile_for_city_state(
+		city_state,
+		{
 		"city_world": city_world,
 		"start_tile": current_tile,
 		"destination_tiles": [assigned_home_tile],
 		"max_expanded_nodes": CityNavigationSystemScript.get_city_wide_path_expansion_limit(city_world),
 		"citizen_id": citizen_id,
 		"heuristic_weight": CityNavigationSystem.HEURISTIC_WEIGHT,
-	})
+		}
+	)
 	if not bool(path_result.get("success", false)):
-		_set_return_home_task_blocked(citizen_id)
+		_set_return_home_task_blocked(city_state, citizen_id)
 		return path_requests_remaining
 
 	var raw_path = path_result.get("path", [])
@@ -1678,31 +2133,36 @@ static func _start_return_home_path(context: Dictionary) -> int:
 		or not raw_destination_tile is Vector2i
 		or raw_destination_tile != assigned_home_tile
 	):
-		_set_return_home_task_blocked(citizen_id)
+		_set_return_home_task_blocked(city_state, citizen_id)
 		return path_requests_remaining
 
 	var movement_path: Array = raw_path
 
-	if not CityCitizenTaskRuntimeSystem.set_city_citizen_task_activity_state({
+	if not CityCitizenTaskRuntimeSystem.set_city_citizen_task_activity_state_for_city_state(
+		city_state,
+		{
 		"citizen_id": citizen_id,
 		"target_tile": assigned_home_tile,
-	}):
-		_set_return_home_task_blocked(citizen_id)
+		}
+	):
+		_set_return_home_task_blocked(city_state, citizen_id)
 		return path_requests_remaining
 
 	if movement_path.size() <= 1:
-		if not _complete_return_home_task(citizen_id):
-			_set_return_home_task_blocked(citizen_id)
+		if not _complete_return_home_task(city_state, citizen_id):
+			_set_return_home_task_blocked(city_state, citizen_id)
 		return path_requests_remaining
 
-	if not CityCitizenMovementRuntimeSystem.assign_city_citizen_movement_order(
+	if not CityCitizenMovementRuntimeSystem.assign_city_citizen_movement_order_for_city_state(
+		city_state,
 		citizen_id,
 		movement_path
 	):
-		_set_return_home_task_blocked(citizen_id)
+		_set_return_home_task_blocked(city_state, citizen_id)
 		return path_requests_remaining
 
-	CityCitizenTaskRuntimeSystem.set_city_citizen_task_phase(
+	CityCitizenTaskRuntimeSystem.set_city_citizen_task_phase_for_city_state(
+		city_state,
 		citizen_id,
 		CityCitizens.CITY_CITIZEN_TASK_PHASE_TRAVELING
 	)
@@ -1710,10 +2170,14 @@ static func _start_return_home_path(context: Dictionary) -> int:
 
 
 static func _complete_return_home_task(
+	city_state: CitySettlementSimulationState,
 	citizen_id: int
 ) -> bool:
 	var current_task := (
-		CityCitizenTaskRuntimeSystem.get_city_citizen_current_task(citizen_id)
+		CityCitizenTaskRuntimeSystem.get_city_citizen_current_task_for_city_state(
+			city_state,
+			citizen_id
+		)
 	)
 	var task_source := str(
 		current_task.get(
@@ -1725,19 +2189,27 @@ static func _complete_return_home_task(
 	if task_source == CityCitizens.CITY_CITIZEN_TASK_SOURCE_NONE:
 		return false
 
-	CityCitizenMovementRuntimeSystem.cancel_city_citizen_movement(citizen_id)
+	CityCitizenMovementRuntimeSystem.cancel_city_citizen_movement_for_city_state(
+		city_state,
+		citizen_id
+	)
 
-	return CityCitizenTaskRuntimeSystem.clear_city_citizen_task(
+	return CityCitizenTaskRuntimeSystem.clear_city_citizen_task_for_city_state(
+		city_state,
 		citizen_id,
 		task_source
 	)
 
 
 static func _set_return_home_task_blocked(
+	city_state: CitySettlementSimulationState,
 	citizen_id: int
 ) -> void:
 	var current_task := (
-		CityCitizenTaskRuntimeSystem.get_city_citizen_current_task(citizen_id)
+		CityCitizenTaskRuntimeSystem.get_city_citizen_current_task_for_city_state(
+			city_state,
+			citizen_id
+		)
 	)
 	var target_tile = current_task.get(
 		"target_tile",
@@ -1747,8 +2219,13 @@ static func _set_return_home_task_blocked(
 	if not target_tile is Vector2i:
 		target_tile = CityCitizens.INVALID_CITY_TILE_POSITION
 
-	CityCitizenMovementRuntimeSystem.cancel_city_citizen_movement(citizen_id)
-	CityCitizenTaskRuntimeSystem.set_city_citizen_task_activity_state({
+	CityCitizenMovementRuntimeSystem.cancel_city_citizen_movement_for_city_state(
+		city_state,
+		citizen_id
+	)
+	CityCitizenTaskRuntimeSystem.set_city_citizen_task_activity_state_for_city_state(
+		city_state,
+		{
 		"citizen_id": citizen_id,
 		"target_tile": target_tile,
 		"previous_target_tile": (
@@ -1759,8 +2236,10 @@ static func _set_return_home_task_blocked(
 			+ BLOCKED_RETURN_HOME_TASK_RETRY_DELAY_MINUTES
 		),
 		"relocation_count": 0,
-	})
-	CityCitizenTaskRuntimeSystem.set_city_citizen_task_phase(
+		}
+	)
+	CityCitizenTaskRuntimeSystem.set_city_citizen_task_phase_for_city_state(
+		city_state,
 		citizen_id,
 		CityCitizens.CITY_CITIZEN_TASK_PHASE_BLOCKED
 	)
@@ -1771,12 +2250,14 @@ static func _set_return_home_task_blocked(
 #region Work Activity Placement and Dwell
 
 static func _build_work_activity_claim_counts(
+	city_state: CitySettlementSimulationState,
 	active_task_ids: Array[int]
 ) -> Dictionary:
 	var claim_counts: Dictionary = {}
 
 	for citizen_id in active_task_ids:
-		var citizen := CityCitizenRegistrySystem.get_city_citizen_by_id(
+		var citizen := _get_city_citizen_by_id(
+			city_state,
 			citizen_id
 		)
 
@@ -1787,7 +2268,8 @@ static func _build_work_activity_claim_counts(
 			continue
 
 		var current_task := (
-			CityCitizenTaskRuntimeSystem.get_city_citizen_current_task(
+			CityCitizenTaskRuntimeSystem.get_city_citizen_current_task_for_city_state(
+				city_state,
 				citizen_id
 			)
 		)
@@ -1834,12 +2316,15 @@ static func _build_work_activity_claim_counts(
 
 
 static func _get_preferred_work_activity_tiles(
+	city_state: CitySettlementSimulationState,
 	activity_tiles: Array[Vector2i],
-	citizen_id: int
+	citizen_id: int,
+	work_activity_claim_counts: Dictionary
 ) -> Array[Vector2i]:
 	var unclaimed_tiles: Array[Vector2i] = []
 	var current_task := (
-		CityCitizenTaskRuntimeSystem.get_city_citizen_current_task(
+		CityCitizenTaskRuntimeSystem.get_city_citizen_current_task_for_city_state(
+			city_state,
 			citizen_id
 		)
 	)
@@ -1850,7 +2335,7 @@ static func _get_preferred_work_activity_tiles(
 
 	for candidate_tile in activity_tiles:
 		var other_claim_count := int(
-			_work_activity_claim_counts.get(
+			work_activity_claim_counts.get(
 				candidate_tile,
 				0
 			)
@@ -1875,6 +2360,8 @@ static func _get_preferred_work_activity_tiles(
 
 
 static func _set_work_task_activity_state(
+	city_state: CitySettlementSimulationState,
+	work_activity_claim_counts: Dictionary,
 	values: Dictionary
 ) -> bool:
 	if not values.has("citizen_id") or not values.has("target_tile"):
@@ -1912,7 +2399,8 @@ static func _set_work_task_activity_state(
 		values.get("relocation_count", -1)
 	)
 	var current_task := (
-		CityCitizenTaskRuntimeSystem.get_city_citizen_current_task(
+		CityCitizenTaskRuntimeSystem.get_city_citizen_current_task_for_city_state(
+			city_state,
 			citizen_id
 		)
 	)
@@ -1925,16 +2413,21 @@ static func _set_work_task_activity_state(
 	if raw_old_target_tile is Vector2i:
 		old_target_tile = raw_old_target_tile
 
-	if not CityCitizenTaskRuntimeSystem.set_city_citizen_task_activity_state({
+	if not CityCitizenTaskRuntimeSystem.set_city_citizen_task_activity_state_for_city_state(
+		city_state,
+		{
 		"citizen_id": citizen_id,
 		"target_tile": target_tile,
 		"previous_target_tile": previous_target_tile,
 		"next_action_world_minute": next_action_world_minute,
 		"relocation_count": relocation_count,
-	}):
+		}
+	):
 		return false
 
 	_replace_work_activity_claim(
+		city_state,
+		work_activity_claim_counts,
 		old_target_tile,
 		target_tile
 	)
@@ -1942,6 +2435,8 @@ static func _set_work_task_activity_state(
 
 
 static func _replace_work_activity_claim(
+	_city_state: CitySettlementSimulationState,
+	work_activity_claim_counts: Dictionary,
 	old_target_tile: Vector2i,
 	new_target_tile: Vector2i
 ) -> void:
@@ -1950,25 +2445,25 @@ static func _replace_work_activity_claim(
 
 	if old_target_tile != CityCitizens.INVALID_CITY_TILE_POSITION:
 		var old_claim_count := int(
-			_work_activity_claim_counts.get(
+			work_activity_claim_counts.get(
 				old_target_tile,
 				0
 			)
 		)
 
 		if old_claim_count <= 1:
-			_work_activity_claim_counts.erase(
+			work_activity_claim_counts.erase(
 				old_target_tile
 			)
 		else:
-			_work_activity_claim_counts[old_target_tile] = (
+			work_activity_claim_counts[old_target_tile] = (
 				old_claim_count - 1
 			)
 
 	if new_target_tile != CityCitizens.INVALID_CITY_TILE_POSITION:
-		_work_activity_claim_counts[new_target_tile] = (
+		work_activity_claim_counts[new_target_tile] = (
 			int(
-				_work_activity_claim_counts.get(
+				work_activity_claim_counts.get(
 					new_target_tile,
 					0
 				)
@@ -1977,6 +2472,7 @@ static func _replace_work_activity_claim(
 		)
 
 static func _get_deterministic_dwell_minutes(
+	_city_state: CitySettlementSimulationState,
 	values: Dictionary
 ) -> int:
 	var citizen_id := int(values["citizen_id"])
@@ -2001,9 +2497,11 @@ static func _get_deterministic_dwell_minutes(
 
 
 static func _begin_work_activity_dwell(
+	city_state: CitySettlementSimulationState,
+	work_activity_claim_counts: Dictionary,
 	values: Dictionary
 ) -> bool:
-	if not _has_valid_work_activity_dwell_values(values):
+	if not _has_valid_work_activity_dwell_values(city_state, values):
 		return false
 
 	var citizen_id := int(values["citizen_id"])
@@ -2021,6 +2519,7 @@ static func _begin_work_activity_dwell(
 
 	if relocation_count < maximum_relocations_per_task:
 		var dwell_minutes := _get_deterministic_dwell_minutes(
+			city_state,
 			values
 		)
 		next_action_world_minute = (
@@ -2028,22 +2527,28 @@ static func _begin_work_activity_dwell(
 			+ dwell_minutes
 		)
 
-	if not _set_work_task_activity_state({
+	if not _set_work_task_activity_state(
+		city_state,
+		work_activity_claim_counts,
+		{
 		"citizen_id": citizen_id,
 		"target_tile": target_tile,
 		"previous_target_tile": previous_target_tile,
 		"next_action_world_minute": next_action_world_minute,
 		"relocation_count": relocation_count,
-	}):
+		}
+	):
 		return false
 
-	return CityCitizenTaskRuntimeSystem.set_city_citizen_task_phase(
+	return CityCitizenTaskRuntimeSystem.set_city_citizen_task_phase_for_city_state(
+		city_state,
 		citizen_id,
 		CityCitizens.CITY_CITIZEN_TASK_PHASE_PERFORMING
 	)
 
 
 static func _has_valid_work_activity_dwell_values(
+	_city_state: CitySettlementSimulationState,
 	values: Dictionary
 ) -> bool:
 	for raw_key in WORK_ACTIVITY_DWELL_REQUIRED_KEYS:
@@ -2075,6 +2580,8 @@ static func _has_valid_work_activity_dwell_values(
 #region Blocked Task Recovery and Cleanup
 
 static func _retry_blocked_work_task_if_due(
+	city_state: CitySettlementSimulationState,
+	work_activity_claim_counts: Dictionary,
 	citizen_id: int,
 	current_task: Dictionary,
 	relocation_count: int
@@ -2090,15 +2597,25 @@ static func _retry_blocked_work_task_if_due(
 		retry_world_minute
 		== CityCitizens.INVALID_CITY_CITIZEN_TASK_ACTION_WORLD_MINUTE
 	):
-		_set_work_task_blocked(citizen_id)
+		_set_work_task_blocked(
+			city_state,
+			work_activity_claim_counts,
+			citizen_id
+		)
 		return
 
 	if SimulationClock.absolute_world_minutes < retry_world_minute:
 		return
 
-	CityCitizenMovementRuntimeSystem.cancel_city_citizen_movement(citizen_id)
+	CityCitizenMovementRuntimeSystem.cancel_city_citizen_movement_for_city_state(
+		city_state,
+		citizen_id
+	)
 
-	if not _set_work_task_activity_state({
+	if not _set_work_task_activity_state(
+		city_state,
+		work_activity_claim_counts,
+		{
 		"citizen_id": citizen_id,
 		"target_tile": CityCitizens.INVALID_CITY_TILE_POSITION,
 		"previous_target_tile": (
@@ -2108,20 +2625,35 @@ static func _retry_blocked_work_task_if_due(
 			CityCitizens.INVALID_CITY_CITIZEN_TASK_ACTION_WORLD_MINUTE
 		),
 		"relocation_count": relocation_count,
-	}):
-		_set_work_task_blocked(citizen_id)
+		}
+	):
+		_set_work_task_blocked(
+			city_state,
+			work_activity_claim_counts,
+			citizen_id
+		)
 		return
 
-	if not CityCitizenTaskRuntimeSystem.set_city_citizen_task_phase(
+	if not CityCitizenTaskRuntimeSystem.set_city_citizen_task_phase_for_city_state(
+		city_state,
 		citizen_id,
 		CityCitizens.CITY_CITIZEN_TASK_PHASE_PENDING
 	):
-		_set_work_task_blocked(citizen_id)
+		_set_work_task_blocked(
+			city_state,
+			work_activity_claim_counts,
+			citizen_id
+		)
 
 
-static func _set_work_task_blocked(citizen_id: int) -> void:
+static func _set_work_task_blocked(
+	city_state: CitySettlementSimulationState,
+	work_activity_claim_counts: Dictionary,
+	citizen_id: int
+) -> void:
 	var current_task := (
-		CityCitizenTaskRuntimeSystem.get_city_citizen_current_task(
+		CityCitizenTaskRuntimeSystem.get_city_citizen_current_task_for_city_state(
+			city_state,
 			citizen_id
 		)
 	)
@@ -2153,25 +2685,40 @@ static func _set_work_task_blocked(citizen_id: int) -> void:
 		+ BLOCKED_WORK_TASK_RETRY_DELAY_MINUTES
 	)
 
-	CityCitizenMovementRuntimeSystem.cancel_city_citizen_movement(citizen_id)
-	_set_work_task_activity_state({
+	CityCitizenMovementRuntimeSystem.cancel_city_citizen_movement_for_city_state(
+		city_state,
+		citizen_id
+	)
+	_set_work_task_activity_state(
+		city_state,
+		work_activity_claim_counts,
+		{
 		"citizen_id": citizen_id,
 		"target_tile": target_tile,
 		"previous_target_tile": previous_target_tile,
 		"next_action_world_minute": retry_world_minute,
 		"relocation_count": relocation_count,
-	})
-	CityCitizenTaskRuntimeSystem.set_city_citizen_task_phase(
+		}
+	)
+	CityCitizenTaskRuntimeSystem.set_city_citizen_task_phase_for_city_state(
+		city_state,
 		citizen_id,
 		CityCitizens.CITY_CITIZEN_TASK_PHASE_BLOCKED
 	)
 
-static func _clear_invalid_task(citizen_id: int) -> void:
-	CityCitizenTaskRuntimeSystem.clear_city_citizen_task(
+static func _clear_invalid_task(
+	city_state: CitySettlementSimulationState,
+	citizen_id: int
+) -> void:
+	CityCitizenTaskRuntimeSystem.clear_city_citizen_task_for_city_state(
+		city_state,
 		citizen_id,
 		CityCitizens.CITY_CITIZEN_TASK_SOURCE_PLAYER
 	)
-	CityCitizenMovementRuntimeSystem.cancel_city_citizen_movement(citizen_id)
+	CityCitizenMovementRuntimeSystem.cancel_city_citizen_movement_for_city_state(
+		city_state,
+		citizen_id
+	)
 
 
 

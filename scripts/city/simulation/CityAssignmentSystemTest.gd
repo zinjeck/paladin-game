@@ -8,6 +8,7 @@ var failure_count: int = 0
 func _ready() -> void:
 	_test_bidirectional_repair_capacity_and_idempotence()
 	_test_atomic_mutation_and_removed_building_reassignment()
+	_test_automatic_staffing_capacity_and_task_cleanup()
 	WorldData.reset_runtime_session_state()
 
 	if failure_count > 0:
@@ -246,11 +247,266 @@ func _test_atomic_mutation_and_removed_building_reassignment() -> void:
 	)
 
 
+func _test_automatic_staffing_capacity_and_task_cleanup() -> void:
+	var fixture := _make_assignment_fixture(99_103)
+	if fixture.is_empty():
+		return
+
+	var house_a_id := int(fixture.get("house_a_id", -1))
+	var fishery_a_id := int(fixture.get("fishery_a_id", -1))
+	var fishery_b_id := int(fixture.get("fishery_b_id", -1))
+	var citizen_ids: Array = fixture.get("citizen_ids", []).duplicate()
+	if citizen_ids.size() != 3:
+		return
+
+	var return_home_citizen_id := int(citizen_ids[1])
+	var work_citizen_id := int(citizen_ids[2])
+	_expect(
+		CityAssignmentSystem.assign_city_citizen_home(
+			return_home_citizen_id,
+			house_a_id
+		)
+		and _assign_task_and_movement(
+			return_home_citizen_id,
+			CityCitizens.CITY_CITIZEN_TASK_KIND_RETURN_HOME,
+			house_a_id
+		)
+		and CityAssignmentSystem.assign_city_citizen_job(
+			work_citizen_id,
+			fishery_a_id
+		)
+		and _assign_task_and_movement(
+			work_citizen_id,
+			CityCitizens.CITY_CITIZEN_TASK_KIND_WORK,
+			fishery_a_id
+		),
+		"The repair-order fixture must seed active Return Home and Work movement."
+	)
+
+	_set_citizen_relationship_fixture(
+		return_home_citizen_id,
+		0,
+		-1,
+		true
+	)
+	_set_citizen_relationship_fixture(
+		work_citizen_id,
+		-1,
+		0,
+		true
+	)
+	CityAssignmentSystem.ensure_city_citizen_assignment_state()
+	var repaired_home_citizen := (
+		CityCitizenRegistrySystem.get_city_citizen_by_id(
+			return_home_citizen_id
+		)
+	)
+	var repaired_work_citizen := (
+		CityCitizenRegistrySystem.get_city_citizen_by_id(work_citizen_id)
+	)
+	var active_mover_ids := (
+		CityCitizenMovementRuntimeSystem.get_city_active_mover_ids_snapshot()
+	)
+	_expect(
+		int(repaired_home_citizen.get("home_object_id", 0)) == -1
+		and _task_kind(return_home_citizen_id)
+		== CityCitizens.CITY_CITIZEN_TASK_KIND_NONE
+		and str(repaired_home_citizen.get("movement_state", ""))
+		== CityCitizens.CITY_CITIZEN_MOVEMENT_STATE_IDLE
+		and not active_mover_ids.has(return_home_citizen_id)
+		and int(repaired_work_citizen.get("job_object_id", 0)) == -1
+		and _task_kind(work_citizen_id)
+		== CityCitizens.CITY_CITIZEN_TASK_KIND_NONE
+		and str(repaired_work_citizen.get("movement_state", ""))
+		== CityCitizens.CITY_CITIZEN_MOVEMENT_STATE_IDLE
+		and not active_mover_ids.has(work_citizen_id),
+		"Assignment repair must commit cleared links before retiring their tasks and movement."
+	)
+
+	var normalized_dead_citizen_id := int(citizen_ids[0])
+	_expect(
+		CityAssignmentSystem.assign_city_citizen_job(
+			normalized_dead_citizen_id,
+			fishery_a_id
+		)
+		and _assign_task_and_movement(
+			normalized_dead_citizen_id,
+			CityCitizens.CITY_CITIZEN_TASK_KIND_WORK,
+			fishery_a_id
+		),
+		"The dead-state repair fixture must seed stale Work movement."
+	)
+	_set_citizen_relationship_fixture(
+		normalized_dead_citizen_id,
+		-1,
+		-1,
+		false
+	)
+	CityAssignmentSystem.ensure_city_citizen_assignment_state()
+	var normalized_dead_citizen := (
+		CityCitizenRegistrySystem.get_city_citizen_by_id(
+			normalized_dead_citizen_id
+		)
+	)
+	_expect(
+		_task_kind(normalized_dead_citizen_id)
+		== CityCitizens.CITY_CITIZEN_TASK_KIND_NONE
+		and str(normalized_dead_citizen.get("movement_state", ""))
+		== CityCitizens.CITY_CITIZEN_MOVEMENT_STATE_IDLE,
+		"A dead citizen with already-normalized links must not retain stale Work movement."
+	)
+	_set_citizen_relationship_fixture(
+		normalized_dead_citizen_id,
+		-1,
+		-1,
+		true
+	)
+
+	var first_citizen := CityCitizenRegistrySystem.get_city_citizen_by_id(
+		int(citizen_ids[0])
+	)
+	var culture_id := int(first_citizen.get("culture_id", -1))
+	var fourth_citizen := CityCitizenRegistrySystem.add_city_citizen(
+		"",
+		Vector2i(23, 20),
+		CityCitizens.CITY_CITIZEN_SEX_FEMALE,
+		culture_id
+	)
+	var fourth_citizen_id := int(fourth_citizen.get("id", -1))
+	if fourth_citizen_id > 0:
+		citizen_ids.append(fourth_citizen_id)
+	citizen_ids.sort()
+	_expect(
+		citizen_ids.size() == 4,
+		"The automatic staffing fixture must own four eligible citizens."
+	)
+	if citizen_ids.size() != 4:
+		return
+
+	_set_object_capacity(fishery_a_id, "worker_capacity", 4)
+	_set_object_capacity(fishery_b_id, "worker_capacity", 0)
+	CityEmploymentSystem.run_tick(1, 1)
+	var fishery_a := CityObjectSystem.get_city_object_by_id(fishery_a_id)
+	_expect(
+		CityEmploymentSystem.get_workplace_staffing_mode(fishery_a)
+		== CityEmploymentSystem.STAFFING_MODE_AUTOMATIC
+		and CityEmploymentSystem.get_workplace_desired_worker_count(fishery_a) == 4
+		and CityEmploymentSystem.get_city_object_worker_ids(fishery_a)
+		== citizen_ids,
+		"Automatic staffing must fill a four-worker Fishery deterministically."
+	)
+
+	_set_object_capacity(fishery_a_id, "worker_capacity", 2)
+	CityEmploymentSystem.run_tick(2, 1)
+	fishery_a = CityObjectSystem.get_city_object_by_id(fishery_a_id)
+	var retained_worker_ids: Array = [citizen_ids[0], citizen_ids[1]]
+	_expect(
+		CityEmploymentSystem.get_workplace_desired_worker_count(fishery_a) == 2
+		and CityEmploymentSystem.get_city_object_worker_ids(fishery_a)
+		== retained_worker_ids
+		and int(
+			CityCitizenRegistrySystem.get_city_citizen_by_id(
+				int(citizen_ids[2])
+			).get("job_object_id", 0)
+		) == -1
+		and int(
+			CityCitizenRegistrySystem.get_city_citizen_by_id(
+				int(citizen_ids[3])
+			).get("job_object_id", 0)
+		) == -1,
+		"Capacity downscale must retain the lowest IDs and clear every surplus job."
+	)
+
+	_set_object_capacity(fishery_a_id, "worker_capacity", 4)
+	CityEmploymentSystem.run_tick(3, 1)
+	fishery_a = CityObjectSystem.get_city_object_by_id(fishery_a_id)
+	_expect(
+		CityEmploymentSystem.get_workplace_desired_worker_count(fishery_a) == 4
+		and CityEmploymentSystem.get_city_object_worker_ids(fishery_a)
+		== citizen_ids,
+		"Capacity upscale must restore the full automatic target and refill vacancies."
+	)
+
+	_set_object_capacity(fishery_b_id, "worker_capacity", 1)
+	CityAssignmentSystem.ensure_city_citizen_assignment_state()
+	CityEmploymentSystem.ensure_workplace_staffing_state()
+	var reassigned_citizen_id := int(citizen_ids[0])
+	_expect(
+		_assign_task_and_movement(
+			reassigned_citizen_id,
+			CityCitizens.CITY_CITIZEN_TASK_KIND_WORK,
+			fishery_a_id
+		)
+		and CityAssignmentSystem.assign_city_citizen_job(
+			reassigned_citizen_id,
+			fishery_b_id
+		),
+		"An employed citizen must support an explicit A to B workplace reassignment."
+	)
+	var reassigned_citizen := (
+		CityCitizenRegistrySystem.get_city_citizen_by_id(reassigned_citizen_id)
+	)
+	_expect(
+		int(reassigned_citizen.get("job_object_id", -1)) == fishery_b_id
+		and _task_kind(reassigned_citizen_id)
+		== CityCitizens.CITY_CITIZEN_TASK_KIND_NONE
+		and str(reassigned_citizen.get("movement_state", ""))
+		== CityCitizens.CITY_CITIZEN_MOVEMENT_STATE_IDLE
+		and not CityCitizenMovementRuntimeSystem.get_city_active_mover_ids_snapshot().has(
+			reassigned_citizen_id
+		),
+		"A to B job reassignment must retire the old workplace task and movement."
+	)
+
+	var workplace_before_rejected_manual := (
+		CityObjectSystem.get_city_object_by_id(fishery_a_id).duplicate(true)
+	)
+	var assignment_version_before_rejected_manual := (
+		CityAssignmentSystem.get_city_assignment_version()
+	)
+	var workplace_version_before_rejected_manual := (
+		CityEmploymentSystem.get_city_workplace_version()
+	)
+	_expect(
+		not CityEmploymentSystem.set_workplace_staffing_mode(
+			fishery_a_id,
+			CityEmploymentSystem.STAFFING_MODE_MANUAL
+		)
+		and not CityEmploymentSystem.assign_citizen_to_workplace(
+			reassigned_citizen_id,
+			fishery_a_id,
+			true
+		)
+		and CityObjectSystem.get_city_object_by_id(fishery_a_id)
+		== workplace_before_rejected_manual
+		and CityAssignmentSystem.get_city_assignment_version()
+		== assignment_version_before_rejected_manual
+		and CityEmploymentSystem.get_city_workplace_version()
+		== workplace_version_before_rejected_manual,
+		"Legacy manual requests must reject without changing policy, jobs, or versions."
+	)
+
+
 func _make_assignment_fixture(seed: int) -> Dictionary:
 	WorldData.reset_runtime_session_state()
 	SimulationClock.start_new_game()
 	var culture := WorldData.create_culture("Assignment Test Culture")
 	var culture_id := int(culture.get("id", -1))
+	var city_name := "Assignment Test City " + str(seed)
+	var city_state = _create_active_city_fixture(city_name, culture_id)
+	_expect(
+		city_state is CitySettlementSimulationState,
+		"The assignment fixture must own an active City simulation state."
+	)
+	if not city_state is CitySettlementSimulationState:
+		return {}
+	city_state.city_runtime_data.clear()
+	city_state.city_runtime_data.merge({
+		"name": city_name,
+		"primary_culture_id": culture_id,
+		"founded": true,
+		"can_build": true,
+	}, true)
 	var city_world := _make_world(TEST_WORLD_SIZE.x, TEST_WORLD_SIZE.y, seed)
 	WorldData.store_city_world_save(city_world, seed)
 
@@ -325,6 +581,32 @@ func _make_assignment_fixture(seed: int) -> Dictionary:
 	}
 
 
+func _create_active_city_fixture(city_name: String, culture_id: int):
+	if culture_id <= 0:
+		return null
+	var polity := WorldPoliticalState.create_polity({
+		"name": city_name + " Realm",
+		"polity_type": PolityData.POLITY_TYPE_KINGDOM,
+		"primary_culture_id": culture_id,
+	})
+	var polity_id := int(polity.get("id", -1))
+	var city := WorldPoliticalState.create_settlement({
+		"name": city_name,
+		"settlement_type": SettlementData.SETTLEMENT_TYPE_CITY,
+		"polity_id": polity_id,
+		"world_region_top_left": Vector2i.ZERO,
+		"world_region_center": Vector2i.ZERO,
+		"world_region_size": 1,
+		"simulation_backend_kind": (
+			SettlementSimulationContext.BACKEND_CITY_SETTLEMENT_STATE
+		),
+	})
+	var city_id := int(city.get("id", -1))
+	if city_id <= 0 or not WorldPoliticalState.set_active_settlement(city_id):
+		return null
+	return WorldPoliticalState.get_city_simulation_state(city_id)
+
+
 func _register_object(
 	object_type: String,
 	top_left: Vector2i,
@@ -344,15 +626,17 @@ func _set_object_capacity(
 	field_name: String,
 	capacity: int
 ) -> void:
-	var object_index := CityObjectSystem.get_city_object_index_by_id(object_id)
-	if object_index < 0:
-		return
-	var raw_city_object = CityObjectSystem.get_city_objects()[object_index]
-	if not raw_city_object is Dictionary:
-		return
-	var city_object: Dictionary = raw_city_object.duplicate(false)
-	city_object[field_name] = capacity
-	CityObjectSystem.write_city_object_at_index(object_index, city_object)
+	match field_name:
+		"resident_capacity":
+			CityAssignmentSystem.set_city_object_resident_capacity(
+				object_id,
+				capacity
+			)
+		"worker_capacity":
+			CityEmploymentSystem.set_city_workplace_worker_capacity(
+				object_id,
+				capacity
+			)
 
 
 func _set_citizen_relationship_fixture(
@@ -378,20 +662,57 @@ func _set_citizen_relationship_fixture(
 	CityCitizenRegistrySystem.get_current_state().citizens[citizen_index] = citizen
 
 
+func _assign_task_and_movement(
+	citizen_id: int,
+	task_kind: String,
+	target_object_id: int
+) -> bool:
+	var citizen := CityCitizenRegistrySystem.get_city_citizen_by_id(citizen_id)
+	var raw_tile_position = citizen.get(
+		"city_tile_position",
+		CityCitizens.INVALID_CITY_TILE_POSITION
+	)
+	if not raw_tile_position is Vector2i:
+		return false
+	var tile_position: Vector2i = raw_tile_position
+	var movement_destination := tile_position + Vector2i(0, 1)
+	var task := {
+		"kind": task_kind,
+		"source": CityCitizens.CITY_CITIZEN_TASK_SOURCE_SCHEDULE,
+		"priority": 50,
+		"target_object_id": target_object_id,
+	}
+	return (
+		CityCitizenTaskRuntimeSystem.assign_city_citizen_task(
+			citizen_id,
+			task
+		)
+		and CityCitizenMovementRuntimeSystem.assign_city_citizen_movement_order(
+			citizen_id,
+			[tile_position, movement_destination]
+		)
+	)
+
+
+func _task_kind(citizen_id: int) -> String:
+	return str(
+		CityCitizenTaskRuntimeSystem.get_city_citizen_current_task(
+			citizen_id
+		).get("kind", CityCitizens.CITY_CITIZEN_TASK_KIND_NONE)
+	)
+
+
 func _set_object_relationship_fixture(
 	object_id: int,
 	field_name: String,
 	assignment_ids: Array
 ) -> void:
-	var object_index := CityObjectSystem.get_city_object_index_by_id(object_id)
-	if object_index < 0:
-		return
-	var raw_city_object = CityObjectSystem.get_city_objects()[object_index]
-	if not raw_city_object is Dictionary:
-		return
-	var city_object: Dictionary = raw_city_object.duplicate(false)
-	city_object[field_name] = assignment_ids.duplicate()
-	CityObjectSystem.write_city_object_at_index(object_index, city_object)
+	var relationship_patch: Dictionary = {}
+	relationship_patch[field_name] = assignment_ids.duplicate()
+	CityObjectSystem.patch_city_object_assignment_fields(
+		object_id,
+		relationship_patch
+	)
 
 
 func _remove_completed_objects(object_ids: Array) -> void:

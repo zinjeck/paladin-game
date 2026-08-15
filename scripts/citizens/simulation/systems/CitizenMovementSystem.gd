@@ -12,17 +12,36 @@ static func run_tick(
 	tick_index: int,
 	minutes_advanced: int
 ) -> void:
-	CityCitizenMovementRuntimeSystem.begin_city_citizen_movement_visual_tick(tick_index)
+	var city_state = WorldPoliticalState.get_current_city_simulation_state()
+	run_tick_for_city_state(city_state, tick_index, minutes_advanced)
+
+
+static func _make_legacy_city_state_view() -> CitySettlementSimulationState:
+	return WorldPoliticalState.get_current_city_simulation_state()
+
+
+static func run_tick_for_city_state(
+	city_state: CitySettlementSimulationState,
+	tick_index: int,
+	minutes_advanced: int
+) -> void:
+	CityCitizenMovementRuntimeSystem.begin_city_citizen_movement_visual_tick_for_city_state(
+		city_state,
+		tick_index
+	)
 
 	if minutes_advanced <= 0:
 		return
 
-	var city_world: WorldData = WorldPoliticalState.get_current_city_world()
+	var city_world: WorldData = city_state.city_world
 
 	if city_world == null:
 		return
 
-	var active_mover_ids := CityCitizenMovementRuntimeSystem.get_city_active_mover_ids_snapshot()
+	var active_mover_ids := (
+		CityCitizenMovementRuntimeSystem
+		.get_city_active_mover_ids_snapshot_for_city_state(city_state)
+	)
 
 	if active_mover_ids.is_empty():
 		return
@@ -37,12 +56,13 @@ static func run_tick(
 	}
 
 	for citizen_id in active_mover_ids:
-		_advance_active_mover({
+		_advance_active_mover(city_state, {
 			"tick_context": tick_context,
 			"citizen_id": int(citizen_id),
 		})
 
-	var commit_result := CityCitizenMovementRuntimeSystem.commit_city_citizen_movement_tick(
+	var commit_result := CityCitizenMovementRuntimeSystem.commit_city_citizen_movement_tick_for_city_state(
+		city_state,
 		city_world,
 		tick_context.get("citizen_updates", []),
 		next_active_mover_ids
@@ -67,15 +87,21 @@ static func run_tick(
 		)
 
 
-static func _advance_active_mover(values: Dictionary) -> void:
+static func _advance_active_mover(
+	city_state: CitySettlementSimulationState,
+	values: Dictionary
+) -> void:
 	var tick_context: Dictionary = values.get("tick_context", {})
 	var citizen_id := int(values.get("citizen_id", -1))
-	var citizen_index := CityCitizenRegistrySystem.get_city_citizen_index_by_id(citizen_id)
+	var registry_state := city_state.citizen_registry_state
+	var citizen_index := -1
+	if registry_state.citizen_index_by_id.has(citizen_id):
+		citizen_index = int(registry_state.citizen_index_by_id[citizen_id])
 
 	if citizen_index < 0:
 		return
 
-	var raw_citizen = CityCitizenRegistrySystem.get_current_state().citizens[citizen_index]
+	var raw_citizen = registry_state.citizens[citizen_index]
 
 	if not raw_citizen is Dictionary:
 		return
@@ -104,7 +130,7 @@ static func _advance_active_mover(values: Dictionary) -> void:
 
 	if not bool(citizen.get("alive", false)):
 		CityCitizens.reset_city_citizen_movement_state(citizen, true)
-		_append_active_mover_update(mover_context)
+		_append_active_mover_update(city_state, mover_context)
 		return
 
 	if (
@@ -113,15 +139,18 @@ static func _advance_active_mover(values: Dictionary) -> void:
 	):
 		return
 
-	if not _prepare_active_mover_path(mover_context):
-		_append_active_mover_update(mover_context)
+	if not _prepare_active_mover_path(city_state, mover_context):
+		_append_active_mover_update(city_state, mover_context)
 		return
 
-	_advance_active_mover_path(mover_context)
-	_finalize_active_mover(mover_context)
+	_advance_active_mover_path(city_state, mover_context)
+	_finalize_active_mover(city_state, mover_context)
 
 
-static func _prepare_active_mover_path(context: Dictionary) -> bool:
+static func _prepare_active_mover_path(
+	city_state: CitySettlementSimulationState,
+	context: Dictionary
+) -> bool:
 	var citizen: Dictionary = context.get("citizen", {})
 	var current_tile: Vector2i = context.get(
 		"current_tile",
@@ -152,7 +181,7 @@ static func _prepare_active_mover_path(context: Dictionary) -> bool:
 	)
 
 	if not basic_state_is_valid:
-		_stop_citizen_for_invalid_path(citizen, raw_destination)
+		_stop_citizen_for_invalid_path(city_state, citizen, raw_destination)
 		return false
 
 	var movement_path: Array = raw_path
@@ -169,7 +198,8 @@ static func _prepare_active_mover_path(context: Dictionary) -> bool:
 		and movement_path[movement_path_index - 1] is Vector2i
 		and movement_path[movement_path_index] is Vector2i
 	):
-		current_step_cost = CityNavigationSystem.get_city_citizen_movement_step_cost(
+		current_step_cost = CityNavigationSystem.get_city_citizen_movement_step_cost_for_city_state(
+			city_state,
 			movement_path[movement_path_index - 1],
 			movement_path[movement_path_index]
 		)
@@ -192,7 +222,11 @@ static func _prepare_active_mover_path(context: Dictionary) -> bool:
 	)
 
 	if not path_state_is_valid:
-		_stop_citizen_for_invalid_path(citizen, movement_destination)
+		_stop_citizen_for_invalid_path(
+			city_state,
+			citizen,
+			movement_destination
+		)
 		return false
 
 	var tick_context: Dictionary = context.get("tick_context", {})
@@ -209,7 +243,10 @@ static func _prepare_active_mover_path(context: Dictionary) -> bool:
 	return true
 
 
-static func _advance_active_mover_path(context: Dictionary) -> void:
+static func _advance_active_mover_path(
+	city_state: CitySettlementSimulationState,
+	context: Dictionary
+) -> void:
 	var tick_context: Dictionary = context.get("tick_context", {})
 	var city_world: WorldData = tick_context.get("city_world")
 	var citizen_id := int(context.get("citizen_id", -1))
@@ -235,6 +272,7 @@ static func _advance_active_mover_path(context: Dictionary) -> void:
 
 		if not raw_next_tile is Vector2i:
 			_set_citizen_movement_blocked(
+				city_state,
 				citizen,
 				movement_destination,
 				CityCitizens.CITY_CITIZEN_MOVEMENT_FAILURE_INVALID_PATH
@@ -243,13 +281,15 @@ static func _advance_active_mover_path(context: Dictionary) -> void:
 			break
 
 		var next_tile: Vector2i = raw_next_tile
-		var step_cost := CityNavigationSystem.get_city_citizen_movement_step_cost(
+		var step_cost := CityNavigationSystem.get_city_citizen_movement_step_cost_for_city_state(
+			city_state,
 			current_tile,
 			next_tile
 		)
 
 		if step_cost <= 0:
 			_set_citizen_movement_blocked(
+				city_state,
 				citizen,
 				movement_destination,
 				CityCitizens.CITY_CITIZEN_MOVEMENT_FAILURE_INVALID_PATH
@@ -257,7 +297,8 @@ static func _advance_active_mover_path(context: Dictionary) -> void:
 			movement_was_blocked = true
 			break
 
-		if not CityNavigationSystem.can_city_citizen_traverse_step(
+		if not CityNavigationSystem.can_city_citizen_traverse_step_for_city_state(
+			city_state,
 			city_world,
 			current_tile,
 			next_tile,
@@ -268,6 +309,7 @@ static func _advance_active_mover_path(context: Dictionary) -> void:
 				>= CityCitizens.MAX_CITIZEN_MOVEMENT_REPATH_ATTEMPTS
 			):
 				_set_citizen_movement_blocked(
+					city_state,
 					citizen,
 					movement_destination,
 					CityCitizens.CITY_CITIZEN_MOVEMENT_FAILURE_REPATH_FAILED
@@ -289,7 +331,7 @@ static func _advance_active_mover_path(context: Dictionary) -> void:
 			repath_attempt_count += 1
 			citizen["movement_repath_attempt_count"] = repath_attempt_count
 
-			var repath_path := _find_bounded_repath({
+			var repath_path := _find_bounded_repath(city_state, {
 				"city_world": city_world,
 				"start_tile": current_tile,
 				"destination_tile": movement_destination,
@@ -298,6 +340,7 @@ static func _advance_active_mover_path(context: Dictionary) -> void:
 
 			if repath_path.is_empty():
 				_set_citizen_movement_blocked(
+					city_state,
 					citizen,
 					movement_destination,
 					CityCitizens.CITY_CITIZEN_MOVEMENT_FAILURE_REPATH_FAILED
@@ -330,7 +373,10 @@ static func _advance_active_mover_path(context: Dictionary) -> void:
 	context["movement_repath_was_deferred"] = movement_repath_was_deferred
 
 
-static func _finalize_active_mover(context: Dictionary) -> void:
+static func _finalize_active_mover(
+	city_state: CitySettlementSimulationState,
+	context: Dictionary
+) -> void:
 	var tick_context: Dictionary = context.get("tick_context", {})
 	var citizen_id := int(context.get("citizen_id", -1))
 	var citizen: Dictionary = context.get("citizen", {})
@@ -352,16 +398,16 @@ static func _finalize_active_mover(context: Dictionary) -> void:
 			CityCitizens.CITY_CITIZEN_MOVEMENT_FAILURE_NONE
 		)
 		next_active_mover_ids.append(citizen_id)
-		_append_active_mover_update(context)
+		_append_active_mover_update(city_state, context)
 		return
 
 	if bool(context.get("movement_was_blocked", false)):
-		_append_active_mover_update(context)
+		_append_active_mover_update(city_state, context)
 		return
 
 	if movement_path_index >= movement_path.size():
 		CityCitizens.reset_city_citizen_movement_state(citizen, true)
-		_append_active_mover_update(context)
+		_append_active_mover_update(city_state, context)
 		return
 
 	citizen["movement_path"] = movement_path.duplicate()
@@ -372,12 +418,15 @@ static func _finalize_active_mover(context: Dictionary) -> void:
 		CityCitizens.CITY_CITIZEN_MOVEMENT_FAILURE_NONE
 	)
 	next_active_mover_ids.append(citizen_id)
-	_append_active_mover_update(context)
+	_append_active_mover_update(city_state, context)
 
 
-static func _append_active_mover_update(context: Dictionary) -> void:
+static func _append_active_mover_update(
+	city_state: CitySettlementSimulationState,
+	context: Dictionary
+) -> void:
 	var tick_context: Dictionary = context.get("tick_context", {})
-	_append_citizen_update({
+	_append_citizen_update(city_state, {
 		"citizen_updates": tick_context.get("citizen_updates", []),
 		"citizen_id": int(context.get("citizen_id", -1)),
 		"citizen": context.get("citizen", {}),
@@ -389,7 +438,10 @@ static func _append_active_mover_update(context: Dictionary) -> void:
 	})
 
 
-static func _find_bounded_repath(values: Dictionary) -> Array:
+static func _find_bounded_repath(
+	city_state: CitySettlementSimulationState,
+	values: Dictionary
+) -> Array:
 	var city_world: WorldData = values.get("city_world")
 	var start_tile: Vector2i = values.get(
 		"start_tile",
@@ -401,14 +453,17 @@ static func _find_bounded_repath(values: Dictionary) -> Array:
 	)
 	var citizen_id := int(values.get("citizen_id", -1))
 	var result := (
-		CityNavigationSystemScript.find_path_to_any_city_tile({
+		CityNavigationSystemScript.find_path_to_any_city_tile_for_city_state(
+			city_state,
+			{
 			"city_world": city_world,
 			"start_tile": start_tile,
 			"destination_tiles": [destination_tile],
 			"max_expanded_nodes": MAX_REPATH_EXPANDED_NODES,
 			"citizen_id": citizen_id,
 			"heuristic_weight": CityNavigationSystem.HEURISTIC_WEIGHT
-		})
+			}
+		)
 	)
 
 	if not bool(result.get("success", false)):
@@ -432,7 +487,10 @@ static func _find_bounded_repath(values: Dictionary) -> Array:
 
 	return repath_path.duplicate()
 
-static func _append_citizen_update(values: Dictionary) -> void:
+static func _append_citizen_update(
+	_city_state: CitySettlementSimulationState,
+	values: Dictionary
+) -> void:
 	var citizen_updates: Array = values.get("citizen_updates", [])
 	var citizen_id := int(values.get("citizen_id", -1))
 	var citizen: Dictionary = values.get("citizen", {})
@@ -450,6 +508,7 @@ static func _append_citizen_update(values: Dictionary) -> void:
 
 
 static func _stop_citizen_for_invalid_path(
+	_city_state: CitySettlementSimulationState,
 	citizen: Dictionary,
 	raw_destination
 ) -> void:
@@ -459,6 +518,7 @@ static func _stop_citizen_for_invalid_path(
 		!= CityCitizens.INVALID_CITY_TILE_POSITION
 	):
 		_set_citizen_movement_blocked(
+			_city_state,
 			citizen,
 			raw_destination,
 			CityCitizens.CITY_CITIZEN_MOVEMENT_FAILURE_INVALID_PATH
@@ -472,6 +532,7 @@ static func _stop_citizen_for_invalid_path(
 
 
 static func _set_citizen_movement_blocked(
+	_city_state: CitySettlementSimulationState,
 	citizen: Dictionary,
 	destination_tile: Vector2i,
 	failure_reason: String

@@ -31,6 +31,24 @@ static func get_work_activity_tiles(
 	city_world: WorldData,
 	workplace: Dictionary
 ) -> Array[Vector2i]:
+	return _get_work_activity_tiles(null, city_world, workplace)
+
+
+static func get_work_activity_tiles_for_city_state(
+	city_state: CitySettlementSimulationState,
+	city_world: WorldData,
+	workplace: Dictionary
+) -> Array[Vector2i]:
+	if city_state == null:
+		return []
+	return _get_work_activity_tiles(city_state, city_world, workplace)
+
+
+static func _get_work_activity_tiles(
+	city_state,
+	city_world: WorldData,
+	workplace: Dictionary
+) -> Array[Vector2i]:
 	var activity_tiles: Array[Vector2i] = []
 
 	if (
@@ -61,18 +79,21 @@ static func get_work_activity_tiles(
 
 		CityObjectCatalog.WORKPLACE_WORK_LOCATION_MODE_LINKED_TILES:
 			activity_tiles = _get_exterior_access_tiles(
+				city_state,
 				city_world,
 				workplace
 			)
 
 		CityObjectCatalog.WORKPLACE_WORK_LOCATION_MODE_WORKSTATIONS:
 			activity_tiles = _get_exterior_access_tiles(
+				city_state,
 				city_world,
 				workplace
 			)
 
 		CityObjectCatalog.WORKPLACE_WORK_LOCATION_MODE_EXPLICIT_POINTS:
 			activity_tiles = _get_exterior_access_tiles(
+				city_state,
 				city_world,
 				workplace
 			)
@@ -80,17 +101,20 @@ static func get_work_activity_tiles(
 		CityObjectCatalog.WORKPLACE_WORK_LOCATION_MODE_FOOTPRINT:
 			# Contextual interior traversal has not been enabled yet.
 			activity_tiles = _get_exterior_access_tiles(
+				city_state,
 				city_world,
 				workplace
 			)
 
 		_:
 			activity_tiles = _get_exterior_access_tiles(
+				city_state,
 				city_world,
 				workplace
 			)
 
 	activity_tiles = _filter_activity_tiles_by_policy(
+		city_state,
 		city_world,
 		activity_tiles,
 		location_policy
@@ -100,6 +124,36 @@ static func get_work_activity_tiles(
 	return activity_tiles
 
 static func get_object_interior_activity_tiles(
+	city_world: WorldData,
+	city_object: Dictionary,
+	citizen_id: int
+) -> Array[Vector2i]:
+	return _get_object_interior_activity_tiles(
+		null,
+		city_world,
+		city_object,
+		citizen_id
+	)
+
+
+static func get_object_interior_activity_tiles_for_city_state(
+	city_state: CitySettlementSimulationState,
+	city_world: WorldData,
+	city_object: Dictionary,
+	citizen_id: int
+) -> Array[Vector2i]:
+	if city_state == null:
+		return []
+	return _get_object_interior_activity_tiles(
+		city_state,
+		city_world,
+		city_object,
+		citizen_id
+	)
+
+
+static func _get_object_interior_activity_tiles(
+	city_state,
 	city_world: WorldData,
 	city_object: Dictionary,
 	citizen_id: int
@@ -121,11 +175,21 @@ static func get_object_interior_activity_tiles(
 
 		var tile_position: Vector2i = raw_tile
 
-		if not CityNavigationSystem.is_city_tile_walkable_for_citizen(
-			city_world,
-			tile_position,
-			citizen_id
-		):
+		var tile_is_walkable := (
+			CityNavigationSystem.is_city_tile_walkable_for_citizen(
+				city_world,
+				tile_position,
+				citizen_id
+			)
+			if city_state == null
+			else CityNavigationSystem.is_city_tile_walkable_for_citizen_for_city_state(
+				city_state,
+				city_world,
+				tile_position,
+				citizen_id
+			)
+		)
+		if not tile_is_walkable:
 			continue
 
 		activity_tiles.append(tile_position)
@@ -161,6 +225,7 @@ static func _get_resource_source_zone_tiles(
 
 
 static func _filter_activity_tiles_by_policy(
+	city_state,
 	city_world: WorldData,
 	candidate_tiles: Array[Vector2i],
 	location_policy: Dictionary
@@ -183,13 +248,22 @@ static func _filter_activity_tiles_by_policy(
 	)
 
 	for candidate_tile in candidate_tiles:
-		if (
-			standing_tile_requirement
-			== CityObjectCatalog.WORKPLACE_WORK_LOCATION_TILE_REQUIREMENT_WALKABLE
-			and not CityNavigationSystem.is_city_tile_walkable_for_citizen(
+		var tile_is_walkable := (
+			CityNavigationSystem.is_city_tile_walkable_for_citizen(
 				city_world,
 				candidate_tile
 			)
+			if city_state == null
+			else CityNavigationSystem.is_city_tile_walkable_for_citizen_for_city_state(
+				city_state,
+				city_world,
+				candidate_tile
+			)
+		)
+		if (
+			standing_tile_requirement
+			== CityObjectCatalog.WORKPLACE_WORK_LOCATION_TILE_REQUIREMENT_WALKABLE
+			and not tile_is_walkable
 		):
 			continue
 
@@ -226,7 +300,7 @@ static func _tile_cardinally_borders_terrain(
 		):
 			continue
 
-		var tile_data: Dictionary = city_world.get_tile(
+		var tile_data: Dictionary = city_world.get_tile_for_internal_read(
 			neighbor_tile.x,
 			neighbor_tile.y
 		)
@@ -360,15 +434,25 @@ static func _make_deterministic_choice_value(
 	return value & 0x7fffffff
 
 static func _get_exterior_access_tiles(
+	city_state,
 	city_world: WorldData,
 	workplace: Dictionary
 ) -> Array[Vector2i]:
 	var activity_tiles: Array[Vector2i] = []
+	var raw_access_tiles := (
+		CityNavigationSystem.get_city_object_access_tiles(
+			city_world,
+			workplace
+		)
+		if city_state == null
+		else CityNavigationSystem.get_city_object_access_tiles_for_city_state(
+			city_state,
+			city_world,
+			workplace
+		)
+	)
 
-	for raw_tile in CityNavigationSystem.get_city_object_access_tiles(
-		city_world,
-		workplace
-	):
+	for raw_tile in raw_access_tiles:
 		if not raw_tile is Vector2i:
 			continue
 

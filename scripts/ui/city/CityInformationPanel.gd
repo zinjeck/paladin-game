@@ -220,12 +220,26 @@ func refresh_identity() -> void:
 	if city_name_label == null:
 		return
 
-	var city_name := WorldData.get_official_city_name().strip_edges()
+	var city_state = WorldPoliticalState.get_current_city_simulation_state()
+	var city_name := ""
 
-	if city_name.is_empty() and WorldData.has_player_city():
+	if city_state is CitySettlementSimulationState:
 		city_name = str(
-			WorldPoliticalState.get_current_city_runtime_data().get("name", "")
+			city_state.city_runtime_data.get("name", "")
 		).strip_edges()
+
+	if city_name.is_empty():
+		city_name = str(
+			WorldPoliticalState.get_active_settlement().get("name", "")
+		).strip_edges()
+
+	if (
+		city_name.is_empty()
+		and WorldPoliticalState.active_settlement_id
+		== SettlementData.INVALID_SETTLEMENT_ID
+		and WorldData.has_official_founding_identity()
+	):
+		city_name = WorldData.get_official_city_name().strip_edges()
 
 	city_name_label.text = city_name
 	city_name_label.tooltip_text = city_name
@@ -242,7 +256,11 @@ func refresh_time() -> void:
 
 
 func refresh_citizen_data() -> void:
-	var city_is_founded := WorldData.has_player_city()
+	var city_state = WorldPoliticalState.get_current_city_simulation_state()
+	var city_is_founded: bool = (
+		city_state is CitySettlementSimulationState
+		and city_state.is_city_founded()
+	)
 
 	if population_button != null:
 		population_button.text = (

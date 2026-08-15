@@ -85,6 +85,21 @@ func _exercise_city_gateways(
 	var city_world := _make_world(16, 16, seed_value)
 	WorldPoliticalState.set_current_city_world(city_world)
 	WorldPoliticalState.set_current_city_seed(seed_value)
+	var city_state = WorldPoliticalState.get_city_simulation_state(city_id)
+	_expect(
+		city_state is CitySettlementSimulationState,
+		"The active City must expose its settlement-owned simulation state."
+	)
+	if not city_state is CitySettlementSimulationState:
+		return {}
+	var settlement := WorldPoliticalState.get_settlement(city_id)
+	city_state.city_runtime_data.clear()
+	city_state.city_runtime_data.merge({
+		"name": str(settlement.get("name", "Citizen API City")),
+		"primary_culture_id": culture_id,
+		"founded": true,
+		"can_build": true,
+	}, true)
 
 	var house := CityObjectSystem.add_city_object({
 		"object_type": CityObjectCatalog.CITY_OBJECT_HOUSE,

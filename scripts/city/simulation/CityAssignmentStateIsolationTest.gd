@@ -83,10 +83,10 @@ func _test_equal_version_assignment_and_workplace_isolation() -> void:
 	_expect(
 		int(state_a.get("citizen_id", -1)) == 1
 		and int(state_b.get("citizen_id", -1)) == 1
-		and int(state_a.get("house_id", -1)) == 1
-		and int(state_b.get("house_id", -1)) == 1
-		and int(state_a.get("fishery_id", -1)) == 2
-		and int(state_b.get("fishery_id", -1)) == 2,
+		and int(state_a.get("house_id", -1)) == 2
+		and int(state_b.get("house_id", -1)) == 2
+		and int(state_a.get("fishery_id", -1)) == 3
+		and int(state_b.get("fishery_id", -1)) == 3,
 		"Both Cities must independently reuse settlement-local citizen and object IDs."
 	)
 	_expect(
@@ -166,6 +166,45 @@ func _exercise_city(
 	var city_world := _make_world(32, 32, world_seed)
 	WorldPoliticalState.set_current_city_world(city_world)
 	WorldPoliticalState.set_current_city_seed(world_seed)
+	var city_state = WorldPoliticalState.get_city_simulation_state(city_id)
+	_expect(
+		city_state is CitySettlementSimulationState,
+		"The assignment fixture must expose its settlement-owned City state."
+	)
+	if not city_state is CitySettlementSimulationState:
+		return {}
+	var settlement := WorldPoliticalState.get_settlement(city_id)
+	city_state.city_runtime_data.clear()
+	city_state.city_runtime_data.merge({
+		"name": str(settlement.get("name", "Assignment Isolation City")),
+		"primary_culture_id": culture_id,
+		"founded": false,
+		"can_build": false,
+	}, true)
+	var keep_top_left := Vector2i(0, 20)
+	var keep := CityObjectSystem.register_completed_city_object({
+		"object_type": CityObjectCatalog.CITY_OBJECT_CITY_CENTER,
+		"top_left": keep_top_left,
+		"size_tiles": CityObjectCatalog.get_city_object_size_for_type(
+			CityObjectCatalog.CITY_OBJECT_CITY_CENTER
+		),
+		"object_owner": "player",
+		"city_world": city_world,
+	})
+	_expect(
+		not keep.is_empty(),
+		"Each assignment fixture must register its Keep while unfounded."
+	)
+	if keep.is_empty():
+		return {}
+	city_state.city_runtime_data.merge({
+		"founded": true,
+		"can_build": true,
+		"foundation_top_left": keep_top_left,
+		"foundation_size": keep.get("size", Vector2i.ZERO),
+		"foundation_object_id": int(keep.get("id", -1)),
+		"foundation_object_owner": str(keep.get("owner", "")),
+	}, true)
 	var house := CityObjectSystem.register_completed_city_object({
 		"object_type": CityObjectCatalog.CITY_OBJECT_HOUSE,
 		"top_left": SHARED_HOUSE_TOP_LEFT,
@@ -196,8 +235,8 @@ func _exercise_city(
 
 	_expect(
 		citizen_id == 1
-		and house_id == 1
-		and fishery_id == 2
+		and house_id == 2
+		and fishery_id == 3
 		and CityAssignmentSystem.assign_city_citizen_home(
 			citizen_id,
 			house_id

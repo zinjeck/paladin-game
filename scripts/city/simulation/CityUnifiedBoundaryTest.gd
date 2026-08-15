@@ -252,15 +252,7 @@ func _test_chained_pickup_respects_near_full_destination() -> void:
 	var city_world := _reset_fixture()
 	var citizen := _add_citizen(Vector2i(5, 5))
 	var citizen_id := int(citizen.get("id", -1))
-	var keep := CityObjectSystem.add_city_object({
-		"object_type": CityObjectCatalog.CITY_OBJECT_CITY_CENTER,
-		"top_left": Vector2i(20, 10),
-		"size_tiles": CityObjectCatalog.get_city_object_size_for_type(
-			CityObjectCatalog.CITY_OBJECT_CITY_CENTER
-		),
-		"object_owner": "player",
-		"city_world": city_world,
-	})
+	var keep := _add_keep(city_world, Vector2i(20, 10))
 	var stockpile := _add_stockpile(city_world, Vector2i(10, 4))
 	var stockpile_id := int(stockpile.get("id", -1))
 	var stockpile_capacity := CityResourceContainerSystem.get_city_object_storage_capacity(
@@ -462,15 +454,7 @@ func _test_public_storage_keep_fallback() -> void:
 	var city_world := _reset_fixture()
 	var citizen := _add_citizen(Vector2i(5, 5))
 	var citizen_id := int(citizen.get("id", -1))
-	var keep := CityObjectSystem.add_city_object({
-		"object_type": CityObjectCatalog.CITY_OBJECT_CITY_CENTER,
-		"top_left": Vector2i(20, 10),
-		"size_tiles": CityObjectCatalog.get_city_object_size_for_type(
-			CityObjectCatalog.CITY_OBJECT_CITY_CENTER
-		),
-		"object_owner": "player",
-		"city_world": city_world,
-	})
+	var keep := _add_keep(city_world, Vector2i(20, 10))
 	var keep_id := int(keep.get("id", -1))
 	var stockpile := _add_stockpile(city_world, Vector2i(10, 4))
 	var stockpile_id := int(stockpile.get("id", -1))
@@ -1124,7 +1108,7 @@ func _reset_fixture() -> WorldData:
 
 	for y in range(city_world.height):
 		for x in range(city_world.width):
-			var tile := city_world.get_tile(x, y)
+			var tile := city_world.get_tile_for_internal_read(x, y)
 			tile["terrain"] = WorldData.TERRAIN_LAND
 			tile["biome"] = WorldData.BIOME_PLAIN
 			tile["is_land"] = true
@@ -1159,6 +1143,40 @@ func _add_citizen(tile_position: Vector2i) -> Dictionary:
 		CityCitizens.CITY_CITIZEN_SEX_FEMALE,
 		test_primary_culture_id
 	)
+
+
+func _add_keep(
+	city_world: WorldData,
+	top_left: Vector2i
+) -> Dictionary:
+	var city_state = WorldPoliticalState.get_current_city_simulation_state()
+	if not city_state is CitySettlementSimulationState:
+		return {}
+
+	var runtime_data: Dictionary = city_state.city_runtime_data
+	var was_founded := bool(runtime_data.get("founded", false))
+	var could_build := bool(runtime_data.get("can_build", false))
+	runtime_data["founded"] = false
+	runtime_data["can_build"] = false
+	var keep := CityObjectSystem.add_city_object({
+		"object_type": CityObjectCatalog.CITY_OBJECT_CITY_CENTER,
+		"top_left": top_left,
+		"size_tiles": CityObjectCatalog.get_city_object_size_for_type(
+			CityObjectCatalog.CITY_OBJECT_CITY_CENTER
+		),
+		"object_owner": "player",
+		"city_world": city_world,
+	})
+	runtime_data["founded"] = was_founded
+	runtime_data["can_build"] = could_build
+	if not keep.is_empty() and was_founded:
+		runtime_data["foundation_top_left"] = top_left
+		runtime_data["foundation_size"] = keep.get("size", Vector2i.ZERO)
+		runtime_data["foundation_object_id"] = int(keep.get("id", -1))
+		runtime_data["foundation_object_owner"] = str(
+			keep.get("owner", "player")
+		)
+	return keep
 
 
 func _add_stockpile(
@@ -1229,9 +1247,10 @@ func _add_natural_command(
 	command_type: String,
 	tile_position: Vector2i
 ) -> int:
-	city_world.get_tile(tile_position.x, tile_position.y)[
-		"surface_feature"
-	] = CityWorkSystem.get_city_player_command_surface_feature(command_type)
+	city_world.set_tile_surface_feature(
+		tile_position,
+		CityWorkSystem.get_city_player_command_surface_feature(command_type)
+	)
 	var added_count := CityWorkSystem.add_city_player_command_targets(
 		command_type,
 		[tile_position]

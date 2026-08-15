@@ -52,6 +52,10 @@ var city_seed: int = 0
 var session_prepared_city_payload: Dictionary = {}
 var session_view_active: bool = true
 var city_layers_have_been_presented: bool = false
+var bound_city_settlement_id: int = SettlementData.INVALID_SETTLEMENT_ID
+var city_presentation_rebind_generation: int = 0
+var city_presentation_rebind_pending: bool = false
+var city_camera_state_by_settlement_id: Dictionary = {}
 var camera: Camera2D
 var observed_city_camera_position: Vector2 = Vector2.ZERO
 var observed_city_camera_zoom: Vector2 = Vector2.ZERO
@@ -338,6 +342,7 @@ func _ready() -> void:
 	setup_city_texture_cache()
 	var generation_start_usec := Time.get_ticks_usec()
 	generate_city_world()
+	bound_city_settlement_id = WorldPoliticalState.active_settlement_id
 	city_generation_duration_usec = (
 		Time.get_ticks_usec() - generation_start_usec
 	)
@@ -427,6 +432,346 @@ func set_session_view_active(is_active: bool) -> void:
 
 		city_information_ui.refresh_all()
 		update_debug_panel_text()
+
+		if city_presentation_rebind_pending:
+			_request_all_city_render_layers_redraw_even_if_hidden()
+			call_deferred(
+				"_finish_city_presentation_rebind",
+				city_presentation_rebind_generation
+			)
+
+
+func can_rebind_city_presentation(
+	settlement_context,
+	prepared_payload: Dictionary = {}
+) -> bool:
+	if (
+		settlement_context == null
+		or not settlement_context is SettlementSimulationContext
+		or not settlement_context.supports_city_simulation()
+	):
+		return false
+
+	var target_state = settlement_context.get_city_simulation_state()
+	if (
+		not target_state is CitySettlementSimulationState
+		or not target_state.city_world is WorldData
+		or target_state.city_world.width <= 0
+		or target_state.city_world.height <= 0
+		or target_state.city_seed <= 0
+	):
+		return false
+
+	var prepared_world = prepared_payload.get("city_world")
+	if prepared_world != null and not is_same(prepared_world, target_state.city_world):
+		return false
+
+	var prepared_seed = prepared_payload.get("city_seed")
+	if prepared_seed != null and int(prepared_seed) != target_state.city_seed:
+		return false
+
+	return true
+
+
+func rebind_city_presentation(
+	settlement_context,
+	prepared_payload: Dictionary = {}
+) -> bool:
+	if not can_rebind_city_presentation(
+		settlement_context,
+		prepared_payload
+	):
+		return false
+
+	var target_settlement_id: int = settlement_context.settlement_id
+	var target_state: CitySettlementSimulationState = (
+		settlement_context.get_city_simulation_state()
+	)
+	var target_world: WorldData = target_state.city_world
+	if (
+		WorldPoliticalState.active_settlement_id
+		!= target_settlement_id
+		or not is_same(
+			WorldPoliticalState.get_current_city_simulation_state(),
+			target_state
+		)
+	):
+		return false
+
+	if (
+		bound_city_settlement_id == target_settlement_id
+		and city_world != null
+		and is_same(city_world, target_world)
+		and city_seed == target_state.city_seed
+	):
+		city_information_ui.refresh_all()
+		return validate_city_presentation_binding(settlement_context)
+
+	_store_bound_city_camera_state()
+	city_presentation_rebind_generation += 1
+	city_presentation_rebind_pending = true
+	_set_city_render_layers_visible(false)
+
+	_clear_city_presentation_interactions()
+	_reset_city_presentation_observers()
+	workplace_zone_overlay_cache.invalidate_all()
+	city_citizen_movement_presentation.initialize()
+	city_citizen_draw_buffer.clear()
+	city_citizen_rect_draw_buffer.clear()
+
+	bound_city_settlement_id = target_settlement_id
+	city_world = target_world
+	city_seed = target_state.city_seed
+	session_prepared_city_payload = prepared_payload.duplicate(true)
+
+	install_session_prepared_city_map_textures()
+	rebuild_city_terrain_texture()
+	rebuild_city_natural_feature_multimeshes()
+	city_world.consume_city_surface_feature_changes()
+	_configure_city_camera_for_bound_settlement()
+	_capture_bound_city_presentation_versions(target_state)
+
+	city_information_ui.refresh_all()
+	update_resource_bar_values()
+	update_build_button_state()
+	update_city_player_command_button_visuals()
+	update_city_map_mode_button_visuals()
+	update_debug_panel_text()
+	_request_all_city_render_layers_redraw_even_if_hidden()
+
+	if (
+		not validate_city_presentation_binding(settlement_context)
+		or not _city_presentation_interactions_are_cleared()
+	):
+		city_presentation_rebind_pending = false
+		return false
+
+	if session_view_active:
+		call_deferred(
+			"_finish_city_presentation_rebind",
+			city_presentation_rebind_generation
+		)
+	return true
+
+
+func validate_city_presentation_binding(settlement_context) -> bool:
+	if not can_rebind_city_presentation(settlement_context):
+		return false
+
+	var target_state: CitySettlementSimulationState = (
+		settlement_context.get_city_simulation_state()
+	)
+	if (
+		bound_city_settlement_id != settlement_context.settlement_id
+		or WorldPoliticalState.active_settlement_id
+		!= settlement_context.settlement_id
+		or not is_same(city_world, target_state.city_world)
+		or city_seed != target_state.city_seed
+		or city_terrain_texture == null
+		or city_terrain_texture.get_width() != city_world.width
+		or city_terrain_texture.get_height() != city_world.height
+	):
+		return false
+
+	for tile_position in city_tree_multimesh_index_by_tile.keys():
+		if (
+			not tile_position is Vector2i
+			or not city_world.is_in_bounds(tile_position.x, tile_position.y)
+			or WorldData.get_city_surface_feature(
+				city_world.tiles[tile_position.y][tile_position.x]
+			) != WorldData.CITY_SURFACE_FEATURE_TREE
+		):
+			return false
+
+	for tile_position in city_rock_multimesh_index_by_tile.keys():
+		if (
+			not tile_position is Vector2i
+			or not city_world.is_in_bounds(tile_position.x, tile_position.y)
+			or WorldData.get_city_surface_feature(
+				city_world.tiles[tile_position.y][tile_position.x]
+			) != WorldData.CITY_SURFACE_FEATURE_ROCK
+		):
+			return false
+
+	return true
+
+
+func _city_presentation_interactions_are_cleared() -> bool:
+	return (
+		not has_selected_city_entity()
+		and not has_debug_selected_city_tile()
+		and not has_active_city_object_placement()
+		and not is_road_placement_active
+		and not is_road_dragging
+		and road_preview_tiles.is_empty()
+		and road_preview_lookup.is_empty()
+		and not is_city_player_command_tool_active()
+		and not is_city_player_command_dragging
+		and city_player_command_drag_preview_tiles.is_empty()
+		and not is_object_selection_dragging
+		and debug_navigation_path.is_empty()
+	)
+
+
+func _clear_city_presentation_interactions() -> void:
+	close_city_map_menu()
+	close_build_menu()
+	close_all_city_object_menus()
+	close_city_player_command_menu()
+	cancel_active_city_object_placement()
+	cancel_road_placement()
+	cancel_city_player_command_drag()
+	is_object_selection_dragging = false
+	if object_selection_box_panel != null:
+		object_selection_box_panel.visible = false
+	clear_selected_city_entity()
+	clear_debug_selected_city_tile()
+	hide_workplace_details_ui()
+	hide_construction_site_info_panel()
+	_hide_selected_city_object_panel()
+	hovered_city_tile = Vector2i(-1, -1)
+	clear_debug_navigation_result()
+
+
+func _reset_city_presentation_observers() -> void:
+	observed_city_object_state = null
+	observed_city_resource_accounting_state = null
+	observed_city_citizen_registry_state = null
+	observed_city_citizen_spatial_state = null
+	observed_city_citizen_movement_runtime_state = null
+	observed_city_citizen_task_runtime_state = null
+	observed_city_assignment_state = null
+	observed_city_workplace_state = null
+	observed_city_object_version = -1
+	observed_city_container_version = -1
+	observed_city_public_storage_version = -1
+	observed_city_citizen_version = -1
+	observed_city_citizen_spatial_version = -1
+	observed_city_citizen_movement_version = -1
+	synchronized_city_citizen_movement_version = -1
+	observed_city_citizen_task_version = -1
+	observed_city_ground_pile_version = -1
+	observed_city_player_command_version = -1
+	observed_city_haul_reservation_version = -1
+	observed_city_construction_version = -1
+	observed_city_assignment_version = -1
+	observed_city_workplace_version = -1
+	observed_city_tile_data_version = -1
+	observed_city_surface_feature_change_version = -1
+	active_workplace_preview_refresh_pending = false
+	debug_refresh_pending = false
+
+
+func _capture_bound_city_presentation_versions(
+	city_state: CitySettlementSimulationState
+) -> void:
+	observed_city_object_state = city_state.object_state
+	observed_city_object_version = city_state.object_state.object_version
+	observed_city_resource_accounting_state = city_state.resource_accounting_state
+	observed_city_container_version = (
+		city_state.resource_accounting_state.container_version
+	)
+	observed_city_public_storage_version = (
+		city_state.resource_accounting_state.public_storage_version
+	)
+	observed_city_citizen_registry_state = city_state.citizen_registry_state
+	observed_city_citizen_version = city_state.citizen_registry_state.citizen_version
+	observed_city_citizen_spatial_state = city_state.citizen_spatial_state
+	observed_city_citizen_spatial_version = (
+		city_state.citizen_spatial_state.citizen_spatial_version
+	)
+	observed_city_citizen_movement_runtime_state = (
+		city_state.citizen_movement_runtime_state
+	)
+	observed_city_citizen_movement_version = (
+		city_state.citizen_movement_runtime_state.citizen_movement_version
+	)
+	synchronized_city_citizen_movement_version = (
+		observed_city_citizen_movement_version
+	)
+	observed_city_citizen_task_runtime_state = (
+		city_state.citizen_task_runtime_state
+	)
+	observed_city_citizen_task_version = (
+		city_state.citizen_task_runtime_state.citizen_task_version
+	)
+	observed_city_ground_pile_version = city_state.logistics_state.ground_pile_version
+	observed_city_haul_reservation_version = (
+		city_state.logistics_state.haul_reservation_version
+	)
+	observed_city_player_command_version = city_state.work_state.player_command_version
+	observed_city_construction_version = city_state.construction_state.construction_version
+	observed_city_assignment_state = city_state.assignment_state
+	observed_city_assignment_version = city_state.assignment_state.assignment_version
+	observed_city_workplace_state = city_state.workplace_state
+	observed_city_workplace_version = city_state.workplace_state.workplace_version
+	observed_city_tile_data_version = city_world.tile_data_version
+	observed_city_surface_feature_change_version = (
+		city_world.city_surface_feature_change_version
+	)
+
+
+func _store_bound_city_camera_state() -> void:
+	if camera == null or bound_city_settlement_id <= 0:
+		return
+	city_camera_state_by_settlement_id[bound_city_settlement_id] = {
+		"position": camera.position,
+		"zoom": camera.zoom,
+	}
+
+
+func _configure_city_camera_for_bound_settlement() -> void:
+	if camera == null or city_world == null:
+		return
+	var stored_camera = city_camera_state_by_settlement_id.get(
+		bound_city_settlement_id
+	)
+	var has_stored_camera := stored_camera is Dictionary
+	camera.configure_for_map(
+		city_world.width,
+		city_world.height,
+		city_tile_size,
+		not has_stored_camera
+	)
+	if has_stored_camera:
+		camera.position = stored_camera.get("position", camera.position)
+		camera.zoom = stored_camera.get("zoom", camera.zoom)
+		camera.clamp_camera_to_map_bounds()
+	observed_city_camera_position = camera.position
+	observed_city_camera_zoom = camera.zoom
+
+
+func _set_city_render_layers_visible(is_visible: bool) -> void:
+	for render_layer in [
+		city_active_workplace_preview_render_layer,
+		city_background_render_layer,
+		city_citizen_render_layer,
+		city_interaction_render_layer,
+	]:
+		if render_layer is CanvasItem:
+			(render_layer as CanvasItem).visible = is_visible
+
+
+func _request_all_city_render_layers_redraw_even_if_hidden() -> void:
+	for render_layer in [
+		city_active_workplace_preview_render_layer,
+		city_background_render_layer,
+		city_citizen_render_layer,
+		city_interaction_render_layer,
+	]:
+		if render_layer is CityRenderLayer:
+			(render_layer as CityRenderLayer).request_redraw()
+
+
+func _finish_city_presentation_rebind(generation: int) -> void:
+	if (
+		generation != city_presentation_rebind_generation
+		or not city_presentation_rebind_pending
+		or not session_view_active
+	):
+		return
+	city_presentation_rebind_pending = false
+	_set_city_render_layers_visible(true)
 
 
 func _set_descendant_canvas_layers_visible(root: Node, is_visible: bool) -> void:
@@ -1568,7 +1913,11 @@ func set_road_option_selected(is_selected: bool) -> void:
 	build_option_icon.add_theme_stylebox_override("panel", icon_style)
 
 func update_build_button_state() -> void:
-	var can_build := WorldData.can_build_in_city()
+	var city_state = WorldPoliticalState.get_current_city_simulation_state()
+	var can_build: bool = (
+		city_state is CitySettlementSimulationState
+		and city_state.can_build_city_objects()
+	)
 
 	if bottom_button_two != null:
 		bottom_button_two.disabled = not can_build
@@ -1688,7 +2037,11 @@ func create_city_player_command_menu() -> void:
 
 
 func on_city_player_command_menu_button_pressed() -> void:
-	if not WorldData.player_city_founded:
+	var city_state = WorldPoliticalState.get_current_city_simulation_state()
+	if (
+		not city_state is CitySettlementSimulationState
+		or not city_state.is_city_founded()
+	):
 		return
 
 	if city_command_menu_open:
@@ -2448,7 +2801,11 @@ func update_city_object_button_states() -> void:
 		main_button.text = str(int(definition.get("button_slot", 0)))
 
 	if bottom_button_six != null:
-		bottom_button_six.disabled = not WorldData.player_city_founded
+		var city_state = WorldPoliticalState.get_current_city_simulation_state()
+		bottom_button_six.disabled = (
+			not city_state is CitySettlementSimulationState
+			or not city_state.is_city_founded()
+		)
 		bottom_button_six.text = "6"
 
 	for object_type in city_object_option_buttons.keys():
@@ -4410,7 +4767,11 @@ func close_build_menu() -> void:
 		build_option_button.visible = false
 
 func on_build_menu_button_pressed() -> void:
-	if not WorldData.can_build_in_city():
+	var city_state = WorldPoliticalState.get_current_city_simulation_state()
+	if (
+		not city_state is CitySettlementSimulationState
+		or not city_state.can_build_city_objects()
+	):
 		print("Build menu blocked: found a city first.")
 		update_build_button_state()
 		return
@@ -4443,7 +4804,11 @@ func on_build_option_button_pressed() -> void:
 		start_road_placement()
 
 func start_road_placement() -> void:
-	if not WorldData.can_build_in_city():
+	var city_state = WorldPoliticalState.get_current_city_simulation_state()
+	if (
+		not city_state is CitySettlementSimulationState
+		or not city_state.can_build_city_objects()
+	):
 		print("Road placement blocked: found a city first.")
 		update_build_button_state()
 		return
@@ -4509,6 +4874,19 @@ func confirm_active_city_object_placement() -> void:
 	var uses_construction := (
 		CityConstructionSystem.city_object_type_uses_construction(object_type)
 	)
+	var city_state = WorldPoliticalState.get_current_city_simulation_state()
+
+	if (
+		not city_state is CitySettlementSimulationState
+		or not CityObjectSystem.can_use_city_object_definition_for_city_state(
+			city_state,
+			object_type
+		)
+	):
+		print("Cannot place object: unavailable for this settlement.")
+		cancel_active_city_object_placement()
+		update_city_object_button_states()
+		return
 
 	var can_place := CityObjectSystem.can_place_city_object(
 		city_world,
@@ -4540,14 +4918,16 @@ func confirm_active_city_object_placement() -> void:
 			"city_world": city_world,
 		})
 	else:
-		placement_result = CityObjectSystem.register_completed_city_object({
-			"object_type": object_type,
-			"top_left": top_left,
-			"size_tiles": size_tiles,
-			"object_owner": object_owner,
-			"city_world": city_world,
-		})
-		after_city_object_placed(placement_result)
+		placement_result = register_immediate_city_object_for_city_state(
+			city_state,
+			{
+				"object_type": object_type,
+				"top_left": top_left,
+				"size_tiles": size_tiles,
+				"object_owner": object_owner,
+				"city_world": city_world,
+			}
+		)
 
 	if placement_result.is_empty():
 		print("Could not place object here.")
@@ -4569,30 +4949,114 @@ func confirm_active_city_object_placement() -> void:
 	queue_city_background_layer_redraw()
 	queue_city_interaction_layer_redraw()
 
-func after_city_object_placed(city_object: Dictionary) -> void:
+
+func register_immediate_city_object_for_city_state(
+	city_state: CitySettlementSimulationState,
+	values: Dictionary
+) -> Dictionary:
+	if city_state == null:
+		return {}
+
+	var object_type := str(values.get("object_type", ""))
+	var definition := CityObjectCatalog.get_city_object_definition(object_type)
+	if definition.is_empty():
+		return {}
+
+	var placement_effect := str(definition.get(
+		"placement_effect",
+		CityObjectCatalog.CITY_OBJECT_PLACEMENT_EFFECT_NONE
+	))
+	var is_city_foundation := (
+		placement_effect
+		== CityObjectCatalog.CITY_OBJECT_PLACEMENT_EFFECT_FOUND_CITY
+	)
+	var registration_values := values.duplicate(true)
+	if is_city_foundation:
+		registration_values["defer_surface_feature_clear"] = true
+
+	var city_object := (
+		CityObjectSystem.register_completed_city_object_for_city_state(
+			city_state,
+			registration_values
+		)
+	)
 	if city_object.is_empty():
-		return
+		return {}
+	var object_id := int(city_object.get("id", -1))
+
+	if not after_city_object_placed(city_object, city_state):
+		if not CityObjectSystem.rollback_completed_city_object_for_city_state(
+			city_state,
+			object_id
+		):
+			push_error(
+				"Could not roll back failed immediate city-object placement."
+			)
+		else:
+			print(
+				"City-object placement effect failed; rolled back object ",
+				object_id,
+				"."
+			)
+		return {}
+
+	if (
+		is_city_foundation
+		and not CityObjectSystem.finalize_deferred_city_foundation_surface_features_for_city_state(
+			city_state,
+			object_id
+		)
+	):
+		push_error(
+			"City foundation committed, but its deferred surface features could not be cleared."
+		)
+
+	return CityObjectSystem.get_city_object_by_id_for_city_state(
+		city_state,
+		object_id
+	)
+
+
+func after_city_object_placed(
+	city_object: Dictionary,
+	city_state: CitySettlementSimulationState = null
+) -> bool:
+	if city_object.is_empty():
+		return false
+	if city_state == null:
+		city_state = WorldPoliticalState.get_current_city_simulation_state()
+	if city_state == null:
+		return false
 
 	var object_type: String = str(city_object.get("type", ""))
 	var definition := CityObjectCatalog.get_city_object_definition(object_type)
 
 	if definition.is_empty():
-		return
+		return false
 
 	var placement_effect: String = str(definition.get("placement_effect", CityObjectCatalog.CITY_OBJECT_PLACEMENT_EFFECT_NONE))
 
 	match placement_effect:
 		CityObjectCatalog.CITY_OBJECT_PLACEMENT_EFFECT_FOUND_CITY:
-			after_city_center_placed(city_object)
+			return after_city_center_placed(city_object, city_state)
 
-func after_city_center_placed(city_object: Dictionary) -> void:
-	if WorldData.has_player_city():
-		return
+	return true
+
+func after_city_center_placed(
+	city_object: Dictionary,
+	city_state: CitySettlementSimulationState = null
+) -> bool:
+	if city_state == null:
+		city_state = WorldPoliticalState.get_current_city_simulation_state()
+	if city_state == null or city_state.city_world != city_world:
+		return false
+	if city_state.is_city_founded():
+		return true
 
 	var top_left: Vector2i = city_object.get("top_left", Vector2i(-1, -1))
 	var size_tiles: Vector2i = city_object.get("size", Vector2i.ZERO)
 
-	WorldData.found_player_city({
+	var foundation_values := {
 		"city_world_seed": city_seed,
 		"city_map_size": Vector2i(
 			city_world.width,
@@ -4600,7 +5064,46 @@ func after_city_center_placed(city_object: Dictionary) -> void:
 		),
 		"foundation_top_left": top_left,
 		"foundation_size": size_tiles,
-	})
+	}
+	var settlement_id := get_settlement_id_for_city_state(city_state)
+	var settlement_context = (
+		WorldPoliticalState.get_settlement_context(settlement_id)
+		if settlement_id != SettlementData.INVALID_SETTLEMENT_ID
+		else null
+	)
+	var founded := false
+
+	if (
+		settlement_context != null
+		and settlement_context.is_player_polity
+		and settlement_context.is_capital
+	):
+		WorldData.found_player_city(foundation_values)
+		founded = city_state.is_city_founded()
+	elif settlement_context != null:
+		founded = WorldPoliticalState.found_city_settlement(
+			settlement_id,
+			foundation_values
+		)
+	elif (
+		WorldData.has_active_world_save()
+		and city_state_matches_current_local_authority(city_state)
+	):
+		# Direct CityScreen tools/tests can enter before GameSession establishes
+		# the capital context. The player bridge performs that explicit
+		# synchronization and adopts the already-live unbound city owners.
+		WorldData.found_player_city(foundation_values)
+		var player_capital_state = (
+			WorldPoliticalState.get_player_capital_city_simulation_state()
+		)
+		founded = (
+			player_capital_state is CitySettlementSimulationState
+			and is_same(player_capital_state.object_state, city_state.object_state)
+			and player_capital_state.is_city_founded()
+		)
+
+	if not founded:
+		return false
 
 	city_information_ui.refresh_all()
 	update_city_object_button_states()
@@ -4608,6 +5111,47 @@ func after_city_center_placed(city_object: Dictionary) -> void:
 
 	print("Founded city at: ", top_left)
 	print("City data: ", WorldPoliticalState.get_current_city_runtime_data())
+	return true
+
+
+func get_settlement_id_for_city_state(
+	city_state: CitySettlementSimulationState
+) -> int:
+	if city_state == null:
+		return SettlementData.INVALID_SETTLEMENT_ID
+
+	for raw_settlement_id in WorldPoliticalState.settlement_city_state_by_id.keys():
+		if not raw_settlement_id is int:
+			continue
+		var settlement_id: int = raw_settlement_id
+		var registered_state = WorldPoliticalState.get_city_simulation_state(
+			settlement_id
+		)
+		if registered_state != null and is_same(registered_state, city_state):
+			return settlement_id
+
+	return SettlementData.INVALID_SETTLEMENT_ID
+
+
+func city_state_matches_current_local_authority(
+	city_state: CitySettlementSimulationState
+) -> bool:
+	if city_state == null:
+		return false
+	var current_state = WorldPoliticalState.get_current_city_simulation_state()
+	return (
+		current_state is CitySettlementSimulationState
+		and current_state.city_world == city_state.city_world
+		and is_same(current_state.object_state, city_state.object_state)
+		and is_same(
+			current_state.citizen_registry_state,
+			city_state.citizen_registry_state
+		)
+		and is_same(
+			current_state.city_runtime_data,
+			city_state.city_runtime_data
+		)
+	)
 
 func start_object_selection_drag(screen_position: Vector2) -> void:
 	is_object_selection_dragging = true
@@ -5228,6 +5772,18 @@ func confirm_road_preview() -> void:
 	if road_preview_tiles.is_empty():
 		print("No road tiles selected.")
 		return
+	var city_state = WorldPoliticalState.get_current_city_simulation_state()
+	if (
+		not city_state is CitySettlementSimulationState
+		or not CityObjectSystem.can_use_city_object_definition_for_city_state(
+			city_state,
+			CityObjectCatalog.CITY_OBJECT_ROAD
+		)
+	):
+		print("Road placement is unavailable for this settlement.")
+		cancel_road_placement()
+		update_build_button_state()
+		return
 
 	var construction_sites := CityConstructionSystemScript.create_road_sites(
 		road_preview_tiles,
@@ -5617,8 +6173,30 @@ func rebuild_city_natural_feature_multimeshes() -> void:
 	var rock_tiles: Array[Vector2i] = []
 	var prepared_tree_tiles = session_prepared_city_payload.get("tree_tiles")
 	var prepared_rock_tiles = session_prepared_city_payload.get("rock_tiles")
+	var prepared_world = session_prepared_city_payload.get("city_world")
+	var prepared_feature_tile_data_version = (
+		session_prepared_city_payload.get("feature_tile_data_version")
+	)
+	var prepared_surface_feature_change_version = (
+		session_prepared_city_payload.get(
+			"city_surface_feature_change_version"
+		)
+	)
+	var can_use_session_prepared_feature_tiles := (
+		prepared_world is WorldData
+		and is_same(prepared_world, city_world)
+		and typeof(prepared_feature_tile_data_version) == TYPE_INT
+		and int(prepared_feature_tile_data_version) == city_world.tile_data_version
+		and typeof(prepared_surface_feature_change_version) == TYPE_INT
+		and int(prepared_surface_feature_change_version)
+		== city_world.city_surface_feature_change_version
+	)
 
-	if prepared_tree_tiles is Array and prepared_rock_tiles is Array:
+	if (
+		can_use_session_prepared_feature_tiles
+		and prepared_tree_tiles is Array
+		and prepared_rock_tiles is Array
+	):
 		for raw_tile in prepared_tree_tiles:
 			if raw_tile is Vector2i:
 				tree_tiles.append(raw_tile)
@@ -7460,43 +8038,118 @@ func draw_hovered_city_tile_highlight(
 	})
 
 func ensure_city_foundation_object_exists() -> void:
-	if not WorldData.has_player_city_foundation():
-		return
-
-	if CityObjectSystem.has_city_object_type(CityObjectCatalog.CITY_OBJECT_CITY_CENTER):
-		return
-
-	var top_left: Vector2i = WorldData.player_city_foundation_top_left
-	var size_tiles: Vector2i = WorldData.player_city_foundation_size
-
-	if not CityObjectSystem.can_place_city_object(
-		city_world,
-		top_left,
-		size_tiles,
-		CityObjectCatalog.CITY_OBJECT_CITY_CENTER
+	var city_state = WorldPoliticalState.get_current_city_simulation_state()
+	if (
+		not city_state is CitySettlementSimulationState
+		or not city_state.has_city_foundation_footprint()
 	):
+		return
+
+	var top_left: Vector2i = city_state.city_runtime_data.get(
+		"foundation_top_left",
+		Vector2i(-1, -1)
+	)
+	var size_tiles: Vector2i = city_state.city_runtime_data.get(
+		"foundation_size",
+		Vector2i.ZERO
+	)
+	var foundation_object_id_value = city_state.city_runtime_data.get(
+		"foundation_object_id"
+	)
+	var foundation_object_owner_value = city_state.city_runtime_data.get(
+		"foundation_object_owner"
+	)
+	if (
+		not foundation_object_id_value is int
+		or foundation_object_id_value <= 0
+		or not foundation_object_owner_value is String
+		or foundation_object_owner_value.strip_edges().is_empty()
+	):
+		print(
+			"Could not recover city foundation object: local identity is invalid."
+		)
+		return
+
+	var foundation_object_id: int = foundation_object_id_value
+	var foundation_object_owner: String = foundation_object_owner_value
+	var foundation_count := 0
+	var exact_foundation_exists := false
+	for raw_city_object in city_state.object_state.objects:
+		if (
+			not raw_city_object is Dictionary
+			or str(raw_city_object.get("type", ""))
+			!= CityObjectCatalog.CITY_OBJECT_CITY_CENTER
+		):
+			continue
+
+		foundation_count += 1
+		exact_foundation_exists = (
+			exact_foundation_exists
+			or (
+				int(raw_city_object.get("id", -1)) == foundation_object_id
+				and str(raw_city_object.get("owner", ""))
+				== foundation_object_owner
+				and raw_city_object.get("top_left") == top_left
+				and raw_city_object.get("size") == size_tiles
+			)
+		)
+
+	if foundation_count > 0:
+		if foundation_count == 1 and exact_foundation_exists:
+			return
+		print(
+			"Could not recover city foundation object: existing Keep identity is ambiguous."
+		)
+		return
+
+	if not CityObjectSystem.get_city_object_by_id_for_city_state(
+		city_state,
+		foundation_object_id
+	).is_empty():
+		print(
+			"Could not recover city foundation object: its saved ID is already occupied."
+		)
+		return
+
+	var foundation_object := (
+		CityObjectSystem.register_recovered_city_foundation_object_for_city_state(
+			city_state,
+			{
+				"object_type": CityObjectCatalog.CITY_OBJECT_CITY_CENTER,
+				"top_left": top_left,
+				"size_tiles": size_tiles,
+				"object_owner": foundation_object_owner,
+				"city_world": city_state.city_world,
+			}
+		)
+	)
+	if foundation_object.is_empty():
 		print("Could not recover city foundation object.")
 		return
-
-	var foundation_object := CityObjectSystem.register_completed_city_object({
-		"object_type": CityObjectCatalog.CITY_OBJECT_CITY_CENTER,
-		"top_left": top_left,
-		"size_tiles": size_tiles,
-		"object_owner": "player",
-		"city_world": city_world,
-	})
 
 	print("Recovered city foundation object: ", foundation_object)
 
 func clear_invalid_old_city_foundation_state() -> void:
-	if not WorldData.player_city_founded:
+	var city_state = WorldPoliticalState.get_current_city_simulation_state()
+	if (
+		not city_state is CitySettlementSimulationState
+		or not city_state.is_city_founded()
+	):
 		return
 
-	if WorldData.has_player_city_foundation():
+	if city_state.has_city_foundation_footprint():
 		return
 
-	print("Clearing old city-founded state with no placed foundation.")
-	WorldData.reset_player_city_state()
+	var settlement_context = WorldPoliticalState.get_settlement_context(
+		WorldPoliticalState.active_settlement_id
+	)
+	if (
+		settlement_context != null
+		and settlement_context.is_player_polity
+		and settlement_context.is_capital
+	):
+		print("Clearing old player-city state with no placed foundation.")
+		WorldData.reset_player_city_state()
 
 func get_city_tile_under_mouse() -> Vector2i:
 	if city_world == null:

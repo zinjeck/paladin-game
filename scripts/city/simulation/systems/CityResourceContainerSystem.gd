@@ -418,6 +418,32 @@ static func get_city_object_unreserved_storage_free_space(
 	)
 
 
+static func get_city_object_unreserved_storage_free_space_for_city_state(
+	city_state: CitySettlementSimulationState,
+	city_object: Dictionary,
+	excluding_reservation_id: int = (
+		CityCitizens.INVALID_CITY_CITIZEN_HAUL_RESERVATION_ID
+	)
+) -> int:
+	if city_state == null or city_object.is_empty():
+		return 0
+
+	var endpoint := CityLogisticsSystem.make_city_citizen_haul_endpoint(
+		int(city_object.get("id", -1))
+	)
+
+	return maxi(
+		get_city_object_storage_free_space(city_object)
+		- CityLogisticsSystem
+		.get_city_haul_endpoint_destination_reserved_amount_for_city_state(
+			city_state,
+			endpoint,
+			excluding_reservation_id
+		),
+		0
+	)
+
+
 static func get_city_object_storage_capacity_for_resource(
 	city_object: Dictionary,
 	resource: String
@@ -528,15 +554,105 @@ static func set_city_object_stored_resource_amount(
 	):
 		return safe_amount
 
-	city_object["stored_resources"] = stored_resources
-
-	if not CityObjectSystem.write_city_object_at_index(
-		object_index,
-		city_object
+	if not CityObjectSystem.patch_city_object_storage_fields(
+		object_id,
+		{"stored_resources": stored_resources}
 	):
 		return old_amount
 
-	CityResourceAccountingSystem.mark_city_container_changed(city_object)
+	CityResourceAccountingSystem.mark_city_container_changed(
+		CityObjectSystem.get_city_object_by_id(object_id)
+	)
+	return safe_amount
+
+
+static func set_city_object_stored_resource_amount_for_city_state(
+	city_state: CitySettlementSimulationState,
+	object_id: int,
+	resource: String,
+	amount: int,
+	reservation_id: int = (
+		CityCitizens.INVALID_CITY_CITIZEN_HAUL_RESERVATION_ID
+	)
+) -> int:
+	var object_index := CityObjectSystem.get_city_object_index_by_id_for_city_state(
+		city_state,
+		object_id
+	)
+
+	if object_index < 0:
+		return 0
+
+	var city_object := CityObjectSystem.get_city_object_by_id_for_city_state(
+		city_state,
+		object_id
+	)
+
+	if city_object.is_empty() or not can_city_object_store_resource(
+		city_object,
+		resource
+	):
+		return 0
+
+	var raw_stored_resources = city_object.get("stored_resources", {})
+	var stored_resources := make_sparse_resource_container(raw_stored_resources)
+	var old_amount := get_resource_container_resource_amount(
+		stored_resources,
+		resource
+	)
+	var used_without_resource := maxi(
+		get_resource_container_total_amount(stored_resources) - old_amount,
+		0
+	)
+	var endpoint := CityLogisticsSystem.make_city_citizen_haul_endpoint(object_id)
+	var minimum_reserved_amount := (
+		CityLogisticsSystem
+		.get_city_haul_endpoint_source_reserved_amount_for_city_state(
+			city_state,
+			endpoint,
+			resource,
+			reservation_id
+		)
+	)
+	var maximum_allowed_amount := maxi(
+		get_city_object_storage_capacity(city_object)
+		- used_without_resource
+		- CityLogisticsSystem
+		.get_city_haul_endpoint_destination_reserved_amount_for_city_state(
+			city_state,
+			endpoint,
+			reservation_id
+		),
+		minimum_reserved_amount
+	)
+	var safe_amount := clampi(
+		amount,
+		minimum_reserved_amount,
+		maximum_allowed_amount
+	)
+
+	if safe_amount > 0:
+		stored_resources[resource] = safe_amount
+	else:
+		stored_resources.erase(resource)
+
+	if raw_stored_resources is Dictionary and raw_stored_resources == stored_resources:
+		return safe_amount
+
+	if not CityObjectSystem.patch_city_object_storage_fields_for_city_state(
+		city_state,
+		object_id,
+		{"stored_resources": stored_resources}
+	):
+		return old_amount
+
+	CityResourceAccountingSystem.mark_city_container_changed_for_city_state(
+		city_state,
+		CityObjectSystem.get_city_object_by_id_for_city_state(
+			city_state,
+			object_id
+		)
+	)
 	return safe_amount
 
 
@@ -617,6 +733,81 @@ static func add_resource_to_city_object_storage(
 	return accepted_amount
 
 
+static func add_resource_to_city_object_storage_for_city_state(
+	city_state: CitySettlementSimulationState,
+	object_id: int,
+	resource: String,
+	amount_delta: int,
+	reservation_id: int = (
+		CityCitizens.INVALID_CITY_CITIZEN_HAUL_RESERVATION_ID
+	)
+) -> int:
+	if city_state == null or amount_delta <= 0:
+		return 0
+
+	var city_object := CityObjectSystem.get_city_object_by_id_for_city_state(
+		city_state,
+		object_id
+	)
+
+	if city_object.is_empty() or not can_city_object_store_resource(
+		city_object,
+		resource
+	):
+		return 0
+
+	var endpoint := CityLogisticsSystem.make_city_citizen_haul_endpoint(object_id)
+	var free_space := get_city_object_unreserved_storage_free_space_for_city_state(
+		city_state,
+		city_object,
+		reservation_id
+	)
+
+	if reservation_id > 0:
+		var reservation := CityLogisticsSystem.get_city_haul_reservation_for_city_state(
+			city_state,
+			reservation_id
+		)
+		var reserved_resource_amount := maxi(
+			int(
+				reservation.get("destination_reserved_resources", {}).get(
+					resource,
+					0
+				)
+			),
+			0
+		)
+
+		if (
+			reservation.is_empty()
+			or not CityLogisticsSystem.city_citizen_haul_endpoints_match(
+				reservation.get("destination", {}),
+				endpoint
+			)
+			or reserved_resource_amount <= 0
+		):
+			return 0
+
+		free_space = mini(free_space, reserved_resource_amount)
+
+	if free_space <= 0:
+		return 0
+
+	var accepted_amount := mini(amount_delta, free_space)
+	var current_amount := get_city_object_stored_resource_amount(
+		city_object,
+		resource
+	)
+	set_city_object_stored_resource_amount_for_city_state(
+		city_state,
+		object_id,
+		resource,
+		current_amount + accepted_amount,
+		reservation_id
+	)
+	return accepted_amount
+
+
 static func add_resource_bundle_to_city_object_storage(
 	object_id: int,
 	requested_resources: Dictionary
@@ -677,15 +868,100 @@ static func add_resource_bundle_to_city_object_storage(
 			+ int(normalized_resources[resource])
 		)
 
-	city_object["stored_resources"] = stored_resources
-
-	if not CityObjectSystem.write_city_object_at_index(
-		object_index,
-		city_object
+	if not CityObjectSystem.patch_city_object_storage_fields(
+		object_id,
+		{"stored_resources": stored_resources}
 	):
 		return false
 
-	CityResourceAccountingSystem.mark_city_container_changed(city_object)
+	CityResourceAccountingSystem.mark_city_container_changed(
+		CityObjectSystem.get_city_object_by_id(object_id)
+	)
+	return true
+
+
+static func add_resource_bundle_to_city_object_storage_for_city_state(
+	city_state: CitySettlementSimulationState,
+	object_id: int,
+	requested_resources: Dictionary
+) -> bool:
+	if city_state == null or requested_resources.is_empty():
+		return false
+
+	var object_index := CityObjectSystem.get_city_object_index_by_id_for_city_state(
+		city_state,
+		object_id
+	)
+
+	if object_index < 0:
+		return false
+
+	var city_object := CityObjectSystem.get_city_object_by_id_for_city_state(
+		city_state,
+		object_id
+	)
+
+	if city_object.is_empty():
+		return false
+	var normalized_resources: Dictionary = {}
+	var total_requested_amount := 0
+
+	for raw_resource in requested_resources.keys():
+		if typeof(raw_resource) != TYPE_STRING:
+			return false
+
+		var resource: String = raw_resource
+		var raw_amount = requested_resources[raw_resource]
+
+		if typeof(raw_amount) != TYPE_INT:
+			return false
+
+		var requested_amount: int = raw_amount
+
+		if (
+			requested_amount <= 0
+			or not can_city_object_store_resource(city_object, resource)
+		):
+			return false
+
+		normalized_resources[resource] = requested_amount
+		total_requested_amount += requested_amount
+
+	if (
+		total_requested_amount <= 0
+		or total_requested_amount
+		> get_city_object_unreserved_storage_free_space_for_city_state(
+			city_state,
+			city_object
+		)
+	):
+		return false
+
+	var stored_resources := make_sparse_resource_container(
+		city_object.get("stored_resources", {})
+	)
+
+	for raw_resource in normalized_resources.keys():
+		var resource: String = raw_resource
+		stored_resources[resource] = (
+			get_resource_container_resource_amount(stored_resources, resource)
+			+ int(normalized_resources[resource])
+		)
+
+	if not CityObjectSystem.patch_city_object_storage_fields_for_city_state(
+		city_state,
+		object_id,
+		{"stored_resources": stored_resources}
+	):
+		return false
+
+	CityResourceAccountingSystem.mark_city_container_changed_for_city_state(
+		city_state,
+		CityObjectSystem.get_city_object_by_id_for_city_state(
+			city_state,
+			object_id
+		)
+	)
 	return true
 
 
@@ -753,6 +1029,85 @@ static func remove_resource_from_city_object_storage(
 		return 0
 
 	var final_amount := set_city_object_stored_resource_amount(
+		object_id,
+		resource,
+		current_amount - amount_to_remove,
+		reservation_id
+	)
+
+	return maxi(current_amount - final_amount, 0)
+
+
+static func remove_resource_from_city_object_storage_for_city_state(
+	city_state: CitySettlementSimulationState,
+	object_id: int,
+	resource: String,
+	requested_amount: int,
+	reservation_id: int = (
+		CityCitizens.INVALID_CITY_CITIZEN_HAUL_RESERVATION_ID
+	)
+) -> int:
+	if city_state == null or requested_amount <= 0:
+		return 0
+
+	var city_object := CityObjectSystem.get_city_object_by_id_for_city_state(
+		city_state,
+		object_id
+	)
+
+	if city_object.is_empty():
+		return 0
+
+	var current_amount := get_city_object_stored_resource_amount(
+		city_object,
+		resource
+	)
+	var endpoint := CityLogisticsSystem.make_city_citizen_haul_endpoint(object_id)
+	var removable_amount := maxi(
+		current_amount
+		- CityLogisticsSystem
+		.get_city_haul_endpoint_source_reserved_amount_for_city_state(
+			city_state,
+			endpoint,
+			resource,
+			reservation_id
+		),
+		0
+	)
+
+	if reservation_id > 0:
+		var reservation := CityLogisticsSystem.get_city_haul_reservation_for_city_state(
+			city_state,
+			reservation_id
+		)
+
+		if (
+			reservation.is_empty()
+			or not CityLogisticsSystem.city_citizen_haul_endpoints_match(
+				reservation.get("source", {}),
+				endpoint
+			)
+			or str(
+				reservation.get(
+					"resource_type",
+					CityResourceCatalog.RESOURCE_NONE
+				)
+			) != resource
+		):
+			return 0
+
+		removable_amount = mini(
+			removable_amount,
+			maxi(int(reservation.get("source_reserved_amount", 0)), 0)
+		)
+
+	var amount_to_remove := mini(requested_amount, removable_amount)
+
+	if amount_to_remove <= 0:
+		return 0
+
+	var final_amount := set_city_object_stored_resource_amount_for_city_state(
+		city_state,
 		object_id,
 		resource,
 		current_amount - amount_to_remove,

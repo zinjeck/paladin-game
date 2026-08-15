@@ -257,6 +257,45 @@ func _prepare_active_city_task(
 	var city_world := _make_world(18, 18, seed_value)
 	WorldPoliticalState.set_current_city_world(city_world)
 	WorldPoliticalState.set_current_city_seed(seed_value)
+	var city_state = WorldPoliticalState.get_city_simulation_state(city_id)
+	_expect(
+		city_state is CitySettlementSimulationState,
+		"The task fixture must expose its settlement-owned City state."
+	)
+	if not city_state is CitySettlementSimulationState:
+		return {}
+	var settlement := WorldPoliticalState.get_settlement(city_id)
+	city_state.city_runtime_data.clear()
+	city_state.city_runtime_data.merge({
+		"name": str(settlement.get("name", "Task City")),
+		"primary_culture_id": culture_id,
+		"founded": false,
+		"can_build": false,
+	}, true)
+	var keep_top_left := Vector2i(0, 10)
+	var keep := CityObjectSystem.register_completed_city_object({
+		"object_type": CityObjectCatalog.CITY_OBJECT_CITY_CENTER,
+		"top_left": keep_top_left,
+		"size_tiles": CityObjectCatalog.get_city_object_size_for_type(
+			CityObjectCatalog.CITY_OBJECT_CITY_CENTER
+		),
+		"object_owner": "player",
+		"city_world": city_world,
+	})
+	_expect(
+		not keep.is_empty(),
+		"The task fixture must register its Keep while still unfounded."
+	)
+	if keep.is_empty():
+		return {}
+	city_state.city_runtime_data.merge({
+		"founded": true,
+		"can_build": true,
+		"foundation_top_left": keep_top_left,
+		"foundation_size": keep.get("size", Vector2i.ZERO),
+		"foundation_object_id": int(keep.get("id", -1)),
+		"foundation_object_owner": str(keep.get("owner", "")),
+	}, true)
 	var house := CityObjectSystem.add_city_object({
 		"object_type": CityObjectCatalog.CITY_OBJECT_HOUSE,
 		"top_left": Vector2i(8, 8),

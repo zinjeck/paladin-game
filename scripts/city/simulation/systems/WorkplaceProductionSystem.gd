@@ -343,7 +343,7 @@ static func _build_footprint_reach_zone(
 			continue
 
 		var zone_tile: Vector2i = raw_zone_tile
-		var tile_data: Dictionary = source_world.get_tile(
+		var tile_data: Dictionary = source_world.get_tile_for_internal_read(
 			zone_tile.x,
 			zone_tile.y
 		)
@@ -492,13 +492,29 @@ static func run_tick(
 	_tick_index: int,
 	minutes_advanced: int
 ) -> void:
+	var city_state = WorldPoliticalState.get_current_city_simulation_state()
+
+	if not city_state is CitySettlementSimulationState:
+		return
+
+	run_tick_for_city_state(city_state, _tick_index, minutes_advanced)
+
+
+static func run_tick_for_city_state(
+	city_state: CitySettlementSimulationState,
+	_tick_index: int,
+	minutes_advanced: int
+) -> void:
+	if city_state == null or city_state.city_world == null:
+		return
+
 	if minutes_advanced <= 0:
 		return
 
-	if not WorldData.has_player_city():
+	if not city_state.is_city_founded():
 		return
 
-	for raw_city_object in CityObjectSystem.get_city_objects():
+	for raw_city_object in city_state.object_state.objects:
 		if not raw_city_object is Dictionary:
 			continue
 
@@ -514,7 +530,8 @@ static func run_tick(
 		if recipe.is_empty():
 			continue
 
-		_run_workplace_tick(
+		_run_workplace_tick_for_city_state(
+			city_state,
 			city_object,
 			recipe,
 			minutes_advanced
@@ -526,7 +543,27 @@ static func _run_workplace_tick(
 	recipe: Dictionary,
 	minutes_advanced: int
 ) -> void:
+	var city_state = WorldPoliticalState.get_current_city_simulation_state()
+
+	if not city_state is CitySettlementSimulationState:
+		return
+
+	_run_workplace_tick_for_city_state(
+		city_state,
+		city_object,
+		recipe,
+		minutes_advanced
+	)
+
+
+static func _run_workplace_tick_for_city_state(
+	city_state: CitySettlementSimulationState,
+	city_object: Dictionary,
+	recipe: Dictionary,
+	minutes_advanced: int
+) -> void:
 	var tick_context := _make_workplace_tick_context({
+		"city_state": city_state,
 		"city_object": city_object,
 		"recipe": recipe,
 		"minutes_advanced": minutes_advanced,
@@ -550,6 +587,11 @@ static func _run_workplace_tick(
 static func _make_workplace_tick_context(
 	values: Dictionary
 ) -> Dictionary:
+	var city_state = values.get("city_state")
+
+	if not city_state is CitySettlementSimulationState:
+		return {}
+
 	var city_object: Dictionary = values.get("city_object", {})
 	var recipe: Dictionary = values.get("recipe", {})
 	var minutes_advanced := int(values.get("minutes_advanced", 0))
@@ -563,7 +605,10 @@ static func _make_workplace_tick_context(
 			city_object
 		)
 	)
-	var source_evaluation := get_resource_source_evaluation(city_object)
+	var source_evaluation := get_resource_source_evaluation(
+		city_object,
+		city_state.city_world
+	)
 	var uses_environmental_resource_source := bool(
 		source_evaluation.get("uses_environmental_source", false)
 	)
@@ -585,6 +630,7 @@ static func _make_workplace_tick_context(
 		)
 
 	return {
+		"city_state": city_state,
 		"city_object": city_object,
 		"recipe": recipe,
 		"minutes_advanced": minutes_advanced,
@@ -594,7 +640,10 @@ static func _make_workplace_tick_context(
 			uses_environmental_resource_source
 		),
 		"site_productivity": site_productivity,
-		"productive_worker_count": _get_productive_worker_count(city_object),
+		"productive_worker_count": _get_productive_worker_count_for_city_state(
+			city_state,
+			city_object
+		),
 	}
 
 
@@ -619,7 +668,7 @@ static func _prepare_workplace_tick_recipe(
 		or not raw_inputs is Dictionary
 		or not _outputs_are_valid_for_workplace(city_object, outputs)
 	):
-		_write_workplace_state({
+		_write_workplace_state_for_context(context, {
 			"object_id": object_id,
 			"progress_work_units": 0,
 			"production_status": (
@@ -639,6 +688,7 @@ static func _prepare_workplace_tick_recipe(
 static func _workplace_tick_is_blocked(
 	context: Dictionary
 ) -> bool:
+	var city_state: CitySettlementSimulationState = context.get("city_state")
 	var city_object: Dictionary = context.get("city_object", {})
 	var object_id := int(context.get("object_id", -1))
 	var current_progress := int(context.get("current_progress", 0))
@@ -653,7 +703,7 @@ static func _workplace_tick_is_blocked(
 	var outputs: Dictionary = context.get("outputs", {})
 
 	if productive_worker_count <= 0:
-		_write_workplace_state({
+		_write_workplace_state_for_context(context, {
 			"object_id": object_id,
 			"progress_work_units": current_progress,
 			"production_status": (
@@ -665,7 +715,7 @@ static func _workplace_tick_is_blocked(
 		return true
 
 	if uses_environmental_resource_source and site_productivity <= 0:
-		_write_workplace_state({
+		_write_workplace_state_for_context(context, {
 			"object_id": object_id,
 			"progress_work_units": current_progress,
 			"production_status": (
@@ -679,7 +729,7 @@ static func _workplace_tick_is_blocked(
 	# Input-consuming recipes fail closed until stored-input processing
 	# is implemented. This prevents future recipes from creating free goods.
 	if not inputs.is_empty():
-		_write_workplace_state({
+		_write_workplace_state_for_context(context, {
 			"object_id": object_id,
 			"progress_work_units": current_progress,
 			"production_status": (
@@ -690,7 +740,8 @@ static func _workplace_tick_is_blocked(
 		})
 		return true
 
-	var output_capacity_in_batches := _get_output_capacity_in_batches(
+	var output_capacity_in_batches := _get_output_capacity_in_batches_for_city_state(
+		city_state,
 		city_object,
 		outputs
 	)
@@ -702,13 +753,16 @@ static func _workplace_tick_is_blocked(
 	# overflow before accepting progress, preserving the existing fail-closed
 	# behavior.
 	if output_capacity_in_batches <= 0:
-		overflow_tile = _find_workplace_overflow_tile(city_object)
+		overflow_tile = _find_workplace_overflow_tile_for_city_state(
+			city_state,
+			city_object
+		)
 		can_overflow = (
 			overflow_tile != CityCitizens.INVALID_CITY_TILE_POSITION
 		)
 
 	if output_capacity_in_batches <= 0 and not can_overflow:
-		_write_workplace_state({
+		_write_workplace_state_for_context(context, {
 			"object_id": object_id,
 			"progress_work_units": current_progress,
 			"production_status": (
@@ -728,6 +782,7 @@ static func _workplace_tick_is_blocked(
 static func _prepare_workplace_tick_output(
 	context: Dictionary
 ) -> bool:
+	var city_state: CitySettlementSimulationState = context.get("city_state")
 	var city_object: Dictionary = context.get("city_object", {})
 	var minutes_advanced := int(context.get("minutes_advanced", 0))
 	var object_id := int(context.get("object_id", -1))
@@ -752,7 +807,7 @@ static func _prepare_workplace_tick_output(
 	)
 
 	if work_units_added <= 0:
-		_write_workplace_state({
+		_write_workplace_state_for_context(context, {
 			"object_id": object_id,
 			"progress_work_units": current_progress,
 			"production_status": (
@@ -769,7 +824,7 @@ static func _prepare_workplace_tick_output(
 	)
 
 	if potential_completed_batches <= 0:
-		_write_workplace_state({
+		_write_workplace_state_for_context(context, {
 			"object_id": object_id,
 			"progress_work_units": total_progress,
 			"production_status": (
@@ -793,7 +848,10 @@ static func _prepare_workplace_tick_output(
 		not can_overflow
 		and potential_completed_batches >= output_capacity_in_batches
 	):
-		overflow_tile = _find_workplace_overflow_tile(city_object)
+		overflow_tile = _find_workplace_overflow_tile_for_city_state(
+			city_state,
+			city_object
+		)
 		can_overflow = (
 			overflow_tile != CityCitizens.INVALID_CITY_TILE_POSITION
 		)
@@ -809,7 +867,7 @@ static func _prepare_workplace_tick_output(
 	)
 
 	if batches_to_produce <= 0:
-		_write_workplace_state({
+		_write_workplace_state_for_context(context, {
 			"object_id": object_id,
 			"progress_work_units": current_progress,
 			"production_status": (
@@ -832,6 +890,7 @@ static func _prepare_workplace_tick_output(
 static func _commit_workplace_tick_output(
 	context: Dictionary
 ) -> void:
+	var city_state: CitySettlementSimulationState = context.get("city_state")
 	var city_object: Dictionary = context.get("city_object", {})
 	var object_id := int(context.get("object_id", -1))
 	var current_progress := int(context.get("current_progress", 0))
@@ -859,6 +918,7 @@ static func _commit_workplace_tick_output(
 	var can_overflow := bool(context.get("can_overflow", false))
 
 	if not _store_recipe_output_distribution({
+		"city_state": city_state,
 		"object_id": object_id,
 		"outputs": outputs,
 		"storage_batch_count": storage_batches_to_produce,
@@ -870,7 +930,7 @@ static func _commit_workplace_tick_output(
 			+ str(object_id)
 			+ " could not store its prevalidated production output."
 		)
-		_write_workplace_state({
+		_write_workplace_state_for_context(context, {
 			"object_id": object_id,
 			"progress_work_units": current_progress,
 			"production_status": (
@@ -894,8 +954,12 @@ static func _commit_workplace_tick_output(
 	):
 		new_progress = 0
 
-	var updated_city_object := CityObjectSystem.get_city_object_by_id(object_id)
-	var remaining_output_capacity := _get_output_capacity_in_batches(
+	var updated_city_object := CityObjectSystem.get_city_object_by_id_for_city_state(
+		city_state,
+		object_id
+	)
+	var remaining_output_capacity := _get_output_capacity_in_batches_for_city_state(
+		city_state,
 		updated_city_object,
 		outputs
 	)
@@ -906,7 +970,7 @@ static func _commit_workplace_tick_output(
 			CityObjectCatalog.WORKPLACE_PRODUCTION_STATUS_BLOCKED_OUTPUT_FULL
 		)
 
-	_write_workplace_state({
+	_write_workplace_state_for_context(context, {
 		"object_id": object_id,
 		"progress_work_units": new_progress,
 		"production_status": new_status,
@@ -919,6 +983,17 @@ static func _get_productive_worker_count(
 ) -> int:
 	return CityEmploymentSystem.get_city_object_attending_worker_count(
 		city_object
+	)
+
+
+static func _get_productive_worker_count_for_city_state(
+	city_state: CitySettlementSimulationState,
+	city_object: Dictionary
+) -> int:
+	return CityEmploymentSystem.get_city_object_attending_worker_count_for_city_state(
+		city_state,
+		city_object,
+		city_state.city_world
 	)
 
 static func _get_recipe_outputs(
@@ -971,6 +1046,18 @@ static func _get_output_capacity_in_batches(
 	city_object: Dictionary,
 	outputs: Dictionary
 ) -> int:
+	return _get_output_capacity_in_batches_for_city_state(
+		null,
+		city_object,
+		outputs
+	)
+
+
+static func _get_output_capacity_in_batches_for_city_state(
+	city_state,
+	city_object: Dictionary,
+	outputs: Dictionary
+) -> int:
 	if city_object.is_empty():
 		return 0
 
@@ -998,6 +1085,11 @@ static func _get_output_capacity_in_batches(
 		CityResourceContainerSystem.get_city_object_unreserved_storage_free_space(
 			city_object
 		)
+		if city_state == null
+		else CityResourceContainerSystem.get_city_object_unreserved_storage_free_space_for_city_state(
+			city_state,
+			city_object
+		)
 	)
 
 	return maxi(
@@ -1012,7 +1104,22 @@ static func _get_output_capacity_in_batches(
 static func _find_workplace_overflow_tile(
 	city_object: Dictionary
 ) -> Vector2i:
-	var active_world = WorldPoliticalState.get_current_city_world()
+	var city_state = WorldPoliticalState.get_current_city_simulation_state()
+
+	if not city_state is CitySettlementSimulationState:
+		return CityCitizens.INVALID_CITY_TILE_POSITION
+
+	return _find_workplace_overflow_tile_for_city_state(
+		city_state,
+		city_object
+	)
+
+
+static func _find_workplace_overflow_tile_for_city_state(
+	city_state: CitySettlementSimulationState,
+	city_object: Dictionary
+) -> Vector2i:
+	var active_world = city_state.city_world
 
 	if active_world == null or city_object.is_empty():
 		return CityCitizens.INVALID_CITY_TILE_POSITION
@@ -1047,7 +1154,8 @@ static func _find_workplace_overflow_tile(
 	if footprint_tiles.is_empty():
 		return CityCitizens.INVALID_CITY_TILE_POSITION
 
-	var access_tiles := CityNavigationSystem.get_city_object_access_tiles(
+	var access_tiles := CityNavigationSystem.get_city_object_access_tiles_for_city_state(
+		city_state,
 		active_world,
 		city_object
 	)
@@ -1067,7 +1175,8 @@ static func _find_workplace_overflow_tile(
 		):
 			continue
 
-		if CityLogisticsSystem.can_city_ground_pile_exist_at_tile(
+		if CityLogisticsSystem.can_city_ground_pile_exist_at_tile_for_city_state(
+			city_state,
 			active_world,
 			access_tile
 		):
@@ -1097,7 +1206,8 @@ static func _find_workplace_overflow_tile(
 				if candidate_lookup.has(candidate_tile):
 					continue
 
-				if not CityLogisticsSystem.can_city_ground_pile_exist_at_tile(
+				if not CityLogisticsSystem.can_city_ground_pile_exist_at_tile_for_city_state(
+					city_state,
 					active_world,
 					candidate_tile
 				):
@@ -1125,6 +1235,7 @@ static func _find_workplace_overflow_tile(
 		var access_tile: Vector2i = raw_access_tile
 		var path_result := (
 			CityNavigationSystem.find_path_to_any_city_tile({
+				"city_state": city_state,
 				"city_world": active_world,
 				"start_tile": access_tile,
 				"destination_tiles": candidate_tiles,
@@ -1255,9 +1366,42 @@ static func _store_recipe_outputs(
 	)
 
 
+static func _store_recipe_outputs_for_city_state(
+	city_state: CitySettlementSimulationState,
+	object_id: int,
+	outputs: Dictionary,
+	batch_count: int
+) -> bool:
+	if city_state == null or object_id <= 0 or batch_count <= 0:
+		return false
+
+	var requested_resources: Dictionary = {}
+
+	for raw_resource in outputs:
+		var resource := str(raw_resource)
+		var requested_amount := int(outputs.get(raw_resource, 0)) * batch_count
+
+		if requested_amount <= 0:
+			return false
+
+		requested_resources[resource] = requested_amount
+
+	return CityResourceContainerSystem.add_resource_bundle_to_city_object_storage_for_city_state(
+		city_state,
+		object_id,
+		requested_resources
+	)
+
+
 static func _store_recipe_output_distribution(
 	values: Dictionary
 ) -> bool:
+	var raw_city_state = values.get("city_state")
+	var city_state = (
+		raw_city_state
+		if raw_city_state is CitySettlementSimulationState
+		else null
+	)
 	var object_id := int(values.get("object_id", -1))
 	var outputs: Dictionary = values.get("outputs", {})
 	var storage_batch_count := maxi(
@@ -1275,11 +1419,22 @@ static func _store_recipe_output_distribution(
 	var stored_in_object := false
 
 	if storage_batch_count > 0:
-		if not _store_recipe_outputs(
-			object_id,
-			outputs,
-			storage_batch_count
-		):
+		var stored := (
+			_store_recipe_outputs(
+				object_id,
+				outputs,
+				storage_batch_count
+			)
+			if city_state == null
+			else _store_recipe_outputs_for_city_state(
+				city_state,
+				object_id,
+				outputs,
+				storage_batch_count
+			)
+		)
+
+		if not stored:
 			return false
 
 		stored_in_object = true
@@ -1287,19 +1442,38 @@ static func _store_recipe_output_distribution(
 	if overflow_batch_count <= 0:
 		return stored_in_object
 
-	if _store_recipe_outputs_in_ground_pile(
-		overflow_tile,
-		outputs,
-		overflow_batch_count
-	):
+	var overflow_stored := (
+		_store_recipe_outputs_in_ground_pile(
+			overflow_tile,
+			outputs,
+			overflow_batch_count
+		)
+		if city_state == null
+		else _store_recipe_outputs_in_ground_pile_for_city_state(
+			city_state,
+			overflow_tile,
+			outputs,
+			overflow_batch_count
+		)
+	)
+
+	if overflow_stored:
 		return true
 
 	if stored_in_object:
-		_rollback_recipe_outputs_from_city_object(
-			object_id,
-			outputs,
-			storage_batch_count
-		)
+		if city_state == null:
+			_rollback_recipe_outputs_from_city_object(
+				object_id,
+				outputs,
+				storage_batch_count
+			)
+		else:
+			_rollback_recipe_outputs_from_city_object_for_city_state(
+				city_state,
+				object_id,
+				outputs,
+				storage_batch_count
+			)
 
 	return false
 
@@ -1348,6 +1522,48 @@ static func _store_recipe_outputs_in_ground_pile(
 	return not added_placements_by_resource.is_empty()
 
 
+static func _store_recipe_outputs_in_ground_pile_for_city_state(
+	city_state: CitySettlementSimulationState,
+	tile_position: Vector2i,
+	outputs: Dictionary,
+	batch_count: int
+) -> bool:
+	if (
+		city_state == null
+		or batch_count <= 0
+		or tile_position == CityCitizens.INVALID_CITY_TILE_POSITION
+	):
+		return false
+
+	var added_placements_by_resource: Dictionary = {}
+
+	for raw_resource in outputs:
+		var resource := str(raw_resource)
+		var requested_amount := int(outputs.get(raw_resource, 0)) * batch_count
+		var add_result := (
+			CityLogisticsSystem.add_resource_to_city_ground_piles_with_result_for_city_state(
+				city_state,
+				{
+					"tile_position": tile_position,
+					"resource": resource,
+					"amount_delta": requested_amount,
+				}
+			)
+		)
+		var added_amount := int(add_result.get("added_amount", 0))
+
+		if added_amount != requested_amount:
+			_rollback_ground_pile_resources_for_city_state(
+				city_state,
+				added_placements_by_resource
+			)
+			return false
+
+		added_placements_by_resource[resource] = add_result.get("placements", [])
+
+	return not added_placements_by_resource.is_empty()
+
+
 static func _rollback_recipe_outputs_from_city_object(
 	object_id: int,
 	outputs: Dictionary,
@@ -1361,6 +1577,31 @@ static func _rollback_recipe_outputs_from_city_object(
 		)
 		var removed_amount := (
 			CityResourceContainerSystem.remove_resource_from_city_object_storage(
+				object_id,
+				resource,
+				requested_amount
+			)
+		)
+
+		if removed_amount != requested_amount:
+			push_error(
+				"Failed to roll back workplace output after an "
+				+ "overflow transfer failure."
+			)
+
+
+static func _rollback_recipe_outputs_from_city_object_for_city_state(
+	city_state: CitySettlementSimulationState,
+	object_id: int,
+	outputs: Dictionary,
+	batch_count: int
+) -> void:
+	for raw_resource in outputs:
+		var resource := str(raw_resource)
+		var requested_amount := int(outputs.get(raw_resource, 0)) * batch_count
+		var removed_amount := (
+			CityResourceContainerSystem.remove_resource_from_city_object_storage_for_city_state(
+				city_state,
 				object_id,
 				resource,
 				requested_amount
@@ -1394,6 +1635,25 @@ static func _rollback_ground_pile_resources(
 			)
 
 
+static func _rollback_ground_pile_resources_for_city_state(
+	city_state: CitySettlementSimulationState,
+	placements_by_resource: Dictionary
+) -> void:
+	for raw_resource in placements_by_resource:
+		var resource := str(raw_resource)
+		var placements = placements_by_resource.get(raw_resource, [])
+
+		if not CityLogisticsSystem.rollback_city_ground_pile_additions_for_city_state(
+			city_state,
+			resource,
+			placements
+		):
+			push_error(
+				"Failed to roll back ground-pile output after "
+				+ "a multi-output transfer failure."
+			)
+
+
 static func _write_workplace_state(
 	values: Dictionary
 ) -> void:
@@ -1401,9 +1661,42 @@ static func _write_workplace_state(
 		values
 	)
 
+
+static func _write_workplace_state_for_context(
+	context: Dictionary,
+	values: Dictionary
+) -> void:
+	var city_state = context.get("city_state")
+
+	if not city_state is CitySettlementSimulationState:
+		return
+
+	set_city_workplace_production_state_for_city_state(
+		city_state,
+		values
+	)
+
 static func set_city_workplace_production_state(
 	values: Dictionary
 ) -> bool:
+	var city_state = WorldPoliticalState.get_current_city_simulation_state()
+
+	if not city_state is CitySettlementSimulationState:
+		return false
+
+	return set_city_workplace_production_state_for_city_state(
+		city_state,
+		values
+	)
+
+
+static func set_city_workplace_production_state_for_city_state(
+	city_state: CitySettlementSimulationState,
+	values: Dictionary
+) -> bool:
+	if city_state == null:
+		return false
+
 	for raw_key in CityObjectCatalog.CITY_WORKPLACE_PRODUCTION_STATE_KEYS:
 		var key := str(raw_key)
 
@@ -1423,19 +1716,15 @@ static func set_city_workplace_production_state(
 	var site_productivity_basis_points := int(
 		values["site_productivity_basis_points"]
 	)
-	var object_index := CityObjectSystem.get_city_object_index_by_id(object_id)
+	var city_object := CityObjectSystem.get_city_object_by_id_for_city_state(
+		city_state,
+		object_id
+	)
 
-	if object_index < 0:
-		return false
-
-	var raw_city_object = CityObjectSystem.get_city_objects()[object_index]
-
-	if not raw_city_object is Dictionary:
-		return false
-
-	var city_object: Dictionary = raw_city_object
-
-	if not CityObjectCatalog.city_object_is_workplace(city_object):
+	if (
+		city_object.is_empty()
+		or not CityObjectCatalog.city_object_is_workplace(city_object)
+	):
 		return false
 
 	var recipe := CityObjectCatalog.get_city_object_production_recipe(city_object)
@@ -1484,21 +1773,17 @@ static func set_city_workplace_production_state(
 	if not state_changed:
 		return false
 
-	city_object["production_progress_work_units"] = safe_progress
-	city_object["production_status"] = safe_status
-	city_object["productive_worker_count"] = (
-		safe_productive_worker_count
-	)
-	city_object["site_productivity_basis_points"] = (
-		safe_site_productivity
-	)
-
-	if not CityObjectSystem.write_city_object_at_index(
-		object_index,
-		city_object
+	if not CityObjectSystem.patch_city_object_workplace_fields_for_city_state(
+		city_state,
+		object_id,
+		{
+			"production_progress_work_units": safe_progress,
+			"production_status": safe_status,
+			"productive_worker_count": safe_productive_worker_count,
+			"site_productivity_basis_points": safe_site_productivity,
+		}
 	):
 		return false
-	CityEmploymentSystem.mark_city_workplaces_changed()
+	CityEmploymentSystem.mark_city_workplaces_changed_for_city_state(city_state)
 
 	return true
-

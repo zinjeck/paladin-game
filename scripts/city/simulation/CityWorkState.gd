@@ -136,7 +136,10 @@ func is_player_command_target_valid(
 	if not city_world.is_in_bounds(tile_position.x, tile_position.y):
 		return false
 
-	var tile = city_world.get_tile(tile_position.x, tile_position.y)
+	var tile = city_world.get_tile_for_internal_read(
+		tile_position.x,
+		tile_position.y
+	)
 	if not tile is Dictionary:
 		return false
 
