@@ -744,6 +744,32 @@ static func _synchronize_player_city_mirrors_from_capital_state() -> void:
 	)
 
 
+static func synchronize_player_city_mirrors_for_city_state(
+	settlement_context: SettlementSimulationContext,
+	city_state: CitySettlementSimulationState
+) -> bool:
+	if (
+		settlement_context == null
+		or city_state == null
+		or not settlement_context.supports_city_simulation()
+		or not settlement_context.is_player_polity
+		or not settlement_context.is_capital
+		or settlement_context.polity_id != WorldPoliticalState.player_polity_id
+		or settlement_context.settlement_id
+		!= WorldPoliticalState.get_player_capital_settlement_id()
+	):
+		return false
+
+	var registered_state = WorldPoliticalState.get_city_simulation_state(
+		settlement_context.settlement_id
+	)
+	if not is_same(registered_state, city_state):
+		return false
+
+	_synchronize_player_city_mirrors_from_capital_state()
+	return true
+
+
 static func found_player_city(values: Dictionary) -> void:
 	if has_player_city():
 		return

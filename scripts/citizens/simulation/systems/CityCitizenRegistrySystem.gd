@@ -319,20 +319,40 @@ static func get_city_citizen_name_seed_for_city_state(
 static func get_city_citizen_count_by_sex(
 	citizen_sex: String
 ) -> int:
-	var normalized_sex := (
-		CityCitizens.normalize_city_citizen_sex(
-			citizen_sex
-		)
+	return _get_city_citizen_count_by_sex_for_registry_state(
+		CityCitizenRegistrySystem.get_current_state(),
+		citizen_sex
 	)
 
-	if not CityCitizens.is_valid_city_citizen_sex(
-		normalized_sex
-	):
+
+static func get_city_citizen_count_by_sex_for_city_state(
+	city_state: CitySettlementSimulationState,
+	citizen_sex: String
+) -> int:
+	var registry_state := get_state_for_city_state(city_state)
+	if registry_state == null:
+		return 0
+
+	return _get_city_citizen_count_by_sex_for_registry_state(
+		registry_state,
+		citizen_sex
+	)
+
+
+static func _get_city_citizen_count_by_sex_for_registry_state(
+	registry_state: CityCitizenRegistryState,
+	citizen_sex: String
+) -> int:
+	var normalized_sex := CityCitizens.normalize_city_citizen_sex(
+		citizen_sex
+	)
+
+	if not CityCitizens.is_valid_city_citizen_sex(normalized_sex):
 		return 0
 
 	var citizen_count := 0
 
-	for raw_citizen in CityCitizenRegistrySystem.get_current_state().citizens:
+	for raw_citizen in registry_state.citizens:
 		if not raw_citizen is Dictionary:
 			continue
 
@@ -350,20 +370,57 @@ static func get_city_citizen_count_by_sex(
 
 	return citizen_count
 
+
 static func make_random_city_citizen_first_name(
 	citizen_sex: String,
 	citizen_number: int = -1
 ) -> String:
+	var registry_state := CityCitizenRegistrySystem.get_current_state()
+	return _make_random_city_citizen_first_name_for_registry_state(
+		registry_state,
+		citizen_sex,
+		citizen_number,
+		get_city_citizen_name_seed()
+	)
+
+
+static func make_random_city_citizen_first_name_for_city_state(
+	city_state: CitySettlementSimulationState,
+	citizen_sex: String,
+	citizen_number: int = -1
+) -> String:
+	var registry_state := get_state_for_city_state(city_state)
+	if registry_state == null:
+		return ""
+
+	var name_seed := get_city_citizen_name_seed_for_city_state(city_state)
+	if name_seed == 0:
+		name_seed = 12345
+
+	return _make_random_city_citizen_first_name_for_registry_state(
+		registry_state,
+		citizen_sex,
+		citizen_number,
+		name_seed
+	)
+
+
+static func _make_random_city_citizen_first_name_for_registry_state(
+	registry_state: CityCitizenRegistryState,
+	citizen_sex: String,
+	citizen_number: int,
+	name_seed: int
+) -> String:
 	var resolved_citizen_number := citizen_number
 
 	if resolved_citizen_number <= 0:
-		resolved_citizen_number = CityCitizenRegistrySystem.get_current_state().next_citizen_id
+		resolved_citizen_number = registry_state.next_citizen_id
 
 	return CityCitizens.make_random_city_citizen_first_name(
 		citizen_sex,
 		resolved_citizen_number,
-		get_city_citizen_name_seed(),
-		CityCitizenRegistrySystem.get_current_state().citizens
+		name_seed,
+		registry_state.citizens
 	)
 
 static func resolve_city_citizen_culture_id(
@@ -763,7 +820,35 @@ static func _starting_citizen_has_spatial_entry(
 	)
 
 static func ensure_city_citizen_demographic_state() -> int:
-	if CityCitizenRegistrySystem.get_current_state().citizens.is_empty():
+	var registry_state := CityCitizenRegistrySystem.get_current_state()
+	return _ensure_city_citizen_demographic_state(
+		registry_state,
+		get_city_citizen_name_seed()
+	)
+
+
+static func ensure_city_citizen_demographic_state_for_city_state(
+	city_state: CitySettlementSimulationState
+) -> int:
+	var registry_state := get_state_for_city_state(city_state)
+	if registry_state == null:
+		return 0
+
+	var name_seed := get_city_citizen_name_seed_for_city_state(city_state)
+	if name_seed == 0:
+		name_seed = 12345
+
+	return _ensure_city_citizen_demographic_state(
+		registry_state,
+		name_seed
+	)
+
+
+static func _ensure_city_citizen_demographic_state(
+	registry_state: CityCitizenRegistryState,
+	name_seed: int
+) -> int:
+	if registry_state.citizens.is_empty():
 		return 0
 
 	if not CityCitizens.city_citizen_name_pools_are_ready():
@@ -773,61 +858,49 @@ static func ensure_city_citizen_demographic_state() -> int:
 		)
 		return 0
 
-	var male_count := get_city_citizen_count_by_sex(
+	var male_count := _get_city_citizen_count_by_sex_for_registry_state(
+		registry_state,
 		CityCitizens.CITY_CITIZEN_SEX_MALE
 	)
-	var female_count := get_city_citizen_count_by_sex(
+	var female_count := _get_city_citizen_count_by_sex_for_registry_state(
+		registry_state,
 		CityCitizens.CITY_CITIZEN_SEX_FEMALE
 	)
 	var migrated_count := 0
 
-	for citizen_index in range(
-		CityCitizenRegistrySystem.get_current_state().citizens.size()
-	):
-		var raw_citizen = CityCitizenRegistrySystem.get_current_state().citizens[
-			citizen_index
-		]
+	for citizen_index in range(registry_state.citizens.size()):
+		var raw_citizen = registry_state.citizens[citizen_index]
 
 		if not raw_citizen is Dictionary:
 			continue
 
 		var citizen: Dictionary = raw_citizen
-		var existing_sex := (
-			CityCitizens.normalize_city_citizen_sex(
-				str(citizen.get("sex", ""))
-			)
+		var existing_sex := CityCitizens.normalize_city_citizen_sex(
+			str(citizen.get("sex", ""))
 		)
 
-		if CityCitizens.is_valid_city_citizen_sex(
-			existing_sex
-		):
+		if CityCitizens.is_valid_city_citizen_sex(existing_sex):
 			continue
 
-		var assigned_sex := (
-			CityCitizens.CITY_CITIZEN_SEX_MALE
-		)
+		var assigned_sex := CityCitizens.CITY_CITIZEN_SEX_MALE
 
 		if male_count > female_count:
-			assigned_sex = (
-				CityCitizens.CITY_CITIZEN_SEX_FEMALE
-			)
+			assigned_sex = CityCitizens.CITY_CITIZEN_SEX_FEMALE
 
-		var existing_name := str(
-			citizen.get("name", "")
-		).strip_edges()
+		var existing_name := str(citizen.get("name", "")).strip_edges()
 		var assigned_name_pool := (
 			CityCitizens.get_city_citizen_name_pool_for_sex(
 				assigned_sex
 			)
 		)
 
-		if not assigned_name_pool.has(
-			existing_name
-		):
+		if not assigned_name_pool.has(existing_name):
 			existing_name = (
-				make_random_city_citizen_first_name(
+				_make_random_city_citizen_first_name_for_registry_state(
+					registry_state,
 					assigned_sex,
-					int(citizen.get("id", -1))
+					int(citizen.get("id", -1)),
+					name_seed
 				)
 			)
 
@@ -842,7 +915,7 @@ static func ensure_city_citizen_demographic_state() -> int:
 
 		citizen["sex"] = assigned_sex
 		citizen["name"] = existing_name
-		CityCitizenRegistrySystem.get_current_state().citizens[citizen_index] = citizen
+		registry_state.citizens[citizen_index] = citizen
 
 		if assigned_sex == CityCitizens.CITY_CITIZEN_SEX_MALE:
 			male_count += 1
@@ -852,7 +925,7 @@ static func ensure_city_citizen_demographic_state() -> int:
 		migrated_count += 1
 
 	if migrated_count > 0:
-		CityCitizenRegistrySystem.mark_city_citizens_changed()
+		registry_state.citizen_version += 1
 
 	return migrated_count
 

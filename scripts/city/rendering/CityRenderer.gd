@@ -347,16 +347,7 @@ func _ready() -> void:
 		Time.get_ticks_usec() - generation_start_usec
 	)
 	install_session_prepared_city_map_textures()
-	clear_invalid_old_city_foundation_state()
-	ensure_city_foundation_object_exists()
-	CityCitizenSpatialSystem.ensure_city_citizen_spatial_state(
-		city_world
-	)
-	CityCitizenRegistrySystem.ensure_city_citizen_demographic_state()
-	CityCitizenInventorySystem.ensure_city_citizen_inventory_state()
-	CitizenNeedsSystem.ensure_city_citizen_need_state()
-	CityCitizenTaskRuntimeSystem.ensure_city_citizen_task_state()
-	CityCitizenMovementRuntimeSystem.ensure_city_citizen_movement_state()
+	bootstrap_bound_city_runtime()
 	city_citizen_movement_presentation.initialize()
 	synchronized_city_citizen_movement_version = (
 		CityCitizenMovementRuntimeSystem.get_current_state().citizen_movement_version
@@ -404,6 +395,27 @@ func _ready() -> void:
 		)
 
 	session_prepared_city_payload.clear()
+
+
+func bootstrap_bound_city_runtime() -> Dictionary:
+	var settlement_context = WorldPoliticalState.get_settlement_context(
+		bound_city_settlement_id
+	)
+	if settlement_context == null:
+		return {}
+
+	var bootstrap_result := CitySettlementRuntimeBootstrap.ensure_ready(
+		settlement_context
+	)
+	if not bool(bootstrap_result.get("success", false)):
+		push_error(
+			"City settlement runtime bootstrap failed for settlement "
+			+ str(bound_city_settlement_id)
+			+ ": "
+			+ str(bootstrap_result.get("errors", []))
+		)
+
+	return bootstrap_result
 
 
 func set_session_view_active(is_active: bool) -> void:
@@ -8036,120 +8048,6 @@ func draw_hovered_city_tile_highlight(
 		"border_width": border_width,
 		"tile_size": city_tile_size
 	})
-
-func ensure_city_foundation_object_exists() -> void:
-	var city_state = WorldPoliticalState.get_current_city_simulation_state()
-	if (
-		not city_state is CitySettlementSimulationState
-		or not city_state.has_city_foundation_footprint()
-	):
-		return
-
-	var top_left: Vector2i = city_state.city_runtime_data.get(
-		"foundation_top_left",
-		Vector2i(-1, -1)
-	)
-	var size_tiles: Vector2i = city_state.city_runtime_data.get(
-		"foundation_size",
-		Vector2i.ZERO
-	)
-	var foundation_object_id_value = city_state.city_runtime_data.get(
-		"foundation_object_id"
-	)
-	var foundation_object_owner_value = city_state.city_runtime_data.get(
-		"foundation_object_owner"
-	)
-	if (
-		not foundation_object_id_value is int
-		or foundation_object_id_value <= 0
-		or not foundation_object_owner_value is String
-		or foundation_object_owner_value.strip_edges().is_empty()
-	):
-		print(
-			"Could not recover city foundation object: local identity is invalid."
-		)
-		return
-
-	var foundation_object_id: int = foundation_object_id_value
-	var foundation_object_owner: String = foundation_object_owner_value
-	var foundation_count := 0
-	var exact_foundation_exists := false
-	for raw_city_object in city_state.object_state.objects:
-		if (
-			not raw_city_object is Dictionary
-			or str(raw_city_object.get("type", ""))
-			!= CityObjectCatalog.CITY_OBJECT_CITY_CENTER
-		):
-			continue
-
-		foundation_count += 1
-		exact_foundation_exists = (
-			exact_foundation_exists
-			or (
-				int(raw_city_object.get("id", -1)) == foundation_object_id
-				and str(raw_city_object.get("owner", ""))
-				== foundation_object_owner
-				and raw_city_object.get("top_left") == top_left
-				and raw_city_object.get("size") == size_tiles
-			)
-		)
-
-	if foundation_count > 0:
-		if foundation_count == 1 and exact_foundation_exists:
-			return
-		print(
-			"Could not recover city foundation object: existing Keep identity is ambiguous."
-		)
-		return
-
-	if not CityObjectSystem.get_city_object_by_id_for_city_state(
-		city_state,
-		foundation_object_id
-	).is_empty():
-		print(
-			"Could not recover city foundation object: its saved ID is already occupied."
-		)
-		return
-
-	var foundation_object := (
-		CityObjectSystem.register_recovered_city_foundation_object_for_city_state(
-			city_state,
-			{
-				"object_type": CityObjectCatalog.CITY_OBJECT_CITY_CENTER,
-				"top_left": top_left,
-				"size_tiles": size_tiles,
-				"object_owner": foundation_object_owner,
-				"city_world": city_state.city_world,
-			}
-		)
-	)
-	if foundation_object.is_empty():
-		print("Could not recover city foundation object.")
-		return
-
-	print("Recovered city foundation object: ", foundation_object)
-
-func clear_invalid_old_city_foundation_state() -> void:
-	var city_state = WorldPoliticalState.get_current_city_simulation_state()
-	if (
-		not city_state is CitySettlementSimulationState
-		or not city_state.is_city_founded()
-	):
-		return
-
-	if city_state.has_city_foundation_footprint():
-		return
-
-	var settlement_context = WorldPoliticalState.get_settlement_context(
-		WorldPoliticalState.active_settlement_id
-	)
-	if (
-		settlement_context != null
-		and settlement_context.is_player_polity
-		and settlement_context.is_capital
-	):
-		print("Clearing old player-city state with no placed foundation.")
-		WorldData.reset_player_city_state()
 
 func get_city_tile_under_mouse() -> Vector2i:
 	if city_world == null:
