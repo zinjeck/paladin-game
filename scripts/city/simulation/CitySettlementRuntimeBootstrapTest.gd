@@ -447,7 +447,7 @@ func _test_legacy_starting_population_is_created_once() -> void:
 				"starting_population",
 				0
 			)
-		== CityCitizenRegistrySystem.STARTING_CITY_POPULATION
+		) == CityCitizenRegistrySystem.STARTING_CITY_POPULATION
 		and state_a.citizen_registry_state.starting_population_initialized
 		and state_a.citizen_registry_state.citizens.size()
 		== CityCitizenRegistrySystem.STARTING_CITY_POPULATION,
