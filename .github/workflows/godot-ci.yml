@@ -24,6 +24,8 @@ jobs:
     steps:
       - name: Check out Paladin
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Cache Godot
         id: cache-godot
