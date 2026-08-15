@@ -721,9 +721,14 @@ static func _clear_player_city_mirrors() -> void:
 
 
 static func _synchronize_player_city_mirrors_from_capital_state() -> void:
-	var capital_state = (
+	_apply_player_city_mirrors_from_city_state(
 		WorldPoliticalState.get_player_capital_city_simulation_state()
 	)
+
+
+static func _apply_player_city_mirrors_from_city_state(
+	capital_state: CitySettlementSimulationState
+) -> void:
 	if capital_state == null or not capital_state.is_city_founded():
 		_clear_player_city_mirrors()
 		return
@@ -742,6 +747,34 @@ static func _synchronize_player_city_mirrors_from_capital_state() -> void:
 		"foundation_size",
 		Vector2i.ZERO
 	)
+
+
+static func synchronize_player_city_mirrors_for_settlement(
+	settlement_context: SettlementSimulationContext,
+	city_state: CitySettlementSimulationState
+) -> bool:
+	if (
+		settlement_context == null
+		or city_state == null
+		or not settlement_context.is_player_polity
+		or not settlement_context.is_capital
+		or settlement_context.settlement_id
+		!= WorldPoliticalState.get_player_capital_settlement_id()
+		or not is_same(
+			settlement_context.get_city_simulation_state(),
+			city_state
+		)
+		or not is_same(
+			WorldPoliticalState.get_city_simulation_state(
+				settlement_context.settlement_id
+			),
+			city_state
+		)
+	):
+		return false
+
+	_apply_player_city_mirrors_from_city_state(city_state)
+	return true
 
 
 static func found_player_city(values: Dictionary) -> void:
