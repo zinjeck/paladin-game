@@ -877,13 +877,13 @@ PASS9_FOCUSED_QUERY_CONSUMERS = {
         "city_citizen_is_hauling",
     ),
     "scripts/city/rendering/CityRenderer.gd": (
-        "get_city_citizen_hunger",
-        "get_city_citizen_carry_capacity",
-        "get_city_citizen_inventory",
-        "get_city_citizen_inventory_used_capacity",
-        "get_city_citizen_haul_cargo_amount",
-        "get_city_citizen_haul_cargo_resources",
-        "city_citizen_is_hauling",
+        "get_city_citizen_hunger_for_city_state",
+        "get_city_citizen_carry_capacity_for_city_state",
+        "get_city_citizen_inventory_for_city_state",
+        "get_city_citizen_inventory_used_capacity_for_city_state",
+        "get_city_citizen_haul_cargo_amount_for_city_state",
+        "get_city_citizen_haul_cargo_resources_for_city_state",
+        "city_citizen_is_hauling_for_city_state",
     ),
 }
 
@@ -2436,7 +2436,9 @@ def main() -> int:
                 "CityCitizenRegistryState" not in renderer_text
                 or "citizen_registry_state_changed" not in renderer_text
                 or 'change_flags["city_citizen_registry_changed"]' not in renderer_text
-                or "city_citizen_movement_presentation.initialize()"
+                or "bound_city_state.citizen_registry_state"
+                not in renderer_text
+                or "city_citizen_movement_presentation.initialize(bound_city_state)"
                 not in renderer_text
             ):
                 errors.append(
@@ -2665,7 +2667,7 @@ def main() -> int:
                 "var observed_city_citizen_spatial_state: "
                 "CityCitizenSpatialState" not in renderer_text
                 or "citizen_spatial_state_changed" not in renderer_text
-                or "CityCitizenSpatialSystem.get_current_state()"
+                or "bound_city_state.citizen_spatial_state"
                 not in renderer_text
             ):
                 errors.append(
@@ -2942,7 +2944,7 @@ def main() -> int:
                 "CityCitizenMovementRuntimeState" not in renderer_text
                 or "citizen_movement_runtime_state_changed"
                 not in renderer_text
-                or "CityCitizenMovementRuntimeSystem.get_current_state()"
+                or "bound_city_state.citizen_movement_runtime_state"
                 not in renderer_text
                 or 'change_flags["city_citizen_movement_runtime_changed"]'
                 not in renderer_text
@@ -3200,7 +3202,7 @@ def main() -> int:
             if (
                 "var observed_city_citizen_task_runtime_state: "
                 "CityCitizenTaskRuntimeState" not in renderer_text
-                or "CityCitizenTaskRuntimeSystem.get_current_state()"
+                or "bound_city_state.citizen_task_runtime_state"
                 not in renderer_text
                 or renderer_identity_comparison is None
                 or renderer_identity_invalidation is None
@@ -3503,6 +3505,16 @@ def main() -> int:
 
     renderer_path = ROOT / "scripts/city/rendering/CityRenderer.gd"
     validator_path = ROOT / "scripts/city/simulation/CityStateValidator.gd"
+    renderer_bound_state_surfaces = {
+        "CityCitizenRegistryState": "bound_city_state.citizen_registry_state",
+        "CityCitizenSpatialState": "bound_city_state.citizen_spatial_state",
+        "CityCitizenMovementRuntimeState": (
+            "bound_city_state.citizen_movement_runtime_state"
+        ),
+        "CityCitizenTaskRuntimeState": (
+            "bound_city_state.citizen_task_runtime_state"
+        ),
+    }
     for consumer_path, consumer_name in (
         (renderer_path, "renderer"),
         (validator_path, "validator"),
@@ -3511,12 +3523,19 @@ def main() -> int:
             continue
         consumer_text = consumer_path.read_text(encoding="utf-8")
         for config in CITIZEN_BEHAVIOR_SYSTEMS.values():
-            focused_accessor = f"{config['class_name']}.get_current_state()"
-            if focused_accessor not in consumer_text:
+            if consumer_name == "renderer":
+                required_surface = renderer_bound_state_surfaces[
+                    config["state_type"]
+                ]
+            else:
+                required_surface = (
+                    f"{config['class_name']}.get_current_state()"
+                )
+            if required_surface not in consumer_text:
                 errors.append(
                     f"{consumer_path.relative_to(ROOT)}: citizen {consumer_name} "
                     f"must resolve {config['state_type']} through "
-                    f"{focused_accessor}"
+                    f"{required_surface}"
                 )
 
     boundary_test_path = (
@@ -4737,6 +4756,172 @@ def main() -> int:
                 f"boundary assertion: {test_name}"
             )
 
+    # Settlement-locality PR 4: CityRenderer is configured before _ready(),
+    # retains one explicit context/state/world binding, and never discovers
+    # settlement-local authority through active/current compatibility APIs.
+    pr4_renderer_relative = "scripts/city/rendering/CityRenderer.gd"
+    pr4_session_relative = "scripts/session/GameSession.gd"
+    pr4_test_relative = (
+        "scripts/city/rendering/CityRendererExplicitBindingTest.gd"
+    )
+    pr4_scene_relative = (
+        "scripts/city/rendering/CityRendererExplicitBindingTest.tscn"
+    )
+    pr4_renderer_path = ROOT / pr4_renderer_relative
+    pr4_session_path = ROOT / pr4_session_relative
+    pr4_test_path = ROOT / pr4_test_relative
+    pr4_scene_path = ROOT / pr4_scene_relative
+    if pr4_renderer_path.exists():
+        pr4_renderer_text = pr4_renderer_path.read_text(encoding="utf-8")
+        pr4_renderer_masked = gdscript_masked_code(pr4_renderer_text)
+        for required_api in (
+            "configure_initial_city_presentation",
+            "get_bound_settlement_context",
+            "can_rebind_city_presentation",
+            "rebind_city_presentation",
+            "validate_city_presentation_binding",
+        ):
+            if not re.search(
+                rf"^func\s+{re.escape(required_api)}\s*\(",
+                pr4_renderer_text,
+                re.MULTILINE,
+            ):
+                errors.append(
+                    f"{pr4_renderer_relative}: missing PR 4 explicit binding "
+                    f"API {required_api}"
+                )
+        for required_surface in (
+            "var bound_settlement_context: SettlementSimulationContext",
+            "var bound_city_state: CitySettlementSimulationState",
+            "var bound_city_settlement_id: int",
+            "var city_world: WorldData",
+            "var city_seed: int",
+        ):
+            if required_surface not in pr4_renderer_text:
+                errors.append(
+                    f"{pr4_renderer_relative}: missing PR 4 binding surface "
+                    f"{required_surface}"
+                )
+        forbidden_renderer_patterns = (
+            r"\bWorldPoliticalState\.active_settlement_id\b",
+            r"\bWorldPoliticalState\.get_active_city_simulation_state\s*\(",
+            r"\bWorldPoliticalState\.get_current_city_",
+            r"\.get_current_state\s*\(",
+            r"\bCityWorkSystem\.get_current_work_state\s*\(",
+            r"\bWorldData\.has_active_city_save\s*\(",
+            r"\bWorldData\.store_city_world_save\s*\(",
+            r"\bWorldData\.reset_player_city_state\s*\(",
+        )
+        for pattern in forbidden_renderer_patterns:
+            if re.search(pattern, pr4_renderer_masked):
+                errors.append(
+                    f"{pr4_renderer_relative}: PR 4 renderer still discovers "
+                    f"local authority through {pattern}"
+                )
+        pr4_ready_body = gdscript_function_body(
+            pr4_renderer_text,
+            "_ready",
+        ) or ""
+        for forbidden_ready_token in (
+            "SimulationClock.resume_simulation(",
+            "CitySettlementRuntimeBootstrap",
+            "ensure_city_citizen_",
+            "reset_city_simulation_runtime_state(",
+        ):
+            if forbidden_ready_token in pr4_ready_body:
+                errors.append(
+                    f"{pr4_renderer_relative}: PR 4 _ready() must remain "
+                    f"presentation-only; found {forbidden_ready_token}"
+                )
+    else:
+        errors.append(f"{pr4_renderer_relative}: missing PR 4 renderer")
+
+    if pr4_session_path.exists():
+        pr4_session_text = pr4_session_path.read_text(encoding="utf-8")
+        pr4_ensure_body = gdscript_function_body(
+            pr4_session_text,
+            "_ensure_city_view",
+        ) or ""
+        pr4_switch_body = gdscript_function_body(
+            pr4_session_text,
+            "show_settlement_city_view",
+        ) or ""
+        for required_token in (
+            '"configure_initial_city_presentation"',
+            "add_child(city_view)",
+            "_select_first_city_detailed_simulation_target()",
+            "_commit_first_city_entry()",
+        ):
+            if required_token not in pr4_ensure_body:
+                errors.append(
+                    f"{pr4_session_relative}: PR 4 first-entry transaction "
+                    f"is missing {required_token}"
+                )
+        if (
+            pr4_ensure_body.find('"configure_initial_city_presentation"')
+            > pr4_ensure_body.find("add_child(city_view)")
+        ):
+            errors.append(
+                f"{pr4_session_relative}: renderer must be configured before "
+                "it enters the tree"
+            )
+        for required_token in (
+            "_bootstrap_city_context(target_context)",
+            '"rebind_city_presentation"',
+            "WorldPoliticalState.set_active_settlement(settlement_id)",
+        ):
+            if required_token not in pr4_switch_body:
+                errors.append(
+                    f"{pr4_session_relative}: PR 4 switch transaction is "
+                    f"missing {required_token}"
+                )
+        pr4_bootstrap_index = pr4_switch_body.find(
+            "_bootstrap_city_context(target_context)"
+        )
+        pr4_rebind_index = pr4_switch_body.find(
+            '"rebind_city_presentation"',
+            pr4_bootstrap_index + 1,
+        )
+        pr4_publish_index = pr4_switch_body.find(
+            "WorldPoliticalState.set_active_settlement(settlement_id)",
+            pr4_rebind_index + 1,
+        )
+        if not (
+            pr4_bootstrap_index >= 0
+            and pr4_rebind_index > pr4_bootstrap_index
+            and pr4_publish_index > pr4_rebind_index
+        ):
+            errors.append(
+                f"{pr4_session_relative}: PR 4 switch must bootstrap, bind, "
+                "then publish global presentation selection"
+            )
+    else:
+        errors.append(f"{pr4_session_relative}: missing PR 4 session owner")
+
+    for required_path in (pr4_test_path, pr4_scene_path):
+        if not required_path.exists():
+            errors.append(
+                f"{required_path.relative_to(ROOT)}: missing permanent PR 4 "
+                "explicit renderer-binding coverage"
+            )
+    if pr4_test_path.exists():
+        pr4_test_text = pr4_test_path.read_text(encoding="utf-8")
+        for required_token in (
+            "set_active_settlement(city_b_id)",
+            "bootstrap_and_configure_renderer(",
+            "SimulationClock.simulation_paused",
+            "run_settlement_simulation_systems(",
+            "rebind_city_presentation(context_b)",
+            "rebind_city_presentation(context_a)",
+            "_capture_gameplay_snapshot(state_a)",
+            "_capture_gameplay_snapshot(state_b)",
+        ):
+            if required_token not in pr4_test_text:
+                errors.append(
+                    f"{pr4_test_relative}: PR 4 regression is missing "
+                    f"required assertion surface {required_token}"
+                )
+
     # Post-Scripts10 PR 9: detailed settlement switching is one presentation
     # transaction. GameSession alone selects the target; CityRenderer clears
     # settlement-bound interaction state and rebuilds every retained cache
@@ -4815,11 +5000,11 @@ def main() -> int:
             "_clear_city_presentation_interactions()",
             "_reset_city_presentation_observers()",
             "workplace_zone_overlay_cache.invalidate_all()",
-            "city_citizen_movement_presentation.initialize()",
+            "city_citizen_movement_presentation.initialize(bound_city_state)",
             "rebuild_city_terrain_texture()",
             "rebuild_city_natural_feature_multimeshes()",
             "_configure_city_camera_for_bound_settlement()",
-            "_capture_bound_city_presentation_versions(target_state)",
+            "_capture_bound_city_presentation_versions(bound_city_state)",
             "city_information_ui.refresh_all()",
             "_request_all_city_render_layers_redraw_even_if_hidden()",
         ):
@@ -4979,7 +5164,7 @@ def main() -> int:
                 "select_detailed_simulation_settlement(settlement_id)",
             ),
             (
-                "_prepare_first_city_entry",
+                "_ensure_city_view",
                 "_select_first_city_detailed_simulation_target()",
             ),
         ):
@@ -5969,8 +6154,8 @@ def main() -> int:
         for required_surface in (
             "var observed_city_assignment_state: CityAssignmentState",
             "var observed_city_workplace_state: CityWorkplaceState",
-            "CityAssignmentSystem.get_current_state()",
-            "CityEmploymentSystem.get_current_state()",
+            "bound_city_state.assignment_state",
+            "bound_city_state.workplace_state",
             "not is_same(",
         ):
             if required_surface not in renderer_text:

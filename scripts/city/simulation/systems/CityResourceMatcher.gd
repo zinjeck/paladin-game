@@ -553,6 +553,38 @@ static func get_city_home_food_supply_status(
 		),
 	}
 
+
+static func get_city_home_food_supply_status_for_city_state(
+	city_state: CitySettlementSimulationState,
+	home: Dictionary
+) -> Dictionary:
+	return {
+		"target_nutrition": (
+			get_city_home_food_target_nutrition_for_city_state(
+				city_state,
+				home
+			)
+		),
+		"stored_nutrition": (
+			get_city_home_stored_food_nutrition_for_city_state(
+				city_state,
+				home
+			)
+		),
+		"incoming_nutrition": (
+			get_city_home_incoming_food_nutrition_for_city_state(
+				city_state,
+				home
+			)
+		),
+		"unfulfilled_nutrition": (
+			get_city_home_unfulfilled_food_nutrition_for_city_state(
+				city_state,
+				home
+			)
+		),
+	}
+
 #endregion
 
 #region Resource Demand Policy and Cargo Matching

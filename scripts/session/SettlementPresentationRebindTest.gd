@@ -64,21 +64,36 @@ func _test_atomic_settlement_presentation_rebind() -> void:
 		or city_b_id <= 0
 		or fixture_a.is_empty()
 		or fixture_b.is_empty()
-		or not WorldPoliticalState.set_active_settlement(city_a_id)
 	):
 		_expect(false, "The A/B presentation fixture must be created.")
 		return
 
+	var context_a = WorldPoliticalState.get_settlement_context(city_a_id)
+	var context_b = WorldPoliticalState.get_settlement_context(city_b_id)
+	var bootstrap_b := CitySettlementRuntimeBootstrap.ensure_ready(context_b)
+	SimulationClock.set_speed_multiplier(2.0)
 	SimulationClock.set_simulation_paused(true)
 	var renderer := CITY_SCENE.instantiate() as CityRenderer
 	_expect(renderer != null, "The City scene must instantiate its renderer.")
 	if renderer == null:
 		return
 
+	var binding_a := CityRendererBindingSupport.bootstrap_and_configure_renderer(
+		renderer,
+		context_a
+	)
+	if (
+		binding_a.is_empty()
+		or not bool(bootstrap_b.get("success", false))
+		or not WorldPoliticalState.set_active_settlement(city_b_id)
+	):
+		_expect(false, "Both settlements must bootstrap before the presentation test.")
+		renderer.free()
+		return
+
 	add_child(renderer)
 	await get_tree().process_frame
 	await get_tree().process_frame
-	SimulationClock.set_simulation_paused(true)
 
 	var state_a: CitySettlementSimulationState = fixture_a["state"]
 	var state_b: CitySettlementSimulationState = fixture_b["state"]
@@ -92,14 +107,19 @@ func _test_atomic_settlement_presentation_rebind() -> void:
 	var state_b_identities := _capture_gameplay_identities(state_b)
 
 	_expect(
-		renderer.bound_city_settlement_id == city_a_id
+		WorldPoliticalState.active_settlement_id == city_b_id
+		and renderer.bound_city_settlement_id == city_a_id
+		and is_same(renderer.bound_settlement_context, context_a)
 		and is_same(renderer.city_world, state_a.city_world)
 		and renderer.city_seed == state_a.city_seed
 		and renderer.city_tree_multimesh_index_by_tile.has(feature_a)
 		and renderer.city_rock_multimesh_index_by_tile.is_empty()
-		and renderer.city_information_ui.city_name_label.text
-		== "Presentation A",
-		"Initial presentation must bind every visible owner to City A."
+		and renderer.get_city_object_by_id(int(object_a.get("id", -1))).get(
+			"owner", ""
+		) == "owner_a"
+		and SimulationClock.simulation_paused
+		and is_equal_approx(SimulationClock.speed_multiplier, 2.0),
+		"Renderer _ready() must retain its explicit A binding while global presentation remains B and must not resume the clock."
 	)
 
 	var a_camera_position := Vector2(23.0, 17.0)

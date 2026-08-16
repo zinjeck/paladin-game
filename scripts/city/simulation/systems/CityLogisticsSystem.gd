@@ -276,7 +276,27 @@ static func get_city_ground_piles_at_tile(
 static func has_city_ground_pile_at_tile(
 	tile_position: Vector2i
 ) -> bool:
-	for raw_ground_pile in _state().ground_piles:
+	return _has_city_ground_pile_at_tile(_state(), tile_position)
+
+
+static func has_city_ground_pile_at_tile_for_city_state(
+	city_state: CitySettlementSimulationState,
+	tile_position: Vector2i
+) -> bool:
+	return _has_city_ground_pile_at_tile(
+		get_state_for_city_state(city_state),
+		tile_position
+	)
+
+
+static func _has_city_ground_pile_at_tile(
+	logistics_state: CityLogisticsState,
+	tile_position: Vector2i
+) -> bool:
+	if logistics_state == null:
+		return false
+
+	for raw_ground_pile in logistics_state.ground_piles:
 		if not raw_ground_pile is Dictionary:
 			continue
 
@@ -2631,8 +2651,7 @@ static func get_city_haul_endpoint_unreserved_resource_amount_for_city_state(
 	excluding_food_citizen_id: int = -1
 ) -> int:
 	var food_task_reserved_amount := (
-		CityCitizenTaskRuntimeSystem
-		.get_city_food_task_reserved_endpoint_amount_for_city_state(
+		CityCitizenTaskRuntimeSystem.get_city_food_task_reserved_endpoint_amount_for_city_state(
 			city_state,
 			str(
 				endpoint.get(

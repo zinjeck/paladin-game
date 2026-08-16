@@ -5,9 +5,26 @@ const PresentationScript = preload(
 )
 
 var failure_count: int = 0
+var presentation_city_state: CitySettlementSimulationState
 
 
 func _ready() -> void:
+	WorldData.reset_runtime_session_state()
+	var culture := WorldData.create_culture(
+		"Movement Presentation Unit Culture"
+	)
+	var initial_city_state = _create_active_city_fixture(
+		"Movement Presentation Unit City",
+		int(culture.get("id", -1))
+	)
+	if not initial_city_state is CitySettlementSimulationState:
+		_expect(
+			false,
+			"Movement presentation tests require an explicit City state."
+		)
+		get_tree().quit(1)
+		return
+	presentation_city_state = initial_city_state
 	_configure_clock()
 	_test_late_cardinal_observer_starts_at_current_segment()
 	_test_late_diagonal_observer_starts_at_current_progress()
@@ -42,7 +59,7 @@ func _configure_clock() -> void:
 
 
 func _test_late_cardinal_observer_starts_at_current_segment() -> void:
-	var presentation = PresentationScript.new()
+	var presentation := _make_presentation()
 	var citizen := _make_moving_citizen(
 		1,
 		Vector2i(2, 1),
@@ -72,7 +89,7 @@ func _test_late_cardinal_observer_starts_at_current_segment() -> void:
 
 
 func _test_late_diagonal_observer_starts_at_current_progress() -> void:
-	var presentation = PresentationScript.new()
+	var presentation := _make_presentation()
 	var citizen := _make_moving_citizen(
 		2,
 		Vector2i(1, 1),
@@ -102,7 +119,7 @@ func _test_late_diagonal_observer_starts_at_current_progress() -> void:
 
 
 func _test_committed_trace_preserves_mixed_corners() -> void:
-	var presentation = PresentationScript.new()
+	var presentation := _make_presentation()
 	var movement_path := [
 		Vector2i(0, 0),
 		Vector2i(1, 1),
@@ -172,7 +189,7 @@ func _test_committed_trace_preserves_mixed_corners() -> void:
 
 
 func _test_completed_route_remains_visualized() -> void:
-	var presentation = PresentationScript.new()
+	var presentation := _make_presentation()
 	var before := _make_moving_citizen(
 		4,
 		Vector2i(0, 0),
@@ -209,7 +226,7 @@ func _test_completed_route_remains_visualized() -> void:
 
 
 func _test_zero_progress_route_waits_without_snapping() -> void:
-	var presentation = PresentationScript.new()
+	var presentation := _make_presentation()
 	var starting_citizen := _make_moving_citizen(
 		5,
 		Vector2i(1, 1),
@@ -232,7 +249,7 @@ func _test_zero_progress_route_waits_without_snapping() -> void:
 
 
 func _test_immediate_partial_repath_returns_to_origin() -> void:
-	var presentation = PresentationScript.new()
+	var presentation := _make_presentation()
 	var before := _make_moving_citizen(
 		6,
 		Vector2i(0, 0),
@@ -273,7 +290,7 @@ func _test_immediate_partial_repath_returns_to_origin() -> void:
 
 
 func _test_partial_completion_does_not_backtrack() -> void:
-	var presentation = PresentationScript.new()
+	var presentation := _make_presentation()
 	var before := _make_moving_citizen(
 		7,
 		Vector2i(0, 0),
@@ -308,7 +325,7 @@ func _test_partial_completion_does_not_backtrack() -> void:
 
 
 func _test_repath_after_old_corner_keeps_that_corner_first() -> void:
-	var presentation = PresentationScript.new()
+	var presentation := _make_presentation()
 	var before := _make_moving_citizen(
 		8,
 		Vector2i(0, 0),
@@ -353,7 +370,7 @@ func _test_repath_after_old_corner_keeps_that_corner_first() -> void:
 
 
 func _test_completed_replacement_route_returns_to_repath_origin() -> void:
-	var presentation = PresentationScript.new()
+	var presentation := _make_presentation()
 	var before := _make_moving_citizen(
 		9,
 		Vector2i(0, 0),
@@ -462,8 +479,8 @@ func _test_completed_road_doubles_visual_travel_speed() -> void:
 		"The visual-speed fixture must create one completed road tile."
 	)
 
-	var road_presentation = PresentationScript.new()
-	var normal_presentation = PresentationScript.new()
+	var road_presentation := _make_presentation(city_state)
+	var normal_presentation := _make_presentation(city_state)
 	var road_before := _make_moving_citizen(
 		20,
 		Vector2i(0, 0),
@@ -518,7 +535,23 @@ func _test_completed_road_doubles_visual_travel_speed() -> void:
 	)
 
 
-func _create_active_city_fixture(city_name: String, culture_id: int):
+func _make_presentation(
+	city_state: CitySettlementSimulationState = null
+) -> CityCitizenMovementPresentation:
+	var resolved_state: CitySettlementSimulationState = city_state
+	if resolved_state == null:
+		resolved_state = presentation_city_state
+	var presentation: CityCitizenMovementPresentation = (
+		PresentationScript.new()
+	)
+	presentation.initialize(resolved_state)
+	return presentation
+
+
+func _create_active_city_fixture(
+	city_name: String,
+	culture_id: int
+) -> CitySettlementSimulationState:
 	if culture_id <= 0:
 		return null
 	var polity := WorldPoliticalState.create_polity({

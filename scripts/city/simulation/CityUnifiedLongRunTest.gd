@@ -58,8 +58,19 @@ func _run_long_run_test() -> void:
 	if renderer == null:
 		return
 
-	add_child(renderer)
 	SimulationClock.set_simulation_paused(true)
+	var binding := (
+		CityRendererBindingSupport.prepare_player_capital_renderer(renderer)
+	)
+	_expect(
+		not binding.is_empty(),
+		"The long-run renderer must receive an explicit settlement binding before _ready()."
+	)
+	if binding.is_empty():
+		renderer.free()
+		return
+
+	add_child(renderer)
 	await get_tree().process_frame
 	await get_tree().process_frame
 
@@ -78,7 +89,7 @@ func _run_long_run_test() -> void:
 
 	_expect(
 		SimulationCoordinator.select_detailed_simulation_settlement(
-			WorldPoliticalState.active_settlement_id
+			renderer.bound_city_settlement_id
 		),
 		"The long-run fixture must explicitly select its detailed simulation target."
 	)
@@ -198,7 +209,7 @@ func _create_mixed_work_fixture(renderer: CityRenderer) -> Dictionary:
 		"object_owner": "player",
 		"city_world": city_world,
 	})
-	renderer.after_city_center_placed(keep)
+	renderer.after_city_center_placed(keep, renderer.bound_city_state)
 
 	_expect(
 		CityCitizenRegistrySystem.get_city_population_count()

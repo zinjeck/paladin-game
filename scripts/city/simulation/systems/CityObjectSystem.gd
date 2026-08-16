@@ -1090,7 +1090,45 @@ static func can_place_city_object(
 	size_tiles: Vector2i,
 	object_type: String = ""
 ) -> bool:
+	return _can_place_city_object(
+		null,
+		CityConstructionSystem.get_current_state(),
+		city_world,
+		top_left,
+		size_tiles,
+		object_type
+	)
+
+
+static func can_place_city_object_for_city_state(
+	city_state: CitySettlementSimulationState,
+	city_world: WorldData,
+	top_left: Vector2i,
+	size_tiles: Vector2i,
+	object_type: String = ""
+) -> bool:
+	return _can_place_city_object(
+		city_state,
+		CityConstructionSystem.get_state_for_city_state(city_state),
+		city_world,
+		top_left,
+		size_tiles,
+		object_type
+	)
+
+
+static func _can_place_city_object(
+	city_state: CitySettlementSimulationState,
+	construction_state: CityConstructionState,
+	city_world: WorldData,
+	top_left: Vector2i,
+	size_tiles: Vector2i,
+	object_type: String
+) -> bool:
 	if city_world == null:
+		return false
+
+	if city_state != null and not is_same(city_world, city_state.city_world):
 		return false
 
 	if size_tiles.x <= 0 or size_tiles.y <= 0:
@@ -1105,22 +1143,55 @@ static func can_place_city_object(
 	):
 		return false
 
+	if construction_state == null:
+		return false
+
 	for y in range(top_left.y, top_left.y + size_tiles.y):
 		for x in range(top_left.x, top_left.x + size_tiles.x):
 			var tile_position := Vector2i(x, y)
 
-			if has_city_object_at_tile(tile_position):
+			var has_object: bool = (
+				has_city_object_at_tile(tile_position)
+				if city_state == null
+				else has_city_object_at_tile_for_city_state(
+					city_state,
+					tile_position
+				)
+			)
+			if has_object:
 				return false
 
-			if CityConstructionSystem.get_current_state().construction_site_id_by_tile.has(
+			if construction_state.construction_site_id_by_tile.has(
 				tile_position
 			):
 				return false
 
-			if CityLogisticsSystem.has_city_ground_pile_at_tile(tile_position):
+			var has_ground_pile: bool = (
+				CityLogisticsSystem.has_city_ground_pile_at_tile(
+					tile_position
+				)
+				if city_state == null
+				else CityLogisticsSystem
+					.has_city_ground_pile_at_tile_for_city_state(
+						city_state,
+						tile_position
+					)
+			)
+			if has_ground_pile:
 				return false
 
-			if CityCitizenSpatialSystem.has_living_city_citizen_at_tile(tile_position):
+			var has_citizen: bool = (
+				CityCitizenSpatialSystem.has_living_city_citizen_at_tile(
+					tile_position
+				)
+				if city_state == null
+				else CityCitizenSpatialSystem
+					.has_living_city_citizen_at_tile_for_city_state(
+						city_state,
+						tile_position
+					)
+			)
+			if has_citizen:
 				return false
 
 			var tile: Dictionary = city_world.get_tile_for_internal_read(x, y)
@@ -1133,7 +1204,8 @@ static func can_place_city_object(
 
 	if (
 		object_type == CityObjectCatalog.CITY_OBJECT_CITY_CENTER
-		and not city_object_placement_has_walkable_access_tile(
+		and not _city_object_placement_has_walkable_access_tile(
+			city_state,
 			city_world,
 			top_left,
 			size_tiles
@@ -1149,7 +1221,38 @@ static func city_object_placement_has_walkable_access_tile(
 	top_left: Vector2i,
 	size_tiles: Vector2i
 ) -> bool:
+	return _city_object_placement_has_walkable_access_tile(
+		null,
+		city_world,
+		top_left,
+		size_tiles
+	)
+
+
+static func city_object_placement_has_walkable_access_tile_for_city_state(
+	city_state: CitySettlementSimulationState,
+	city_world: WorldData,
+	top_left: Vector2i,
+	size_tiles: Vector2i
+) -> bool:
+	return _city_object_placement_has_walkable_access_tile(
+		city_state,
+		city_world,
+		top_left,
+		size_tiles
+	)
+
+
+static func _city_object_placement_has_walkable_access_tile(
+	city_state: CitySettlementSimulationState,
+	city_world: WorldData,
+	top_left: Vector2i,
+	size_tiles: Vector2i
+) -> bool:
 	if city_world == null:
+		return false
+
+	if city_state != null and not is_same(city_world, city_state.city_world):
 		return false
 
 	var footprint_lookup: Dictionary = {}
@@ -1170,10 +1273,20 @@ static func city_object_placement_has_walkable_access_tile(
 			if footprint_lookup.has(candidate_tile):
 				continue
 
-			if CityNavigationSystem.is_city_tile_walkable_for_citizen(
-				city_world,
-				candidate_tile
-			):
+			var is_walkable: bool = (
+				CityNavigationSystem.is_city_tile_walkable_for_citizen(
+					city_world,
+					candidate_tile
+				)
+				if city_state == null
+				else CityNavigationSystem
+					.is_city_tile_walkable_for_citizen_for_city_state(
+						city_state,
+						city_world,
+						candidate_tile
+					)
+			)
+			if is_walkable:
 				return true
 
 	return false
@@ -1783,8 +1896,7 @@ static func rollback_completed_city_object_for_city_state(
 		registration_baseline["workplace_version"]
 	)
 	return (
-		CityResourceAccountingSystem
-		.restore_city_resource_accounting_snapshot_for_city_state(
+		CityResourceAccountingSystem.restore_city_resource_accounting_snapshot_for_city_state(
 			city_state,
 			registration_baseline
 		)
@@ -2265,8 +2377,7 @@ static func _registration_matches_authoritative_construction_site(
 		return false
 
 	var site := (
-		CityConstructionSystem
-		.get_city_construction_site_by_id_for_city_state(
+		CityConstructionSystem.get_city_construction_site_by_id_for_city_state(
 			city_state,
 			construction_site_id
 		)

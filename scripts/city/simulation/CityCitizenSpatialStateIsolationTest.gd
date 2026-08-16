@@ -234,6 +234,11 @@ func _test_renderer_identity_invalidation(
 	original_spatial_state: CityCitizenSpatialState
 ) -> void:
 	var renderer := CityRenderer.new()
+	var renderer_context = WorldPoliticalState.get_settlement_context(city_id)
+	_expect(
+		renderer.configure_initial_city_presentation(renderer_context),
+		"Renderer observer coverage requires the explicit target settlement binding."
+	)
 	renderer.observed_city_citizen_registry_state = registry_state
 	renderer.observed_city_citizen_version = registry_state.citizen_version
 	renderer.observed_city_citizen_spatial_state = original_spatial_state

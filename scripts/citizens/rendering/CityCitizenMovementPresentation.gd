@@ -8,13 +8,15 @@ class_name CityCitizenMovementPresentation
 
 const POSITION_EPSILON: float = 0.0001
 
+var bound_city_state: CitySettlementSimulationState
 var movement_snapshot_by_citizen_id: Dictionary = {}
 var visual_position_by_citizen_id: Dictionary = {}
 var transition_by_citizen_id: Dictionary = {}
 var tracked_mover_id_lookup: Dictionary = {}
 
 
-func initialize() -> void:
+func initialize(city_state: CitySettlementSimulationState) -> void:
+	bound_city_state = city_state
 	movement_snapshot_by_citizen_id.clear()
 	visual_position_by_citizen_id.clear()
 	transition_by_citizen_id.clear()
@@ -23,6 +25,9 @@ func initialize() -> void:
 
 
 func synchronize(animate_position_changes: bool) -> void:
+	if bound_city_state == null:
+		return
+
 	var candidate_citizen_id_lookup: Dictionary = {}
 
 	for raw_citizen_id in tracked_mover_id_lookup.keys():
@@ -33,7 +38,9 @@ func synchronize(animate_position_changes: bool) -> void:
 		if typeof(raw_citizen_id) == TYPE_INT:
 			candidate_citizen_id_lookup[raw_citizen_id] = true
 
-	for citizen_id in CityCitizenMovementRuntimeSystem.get_city_active_mover_ids_snapshot():
+	for citizen_id in CityCitizenMovementRuntimeSystem.get_city_active_mover_ids_snapshot_for_city_state(
+		bound_city_state
+	):
 		candidate_citizen_id_lookup[citizen_id] = true
 
 	var candidate_citizen_ids: Array = (
@@ -43,7 +50,10 @@ func synchronize(animate_position_changes: bool) -> void:
 
 	for raw_citizen_id in candidate_citizen_ids:
 		var citizen_id := int(raw_citizen_id)
-		var citizen := CityCitizenRegistrySystem.get_city_citizen_by_id(citizen_id)
+		var citizen := CityCitizenRegistrySystem.get_city_citizen_by_id_for_city_state(
+			bound_city_state,
+			citizen_id
+		)
 
 		if (
 			citizen.is_empty()
@@ -224,10 +234,16 @@ func synchronize_committed_tick(raw_events: Array) -> bool:
 
 
 func track_mover(citizen_id: int) -> void:
+	if bound_city_state == null:
+		return
+
 	if citizen_id <= 0:
 		return
 
-	var citizen := CityCitizenRegistrySystem.get_city_citizen_by_id(citizen_id)
+	var citizen := CityCitizenRegistrySystem.get_city_citizen_by_id_for_city_state(
+		bound_city_state,
+		citizen_id
+	)
 
 	if (
 		citizen.is_empty()
@@ -250,7 +266,12 @@ func track_mover(citizen_id: int) -> void:
 
 
 func refresh_mover_tracking() -> void:
-	for citizen_id in CityCitizenMovementRuntimeSystem.get_city_active_mover_ids_snapshot():
+	if bound_city_state == null:
+		return
+
+	for citizen_id in CityCitizenMovementRuntimeSystem.get_city_active_mover_ids_snapshot_for_city_state(
+		bound_city_state
+	):
 		track_mover(citizen_id)
 
 	for raw_citizen_id in tracked_mover_id_lookup.keys():
@@ -453,10 +474,16 @@ func _get_segment_movement_cost_per_world_unit(
 		_get_segment_destination_coordinate(to_position.y, direction.y)
 	)
 	var source_tile := target_tile - direction
-	var step_cost := CityNavigationSystem.get_city_citizen_movement_step_cost(
-		source_tile,
-		target_tile
-	)
+	var step_cost := 0
+	if bound_city_state != null:
+		step_cost = (
+			CityNavigationSystem
+			.get_city_citizen_movement_step_cost_for_city_state(
+				bound_city_state,
+				source_tile,
+				target_tile
+			)
+		)
 
 	if step_cost <= 0:
 		step_cost = (
@@ -642,10 +669,16 @@ func _make_movement_snapshot(citizen: Dictionary) -> Dictionary:
 	):
 		var from_tile: Vector2i = movement_path[movement_path_index - 1]
 		var to_tile: Vector2i = movement_path[movement_path_index]
-		var step_cost := CityNavigationSystem.get_city_citizen_movement_step_cost(
-			from_tile,
-			to_tile
-		)
+		var step_cost := 0
+		if bound_city_state != null:
+			step_cost = (
+				CityNavigationSystem
+				.get_city_citizen_movement_step_cost_for_city_state(
+					bound_city_state,
+					from_tile,
+					to_tile
+				)
+			)
 
 		if step_cost > 0:
 			visual_step_target_tile = to_tile
@@ -797,7 +830,12 @@ func erase_citizen(citizen_id: int) -> void:
 
 
 func _release_mover_if_inactive(citizen_id: int) -> void:
-	if CityCitizenMovementRuntimeSystem.get_current_state().active_mover_id_lookup.has(citizen_id):
+	if (
+		bound_city_state != null
+		and bound_city_state.citizen_movement_runtime_state.active_mover_id_lookup.has(
+			citizen_id
+		)
+	):
 		return
 
 	if transition_by_citizen_id.has(citizen_id):

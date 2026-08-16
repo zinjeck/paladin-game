@@ -179,13 +179,36 @@ static func _get_city_object_resident_ids(
 
 
 static func get_city_object_resident_names(city_object: Dictionary) -> Array:
+	return _get_city_object_resident_names(null, city_object)
+
+
+static func get_city_object_resident_names_for_city_state(
+	city_state: CitySettlementSimulationState,
+	city_object: Dictionary
+) -> Array:
+	return _get_city_object_resident_names(city_state, city_object)
+
+
+static func _get_city_object_resident_names(
+	city_state: CitySettlementSimulationState,
+	city_object: Dictionary
+) -> Array:
 	var resident_names: Array = []
 
-	for raw_resident_id in get_city_object_resident_ids(city_object):
+	for raw_resident_id in _get_city_object_resident_ids(
+		city_state,
+		city_object
+	):
 		resident_names.append(
 			CityCitizenRegistrySystem.get_city_citizen_display_name(
 				int(raw_resident_id)
 			)
+			if city_state == null
+			else CityCitizenRegistrySystem
+				.get_city_citizen_display_name_for_city_state(
+					city_state,
+					int(raw_resident_id)
+				)
 		)
 
 	return resident_names
@@ -336,13 +359,33 @@ static func get_city_object_worker_count_for_city_state(
 
 
 static func get_city_object_worker_names(city_object: Dictionary) -> Array:
+	return _get_city_object_worker_names(null, city_object)
+
+
+static func get_city_object_worker_names_for_city_state(
+	city_state: CitySettlementSimulationState,
+	city_object: Dictionary
+) -> Array:
+	return _get_city_object_worker_names(city_state, city_object)
+
+
+static func _get_city_object_worker_names(
+	city_state: CitySettlementSimulationState,
+	city_object: Dictionary
+) -> Array:
 	var worker_names: Array = []
 
-	for raw_worker_id in get_city_object_worker_ids(city_object):
+	for raw_worker_id in _get_city_object_worker_ids(city_state, city_object):
 		worker_names.append(
 			CityCitizenRegistrySystem.get_city_citizen_display_name(
 				int(raw_worker_id)
 			)
+			if city_state == null
+			else CityCitizenRegistrySystem
+				.get_city_citizen_display_name_for_city_state(
+					city_state,
+					int(raw_worker_id)
+				)
 		)
 
 	return worker_names
