@@ -8,11 +8,30 @@ class_name CityCitizenMovementPresentation
 
 const POSITION_EPSILON: float = 0.0001
 
+var presentation_binding: CityPresentationBinding
 var bound_city_state: CitySettlementSimulationState
 var movement_snapshot_by_citizen_id: Dictionary = {}
 var visual_position_by_citizen_id: Dictionary = {}
 var transition_by_citizen_id: Dictionary = {}
 var tracked_mover_id_lookup: Dictionary = {}
+
+
+func bind_city_presentation(binding: CityPresentationBinding) -> bool:
+	if binding == null or not binding.is_valid():
+		return false
+	presentation_binding = binding
+	initialize(binding.city_state)
+	return true
+
+
+func is_bound_to_city_presentation(
+	binding: CityPresentationBinding
+) -> bool:
+	return (
+		presentation_binding != null
+		and presentation_binding.matches_binding(binding)
+		and is_same(bound_city_state, binding.city_state)
+	)
 
 
 func initialize(city_state: CitySettlementSimulationState) -> void:
