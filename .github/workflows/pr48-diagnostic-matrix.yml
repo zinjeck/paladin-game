@@ -1,0 +1,115 @@
+name: PR 48 diagnostic test matrix
+
+on:
+  push:
+    branches:
+      - diagnostic/pr48-test-matrix
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  focused-test:
+    name: ${{ matrix.id }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - id: renderer-explicit-binding
+            scene: scripts/city/rendering/CityRendererExplicitBindingTest.tscn
+          - id: renderer-smoke
+            scene: scripts/city/rendering/CityRendererRefactorSmokeTest.tscn
+          - id: movement-isolation
+            scene: scripts/city/simulation/CityCitizenMovementRuntimeStateIsolationTest.tscn
+          - id: registry-isolation
+            scene: scripts/city/simulation/CityCitizenRegistryStateIsolationTest.tscn
+          - id: spatial-isolation
+            scene: scripts/city/simulation/CityCitizenSpatialStateIsolationTest.tscn
+          - id: task-isolation
+            scene: scripts/city/simulation/CityCitizenTaskRuntimeStateIsolationTest.tscn
+          - id: accounting-regression
+            scene: scripts/city/simulation/CityResourceAccountingRegressionTest.tscn
+          - id: accounting-isolation
+            scene: scripts/city/simulation/CityResourceAccountingStateIsolationTest.tscn
+          - id: unified-long-run
+            scene: scripts/city/simulation/CityUnifiedLongRunTest.tscn
+          - id: session-persistence
+            scene: scripts/session/GameSessionPersistenceTest.tscn
+          - id: presentation-rebind
+            scene: scripts/session/SettlementPresentationRebindTest.tscn
+          - id: main-scene-boot
+            scene: __MAIN_SCENE__
+
+    steps:
+      - name: Check out diagnostic branch
+        uses: actions/checkout@v4
+
+      - name: Cache Godot
+        id: cache-godot
+        uses: actions/cache@v4
+        with:
+          path: ${{ runner.tool_cache }}/godot-4.7.1
+          key: godot-4.7.1-linux-x86-64
+
+      - name: Install Godot 4.7.1
+        if: steps.cache-godot.outputs.cache-hit != 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          GODOT_DIR="${RUNNER_TOOL_CACHE}/godot-4.7.1"
+          mkdir -p "$GODOT_DIR"
+          curl --fail --location --retry 3 \
+            --output /tmp/godot.zip \
+            "https://github.com/godotengine/godot-builds/releases/download/4.7.1-stable/Godot_v4.7.1-stable_linux.x86_64.zip"
+          unzip -q /tmp/godot.zip -d "$GODOT_DIR"
+          mv "$GODOT_DIR/Godot_v4.7.1-stable_linux.x86_64" "$GODOT_DIR/godot"
+          chmod +x "$GODOT_DIR/godot"
+
+      - name: Put Godot on PATH
+        shell: bash
+        run: echo "${RUNNER_TOOL_CACHE}/godot-4.7.1" >> "$GITHUB_PATH"
+
+      - name: Import project
+        shell: bash
+        run: timeout 300s godot --headless --path . --import
+
+      - name: Run focused scene
+        shell: bash
+        env:
+          SCENE: ${{ matrix.scene }}
+          TEST_ID: ${{ matrix.id }}
+        run: |
+          set -uo pipefail
+          mkdir -p diagnostic-logs
+          log="diagnostic-logs/${TEST_ID}.log"
+          if [[ "$SCENE" == "__MAIN_SCENE__" ]]; then
+            timeout 180s godot --headless --path . --quit-after 180 >"$log" 2>&1
+          else
+            timeout 180s godot --headless --path . "res://$SCENE" >"$log" 2>&1
+          fi
+          status=$?
+          cat "$log"
+          if [[ $status -eq 124 ]]; then
+            echo "::error::$TEST_ID timed out after 180 seconds."
+            exit 124
+          fi
+          if [[ $status -ne 0 ]]; then
+            echo "::error::$TEST_ID exited with status $status."
+            exit "$status"
+          fi
+          if grep -Eqi 'SCRIPT ERROR:|Parse Error:|Compile Error:|Failed to load script|Failed loading resource|Invalid call\. Nonexistent function|Invalid access to property or key' "$log"; then
+            echo "::error::$TEST_ID produced a Godot script or resource error."
+            exit 1
+          fi
+
+      - name: Upload focused log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pr48-${{ matrix.id }}-log
+          path: diagnostic-logs/
+          if-no-files-found: warn
+          retention-days: 2
