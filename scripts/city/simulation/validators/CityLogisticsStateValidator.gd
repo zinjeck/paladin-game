@@ -1,4 +1,4 @@
-# File responsibility: Validate construction, ground-pile, work-order, and haul-reservation state.
+# File responsibility: Validate construction, piles, work orders, and haul reservations for one explicit city target.
 extends RefCounted
 
 const CityWorkSystemScript := preload(
@@ -8,9 +8,13 @@ const CityWorkSystemScript := preload(
 
 #region Construction and Ground Piles
 static func _validate_city_construction_state(
+	validation_target: Dictionary,
 	errors: Array[String],
 	object_lookup: Dictionary
 ) -> Dictionary:
+	var target_city_state: CitySettlementSimulationState = (
+		validation_target.get("city_state")
+	)
 	var site_lookup: Dictionary = {}
 	var expected_tile_lookup: Dictionary = {}
 	var maximum_site_id := 0
@@ -24,8 +28,8 @@ static func _validate_city_construction_state(
 		CityConstructionSystem.CITY_CONSTRUCTION_TARGET_MODIFICATION,
 	]
 
-	for site_index in range(CityConstructionSystem.get_current_state().construction_sites.size()):
-		var raw_site = CityConstructionSystem.get_current_state().construction_sites[site_index]
+	for site_index in range(target_city_state.construction_state.construction_sites.size()):
+		var raw_site = target_city_state.construction_state.construction_sites[site_index]
 
 		if not raw_site is Dictionary:
 			errors.append(
@@ -62,7 +66,7 @@ static func _validate_city_construction_state(
 
 		if (
 			int(
-				CityConstructionSystem.get_current_state().construction_site_index_by_id.get(
+				target_city_state.construction_state.construction_site_index_by_id.get(
 					site_id,
 					-1
 				)
@@ -102,7 +106,8 @@ static func _validate_city_construction_state(
 					+ "."
 				)
 		else:
-			var target_object := CityObjectSystem.get_city_object_by_id(
+			var target_object := CityObjectSystem.get_city_object_by_id_for_city_state(
+				target_city_state,
 				target_object_id
 			)
 
@@ -172,8 +177,8 @@ static func _validate_city_construction_state(
 					expected_tile_lookup[tile_position] = site_id
 
 				if (
-					WorldPoliticalState.get_current_city_world() != null
-					and not WorldPoliticalState.get_current_city_world().is_in_bounds(
+					target_city_state.city_world != null
+					and not target_city_state.city_world.is_in_bounds(
 						tile_position.x,
 						tile_position.y
 					)
@@ -186,9 +191,10 @@ static func _validate_city_construction_state(
 						+ "."
 					)
 
-				if CityObjectSystem.has_city_object_at_tile(tile_position):
+				if CityObjectSystem.has_city_object_at_tile_for_city_state(target_city_state, tile_position):
 					var completed_object_id := int(
-						CityObjectSystem.get_city_object_id_at_tile(
+						CityObjectSystem.get_city_object_id_at_tile_for_city_state(
+							target_city_state,
 							tile_position
 						)
 					)
@@ -258,19 +264,19 @@ static func _validate_city_construction_state(
 			)
 
 	if (
-		CityConstructionSystem.get_current_state().construction_site_index_by_id.size()
+		target_city_state.construction_state.construction_site_index_by_id.size()
 		!= site_lookup.size()
 	):
 		errors.append(
 			"Construction site registry and ID lookup have different sizes."
 		)
 
-	if CityConstructionSystem.get_current_state().construction_site_id_by_tile != expected_tile_lookup:
+	if target_city_state.construction_state.construction_site_id_by_tile != expected_tile_lookup:
 		errors.append(
 			"Construction site footprint lookup does not match site state."
 		)
 
-	if CityConstructionSystem.get_current_state().next_construction_site_id <= maximum_site_id:
+	if target_city_state.construction_state.next_construction_site_id <= maximum_site_id:
 		errors.append(
 			"next_city_construction_site_id must exceed every site ID."
 		)
@@ -281,15 +287,19 @@ static func _validate_city_construction_state(
 
 
 static func _validate_city_ground_pile_state(
+	validation_target: Dictionary,
 	errors: Array[String],
 	construction_site_lookup: Dictionary
 ) -> Dictionary:
+	var target_city_state: CitySettlementSimulationState = (
+		validation_target.get("city_state")
+	)
 	var ground_pile_lookup: Dictionary = {}
 	var nonfull_pile_id_by_resource_tile: Dictionary = {}
 	var maximum_ground_pile_id := 0
 
-	for pile_index in range(CityLogisticsSystem.get_current_state().ground_piles.size()):
-		var raw_ground_pile = CityLogisticsSystem.get_current_state().ground_piles[pile_index]
+	for pile_index in range(target_city_state.logistics_state.ground_piles.size()):
+		var raw_ground_pile = target_city_state.logistics_state.ground_piles[pile_index]
 
 		if not raw_ground_pile is Dictionary:
 			errors.append(
@@ -349,9 +359,10 @@ static func _validate_city_ground_pile_state(
 			var tile_position: Vector2i = raw_tile_position
 
 			if (
-				WorldPoliticalState.get_current_city_world() != null
-				and not CityLogisticsSystem.can_city_ground_pile_exist_at_tile(
-					WorldPoliticalState.get_current_city_world(),
+				target_city_state.city_world != null
+				and not CityLogisticsSystem.can_city_ground_pile_exist_at_tile_for_city_state(
+					target_city_state,
+					target_city_state.city_world,
 					tile_position
 				)
 			):
@@ -374,7 +385,8 @@ static func _validate_city_ground_pile_state(
 
 		if construction_site_id > 0:
 			var construction_site := (
-				CityConstructionSystem.get_city_construction_site_by_id(
+				CityConstructionSystem.get_city_construction_site_by_id_for_city_state(
+					target_city_state,
 					construction_site_id
 				)
 			)
@@ -490,7 +502,7 @@ static func _validate_city_ground_pile_state(
 
 
 		if int(
-			CityLogisticsSystem.get_current_state().ground_pile_index_by_id.get(
+			target_city_state.logistics_state.ground_pile_index_by_id.get(
 				ground_pile_id,
 				-1
 			)
@@ -502,14 +514,14 @@ static func _validate_city_ground_pile_state(
 			)
 
 	if (
-		CityLogisticsSystem.get_current_state().ground_pile_index_by_id.size()
+		target_city_state.logistics_state.ground_pile_index_by_id.size()
 		!= ground_pile_lookup.size()
 	):
 		errors.append(
 			"Ground pile registry array and ID lookup have different sizes."
 		)
 
-	if CityLogisticsSystem.get_current_state().next_ground_pile_id <= maximum_ground_pile_id:
+	if target_city_state.logistics_state.next_ground_pile_id <= maximum_ground_pile_id:
 		errors.append(
 			"next_city_ground_pile_id must be greater than every existing pile ID."
 		)
@@ -523,10 +535,14 @@ static func _validate_city_ground_pile_state(
 
 #region Work Orders
 static func _validate_city_work_orders(
+	validation_target: Dictionary,
 	errors: Array[String],
 	citizen_lookup: Dictionary,
 	construction_site_lookup: Dictionary
 ) -> int:
+	var target_city_state: CitySettlementSimulationState = (
+		validation_target.get("city_state")
+	)
 	var expected_source_lookup: Dictionary = {}
 	var maximum_order_id := 0
 	var required_order_fields: Array[String] = [
@@ -549,8 +565,8 @@ static func _validate_city_work_orders(
 		"progress_signature",
 	]
 
-	for raw_order_id in CityWorkSystem.get_current_work_state().work_orders.keys():
-		maximum_order_id = _validate_city_work_order_entry({
+	for raw_order_id in target_city_state.work_state.work_orders.keys():
+		maximum_order_id = _validate_city_work_order_entry(validation_target, {
 			"errors": errors,
 			"citizen_lookup": citizen_lookup,
 			"construction_site_lookup": construction_site_lookup,
@@ -560,9 +576,9 @@ static func _validate_city_work_orders(
 			"raw_order_id": raw_order_id,
 		})
 
-	for raw_source_key in CityWorkSystem.get_current_work_state().work_order_id_by_source_key.keys():
+	for raw_source_key in target_city_state.work_state.work_order_id_by_source_key.keys():
 		var raw_lookup_order_id = (
-			CityWorkSystem.get_current_work_state().work_order_id_by_source_key.get(raw_source_key)
+			target_city_state.work_state.work_order_id_by_source_key.get(raw_source_key)
 		)
 
 		if (
@@ -573,24 +589,28 @@ static func _validate_city_work_orders(
 				"Work-order source lookup contains an invalid key or ID."
 			)
 
-	if CityWorkSystem.get_current_work_state().work_order_id_by_source_key != expected_source_lookup:
+	if target_city_state.work_state.work_order_id_by_source_key != expected_source_lookup:
 		errors.append(
 			"Work-order source lookup is not a bijection with the registry."
 		)
 
-	if CityWorkSystem.get_current_work_state().next_work_order_id <= maximum_order_id:
+	if target_city_state.work_state.next_work_order_id <= maximum_order_id:
 		errors.append(
 			"next_city_work_order_id must exceed every work-order ID."
 		)
 
-	return CityWorkSystem.get_current_work_state().work_orders.size()
+	return target_city_state.work_state.work_orders.size()
 
 
 
 
 static func _validate_city_work_order_entry(
+	validation_target: Dictionary,
 	values: Dictionary
 ) -> int:
+	var target_city_state: CitySettlementSimulationState = (
+		validation_target.get("city_state")
+	)
 	var errors: Array[String] = values.get("errors", [])
 	var citizen_lookup: Dictionary = values.get("citizen_lookup", {})
 	var construction_site_lookup: Dictionary = values.get(
@@ -615,7 +635,7 @@ static func _validate_city_work_order_entry(
 
 	var order_id: int = raw_order_id
 	maximum_order_id = maxi(maximum_order_id, order_id)
-	var raw_order = CityWorkSystem.get_current_work_state().work_orders.get(order_id, {})
+	var raw_order = target_city_state.work_state.work_orders.get(order_id, {})
 
 	if not raw_order is Dictionary:
 		errors.append(
@@ -762,12 +782,12 @@ static func _validate_city_work_order_entry(
 		"last_progress_minute": last_progress_minute,
 		"last_attention_minute": last_attention_minute,
 	}
-	_validate_city_work_order_identity(order_context)
-	_validate_city_work_order_source_state(order_context)
-	_validate_city_work_order_runtime_state(order_context)
-	_validate_city_work_order_active_citizens(order_context)
+	_validate_city_work_order_identity(validation_target, order_context)
+	_validate_city_work_order_source_state(validation_target, order_context)
+	_validate_city_work_order_runtime_state(validation_target, order_context)
+	_validate_city_work_order_active_citizens(validation_target, order_context)
 
-	_validate_city_work_order_jobs({
+	_validate_city_work_order_jobs(validation_target, {
 		"errors": errors,
 		"order_id": order_id,
 		"jobs": jobs,
@@ -779,6 +799,7 @@ static func _validate_city_work_order_entry(
 	return maximum_order_id
 
 static func _validate_city_work_order_identity(
+	validation_target: Dictionary,
 	values: Dictionary
 ) -> void:
 	var errors: Array[String] = values.get("errors", [])
@@ -835,8 +856,12 @@ static func _validate_city_work_order_identity(
 
 
 static func _validate_city_work_order_source_state(
+	validation_target: Dictionary,
 	values: Dictionary
 ) -> void:
+	var target_city_state: CitySettlementSimulationState = (
+		validation_target.get("city_state")
+	)
 	var errors: Array[String] = values.get("errors", [])
 	var construction_site_lookup: Dictionary = values.get(
 		"construction_site_lookup",
@@ -859,6 +884,7 @@ static func _validate_city_work_order_source_state(
 			+ "'."
 		)
 	elif not _city_work_order_source_exists(
+		validation_target,
 		order_type,
 		source_id,
 		construction_site_lookup
@@ -880,7 +906,8 @@ static func _validate_city_work_order_source_state(
 			+ "'."
 		)
 	elif order_type == CityWorkSystemScript.ORDER_TYPE_CONSTRUCTION_SITE:
-		var source_site := CityConstructionSystem.get_city_construction_site_by_id(
+		var source_site := CityConstructionSystem.get_city_construction_site_by_id_for_city_state(
+			target_city_state,
 			source_id
 		)
 
@@ -896,6 +923,7 @@ static func _validate_city_work_order_source_state(
 
 
 static func _validate_city_work_order_runtime_state(
+	validation_target: Dictionary,
 	values: Dictionary
 ) -> void:
 	var errors: Array[String] = values.get("errors", [])
@@ -968,6 +996,7 @@ static func _validate_city_work_order_runtime_state(
 
 
 static func _validate_city_work_order_active_citizens(
+	validation_target: Dictionary,
 	values: Dictionary
 ) -> void:
 	var errors: Array[String] = values.get("errors", [])
@@ -1008,12 +1037,16 @@ static func _validate_city_work_order_active_citizens(
 		)
 
 static func _city_work_order_source_exists(
+	validation_target: Dictionary,
 	order_type: String,
 	source_id: int,
 	construction_site_lookup: Dictionary
 ) -> bool:
+	var target_city_state: CitySettlementSimulationState = (
+		validation_target.get("city_state")
+	)
 	if order_type == CityWorkSystemScript.ORDER_TYPE_COMMAND_GROUP:
-		for raw_command in CityWorkSystem.get_current_work_state().player_commands:
+		for raw_command in target_city_state.work_state.player_commands:
 			if (
 				raw_command is Dictionary
 				and int(raw_command.get("group_id", -1)) == source_id
@@ -1030,6 +1063,7 @@ static func _city_work_order_source_exists(
 
 
 static func _validate_city_work_order_jobs(
+	validation_target: Dictionary,
 	values: Dictionary
 ) -> void:
 	var errors: Array[String] = values.get("errors", [])
@@ -1243,10 +1277,14 @@ static func _validate_city_work_order_jobs(
 
 #region Haul Reservations
 static func _validate_city_haul_reservations(
+	validation_target: Dictionary,
 	errors: Array[String],
 	citizen_lookup: Dictionary,
 	ground_pile_lookup: Dictionary
 ) -> int:
+	var target_city_state: CitySettlementSimulationState = (
+		validation_target.get("city_state")
+	)
 	var expected_citizen_lookup: Dictionary = {}
 	var expected_source_amount_by_key: Dictionary = {}
 	var expected_destination_amount_by_key: Dictionary = {}
@@ -1255,8 +1293,8 @@ static func _validate_city_haul_reservations(
 	var destination_endpoint_by_key: Dictionary = {}
 	var maximum_reservation_id := 0
 
-	for raw_reservation_id in CityLogisticsSystem.get_current_state().haul_reservations.keys():
-		maximum_reservation_id = _validate_city_haul_reservation_entry({
+	for raw_reservation_id in target_city_state.logistics_state.haul_reservations.keys():
+		maximum_reservation_id = _validate_city_haul_reservation_entry(validation_target, {
 			"errors": errors,
 			"citizen_lookup": citizen_lookup,
 			"ground_pile_lookup": ground_pile_lookup,
@@ -1281,7 +1319,8 @@ static func _validate_city_haul_reservations(
 
 		if (
 			reserved_amount
-			> CityLogisticsSystem.get_city_haul_endpoint_resource_amount(
+			> CityLogisticsSystem.get_city_haul_endpoint_resource_amount_for_city_state(
+				target_city_state,
 				source,
 				resource
 			)
@@ -1304,7 +1343,8 @@ static func _validate_city_haul_reservations(
 				CityCitizens.CITY_CITIZEN_HAUL_ENDPOINT_KIND_NONE
 			)
 		)
-		var city_object := CityObjectSystem.get_city_object_by_id(
+		var city_object := CityObjectSystem.get_city_object_by_id_for_city_state(
+			target_city_state,
 			int(destination.get("id", -1))
 		)
 		var reserved_amount := int(
@@ -1320,7 +1360,8 @@ static func _validate_city_haul_reservations(
 
 			for resource in CityResourceCatalog.get_city_resource_types():
 				remaining_capacity += (
-					CityConstructionSystem.get_city_construction_site_remaining_resource_amount(
+					CityConstructionSystem.get_city_construction_site_remaining_resource_amount_for_city_state(
+						target_city_state,
 						site_id,
 						resource
 					)
@@ -1356,7 +1397,7 @@ static func _validate_city_haul_reservations(
 			)
 
 	if (
-		CityLogisticsSystem.get_current_state().haul_reservation_id_by_citizen_id
+		target_city_state.logistics_state.haul_reservation_id_by_citizen_id
 		!= expected_citizen_lookup
 	):
 		errors.append(
@@ -1364,7 +1405,7 @@ static func _validate_city_haul_reservations(
 		)
 
 	if (
-		CityLogisticsSystem.get_current_state().haul_source_reserved_amount_by_key
+		target_city_state.logistics_state.haul_source_reserved_amount_by_key
 		!= expected_source_amount_by_key
 	):
 		errors.append(
@@ -1372,26 +1413,30 @@ static func _validate_city_haul_reservations(
 		)
 
 	if (
-		CityLogisticsSystem.get_current_state().haul_destination_reserved_amount_by_key
+		target_city_state.logistics_state.haul_destination_reserved_amount_by_key
 		!= expected_destination_amount_by_key
 	):
 		errors.append(
 			"Haul destination reservation aggregate does not match the ledger."
 		)
 
-	if CityLogisticsSystem.get_current_state().next_haul_reservation_id <= maximum_reservation_id:
+	if target_city_state.logistics_state.next_haul_reservation_id <= maximum_reservation_id:
 		errors.append(
 			"next_city_haul_reservation_id must exceed every reservation ID."
 		)
 
-	return CityLogisticsSystem.get_current_state().haul_reservations.size()
+	return target_city_state.logistics_state.haul_reservations.size()
 
 
 
 
 static func _validate_city_haul_reservation_entry(
+	validation_target: Dictionary,
 	values: Dictionary
 ) -> int:
+	var target_city_state: CitySettlementSimulationState = (
+		validation_target.get("city_state")
+	)
 	var errors: Array[String] = values.get("errors", [])
 	var citizen_lookup: Dictionary = values.get("citizen_lookup", {})
 	var ground_pile_lookup: Dictionary = values.get("ground_pile_lookup", {})
@@ -1430,7 +1475,7 @@ static func _validate_city_haul_reservation_entry(
 		return maximum_reservation_id
 
 	var reservation_id: int = raw_reservation_id
-	var raw_reservation = CityLogisticsSystem.get_current_state().haul_reservations[
+	var raw_reservation = target_city_state.logistics_state.haul_reservations[
 		reservation_id
 	]
 
@@ -1473,7 +1518,7 @@ static func _validate_city_haul_reservation_entry(
 		0
 	)
 	var destination_manifest_result := (
-		_build_destination_reserved_resource_manifest({
+		_build_destination_reserved_resource_manifest(validation_target, {
 			"errors": errors,
 			"reservation_id": reservation_id,
 			"raw_manifest": raw_destination_reserved_resources,
@@ -1569,7 +1614,7 @@ static func _validate_city_haul_reservation_entry(
 	var destination: Dictionary = raw_destination
 	var source_is_valid := (
 		CityCitizens.is_valid_city_citizen_haul_endpoint(source)
-		and _city_haul_endpoint_schema_is_valid(source)
+		and _city_haul_endpoint_schema_is_valid(validation_target, source)
 		and str(source.get("kind", ""))
 		!= CityCitizens.CITY_CITIZEN_HAUL_ENDPOINT_KIND_GROUND_TILE
 	)
@@ -1579,6 +1624,7 @@ static func _validate_city_haul_reservation_entry(
 			destination_reserved_amount <= 0
 		)
 		and _city_haul_endpoint_schema_is_valid(
+			validation_target,
 			destination,
 			destination_reserved_amount <= 0
 		)
@@ -1598,22 +1644,26 @@ static func _validate_city_haul_reservation_entry(
 			+ " has invalid destination endpoint."
 		)
 
-	var citizen := CityCitizenRegistrySystem.get_city_citizen_by_id(citizen_id)
-	var current_task := CityCitizenTaskRuntimeSystem.get_city_citizen_current_task(
+	var citizen := CityCitizenRegistrySystem.get_city_citizen_by_id_for_city_state(target_city_state, citizen_id)
+	var current_task := CityCitizenTaskRuntimeSystem.get_city_citizen_current_task_for_city_state(
+		target_city_state,
 		citizen_id
 	)
-	var current_haul := CityCitizenTaskRuntimeSystem.get_city_citizen_current_haul(
+	var current_haul := CityCitizenTaskRuntimeSystem.get_city_citizen_current_haul_for_city_state(
+		target_city_state,
 		citizen_id
 	)
-	var cargo_amount := CityCitizenInventorySystem.get_city_citizen_haul_cargo_amount(
+	var cargo_amount := CityCitizenInventorySystem.get_city_citizen_haul_cargo_amount_for_city_state(
+		target_city_state,
 		citizen_id
 	)
 	var cargo_resources := (
-		CityCitizenInventorySystem.get_city_citizen_haul_cargo_resources(
+		CityCitizenInventorySystem.get_city_citizen_haul_cargo_resources_for_city_state(
+			target_city_state,
 			citizen_id
 		)
 	)
-	_validate_city_haul_reservation_citizen_state({
+	_validate_city_haul_reservation_citizen_state(validation_target, {
 		"errors": errors,
 		"reservation_id": reservation_id,
 		"citizen_id": citizen_id,
@@ -1650,13 +1700,14 @@ static func _validate_city_haul_reservation_entry(
 		"destination_reserved_resources": destination_reserved_resources,
 		"current_haul": current_haul,
 	}
-	_validate_city_haul_reservation_source(endpoint_context)
-	_validate_city_haul_reservation_destination(endpoint_context)
+	_validate_city_haul_reservation_source(validation_target, endpoint_context)
+	_validate_city_haul_reservation_destination(validation_target, endpoint_context)
 
 	return maximum_reservation_id
 
 
 static func _validate_city_haul_reservation_citizen_state(
+	validation_target: Dictionary,
 	values: Dictionary
 ) -> void:
 	var errors: Array[String] = values.get("errors", [])
@@ -1728,8 +1779,8 @@ static func _validate_city_haul_reservation_citizen_state(
 
 	if (
 		not raw_current_source is Dictionary
-		or _get_validation_endpoint_key(raw_current_source)
-		!= _get_validation_endpoint_key(source)
+		or _get_validation_endpoint_key(validation_target, raw_current_source)
+		!= _get_validation_endpoint_key(validation_target, source)
 	):
 		errors.append(
 			"Citizen "
@@ -1822,6 +1873,7 @@ static func _validate_city_haul_reservation_citizen_state(
 
 
 static func _build_destination_reserved_resource_manifest(
+	validation_target: Dictionary,
 	values: Dictionary
 ) -> Dictionary:
 	var errors: Array[String] = values.get("errors", [])
@@ -1881,8 +1933,12 @@ static func _build_destination_reserved_resource_manifest(
 
 
 static func _validate_city_haul_reservation_source(
+	validation_target: Dictionary,
 	values: Dictionary
 ) -> void:
+	var target_city_state: CitySettlementSimulationState = (
+		validation_target.get("city_state")
+	)
 	var errors: Array[String] = values.get("errors", [])
 	var ground_pile_lookup: Dictionary = values.get("ground_pile_lookup", {})
 	var expected_source_amount_by_key: Dictionary = values.get(
@@ -1904,6 +1960,7 @@ static func _validate_city_haul_reservation_source(
 	var source_reserved_amount := int(values.get("source_reserved_amount", 0))
 	if source_reserved_amount > 0:
 		if not _city_haul_endpoint_exists(
+			validation_target,
 			source,
 			ground_pile_lookup
 		):
@@ -1913,7 +1970,7 @@ static func _validate_city_haul_reservation_source(
 				+ " reserves a missing source endpoint."
 			)
 
-		if not CityLogisticsSystem.city_haul_endpoint_can_provide_resource({
+		if not CityLogisticsSystem.city_haul_endpoint_can_provide_resource_for_city_state(target_city_state, {
 			"endpoint": source,
 			"resource": resource,
 			"withdrawal_purpose": str(
@@ -1932,6 +1989,7 @@ static func _validate_city_haul_reservation_source(
 			)
 
 		var source_key := _get_validation_source_key(
+			validation_target,
 			source,
 			resource
 		)
@@ -1944,8 +2002,12 @@ static func _validate_city_haul_reservation_source(
 
 
 static func _validate_city_haul_reservation_destination(
+	validation_target: Dictionary,
 	values: Dictionary
 ) -> void:
+	var target_city_state: CitySettlementSimulationState = (
+		validation_target.get("city_state")
+	)
 	var errors: Array[String] = values.get("errors", [])
 	var ground_pile_lookup: Dictionary = values.get("ground_pile_lookup", {})
 	var expected_destination_amount_by_key: Dictionary = values.get(
@@ -1970,6 +2032,7 @@ static func _validate_city_haul_reservation_destination(
 	var current_haul: Dictionary = values.get("current_haul", {})
 	if destination_reserved_amount > 0:
 		if not _city_haul_endpoint_exists(
+			validation_target,
 			destination,
 			ground_pile_lookup
 		):
@@ -1986,8 +2049,8 @@ static func _validate_city_haul_reservation_destination(
 
 		if (
 			not raw_current_destination is Dictionary
-			or _get_validation_endpoint_key(raw_current_destination)
-			!= _get_validation_endpoint_key(destination)
+			or _get_validation_endpoint_key(validation_target, raw_current_destination)
+			!= _get_validation_endpoint_key(validation_target, destination)
 		):
 			errors.append(
 				"Citizen "
@@ -1997,7 +2060,8 @@ static func _validate_city_haul_reservation_destination(
 				+ "."
 			)
 
-		var destination_object := CityObjectSystem.get_city_object_by_id(
+		var destination_object := CityObjectSystem.get_city_object_by_id_for_city_state(
+			target_city_state,
 			int(destination.get("id", -1))
 		)
 		var destination_kind := str(
@@ -2016,7 +2080,7 @@ static func _validate_city_haul_reservation_destination(
 		var destination_policy_is_valid := true
 
 		for reserved_resource in destination_reserved_resources.keys():
-			if not CityLogisticsSystem.city_haul_endpoint_can_accept_resource({
+			if not CityLogisticsSystem.city_haul_endpoint_can_accept_resource_for_city_state(target_city_state, {
 				"endpoint": destination,
 				"resource": str(reserved_resource),
 				"deposit_purpose": destination_access_purpose,
@@ -2059,6 +2123,7 @@ static func _validate_city_haul_reservation_destination(
 			)
 
 		var destination_key := _get_validation_endpoint_key(
+			validation_target,
 			destination
 		)
 		expected_destination_amount_by_key[destination_key] = (
@@ -2074,9 +2139,13 @@ static func _validate_city_haul_reservation_destination(
 
 
 static func _city_haul_endpoint_exists(
+	validation_target: Dictionary,
 	endpoint: Dictionary,
 	ground_pile_lookup: Dictionary
 ) -> bool:
+	var target_city_state: CitySettlementSimulationState = (
+		validation_target.get("city_state")
+	)
 	match str(
 		endpoint.get(
 			"kind",
@@ -2084,7 +2153,8 @@ static func _city_haul_endpoint_exists(
 		)
 	):
 		CityCitizens.CITY_CITIZEN_HAUL_ENDPOINT_KIND_CITY_OBJECT_CONTAINER:
-			return not CityObjectSystem.get_city_object_by_id(
+			return not CityObjectSystem.get_city_object_by_id_for_city_state(
+				target_city_state,
 				int(endpoint.get("id", -1))
 			).is_empty()
 
@@ -2100,15 +2170,17 @@ static func _city_haul_endpoint_exists(
 			)
 			return (
 				raw_tile is Vector2i
-				and WorldPoliticalState.get_current_city_world() != null
-				and CityLogisticsSystem.can_city_ground_pile_exist_at_tile(
-					WorldPoliticalState.get_current_city_world(),
+				and target_city_state.city_world != null
+				and CityLogisticsSystem.can_city_ground_pile_exist_at_tile_for_city_state(
+					target_city_state,
+					target_city_state.city_world,
 					raw_tile
 				)
 			)
 
 		CityCitizens.CITY_CITIZEN_HAUL_ENDPOINT_KIND_CONSTRUCTION_SITE:
-			return not CityConstructionSystem.get_city_construction_site_by_id(
+			return not CityConstructionSystem.get_city_construction_site_by_id_for_city_state(
+				target_city_state,
 				int(endpoint.get("id", -1))
 			).is_empty()
 
@@ -2116,6 +2188,7 @@ static func _city_haul_endpoint_exists(
 
 
 static func _city_haul_endpoint_schema_is_valid(
+	validation_target: Dictionary,
 	endpoint: Dictionary,
 	allow_none: bool = false
 ) -> bool:
@@ -2180,6 +2253,7 @@ static func _city_haul_endpoint_schema_is_valid(
 
 
 static func _get_validation_endpoint_key(
+	validation_target: Dictionary,
 	endpoint: Dictionary
 ) -> String:
 	var endpoint_kind := str(
@@ -2215,10 +2289,11 @@ static func _get_validation_endpoint_key(
 
 
 static func _get_validation_source_key(
+	validation_target: Dictionary,
 	endpoint: Dictionary,
 	resource: String
 ) -> String:
-	return _get_validation_endpoint_key(endpoint) + ":" + resource
+	return _get_validation_endpoint_key(validation_target, endpoint) + ":" + resource
 
 
 

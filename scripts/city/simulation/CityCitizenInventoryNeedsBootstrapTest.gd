@@ -11,6 +11,9 @@ const TEST_CITY_NAME := "Inventory Needs Bootstrap"
 const TEST_CULTURE_NAME := "Inventory Needs Culture"
 
 var failure_count: int = 0
+var validator_city_id: int = -1
+var validator_city_state: CitySettlementSimulationState
+var validator_settlement_context: SettlementSimulationContext
 
 
 func _ready() -> void:
@@ -322,6 +325,11 @@ func _test_headless_simulation_bootstrap_and_canonical_setters() -> void:
 
 	WorldPoliticalState.set_current_city_world(_make_world(16, 16, 98_904))
 	WorldPoliticalState.set_current_city_seed(98_904)
+	validator_city_id = city_a_id
+	validator_city_state = WorldPoliticalState.get_city_simulation_state(city_a_id)
+	validator_settlement_context = (
+		WorldPoliticalState.get_settlement_context(city_a_id)
+	)
 	var created := CityCitizenRegistrySystem.add_city_citizen(
 		"",
 		Vector2i(5, 5),
@@ -606,7 +614,8 @@ func _test_malformed_carried_state_quarantine() -> void:
 
 
 func _test_validator_rejects_uninterpretable_embedded_state() -> void:
-	var registry_state := CityCitizenRegistrySystem.get_current_state()
+	var validation_target := _get_explicit_validation_target()
+	var registry_state := validator_city_state.citizen_registry_state
 
 	if registry_state.citizens.is_empty():
 		_expect(false, "Validator coverage requires the headless citizen fixture.")
@@ -628,6 +637,7 @@ func _test_validator_rejects_uninterpretable_embedded_state() -> void:
 	var carrying_errors: Array[String] = []
 	var carrying_warnings: Array[String] = []
 	CityObjectStateValidatorScript._validate_citizen_inventories(
+		validation_target,
 		carrying_errors,
 		carrying_warnings,
 		citizen_lookup
@@ -646,6 +656,7 @@ func _test_validator_rejects_uninterpretable_embedded_state() -> void:
 	var inventory_errors: Array[String] = []
 	var inventory_warnings: Array[String] = []
 	CityObjectStateValidatorScript._validate_citizen_inventories(
+		validation_target,
 		inventory_errors,
 		inventory_warnings,
 		citizen_lookup
@@ -664,6 +675,7 @@ func _test_validator_rejects_uninterpretable_embedded_state() -> void:
 	registry_state.citizens[0] = citizen
 	var need_errors: Array[String] = []
 	CityCitizenStateValidatorScript._validate_city_citizen_need_state(
+		validation_target,
 		need_errors,
 		citizen_lookup
 	)
@@ -678,6 +690,7 @@ func _test_validator_rejects_uninterpretable_embedded_state() -> void:
 	registry_state.citizens[0] = citizen
 	var incomplete_need_errors: Array[String] = []
 	CityCitizenStateValidatorScript._validate_city_citizen_need_state(
+		validation_target,
 		incomplete_need_errors,
 		citizen_lookup
 	)
@@ -685,6 +698,14 @@ func _test_validator_rejects_uninterpretable_embedded_state() -> void:
 		_errors_contain(incomplete_need_errors, "incomplete need state"),
 		"Validator must reject missing scalar need fields."
 	)
+
+
+func _get_explicit_validation_target() -> Dictionary:
+	return {
+		"settlement_context": validator_settlement_context,
+		"settlement_id": validator_city_id,
+		"city_state": validator_city_state,
+	}
 
 
 func _lock_founding_world(world: WorldData, label: String) -> bool:

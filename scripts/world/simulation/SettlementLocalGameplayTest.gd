@@ -77,17 +77,25 @@ func _test_two_founded_settlements_resolve_local_culture() -> void:
 		and int(citizen_b.get("culture_id", -1)) == culture_b_id,
 		"Default citizen creation must use the target settlement culture."
 	)
+	var city_b_id: int = int(fixture["city_b_id"])
 	var npc_validation_errors: Array[String] = []
-	WorldPoliticalState.set_active_settlement(int(fixture["city_b_id"]))
+	var npc_validation_target := {
+		"settlement_context": (
+			WorldPoliticalState.get_settlement_context(city_b_id)
+		),
+		"settlement_id": city_b_id,
+		"city_state": state_b,
+	}
 	CityCitizenStateValidatorScript._validate_city_citizen_culture_state(
+		npc_validation_target,
 		npc_validation_errors,
 		state_b.citizen_registry_state.citizen_index_by_id
 	)
 	_expect(
-		npc_validation_errors.is_empty(),
-		"A founded NPC city must validate against its local culture, not the official player culture."
+		npc_validation_errors.is_empty()
+		and WorldPoliticalState.active_settlement_id == city_a_id,
+		"A founded NPC city must validate against its local culture without changing the selected City."
 	)
-	WorldPoliticalState.set_active_settlement(city_a_id)
 
 	WorldData.player_city_founded = false
 	_expect(

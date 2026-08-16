@@ -96,7 +96,11 @@ func _run_smoke_test() -> void:
 	await get_tree().process_frame
 	await get_tree().process_frame
 
-	var validation := CityStateValidatorScript.validate(true, false)
+	var validation := CityStateValidatorScript.validate_for_settlement(
+		renderer.bound_settlement_context,
+		true,
+		false
+	)
 	_expect(
 		bool(validation.get("valid", false)),
 		"City state validator must remain valid after the fixture."

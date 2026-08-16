@@ -113,7 +113,11 @@ func _test_equal_version_assignment_and_workplace_isolation() -> void:
 		WorldPoliticalState.set_active_settlement(city_a_id),
 		"City A must become active for isolated mutation."
 	)
-	var validator_a := CityStateValidator.validate(true, false)
+	var validator_a := CityStateValidator.validate_for_settlement(
+		WorldPoliticalState.get_settlement_context(city_a_id),
+		true,
+		false
+	)
 	var citizen_id := int(state_a.get("citizen_id", -1))
 	_expect(
 		CityAssignmentSystem.remove_city_citizen_home(citizen_id)
@@ -128,7 +132,11 @@ func _test_equal_version_assignment_and_workplace_isolation() -> void:
 		and _active_city_matches_assigned_state(state_b),
 		"A -> B must restore City B's own bidirectional relationships."
 	)
-	var validator_b := CityStateValidator.validate(false, false)
+	var validator_b := CityStateValidator.validate_for_settlement(
+		WorldPoliticalState.get_settlement_context(city_b_id),
+		false,
+		false
+	)
 	_expect(
 		int(validator_a.get("assignment_state_instance_id", 0))
 		!= int(validator_b.get("assignment_state_instance_id", 0))

@@ -96,7 +96,9 @@ static func get_simulation_text(values: Dictionary) -> String:
 		+ "\n"
 		+ SimulationCoordinator.get_debug_text()
 		+ "\n"
-		+ CityStateValidator.get_summary_text()
+		+ CityStateValidator.get_summary_text_for_settlement(
+			values.get("settlement_context")
+		)
 		+ "\n"
 		+ get_navigation_text(values)
 	)

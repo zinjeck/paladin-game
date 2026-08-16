@@ -831,7 +831,7 @@ PASS9_REQUIRED_TEST_CALLS = {
     },
     "scripts/city/simulation/CityUnifiedBoundaryTest.gd": {
         "_test_public_storage_keep_fallback": (
-            "validate",
+            "_validate_fixture_city",
             "get_total_physical_city_resource_amount",
             "get_city_citizen_haul_cargo_amount",
         ),
@@ -2448,13 +2448,14 @@ def main() -> int:
         if validator_path.exists():
             validator_text = validator_path.read_text(encoding="utf-8")
             if (
-                "static var _cached_citizen_registry_state: "
-                "CityCitizenRegistryState" not in validator_text
+                '"citizen_registry_state": city_state.citizen_registry_state'
+                not in validator_text
+                or 'entry.get("citizen_registry_state")' not in validator_text
                 or '"citizen_registry_state_instance_id"' not in validator_text
             ):
                 errors.append(
-                    "scripts/city/simulation/CityStateValidator.gd: validation "
-                    "cache must include citizen-registry identity"
+                    "scripts/city/simulation/CityStateValidator.gd: explicit "
+                    "validation cache must include citizen-registry identity"
                 )
 
     citizen_spatial_state_path = (
@@ -2677,13 +2678,14 @@ def main() -> int:
         if validator_path.exists():
             validator_text = validator_path.read_text(encoding="utf-8")
             if (
-                "static var _cached_citizen_spatial_state: "
-                "CityCitizenSpatialState" not in validator_text
+                '"citizen_spatial_state": city_state.citizen_spatial_state'
+                not in validator_text
+                or 'entry.get("citizen_spatial_state")' not in validator_text
                 or '"citizen_spatial_state_instance_id"' not in validator_text
             ):
                 errors.append(
-                    "scripts/city/simulation/CityStateValidator.gd: validation "
-                    "cache must include citizen-spatial identity"
+                    "scripts/city/simulation/CityStateValidator.gd: explicit "
+                    "validation cache must include citizen-spatial identity"
                 )
 
     citizen_movement_runtime_state_path = (
@@ -2956,15 +2958,16 @@ def main() -> int:
         if validator_path.exists():
             validator_text = validator_path.read_text(encoding="utf-8")
             if (
-                "static var _cached_citizen_movement_runtime_state: "
-                "CityCitizenMovementRuntimeState" not in validator_text
+                '"citizen_movement_runtime_state": city_state.citizen_movement_runtime_state'
+                not in validator_text
+                or 'entry.get("citizen_movement_runtime_state")' not in validator_text
                 or '"citizen_movement_runtime_state_instance_id"'
                 not in validator_text
             ):
                 errors.append(
-                    "scripts/city/simulation/CityStateValidator.gd: "
-                    "validation cache must include citizen "
-                    "movement-runtime identity"
+                    "scripts/city/simulation/CityStateValidator.gd: explicit "
+                    "validation cache must include citizen movement-runtime "
+                    "identity"
                 )
 
     citizen_task_runtime_state_path = (
@@ -3213,35 +3216,16 @@ def main() -> int:
                 )
         if validator_path.exists():
             validator_text = validator_path.read_text(encoding="utf-8")
-            validator_identity_comparison = re.search(
-                r"if\s*\(\s*_cached_citizen_task_runtime_state\s*"
-                r"==\s*null\s*or\s*not\s+is_same\s*\(\s*"
-                r"_cached_citizen_task_runtime_state\s*,\s*"
-                r"CityCitizenTaskRuntimeSystem\s*\.\s*"
-                r"get_current_state\s*\(\s*\)"
-                r"\s*\)\s*\)\s*:\s*return\s+false",
-                validator_text,
-                re.DOTALL,
-            )
-            validator_cache_assignment = re.search(
-                r"_cached_citizen_task_runtime_state\s*=\s*\(\s*"
-                r"CityCitizenTaskRuntimeSystem\s*\.\s*"
-                r"get_current_state\s*\(\s*\)"
-                r"\s*\)",
-                validator_text,
-                re.DOTALL,
-            )
             if (
-                "static var _cached_citizen_task_runtime_state: "
-                "CityCitizenTaskRuntimeState" not in validator_text
+                '"citizen_task_runtime_state": city_state.citizen_task_runtime_state'
+                not in validator_text
+                or 'entry.get("citizen_task_runtime_state")' not in validator_text
                 or '"citizen_task_runtime_state_instance_id"'
                 not in validator_text
-                or validator_identity_comparison is None
-                or validator_cache_assignment is None
             ):
                 errors.append(
-                    "scripts/city/simulation/CityStateValidator.gd: validation "
-                    "cache must include citizen task-runtime identity"
+                    "scripts/city/simulation/CityStateValidator.gd: explicit "
+                    "validation cache must include citizen task-runtime identity"
                 )
 
     # Pass 8: focused citizen behavior APIs must be permanent boundaries.
@@ -3515,6 +3499,16 @@ def main() -> int:
             "bound_city_state.citizen_task_runtime_state"
         ),
     }
+    validator_bound_state_surfaces = {
+        "CityCitizenRegistryState": "city_state.citizen_registry_state",
+        "CityCitizenSpatialState": "city_state.citizen_spatial_state",
+        "CityCitizenMovementRuntimeState": (
+            "city_state.citizen_movement_runtime_state"
+        ),
+        "CityCitizenTaskRuntimeState": (
+            "city_state.citizen_task_runtime_state"
+        ),
+    }
     for consumer_path, consumer_name in (
         (renderer_path, "renderer"),
         (validator_path, "validator"),
@@ -3528,9 +3522,9 @@ def main() -> int:
                     config["state_type"]
                 ]
             else:
-                required_surface = (
-                    f"{config['class_name']}.get_current_state()"
-                )
+                required_surface = validator_bound_state_surfaces[
+                    config["state_type"]
+                ]
             if required_surface not in consumer_text:
                 errors.append(
                     f"{consumer_path.relative_to(ROOT)}: citizen {consumer_name} "
@@ -6164,18 +6158,19 @@ def main() -> int:
                     f"Pass 10 invalidation surface: {required_surface}"
                 )
         for required_surface in (
-            "static var _cached_assignment_state: CityAssignmentState",
-            "static var _cached_workplace_state: CityWorkplaceState",
+            '"assignment_state": city_state.assignment_state',
+            '"workplace_state": city_state.workplace_state',
+            'entry.get("assignment_state")',
+            'entry.get("workplace_state")',
             '"assignment_state_instance_id"',
             '"workplace_state_instance_id"',
-            "CityAssignmentSystem.get_current_state()",
-            "CityEmploymentSystem.get_current_state()",
             "not is_same(",
         ):
             if required_surface not in validator_text:
                 errors.append(
                     "scripts/city/simulation/CityStateValidator.gd: missing "
-                    f"identity-aware Pass 10 cache surface: {required_surface}"
+                    "explicit identity-aware Pass 10 cache surface: "
+                    f"{required_surface}"
                 )
 
     pass10_test_contracts = {
@@ -6228,6 +6223,118 @@ def main() -> int:
                     f"{test_scene_path.relative_to(ROOT)}: Pass 10 scene must "
                     f"bind {expected_resource_path} on its root node"
                 )
+
+    # Settlement-local validation must never rediscover authority through the
+    # globally selected/current City. The validator coordinator accepts an
+    # explicit registered context (or explicit state for headless tests), and
+    # every domain validator receives the same target Dictionary first.
+    validator_contract_paths = (
+        ROOT / "scripts/city/simulation/CityStateValidator.gd",
+        ROOT / "scripts/city/simulation/validators/CityCitizenStateValidator.gd",
+        ROOT / "scripts/city/simulation/validators/CityLogisticsStateValidator.gd",
+        ROOT / "scripts/city/simulation/validators/CityObjectStateValidator.gd",
+    )
+    validator_forbidden_authority_patterns = (
+        r"\bWorldPoliticalState\s*\.\s*active_settlement_id\b",
+        r"\bWorldPoliticalState\s*\.\s*get_active_city_simulation_state\s*\(",
+        r"\bWorldPoliticalState\s*\.\s*get_current_city_",
+        r"\b[A-Z][A-Za-z0-9_]*System(?:Script)?\s*\.\s*get_current_state\s*\(",
+        r"\bCityWorkSystem(?:Script)?\s*\.\s*get_current_work_state\s*\(",
+    )
+    for validator_contract_path in validator_contract_paths:
+        if not validator_contract_path.exists():
+            errors.append(
+                f"{validator_contract_path.relative_to(ROOT)}: missing "
+                "settlement-local validator contract"
+            )
+            continue
+        validator_contract_text = validator_contract_path.read_text(
+            encoding="utf-8"
+        )
+        masked_validator_contract_text = gdscript_masked_code(
+            validator_contract_text
+        )
+        for forbidden_pattern in validator_forbidden_authority_patterns:
+            if re.search(forbidden_pattern, masked_validator_contract_text):
+                errors.append(
+                    f"{validator_contract_path.relative_to(ROOT)}: explicit "
+                    "validator must not resolve active/current City authority"
+                )
+                break
+
+    if validator_path.exists():
+        explicit_validator_text = validator_path.read_text(encoding="utf-8")
+        for required_function in (
+            "validate_for_settlement",
+            "validate_for_city_state",
+            "get_summary_text_for_settlement",
+            "get_summary_text_for_city_state",
+            "clear_cache_for_settlement",
+            "clear_all_validation_caches",
+        ):
+            if not re.search(
+                rf"^static\s+func\s+{required_function}\s*\(",
+                explicit_validator_text,
+                re.MULTILINE,
+            ):
+                errors.append(
+                    "scripts/city/simulation/CityStateValidator.gd: missing "
+                    f"explicit validator API {required_function}"
+                )
+        for retired_function in ("validate", "get_summary_text"):
+            if re.search(
+                rf"^static\s+func\s+{retired_function}\s*\(",
+                explicit_validator_text,
+                re.MULTILINE,
+            ):
+                errors.append(
+                    "scripts/city/simulation/CityStateValidator.gd: retired "
+                    f"no-target API must not return: {retired_function}"
+                )
+        for required_cache_surface in (
+            "const MAX_CACHED_SETTLEMENTS",
+            "static var _cache_by_settlement_id",
+            "static var _cache_recency",
+            'entry.get("city_state")',
+            'entry.get("city_world")',
+            '"city_state_instance_id"',
+            '"city_world_instance_id"',
+        ):
+            if required_cache_surface not in explicit_validator_text:
+                errors.append(
+                    "scripts/city/simulation/CityStateValidator.gd: missing "
+                    "bounded exact-identity cache surface: "
+                    f"{required_cache_surface}"
+                )
+
+    for domain_validator_path in validator_contract_paths[1:]:
+        if not domain_validator_path.exists():
+            continue
+        domain_validator_text = domain_validator_path.read_text(encoding="utf-8")
+        for function_match in FUNC_RE.finditer(domain_validator_text):
+            function_name = function_match.group(1)
+            explicit_first_parameter = re.search(
+                rf"^static\s+func\s+{re.escape(function_name)}\s*\(\s*"
+                r"validation_target\s*:\s*Dictionary\s*(?:,|\))",
+                domain_validator_text,
+                re.MULTILINE,
+            )
+            if explicit_first_parameter is None:
+                errors.append(
+                    f"{domain_validator_path.relative_to(ROOT)}: "
+                    f"{function_name} must receive validation_target first"
+                )
+
+    validator_test_path = (
+        ROOT / "scripts/city/simulation/CityStateValidatorExplicitContextTest.gd"
+    )
+    validator_test_scene_path = validator_test_path.with_suffix(".tscn")
+    for required_path in (validator_test_path, validator_test_scene_path):
+        if not required_path.exists():
+            errors.append(
+                f"{required_path.relative_to(ROOT)}: missing explicit validator "
+                "A/B cache-isolation coverage"
+            )
 
     report = {
         "script_count": len(scripts),

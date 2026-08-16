@@ -116,7 +116,11 @@ func _run_state_isolation_test() -> void:
 		player_state.object_state.object_index_by_id
 	)
 	var player_occupancy: Dictionary = player_state.object_state.occupied_tiles
-	var player_validation := CityStateValidatorScript.validate(true, false)
+	var player_validation := CityStateValidatorScript.validate_for_settlement(
+		WorldPoliticalState.get_settlement_context(player_city_id),
+		true,
+		false
+	)
 	_expect(
 		bool(player_validation.get("valid", false))
 		and int(player_validation.get("checked_objects", 0)) == 2
@@ -335,7 +339,11 @@ func _run_state_isolation_test() -> void:
 	var cpu_objects: Array = cpu_state.object_state.objects
 	var cpu_object_index: Dictionary = cpu_state.object_state.object_index_by_id
 	var cpu_occupancy: Dictionary = cpu_state.object_state.occupied_tiles
-	var cpu_validation := CityStateValidatorScript.validate(true, false)
+	var cpu_validation := CityStateValidatorScript.validate_for_settlement(
+		WorldPoliticalState.get_settlement_context(cpu_city_id),
+		true,
+		false
+	)
 	_expect(
 		bool(cpu_validation.get("valid", false))
 		and int(cpu_validation.get("checked_objects", 0)) == 2
@@ -509,7 +517,12 @@ func _test_validator_cache_tracks_object_state_identity() -> void:
 		city_world
 	)
 	var first_state := CityObjectSystem.get_current_state()
-	var first_result := CityStateValidatorScript.validate(true, false)
+	var first_result := CityStateValidatorScript.validate_for_city_state(
+		int(first_city_state.city_runtime_data.get("id", -1)),
+		first_city_state,
+		true,
+		false
+	)
 
 	_expect(
 		not first_road.is_empty()
@@ -532,7 +545,12 @@ func _test_validator_cache_tracks_object_state_identity() -> void:
 		return
 	var second_state := second_city_state.object_state
 	second_state.object_version = first_state.object_version
-	var second_result := CityStateValidatorScript.validate(false, false)
+	var second_result := CityStateValidatorScript.validate_for_city_state(
+		int(second_city_state.city_runtime_data.get("id", -1)),
+		second_city_state,
+		false,
+		false
+	)
 
 	_expect(
 		not is_same(second_state, first_state)

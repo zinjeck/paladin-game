@@ -8301,7 +8301,11 @@ func toggle_debug_mode() -> void:
 	queue_city_interaction_layer_redraw()
 
 	if is_enabled:
-		CityStateValidator.validate(true, true)
+		CityStateValidator.validate_for_settlement(
+			bound_settlement_context,
+			true,
+			true
+		)
 		debug_panel_ui.refresh()
 		print("Debug mode: ON")
 	else:
@@ -8315,6 +8319,7 @@ func get_city_debug_panel_text() -> String:
 
 func _get_city_debug_presentation_values() -> Dictionary:
 	return {
+		"settlement_context": bound_settlement_context,
 		"city_world": city_world,
 		"city_seed": city_seed,
 		"city_view_name": get_city_map_mode_name(city_view_mode),
