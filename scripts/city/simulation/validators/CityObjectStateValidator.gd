@@ -1,12 +1,16 @@
-# File responsibility: Validate city foundations, occupancy, assignments, inventories, containers, and workplace state.
+# File responsibility: Validate foundations, occupancy, assignments, storage, and workplaces for one explicit city target.
 extends RefCounted
 
 #region Foundation Occupancy and Containers
 static func _validate_city_foundation_state(
+	validation_target: Dictionary,
 	errors: Array[String],
 	warnings: Array[String],
 	object_lookup: Dictionary
 ) -> void:
+	var target_city_state: CitySettlementSimulationState = (
+		validation_target.get("city_state")
+	)
 	var city_center_count := 0
 
 	for object_id in object_lookup.keys():
@@ -15,7 +19,7 @@ static func _validate_city_foundation_state(
 		)
 
 		var city_object: Dictionary = (
-			CityObjectSystem.get_city_objects()[object_index]
+			target_city_state.object_state.objects[object_index]
 		)
 
 		if (
@@ -24,14 +28,14 @@ static func _validate_city_foundation_state(
 		):
 			city_center_count += 1
 
-	var city_state = WorldPoliticalState.get_current_city_simulation_state()
+	var city_state = target_city_state
 	var city_is_founded: bool = (
 		city_state is CitySettlementSimulationState
 		and city_state.is_city_founded()
 	)
 
 	if not city_is_founded:
-		if not CityCitizenRegistrySystem.get_current_state().citizens.is_empty():
+		if not target_city_state.citizen_registry_state.citizens.is_empty():
 			errors.append(
 				"Citizens exist before the target settlement is founded."
 			)
@@ -50,18 +54,22 @@ static func _validate_city_foundation_state(
 				+ " exist."
 		)
 
-	if CityCitizenRegistrySystem.get_current_state().citizens.is_empty():
+	if target_city_state.citizen_registry_state.citizens.is_empty():
 		warnings.append(
 			"The city is founded but currently has no citizens."
 		)
 
 
 static func _validate_city_occupancy(
+	validation_target: Dictionary,
 	errors: Array[String],
 	object_lookup: Dictionary
 ) -> void:
+	var target_city_state: CitySettlementSimulationState = (
+		validation_target.get("city_state")
+	)
 	var expected_occupancy: Dictionary = {}
-	var occupied_tiles := CityObjectSystem.get_city_occupied_tiles_snapshot()
+	var occupied_tiles := target_city_state.object_state.occupied_tiles
 
 	for object_id in object_lookup.keys():
 		var object_index := int(
@@ -69,7 +77,7 @@ static func _validate_city_occupancy(
 		)
 
 		var city_object: Dictionary = (
-			CityObjectSystem.get_city_objects()[object_index]
+			target_city_state.object_state.objects[object_index]
 		)
 
 		var footprint_tiles := (
@@ -169,9 +177,13 @@ static func _validate_city_occupancy(
 
 
 static func _validate_city_containers(
+	validation_target: Dictionary,
 	errors: Array[String],
 	object_lookup: Dictionary
 ) -> int:
+	var target_city_state: CitySettlementSimulationState = (
+		validation_target.get("city_state")
+	)
 	var checked_container_count := 0
 
 	for object_id in object_lookup.keys():
@@ -180,7 +192,7 @@ static func _validate_city_containers(
 		)
 
 		var city_object: Dictionary = (
-			CityObjectSystem.get_city_objects()[object_index]
+			target_city_state.object_state.objects[object_index]
 		)
 
 		var allowed_resources := (
@@ -347,10 +359,14 @@ static func _validate_city_containers(
 
 #region Assignments and Inventories
 static func _validate_city_assignments(
+	validation_target: Dictionary,
 	errors: Array[String],
 	object_lookup: Dictionary,
 	citizen_lookup: Dictionary
 ) -> void:
+	var target_city_state: CitySettlementSimulationState = (
+		validation_target.get("city_state")
+	)
 	var resident_membership: Dictionary = {}
 	var worker_membership: Dictionary = {}
 
@@ -360,7 +376,7 @@ static func _validate_city_assignments(
 		)
 
 		var city_object: Dictionary = (
-			CityObjectSystem.get_city_objects()[object_index]
+			target_city_state.object_state.objects[object_index]
 		)
 
 		var resident_capacity := (
@@ -377,7 +393,7 @@ static func _validate_city_assignments(
 						+ " is missing resident_ids."
 				)
 			else:
-				_validate_resident_list({
+				_validate_resident_list(validation_target, {
 					"errors": errors,
 					"city_object": city_object,
 					"object_id": int(object_id),
@@ -415,7 +431,7 @@ static func _validate_city_assignments(
 						+ " is missing assigned_worker_ids."
 				)
 			else:
-				_validate_worker_list({
+				_validate_worker_list(validation_target, {
 					"errors": errors,
 					"city_object": city_object,
 					"object_id": int(object_id),
@@ -446,7 +462,7 @@ static func _validate_city_assignments(
 		)
 
 		var citizen: Dictionary = (
-			CityCitizenRegistrySystem.get_current_state().citizens[citizen_index]
+			target_city_state.citizen_registry_state.citizens[citizen_index]
 		)
 
 		var is_alive := bool(
@@ -495,7 +511,7 @@ static func _validate_city_assignments(
 				)
 
 				var home_object: Dictionary = (
-					CityObjectSystem.get_city_objects()[home_index]
+					target_city_state.object_state.objects[home_index]
 				)
 
 				if (
@@ -557,7 +573,7 @@ static func _validate_city_assignments(
 				)
 
 				var workplace: Dictionary = (
-					CityObjectSystem.get_city_objects()[
+					target_city_state.object_state.objects[
 						workplace_index
 					]
 				)
@@ -605,8 +621,12 @@ static func _validate_city_assignments(
 
 
 static func _validate_resident_list(
+	validation_target: Dictionary,
 	values: Dictionary
 ) -> void:
+	var target_city_state: CitySettlementSimulationState = (
+		validation_target.get("city_state")
+	)
 	var errors: Array[String] = values.get("errors", [])
 	var city_object: Dictionary = values.get("city_object", {})
 	var object_id := int(values.get("object_id", -1))
@@ -699,7 +719,7 @@ static func _validate_resident_list(
 		)
 
 		var citizen: Dictionary = (
-			CityCitizenRegistrySystem.get_current_state().citizens[citizen_index]
+			target_city_state.citizen_registry_state.citizens[citizen_index]
 		)
 
 		if not bool(citizen.get("alive", true)):
@@ -732,8 +752,12 @@ static func _validate_resident_list(
 
 
 static func _validate_worker_list(
+	validation_target: Dictionary,
 	values: Dictionary
 ) -> void:
+	var target_city_state: CitySettlementSimulationState = (
+		validation_target.get("city_state")
+	)
 	var errors: Array[String] = values.get("errors", [])
 	var city_object: Dictionary = values.get("city_object", {})
 	var object_id := int(values.get("object_id", -1))
@@ -826,7 +850,7 @@ static func _validate_worker_list(
 		)
 
 		var citizen: Dictionary = (
-			CityCitizenRegistrySystem.get_current_state().citizens[citizen_index]
+			target_city_state.citizen_registry_state.citizens[citizen_index]
 		)
 
 		if not bool(citizen.get("alive", true)):
@@ -859,10 +883,14 @@ static func _validate_worker_list(
 
 
 static func _validate_citizen_inventories(
+	validation_target: Dictionary,
 	errors: Array[String],
 	warnings: Array[String],
 	citizen_lookup: Dictionary
 ) -> int:
+	var target_city_state: CitySettlementSimulationState = (
+		validation_target.get("city_state")
+	)
 	var checked_inventory_count := 0
 	var valid_resources := (
 		CityResourceCatalog.get_city_resource_types()
@@ -874,7 +902,7 @@ static func _validate_citizen_inventories(
 		)
 
 		var citizen: Dictionary = (
-			CityCitizenRegistrySystem.get_current_state().citizens[citizen_index]
+			target_city_state.citizen_registry_state.citizens[citizen_index]
 		)
 
 		var raw_carry_capacity = citizen.get("carry_capacity")
@@ -1117,15 +1145,19 @@ static func _validate_citizen_inventories(
 
 #region Workplace Production
 static func _validate_city_workplace_production(
+	validation_target: Dictionary,
 	values: Dictionary
 ) -> void:
+	var target_city_state: CitySettlementSimulationState = (
+		validation_target.get("city_state")
+	)
 	var errors: Array[String] = values.get("errors", [])
 	var warnings: Array[String] = values.get("warnings", [])
 	var object_lookup: Dictionary = values.get("object_lookup", {})
 	var citizen_lookup: Dictionary = values.get("citizen_lookup", {})
 	for object_id in object_lookup.keys():
 		var object_index := int(object_lookup[object_id])
-		var city_object: Dictionary = CityObjectSystem.get_city_objects()[object_index]
+		var city_object: Dictionary = target_city_state.object_state.objects[object_index]
 
 		if not CityObjectCatalog.city_object_is_workplace(city_object):
 			continue
@@ -1143,7 +1175,7 @@ static func _validate_city_workplace_production(
 			continue
 
 		var raw_production_recipe = (
-			_get_required_workplace_definition_dictionary({
+			_get_required_workplace_definition_dictionary(validation_target, {
 				"errors": errors,
 				"definition": definition,
 				"object_id": int(object_id),
@@ -1155,14 +1187,14 @@ static func _validate_city_workplace_production(
 			var production_recipe: Dictionary = raw_production_recipe
 
 			if not production_recipe.is_empty():
-				var work_units_per_batch := _validate_workplace_recipe({
+				var work_units_per_batch := _validate_workplace_recipe(validation_target, {
 					"errors": errors,
 					"city_object": city_object,
 					"object_id": int(object_id),
 					"recipe": production_recipe,
 				})
 
-				_validate_workplace_runtime_production_state({
+				_validate_workplace_runtime_production_state(validation_target, {
 					"errors": errors,
 					"warnings": warnings,
 					"city_object": city_object,
@@ -1172,7 +1204,7 @@ static func _validate_city_workplace_production(
 				})
 
 		var raw_resource_source_policy = (
-			_get_required_workplace_definition_dictionary({
+			_get_required_workplace_definition_dictionary(validation_target, {
 				"errors": errors,
 				"definition": definition,
 				"object_id": int(object_id),
@@ -1182,13 +1214,14 @@ static func _validate_city_workplace_production(
 
 		if raw_resource_source_policy is Dictionary:
 			_validate_workplace_resource_source_policy(
+				validation_target,
 				errors,
 				int(object_id),
 				raw_resource_source_policy
 			)
 
 		var raw_work_location_policy = (
-			_get_required_workplace_definition_dictionary({
+			_get_required_workplace_definition_dictionary(validation_target, {
 				"errors": errors,
 				"definition": definition,
 				"object_id": int(object_id),
@@ -1198,13 +1231,14 @@ static func _validate_city_workplace_production(
 
 		if raw_work_location_policy is Dictionary:
 			_validate_workplace_work_location_policy(
+				validation_target,
 				errors,
 				int(object_id),
 				raw_work_location_policy
 			)
 
 		var raw_work_movement_policy = (
-			_get_required_workplace_definition_dictionary({
+			_get_required_workplace_definition_dictionary(validation_target, {
 				"errors": errors,
 				"definition": definition,
 				"object_id": int(object_id),
@@ -1214,13 +1248,14 @@ static func _validate_city_workplace_production(
 
 		if raw_work_movement_policy is Dictionary:
 			_validate_workplace_movement_policy(
+				validation_target,
 				errors,
 				int(object_id),
 				raw_work_movement_policy
 			)
 
 		var raw_break_location_policy = (
-			_get_required_workplace_definition_dictionary({
+			_get_required_workplace_definition_dictionary(validation_target, {
 				"errors": errors,
 				"definition": definition,
 				"object_id": int(object_id),
@@ -1230,13 +1265,14 @@ static func _validate_city_workplace_production(
 
 		if raw_break_location_policy is Dictionary:
 			_validate_workplace_break_location_policy(
+				validation_target,
 				errors,
 				int(object_id),
 				raw_break_location_policy
 			)
 
 		var raw_overflow_policy = (
-			_get_required_workplace_definition_dictionary({
+			_get_required_workplace_definition_dictionary(validation_target, {
 				"errors": errors,
 				"definition": definition,
 				"object_id": int(object_id),
@@ -1246,6 +1282,7 @@ static func _validate_city_workplace_production(
 
 		if raw_overflow_policy is Dictionary:
 			_validate_workplace_overflow_policy(
+				validation_target,
 				errors,
 				int(object_id),
 				raw_overflow_policy
@@ -1253,6 +1290,7 @@ static func _validate_city_workplace_production(
 
 
 static func _get_required_workplace_definition_dictionary(
+	validation_target: Dictionary,
 	values: Dictionary
 ) -> Variant:
 	var errors: Array[String] = values.get("errors", [])
@@ -1285,6 +1323,7 @@ static func _get_required_workplace_definition_dictionary(
 
 
 static func _validate_workplace_recipe(
+	validation_target: Dictionary,
 	values: Dictionary
 ) -> int:
 	var errors: Array[String] = values.get("errors", [])
@@ -1307,7 +1346,7 @@ static func _validate_workplace_recipe(
 				+ " production recipe has non-Dictionary inputs."
 		)
 	else:
-		_validate_workplace_recipe_resources({
+		_validate_workplace_recipe_resources(validation_target, {
 			"errors": errors,
 			"city_object": city_object,
 			"object_id": object_id,
@@ -1341,7 +1380,7 @@ static func _validate_workplace_recipe(
 					+ " production recipe has no outputs."
 			)
 		else:
-			_validate_workplace_recipe_resources({
+			_validate_workplace_recipe_resources(validation_target, {
 			"errors": errors,
 			"city_object": city_object,
 			"object_id": object_id,
@@ -1385,6 +1424,7 @@ static func _validate_workplace_recipe(
 
 
 static func _validate_workplace_recipe_resources(
+	validation_target: Dictionary,
 	values: Dictionary
 ) -> void:
 	var errors: Array[String] = values.get("errors", [])
@@ -1468,6 +1508,7 @@ static func _validate_workplace_recipe_resources(
 
 
 static func _validate_workplace_runtime_production_state(
+	validation_target: Dictionary,
 	values: Dictionary
 ) -> void:
 	var errors: Array[String] = values.get("errors", [])
@@ -1589,6 +1630,7 @@ static func _validate_workplace_runtime_production_state(
 
 			var expected_productive_worker_count := (
 				_get_expected_productive_worker_count(
+					validation_target,
 					city_object,
 					citizen_lookup
 				)
@@ -1654,9 +1696,13 @@ static func _validate_workplace_runtime_production_state(
 
 
 static func _get_expected_productive_worker_count(
+	validation_target: Dictionary,
 	city_object: Dictionary,
 	citizen_lookup: Dictionary
 ) -> int:
+	var target_city_state: CitySettlementSimulationState = (
+		validation_target.get("city_state")
+	)
 	var raw_worker_ids = city_object.get("assigned_worker_ids", null)
 
 	if not raw_worker_ids is Array:
@@ -1685,7 +1731,7 @@ static func _get_expected_productive_worker_count(
 			continue
 
 		var citizen_index := int(citizen_lookup[worker_id])
-		var citizen: Dictionary = CityCitizenRegistrySystem.get_current_state().citizens[citizen_index]
+		var citizen: Dictionary = target_city_state.citizen_registry_state.citizens[citizen_index]
 
 		if not bool(citizen.get("alive", false)):
 			continue
@@ -1693,7 +1739,8 @@ static func _get_expected_productive_worker_count(
 		if int(citizen.get("job_object_id", -1)) != workplace_id:
 			continue
 
-		if not CityEmploymentSystem.is_city_citizen_attending_workplace(
+		if not CityEmploymentSystem.is_city_citizen_attending_workplace_for_city_state(
+			target_city_state,
 			worker_id,
 			workplace_id
 		):
@@ -1710,11 +1757,12 @@ static func _get_expected_productive_worker_count(
 	)
 
 static func _validate_workplace_resource_source_policy(
+	validation_target: Dictionary,
 	errors: Array[String],
 	object_id: int,
 	policy: Dictionary
 ) -> void:
-	var mode := _get_workplace_policy_mode({
+	var mode := _get_workplace_policy_mode(validation_target, {
 		"errors": errors,
 		"object_id": object_id,
 		"policy_name": "resource_source_policy",
@@ -1738,7 +1786,7 @@ static func _validate_workplace_resource_source_policy(
 		mode
 		== CityObjectCatalog.WORKPLACE_RESOURCE_SOURCE_MODE_FOOTPRINT_REACH
 	):
-		_validate_known_workplace_policy_resource({
+		_validate_known_workplace_policy_resource(validation_target, {
 		"errors": errors,
 		"object_id": object_id,
 		"policy_name": "resource_source_policy",
@@ -1746,7 +1794,7 @@ static func _validate_workplace_resource_source_policy(
 		"field_name": "resource_type",
 	})
 
-		_validate_positive_workplace_policy_integer({
+		_validate_positive_workplace_policy_integer(validation_target, {
 		"errors": errors,
 		"object_id": object_id,
 		"policy_name": "resource_source_policy",
@@ -1754,7 +1802,7 @@ static func _validate_workplace_resource_source_policy(
 		"field_name": "reach_tiles",
 	})
 
-		_validate_positive_workplace_policy_integer({
+		_validate_positive_workplace_policy_integer(validation_target, {
 		"errors": errors,
 		"object_id": object_id,
 		"policy_name": "resource_source_policy",
@@ -1785,7 +1833,7 @@ static func _validate_workplace_resource_source_policy(
 	if mode != CityObjectCatalog.WORKPLACE_RESOURCE_SOURCE_MODE_RADIUS:
 		return
 
-	_validate_known_workplace_policy_resource({
+	_validate_known_workplace_policy_resource(validation_target, {
 		"errors": errors,
 		"object_id": object_id,
 		"policy_name": "resource_source_policy",
@@ -1793,7 +1841,7 @@ static func _validate_workplace_resource_source_policy(
 		"field_name": "resource_type",
 	})
 
-	_validate_positive_workplace_policy_integer({
+	_validate_positive_workplace_policy_integer(validation_target, {
 		"errors": errors,
 		"object_id": object_id,
 		"policy_name": "resource_source_policy",
@@ -1831,11 +1879,12 @@ static func _validate_workplace_resource_source_policy(
 		)
 
 static func _validate_workplace_work_location_policy(
+	validation_target: Dictionary,
 	errors: Array[String],
 	object_id: int,
 	policy: Dictionary
 ) -> void:
-	var mode := _get_workplace_policy_mode({
+	var mode := _get_workplace_policy_mode(validation_target, {
 		"errors": errors,
 		"object_id": object_id,
 		"policy_name": "work_location_policy",
@@ -1856,11 +1905,12 @@ static func _validate_workplace_work_location_policy(
 
 
 static func _validate_workplace_movement_policy(
+	validation_target: Dictionary,
 	errors: Array[String],
 	object_id: int,
 	policy: Dictionary
 ) -> void:
-	var mode := _get_workplace_policy_mode({
+	var mode := _get_workplace_policy_mode(validation_target, {
 		"errors": errors,
 		"object_id": object_id,
 		"policy_name": "work_movement_policy",
@@ -1881,11 +1931,12 @@ static func _validate_workplace_movement_policy(
 
 
 static func _validate_workplace_break_location_policy(
+	validation_target: Dictionary,
 	errors: Array[String],
 	object_id: int,
 	policy: Dictionary
 ) -> void:
-	var mode := _get_workplace_policy_mode({
+	var mode := _get_workplace_policy_mode(validation_target, {
 		"errors": errors,
 		"object_id": object_id,
 		"policy_name": "break_location_policy",
@@ -1906,7 +1957,7 @@ static func _validate_workplace_break_location_policy(
 		return
 
 	if mode == CityObjectCatalog.WORKPLACE_BREAK_LOCATION_MODE_FOOTPRINT_RADIUS:
-		_validate_positive_workplace_policy_integer({
+		_validate_positive_workplace_policy_integer(validation_target, {
 		"errors": errors,
 		"object_id": object_id,
 		"policy_name": "break_location_policy",
@@ -1916,11 +1967,12 @@ static func _validate_workplace_break_location_policy(
 
 
 static func _validate_workplace_overflow_policy(
+	validation_target: Dictionary,
 	errors: Array[String],
 	object_id: int,
 	policy: Dictionary
 ) -> void:
-	var mode := _get_workplace_policy_mode({
+	var mode := _get_workplace_policy_mode(validation_target, {
 		"errors": errors,
 		"object_id": object_id,
 		"policy_name": "overflow_policy",
@@ -1941,7 +1993,7 @@ static func _validate_workplace_overflow_policy(
 		return
 
 	if mode == CityObjectCatalog.WORKPLACE_OVERFLOW_MODE_FOOTPRINT_RADIUS:
-		_validate_positive_workplace_policy_integer({
+		_validate_positive_workplace_policy_integer(validation_target, {
 		"errors": errors,
 		"object_id": object_id,
 		"policy_name": "overflow_policy",
@@ -1951,6 +2003,7 @@ static func _validate_workplace_overflow_policy(
 
 
 static func _get_workplace_policy_mode(
+	validation_target: Dictionary,
 	values: Dictionary
 ) -> String:
 	var errors: Array[String] = values.get("errors", [])
@@ -1983,6 +2036,7 @@ static func _get_workplace_policy_mode(
 
 
 static func _validate_known_workplace_policy_resource(
+	validation_target: Dictionary,
 	values: Dictionary
 ) -> void:
 	var errors: Array[String] = values.get("errors", [])
@@ -2033,6 +2087,7 @@ static func _validate_known_workplace_policy_resource(
 
 
 static func _validate_positive_workplace_policy_integer(
+	validation_target: Dictionary,
 	values: Dictionary
 ) -> void:
 	var errors: Array[String] = values.get("errors", [])

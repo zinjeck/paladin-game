@@ -276,12 +276,20 @@ func _test_validator_identity_invalidation(
 	city_id: int,
 	original_spatial_state: CityCitizenSpatialState
 ) -> void:
-	var first_validation := CityStateValidatorScript.validate(true, false)
+	var first_validation := CityStateValidatorScript.validate_for_settlement(
+		WorldPoliticalState.get_settlement_context(city_id),
+		true,
+		false
+	)
 	var replacement_state := _clone_spatial_state(original_spatial_state)
 	replacement_state.citizen_ids_by_tile.clear()
 	var city_root = WorldPoliticalState.get_city_simulation_state(city_id)
 	city_root.citizen_spatial_state = replacement_state
-	var second_validation := CityStateValidatorScript.validate(false, false)
+	var second_validation := CityStateValidatorScript.validate_for_settlement(
+		WorldPoliticalState.get_settlement_context(city_id),
+		false,
+		false
+	)
 	_expect(
 		int(first_validation.get(
 			"citizen_spatial_state_instance_id",
@@ -298,7 +306,11 @@ func _test_validator_identity_invalidation(
 		"Validator cache must invalidate and inspect equal-version replacement."
 	)
 	city_root.citizen_spatial_state = original_spatial_state
-	CityStateValidatorScript.validate(true, false)
+	CityStateValidatorScript.validate_for_settlement(
+		WorldPoliticalState.get_settlement_context(city_id),
+		true,
+		false
+	)
 
 
 func _contains_error_fragment(raw_errors, fragment: String) -> bool:

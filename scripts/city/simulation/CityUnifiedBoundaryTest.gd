@@ -31,6 +31,7 @@ const AUTONOMOUS_CLEANUP_PRIORITY: int = 90
 
 var failure_count: int = 0
 var test_primary_culture_id: int = -1
+var test_city_state: CitySettlementSimulationState
 
 
 func _ready() -> void:
@@ -310,7 +311,7 @@ func _test_chained_pickup_respects_near_full_destination() -> void:
 	var destination_free_space := CityResourceContainerSystem.get_city_object_storage_free_space(
 		CityObjectSystem.get_city_object_by_id(stockpile_id)
 	)
-	var validation_result := CityStateValidatorScript.validate(true, false)
+	var validation_result := _validate_fixture_city(true, false)
 	var has_shared_capacity_error := false
 
 	for raw_error in validation_result.get("errors", []):
@@ -403,7 +404,7 @@ func _test_chained_pickup_respects_near_full_destination() -> void:
 	var final_stockpile := CityObjectSystem.get_city_object_by_id(
 		stockpile_id
 	)
-	var final_validation := CityStateValidatorScript.validate(true, true)
+	var final_validation := _validate_fixture_city(true, true)
 
 	_expect(
 		haul_completed
@@ -602,7 +603,7 @@ func _test_public_storage_keep_fallback() -> void:
 			break
 
 	var final_keep := CityObjectSystem.get_city_object_by_id(keep_id)
-	var final_validation := CityStateValidatorScript.validate(true, true)
+	var final_validation := _validate_fixture_city(true, true)
 
 	_expect(
 		keep_delivery_completed
@@ -883,6 +884,7 @@ func _test_construction_labor_releases_at_atomic_boundary() -> void:
 func _test_culture_identity_validation() -> void:
 	print("Boundary test: citizen culture identity")
 	_reset_fixture()
+	var validation_target := _get_fixture_validation_target()
 
 	for founder_index in range(CityCitizenRegistrySystem.STARTING_CITY_POPULATION):
 		var founder := _add_citizen(
@@ -918,6 +920,7 @@ func _test_culture_identity_validation() -> void:
 
 	var errors: Array[String] = []
 	CityCitizenStateValidatorScript._validate_city_citizen_culture_state(
+		validation_target,
 		errors,
 		CityCitizenRegistrySystem.get_current_state().citizen_index_by_id
 	)
@@ -929,6 +932,7 @@ func _test_culture_identity_validation() -> void:
 	citizen.erase("culture_id")
 	errors.clear()
 	CityCitizenStateValidatorScript._validate_city_citizen_culture_state(
+		validation_target,
 		errors,
 		CityCitizenRegistrySystem.get_current_state().citizen_index_by_id
 	)
@@ -940,6 +944,7 @@ func _test_culture_identity_validation() -> void:
 	citizen["culture_id"] = "not an integer"
 	errors.clear()
 	CityCitizenStateValidatorScript._validate_city_citizen_culture_state(
+		validation_target,
 		errors,
 		CityCitizenRegistrySystem.get_current_state().citizen_index_by_id
 	)
@@ -951,6 +956,7 @@ func _test_culture_identity_validation() -> void:
 	citizen["culture_id"] = 0
 	errors.clear()
 	CityCitizenStateValidatorScript._validate_city_citizen_culture_state(
+		validation_target,
 		errors,
 		CityCitizenRegistrySystem.get_current_state().citizen_index_by_id
 	)
@@ -967,6 +973,7 @@ func _test_culture_identity_validation() -> void:
 	citizen["culture_id"] = nonexistent_culture_id
 	errors.clear()
 	CityCitizenStateValidatorScript._validate_city_citizen_culture_state(
+		validation_target,
 		errors,
 		CityCitizenRegistrySystem.get_current_state().citizen_index_by_id
 	)
@@ -978,6 +985,7 @@ func _test_culture_identity_validation() -> void:
 	citizen["culture_id"] = alternate_culture_id
 	errors.clear()
 	CityCitizenStateValidatorScript._validate_city_citizen_culture_state(
+		validation_target,
 		errors,
 		CityCitizenRegistrySystem.get_current_state().citizen_index_by_id
 	)
@@ -990,6 +998,7 @@ func _test_culture_identity_validation() -> void:
 	founding_citizen["culture_id"] = alternate_culture_id
 	errors.clear()
 	CityCitizenStateValidatorScript._validate_city_citizen_culture_state(
+		validation_target,
 		errors,
 		CityCitizenRegistrySystem.get_current_state().citizen_index_by_id
 	)
@@ -1133,7 +1142,28 @@ func _reset_fixture() -> WorldData:
 		"can_build": true,
 		"founded": true,
 	})
+	test_city_state = WorldPoliticalState.get_current_city_simulation_state()
 	return city_world
+
+
+func _validate_fixture_city(
+	force_rebuild: bool,
+	report_problems: bool
+) -> Dictionary:
+	return CityStateValidatorScript.validate_for_city_state(
+		1,
+		test_city_state,
+		force_rebuild,
+		report_problems
+	)
+
+
+func _get_fixture_validation_target() -> Dictionary:
+	return {
+		"settlement_context": null,
+		"settlement_id": 1,
+		"city_state": test_city_state,
+	}
 
 
 func _add_citizen(tile_position: Vector2i) -> Dictionary:

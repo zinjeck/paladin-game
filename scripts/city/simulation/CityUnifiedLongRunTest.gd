@@ -94,7 +94,11 @@ func _run_long_run_test() -> void:
 		"The long-run fixture must explicitly select its detailed simulation target."
 	)
 
-	var initial_validation := CityStateValidatorScript.validate(true, false)
+	var initial_validation := CityStateValidatorScript.validate_for_settlement(
+		renderer.bound_settlement_context,
+		true,
+		false
+	)
 	_record_validation(initial_validation, 0)
 	var initial_totals := _capture_physical_resource_totals()
 	fixture["initial_physical_totals"] = initial_totals
@@ -119,11 +123,19 @@ func _run_long_run_test() -> void:
 
 		if tick_number % VALIDATION_INTERVAL_TICKS == 0:
 			var elapsed_minutes := tick_number * TEST_MINUTES_PER_TICK
-			var validation := CityStateValidatorScript.validate(true, false)
+			var validation := CityStateValidatorScript.validate_for_settlement(
+				renderer.bound_settlement_context,
+				true,
+				false
+			)
 			_record_validation(validation, elapsed_minutes)
 			_check_nonnegative_state(elapsed_minutes)
 
-	var final_validation := CityStateValidatorScript.validate(true, false)
+	var final_validation := CityStateValidatorScript.validate_for_settlement(
+		renderer.bound_settlement_context,
+		true,
+		false
+	)
 	_record_validation(
 		final_validation,
 		TEST_DAYS * SimulationClock.MINUTES_PER_DAY

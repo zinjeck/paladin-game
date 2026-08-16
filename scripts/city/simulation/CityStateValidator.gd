@@ -1,4 +1,4 @@
-# File responsibility: Coordinate read-only invariant validation for authoritative city simulation state.
+# File responsibility: Coordinate read-only invariant validation for one explicit settlement simulation target.
 # Domain-specific validation lives in the dedicated validators preloaded below.
 extends RefCounted
 
@@ -7,135 +7,395 @@ const CityCitizenStateValidator := preload("res://scripts/city/simulation/valida
 const CityObjectStateValidator := preload("res://scripts/city/simulation/validators/CityObjectStateValidator.gd")
 
 const MAX_REPORTED_PROBLEMS: int = 24
+const MAX_CACHED_SETTLEMENTS: int = 8
 
-static var _cached_result: Dictionary = {}
-static var _cached_object_state: CityObjectState
-static var _cached_resource_accounting_state: CityResourceAccountingState
-static var _cached_citizen_registry_state: CityCitizenRegistryState
-static var _cached_assignment_state: CityAssignmentState
-static var _cached_workplace_state: CityWorkplaceState
-static var _cached_citizen_spatial_state: CityCitizenSpatialState
-static var _cached_citizen_movement_runtime_state: CityCitizenMovementRuntimeState
-static var _cached_citizen_task_runtime_state: CityCitizenTaskRuntimeState
+# Validation is read-only. Cache entries retain authoritative-owner identity references,
+# version/fingerprint stamps, and detached result dictionaries. Settlement ID selects
+# a bounded slot, while exact state/world/domain-owner identities prevent same-ID or
+# equal-version cross-settlement reuse.
+static var _cache_by_settlement_id: Dictionary = {}
+static var _cache_recency: Array[int] = []
 
 
-#region Validation Entry Point and Cache
-static func validate(
+#region Explicit Validation Entry Points
+static func validate_for_settlement(
+	settlement_context: SettlementSimulationContext,
 	force_rebuild: bool = false,
 	report_problems: bool = true
 ) -> Dictionary:
+	var validation_target := _make_validation_target(settlement_context)
+	if validation_target.is_empty():
+		var invalid_result := _make_invalid_target_result(
+			settlement_context,
+			"CityStateValidator requires a registered city settlement context."
+		)
+		if report_problems:
+			_report_validation_problems(invalid_result)
+		return invalid_result
+
+	return _validate_target(
+		validation_target,
+		force_rebuild,
+		report_problems
+	)
+
+
+static func validate_for_city_state(
+	settlement_id: int,
+	city_state: CitySettlementSimulationState,
+	force_rebuild: bool = false,
+	report_problems: bool = true,
+	settlement_context: SettlementSimulationContext = null
+) -> Dictionary:
+	var validation_target := _make_validation_target_for_city_state(
+		settlement_id,
+		city_state,
+		settlement_context
+	)
+	if validation_target.is_empty():
+		var invalid_result := _make_invalid_target_result(
+			settlement_context,
+			"CityStateValidator requires an explicit valid settlement ID and city state."
+		)
+		if report_problems:
+			_report_validation_problems(invalid_result)
+		return invalid_result
+
+	return _validate_target(
+		validation_target,
+		force_rebuild,
+		report_problems
+	)
+
+
+static func get_summary_text_for_settlement(
+	settlement_context: SettlementSimulationContext
+) -> String:
+	return _format_summary_text(
+		validate_for_settlement(settlement_context, false, true)
+	)
+
+
+static func get_summary_text_for_city_state(
+	settlement_id: int,
+	city_state: CitySettlementSimulationState,
+	settlement_context: SettlementSimulationContext = null
+) -> String:
+	return _format_summary_text(
+		validate_for_city_state(
+			settlement_id,
+			city_state,
+			false,
+			true,
+			settlement_context
+		)
+	)
+
+
+static func clear_cache_for_settlement(settlement_id: int) -> void:
+	_cache_by_settlement_id.erase(settlement_id)
+	_cache_recency.erase(settlement_id)
+
+
+static func clear_all_validation_caches() -> void:
+	_cache_by_settlement_id.clear()
+	_cache_recency.clear()
+
+
+static func _make_validation_target(
+	settlement_context: SettlementSimulationContext
+) -> Dictionary:
 	if (
-		not force_rebuild
-		and _validation_cache_matches_current_state()
+		settlement_context == null
+		or not settlement_context.supports_city_simulation()
+		or not WorldPoliticalState.is_registered_settlement_context(
+			settlement_context
+		)
 	):
-		return _cached_result
+		return {}
+
+	var city_state: CitySettlementSimulationState = (
+		settlement_context.get_city_simulation_state()
+	)
+	return _make_validation_target_for_city_state(
+		settlement_context.settlement_id,
+		city_state,
+		settlement_context
+	)
+
+
+static func _make_validation_target_for_city_state(
+	settlement_id: int,
+	city_state: CitySettlementSimulationState,
+	settlement_context: SettlementSimulationContext
+) -> Dictionary:
+	if settlement_id <= 0 or city_state == null:
+		return {}
+	if (
+		settlement_context != null
+		and (
+			settlement_context.settlement_id != settlement_id
+			or not settlement_context.supports_city_simulation()
+			or not WorldPoliticalState.is_registered_settlement_context(
+				settlement_context
+			)
+			or not is_same(
+				settlement_context.get_city_simulation_state(),
+				city_state
+			)
+		)
+	):
+		return {}
+
+	return {
+		"settlement_context": settlement_context,
+		"settlement_id": settlement_id,
+		"city_state": city_state,
+	}
+
+
+static func _make_invalid_target_result(
+	settlement_context,
+	error_text: String
+) -> Dictionary:
+	var settlement_id: int = (
+		int(settlement_context.settlement_id)
+		if settlement_context is SettlementSimulationContext
+		else SettlementData.INVALID_SETTLEMENT_ID
+	)
+	return {
+		"valid": false,
+		"errors": [error_text],
+		"warnings": [],
+		"settlement_id": settlement_id,
+		"city_state_instance_id": -1,
+		"city_world_instance_id": -1,
+		"duration_usec": 0,
+		"cache_hit": false,
+	}
+#endregion
+
+
+#region Target Validation and Cache
+static func _validate_target(
+	validation_target: Dictionary,
+	force_rebuild: bool,
+	report_problems: bool
+) -> Dictionary:
+	if not force_rebuild:
+		var cached_result := _get_cached_result(validation_target)
+		if not cached_result.is_empty():
+			cached_result["cache_hit"] = true
+			return cached_result
 
 	var validation_start_usec := Time.get_ticks_usec()
-
+	var city_state: CitySettlementSimulationState = validation_target["city_state"]
 	var errors: Array[String] = []
 	var warnings: Array[String] = []
 
-	var object_lookup := _validate_city_object_index(errors)
-	var citizen_lookup := _validate_city_citizen_index(errors)
+	var object_lookup := _validate_city_object_index(validation_target, errors)
+	var citizen_lookup := _validate_city_citizen_index(validation_target, errors)
 	var construction_site_lookup := (
 		CityLogisticsStateValidator._validate_city_construction_state(
+			validation_target,
 			errors,
 			object_lookup
 		)
 	)
-	var ground_pile_lookup := CityLogisticsStateValidator._validate_city_ground_pile_state(
-		errors,
-		construction_site_lookup
+	var ground_pile_lookup := (
+		CityLogisticsStateValidator._validate_city_ground_pile_state(
+			validation_target,
+			errors,
+			construction_site_lookup
+		)
 	)
 
 	CityObjectStateValidator._validate_city_foundation_state(
+		validation_target,
 		errors,
 		warnings,
 		object_lookup
 	)
-
 	CityObjectStateValidator._validate_city_occupancy(
+		validation_target,
 		errors,
 		object_lookup
 	)
-
 	CityCitizenStateValidator._validate_city_citizen_spatial_state(
+		validation_target,
 		errors,
 		citizen_lookup
 	)
-
 	CityCitizenStateValidator._validate_city_citizen_demographics(
+		validation_target,
 		errors,
 		citizen_lookup
 	)
 	CityCitizenStateValidator._validate_city_citizen_culture_state(
+		validation_target,
 		errors,
 		citizen_lookup
 	)
 	CityCitizenStateValidator._validate_city_citizen_need_state(
+		validation_target,
 		errors,
 		citizen_lookup
 	)
-	var checked_work_order_count := CityLogisticsStateValidator._validate_city_work_orders(
-		errors,
-		citizen_lookup,
-		construction_site_lookup
+	var checked_work_order_count := (
+		CityLogisticsStateValidator._validate_city_work_orders(
+			validation_target,
+			errors,
+			citizen_lookup,
+			construction_site_lookup
+		)
 	)
 	CityCitizenStateValidator._validate_city_citizen_task_state(
+		validation_target,
 		errors,
 		citizen_lookup,
 		object_lookup
 	)
 	var checked_haul_reservation_count := (
 		CityLogisticsStateValidator._validate_city_haul_reservations(
+			validation_target,
 			errors,
 			citizen_lookup,
 			ground_pile_lookup
 		)
 	)
 	CityCitizenStateValidator._validate_city_citizen_movement_state(
+		validation_target,
 		errors,
 		citizen_lookup
 	)
-
-	var checked_container_count := CityObjectStateValidator._validate_city_containers(
-		errors,
-		object_lookup
+	var checked_container_count := (
+		CityObjectStateValidator._validate_city_containers(
+			validation_target,
+			errors,
+			object_lookup
+		)
 	)
-
 	CityObjectStateValidator._validate_city_assignments(
+		validation_target,
 		errors,
 		object_lookup,
 		citizen_lookup
 	)
-
-	CityObjectStateValidator._validate_city_workplace_production({
-		"errors": errors,
-		"warnings": warnings,
-		"object_lookup": object_lookup,
-		"citizen_lookup": citizen_lookup,
-	})
-
-	var checked_inventory_count := CityObjectStateValidator._validate_citizen_inventories(
-		errors,
-		warnings,
-		citizen_lookup
+	CityObjectStateValidator._validate_city_workplace_production(
+		validation_target,
+		{
+			"errors": errors,
+			"warnings": warnings,
+			"object_lookup": object_lookup,
+			"citizen_lookup": citizen_lookup,
+		}
+	)
+	var checked_inventory_count := (
+		CityObjectStateValidator._validate_citizen_inventories(
+			validation_target,
+			errors,
+			warnings,
+			citizen_lookup
+		)
 	)
 
 	var validation_duration_usec := (
-		Time.get_ticks_usec()
-		- validation_start_usec
+		Time.get_ticks_usec() - validation_start_usec
 	)
+	var result := _make_validation_result(
+		validation_target,
+		errors,
+		warnings,
+		object_lookup,
+		citizen_lookup,
+		construction_site_lookup,
+		ground_pile_lookup,
+		checked_container_count,
+		checked_inventory_count,
+		checked_haul_reservation_count,
+		checked_work_order_count,
+		validation_duration_usec
+	)
+	_store_cached_result(validation_target, result)
 
+	if report_problems:
+		_report_validation_problems(result)
+	return result.duplicate(true)
+
+
+static func _make_validation_result(
+	validation_target: Dictionary,
+	errors: Array[String],
+	warnings: Array[String],
+	object_lookup: Dictionary,
+	citizen_lookup: Dictionary,
+	construction_site_lookup: Dictionary,
+	ground_pile_lookup: Dictionary,
+	checked_container_count: int,
+	checked_inventory_count: int,
+	checked_haul_reservation_count: int,
+	checked_work_order_count: int,
+	validation_duration_usec: int
+) -> Dictionary:
+	var settlement_context = validation_target.get("settlement_context")
+	var settlement_id: int = int(validation_target["settlement_id"])
+	var city_state: CitySettlementSimulationState = validation_target["city_state"]
+	var world_instance_id := (
+		int(city_state.city_world.get_instance_id())
+		if city_state.city_world is WorldData
+		else -1
+	)
 	var result := {
 		"valid": errors.is_empty(),
 		"errors": errors,
 		"warnings": warnings,
+		"settlement_id": settlement_id,
+		"settlement_context_instance_id": (
+			int(settlement_context.get_instance_id())
+			if settlement_context is SettlementSimulationContext
+			else -1
+		),
+		"city_state_instance_id": int(city_state.get_instance_id()),
+		"city_world_instance_id": world_instance_id,
+		"object_state_instance_id": int(
+			city_state.object_state.get_instance_id()
+		),
+		"resource_accounting_state_instance_id": int(
+			city_state.resource_accounting_state.get_instance_id()
+		),
+		"citizen_registry_state_instance_id": int(
+			city_state.citizen_registry_state.get_instance_id()
+		),
+		"assignment_state_instance_id": int(
+			city_state.assignment_state.get_instance_id()
+		),
+		"workplace_state_instance_id": int(
+			city_state.workplace_state.get_instance_id()
+		),
+		"citizen_spatial_state_instance_id": int(
+			city_state.citizen_spatial_state.get_instance_id()
+		),
+		"citizen_movement_runtime_state_instance_id": int(
+			city_state.citizen_movement_runtime_state.get_instance_id()
+		),
+		"citizen_task_runtime_state_instance_id": int(
+			city_state.citizen_task_runtime_state.get_instance_id()
+		),
+		"work_state_instance_id": int(
+			city_state.work_state.get_instance_id()
+		),
+		"logistics_state_instance_id": int(
+			city_state.logistics_state.get_instance_id()
+		),
+		"construction_state_instance_id": int(
+			city_state.construction_state.get_instance_id()
+		),
+		"navigation_state_instance_id": int(
+			city_state.navigation_state.get_instance_id()
+		),
 		"checked_objects": object_lookup.size(),
 		"checked_citizens": citizen_lookup.size(),
-		"checked_occupied_tiles": (
-			CityObjectSystem.get_city_occupied_tiles_snapshot().size()
-		),
+		"checked_occupied_tiles": city_state.object_state.occupied_tiles.size(),
 		"checked_containers": checked_container_count,
 		"checked_inventories": checked_inventory_count,
 		"checked_ground_piles": ground_pile_lookup.size(),
@@ -143,114 +403,175 @@ static func validate(
 		"checked_work_orders": checked_work_order_count,
 		"checked_construction_sites": construction_site_lookup.size(),
 		"duration_usec": validation_duration_usec,
-		"object_version": CityObjectSystem.get_city_object_version(),
+		"cache_hit": false,
+	}
+	result.merge(_make_cache_stamp(city_state), true)
+	return result
+
+
+static func _get_cached_result(
+	validation_target: Dictionary
+) -> Dictionary:
+	var settlement_id: int = int(validation_target["settlement_id"])
+	var raw_entry = _cache_by_settlement_id.get(settlement_id, {})
+	if not raw_entry is Dictionary:
+		return {}
+	var entry: Dictionary = raw_entry
+	if not _validation_cache_matches_target(entry, validation_target):
+		return {}
+	_touch_cache_entry(settlement_id)
+	var raw_result = entry.get("result", {})
+	if not raw_result is Dictionary:
+		return {}
+	var cached_result: Dictionary = (raw_result as Dictionary).duplicate(true)
+	var settlement_context = validation_target.get("settlement_context")
+	cached_result["settlement_context_instance_id"] = (
+		int(settlement_context.get_instance_id())
+		if settlement_context is SettlementSimulationContext
+		else -1
+	)
+	return cached_result
+
+
+static func _store_cached_result(
+	validation_target: Dictionary,
+	result: Dictionary
+) -> void:
+	var settlement_id: int = int(validation_target["settlement_id"])
+	var city_state: CitySettlementSimulationState = validation_target["city_state"]
+	_cache_by_settlement_id[settlement_id] = {
+		"city_state": city_state,
+		"city_world": city_state.city_world,
+		"object_state": city_state.object_state,
+		"resource_accounting_state": city_state.resource_accounting_state,
+		"citizen_registry_state": city_state.citizen_registry_state,
+		"assignment_state": city_state.assignment_state,
+		"workplace_state": city_state.workplace_state,
+		"citizen_spatial_state": city_state.citizen_spatial_state,
+		"citizen_movement_runtime_state": city_state.citizen_movement_runtime_state,
+		"citizen_task_runtime_state": city_state.citizen_task_runtime_state,
+		"work_state": city_state.work_state,
+		"logistics_state": city_state.logistics_state,
+		"construction_state": city_state.construction_state,
+		"navigation_state": city_state.navigation_state,
+		"stamp": _make_cache_stamp(city_state),
+		"result": result.duplicate(true),
+	}
+	_touch_cache_entry(settlement_id)
+	while _cache_recency.size() > MAX_CACHED_SETTLEMENTS:
+		var evicted_settlement_id: int = int(_cache_recency.pop_front())
+		_cache_by_settlement_id.erase(evicted_settlement_id)
+
+
+static func _touch_cache_entry(settlement_id: int) -> void:
+	_cache_recency.erase(settlement_id)
+	_cache_recency.append(settlement_id)
+
+
+static func _validation_cache_matches_target(
+	entry: Dictionary,
+	validation_target: Dictionary
+) -> bool:
+	var city_state: CitySettlementSimulationState = validation_target["city_state"]
+	if (
+		not is_same(entry.get("city_state"), city_state)
+		or not is_same(entry.get("city_world"), city_state.city_world)
+		or not is_same(entry.get("object_state"), city_state.object_state)
+		or not is_same(
+			entry.get("resource_accounting_state"),
+			city_state.resource_accounting_state
+		)
+		or not is_same(
+			entry.get("citizen_registry_state"),
+			city_state.citizen_registry_state
+		)
+		or not is_same(entry.get("assignment_state"), city_state.assignment_state)
+		or not is_same(entry.get("workplace_state"), city_state.workplace_state)
+		or not is_same(
+			entry.get("citizen_spatial_state"),
+			city_state.citizen_spatial_state
+		)
+		or not is_same(
+			entry.get("citizen_movement_runtime_state"),
+			city_state.citizen_movement_runtime_state
+		)
+		or not is_same(
+			entry.get("citizen_task_runtime_state"),
+			city_state.citizen_task_runtime_state
+		)
+		or not is_same(entry.get("work_state"), city_state.work_state)
+		or not is_same(entry.get("logistics_state"), city_state.logistics_state)
+		or not is_same(entry.get("construction_state"), city_state.construction_state)
+		or not is_same(entry.get("navigation_state"), city_state.navigation_state)
+	):
+		return false
+	return entry.get("stamp", {}) == _make_cache_stamp(city_state)
+
+
+static func _make_cache_stamp(
+	city_state: CitySettlementSimulationState
+) -> Dictionary:
+	var city_world = city_state.city_world
+	return {
+		"city_seed": city_state.city_seed,
+		"city_runtime_fingerprint": int(hash(city_state.city_runtime_data)),
+		"city_world_width": city_world.width if city_world is WorldData else -1,
+		"city_world_height": city_world.height if city_world is WorldData else -1,
+		"city_world_tile_data_version": (
+			city_world.tile_data_version if city_world is WorldData else -1
+		),
+		"city_world_surface_feature_version": (
+			city_world.city_surface_feature_change_version
+			if city_world is WorldData
+			else -1
+		),
+		"object_version": city_state.object_state.object_version,
 		"object_debug_fingerprint": (
-			CityObjectSystem.get_city_object_debug_fingerprint()
+			CityObjectSystem.get_city_object_debug_fingerprint_for_city_state(
+				city_state
+			)
 		),
-		"object_state_instance_id": int(
-			CityObjectSystem.get_current_state().get_instance_id()
+		"container_version": city_state.resource_accounting_state.container_version,
+		"public_storage_version": (
+			city_state.resource_accounting_state.public_storage_version
 		),
-		"container_version": (
-			CityResourceAccountingSystem.get_city_container_version()
-		),
-		"resource_accounting_state_instance_id": int(
-			CityResourceAccountingSystem
-			.get_current_state().get_instance_id()
-		),
-		"citizen_registry_state_instance_id": int(
-			CityCitizenRegistrySystem.get_current_state()
-			.get_instance_id()
-		),
-		"citizen_spatial_state_instance_id": int(
-			CityCitizenSpatialSystem.get_current_state()
-			.get_instance_id()
-		),
-		"citizen_movement_runtime_state_instance_id": int(
-			CityCitizenMovementRuntimeSystem.get_current_state()
-			.get_instance_id()
-		),
-		"citizen_task_runtime_state_instance_id": int(
-			CityCitizenTaskRuntimeSystem.get_current_state()
-			.get_instance_id()
-		),
-		"citizen_version": CityCitizenRegistrySystem.get_current_state().citizen_version,
+		"citizen_version": city_state.citizen_registry_state.citizen_version,
 		"citizen_spatial_version": (
-			CityCitizenSpatialSystem.get_current_state().citizen_spatial_version
+			city_state.citizen_spatial_state.citizen_spatial_version
 		),
 		"citizen_movement_version": (
-			CityCitizenMovementRuntimeSystem.get_current_state().citizen_movement_version
+			city_state.citizen_movement_runtime_state.citizen_movement_version
 		),
 		"citizen_task_version": (
-			CityCitizenTaskRuntimeSystem.get_current_state().citizen_task_version
+			city_state.citizen_task_runtime_state.citizen_task_version
 		),
-		"assignment_state_instance_id": int(
-			CityAssignmentSystem.get_current_state().get_instance_id()
-		),
-		"workplace_state_instance_id": int(
-			CityEmploymentSystem.get_current_state().get_instance_id()
-		),
-		"assignment_version": CityAssignmentSystem.get_city_assignment_version(),
-		"workplace_version": CityEmploymentSystem.get_city_workplace_version(),
-		"ground_pile_version": CityLogisticsSystem.get_current_state().ground_pile_version,
-		"player_command_version": CityWorkSystem.get_current_work_state().player_command_version,
-		"work_order_version": CityWorkSystem.get_current_work_state().work_order_version,
+		"assignment_version": city_state.assignment_state.assignment_version,
+		"workplace_version": city_state.workplace_state.workplace_version,
+		"ground_pile_version": city_state.logistics_state.ground_pile_version,
 		"haul_reservation_version": (
-			CityLogisticsSystem.get_current_state().haul_reservation_version
+			city_state.logistics_state.haul_reservation_version
 		),
-		"construction_version": CityConstructionSystem.get_current_state().construction_version,
+		"player_command_version": city_state.work_state.player_command_version,
+		"work_order_version": city_state.work_state.work_order_version,
+		"construction_version": city_state.construction_state.construction_version,
 	}
-
-	_cached_result = result
-	_cached_object_state = CityObjectSystem.get_current_state()
-	_cached_resource_accounting_state = (
-		CityResourceAccountingSystem.get_current_state()
-	)
-	_cached_citizen_registry_state = (
-		CityCitizenRegistrySystem.get_current_state()
-	)
-	_cached_assignment_state = CityAssignmentSystem.get_current_state()
-	_cached_workplace_state = CityEmploymentSystem.get_current_state()
-	_cached_citizen_spatial_state = (
-		CityCitizenSpatialSystem.get_current_state()
-	)
-	_cached_citizen_movement_runtime_state = (
-		CityCitizenMovementRuntimeSystem.get_current_state()
-	)
-	_cached_citizen_task_runtime_state = (
-		CityCitizenTaskRuntimeSystem.get_current_state()
-	)
-
-	if report_problems:
-		_report_validation_problems(result)
-
-	return _cached_result
+#endregion
 
 
-static func get_summary_text() -> String:
-	var result := validate(false, true)
-
-	var error_count := int(
-		result.get("errors", []).size()
-	)
-
-	var warning_count := int(
-		result.get("warnings", []).size()
-	)
-
+#region Summary Formatting
+static func _format_summary_text(result: Dictionary) -> String:
+	var error_count := int(result.get("errors", []).size())
+	var warning_count := int(result.get("warnings", []).size())
 	var status_text := "VALID"
-
 	if error_count > 0:
 		status_text = "INVALID"
 	elif warning_count > 0:
 		status_text = "VALID WITH WARNINGS"
-
-	var duration_msec := (
-		float(result.get("duration_usec", 0))
-		/ 1000.0
-	)
+	var duration_msec := float(result.get("duration_usec", 0)) / 1000.0
 
 	return (
 		"City State: " + status_text
+		+ " | Settlement: " + str(result.get("settlement_id", -1))
 		+ " | Errors: " + str(error_count)
 		+ " | Warnings: " + str(warning_count)
 		+ "\n"
@@ -266,212 +587,29 @@ static func get_summary_text() -> String:
 		+ str(result.get("checked_ground_piles", 0))
 		+ " ground piles | "
 		+ str(result.get("checked_haul_reservations", 0))
-		+ " reservations"
-		+ " | "
+		+ " reservations | "
 		+ str(result.get("checked_work_orders", 0))
-		+ " work orders"
-		+ " | "
+		+ " work orders | "
 		+ str(result.get("checked_construction_sites", 0))
 		+ " construction sites"
 		+ "\n"
 		+ "Validation Cost: "
 		+ "%.3f ms" % duration_msec
 	)
-
-static func _validation_cache_matches_current_state() -> bool:
-	if _cached_result.is_empty():
-		return false
-	if (
-		_cached_object_state == null
-		or not is_same(
-			_cached_object_state,
-			CityObjectSystem.get_current_state()
-		)
-		):
-		return false
-	if (
-		_cached_resource_accounting_state == null
-		or not is_same(
-			_cached_resource_accounting_state,
-			CityResourceAccountingSystem.get_current_state()
-		)
-	):
-		return false
-	if (
-		_cached_citizen_registry_state == null
-		or not is_same(
-			_cached_citizen_registry_state,
-			CityCitizenRegistrySystem.get_current_state()
-		)
-	):
-		return false
-	if (
-		_cached_assignment_state == null
-		or not is_same(
-			_cached_assignment_state,
-			CityAssignmentSystem.get_current_state()
-		)
-	):
-		return false
-	if (
-		_cached_workplace_state == null
-		or not is_same(
-			_cached_workplace_state,
-			CityEmploymentSystem.get_current_state()
-		)
-	):
-		return false
-	if (
-		_cached_citizen_spatial_state == null
-		or not is_same(
-			_cached_citizen_spatial_state,
-			CityCitizenSpatialSystem.get_current_state()
-		)
-	):
-		return false
-	if (
-		_cached_citizen_movement_runtime_state == null
-		or not is_same(
-			_cached_citizen_movement_runtime_state,
-			CityCitizenMovementRuntimeSystem.get_current_state()
-		)
-	):
-		return false
-	if (
-		_cached_citizen_task_runtime_state == null
-		or not is_same(
-			_cached_citizen_task_runtime_state,
-			CityCitizenTaskRuntimeSystem.get_current_state()
-		)
-	):
-		return false
-	if (
-		int(
-			_cached_result.get(
-				"citizen_task_version",
-				-1
-			)
-		)
-		!= CityCitizenTaskRuntimeSystem.get_current_state().citizen_task_version
-	):
-		return false
-	if (
-		int(_cached_result.get("object_version", -1))
-		!= CityObjectSystem.get_city_object_version()
-	):
-		return false
-	if (
-		int(_cached_result.get("object_debug_fingerprint", -1))
-		!= CityObjectSystem.get_city_object_debug_fingerprint()
-	):
-		return false
-
-	if (
-		int(_cached_result.get("container_version", -1))
-		!= CityResourceAccountingSystem.get_city_container_version()
-	):
-		return false
-
-	if (
-		int(_cached_result.get("citizen_version", -1))
-		!= CityCitizenRegistrySystem.get_current_state().citizen_version
-	):
-		return false
-
-	if (
-		int(
-			_cached_result.get(
-				"citizen_spatial_version",
-				-1
-			)
-		)
-		!= CityCitizenSpatialSystem.get_current_state().citizen_spatial_version
-	):
-		return false
-
-	if (
-		int(
-			_cached_result.get(
-				"citizen_movement_version",
-				-1
-			)
-		)
-		!= CityCitizenMovementRuntimeSystem.get_current_state().citizen_movement_version
-	):
-		return false
-
-	if (
-		int(_cached_result.get("assignment_version", -1))
-		!= CityAssignmentSystem.get_city_assignment_version()
-	):
-		return false
-
-	if (
-		int(_cached_result.get("workplace_version", -1))
-		!= CityEmploymentSystem.get_city_workplace_version()
-	):
-		return false
-
-	if (
-		int(_cached_result.get("ground_pile_version", -1))
-		!= CityLogisticsSystem.get_current_state().ground_pile_version
-	):
-		return false
-
-	if (
-		int(
-			_cached_result.get(
-				"player_command_version",
-				-1
-			)
-		)
-		!= CityWorkSystem.get_current_work_state().player_command_version
-	):
-		return false
-
-	if (
-		int(
-			_cached_result.get(
-				"work_order_version",
-				-1
-			)
-		)
-		!= CityWorkSystem.get_current_work_state().work_order_version
-	):
-		return false
-
-	if (
-		int(
-			_cached_result.get(
-				"haul_reservation_version",
-				-1
-			)
-		)
-		!= CityLogisticsSystem.get_current_state().haul_reservation_version
-	):
-		return false
-
-	if (
-		int(_cached_result.get("construction_version", -1))
-		!= CityConstructionSystem.get_current_state().construction_version
-	):
-		return false
-
-	return true
-
-
-
-
 #endregion
+
 
 #region Entity Index Validation
 static func _validate_city_object_index(
+	validation_target: Dictionary,
 	errors: Array[String]
 ) -> Dictionary:
+	var city_state: CitySettlementSimulationState = validation_target["city_state"]
+	var object_state: CityObjectState = city_state.object_state
 	var object_lookup: Dictionary = {}
 	var maximum_object_id := 0
-	var city_objects := CityObjectSystem.get_city_objects()
-	var object_index_by_id := CityObjectSystem.get_city_object_index_snapshot()
+	var city_objects: Array = object_state.objects
+	var object_index_by_id: Dictionary = object_state.object_index_by_id
 
 	for object_index in range(city_objects.size()):
 		var raw_city_object = city_objects[object_index]
@@ -605,12 +743,12 @@ static func _validate_city_object_index(
 
 	if (
 		not object_lookup.is_empty()
-		and CityObjectSystem.get_next_city_object_id()
+		and object_state.next_object_id
 		<= maximum_object_id
 	):
 		errors.append(
 			"next_city_object_id is "
-				+ str(CityObjectSystem.get_next_city_object_id())
+				+ str(object_state.next_object_id)
 				+ ", but existing object ID "
 				+ str(maximum_object_id)
 				+ " is equal or greater."
@@ -620,15 +758,18 @@ static func _validate_city_object_index(
 
 
 static func _validate_city_citizen_index(
+	validation_target: Dictionary,
 	errors: Array[String]
 ) -> Dictionary:
+	var city_state: CitySettlementSimulationState = validation_target["city_state"]
+	var citizen_state: CityCitizenRegistryState = city_state.citizen_registry_state
 	var citizen_lookup: Dictionary = {}
 	var maximum_citizen_id := 0
 
 	for citizen_index in range(
-		CityCitizenRegistrySystem.get_current_state().citizens.size()
+		citizen_state.citizens.size()
 	):
-		var raw_citizen = CityCitizenRegistrySystem.get_current_state().citizens[
+		var raw_citizen = citizen_state.citizens[
 			citizen_index
 		]
 
@@ -676,7 +817,7 @@ static func _validate_city_citizen_index(
 			citizen_id
 		)
 
-		if not CityCitizenRegistrySystem.get_current_state().citizen_index_by_id.has(
+		if not citizen_state.citizen_index_by_id.has(
 			citizen_id
 		):
 			errors.append(
@@ -686,7 +827,7 @@ static func _validate_city_citizen_index(
 			)
 		else:
 			var indexed_array_position := int(
-				CityCitizenRegistrySystem.get_current_state().citizen_index_by_id[
+				citizen_state.citizen_index_by_id[
 					citizen_id
 				]
 			)
@@ -703,7 +844,7 @@ static func _validate_city_citizen_index(
 				)
 
 	for raw_citizen_id in (
-		CityCitizenRegistrySystem.get_current_state().citizen_index_by_id.keys()
+		citizen_state.citizen_index_by_id.keys()
 	):
 		if typeof(raw_citizen_id) != TYPE_INT:
 			errors.append(
@@ -724,13 +865,13 @@ static func _validate_city_citizen_index(
 			)
 
 	if (
-		CityCitizenRegistrySystem.get_current_state().citizen_index_by_id.size()
+		citizen_state.citizen_index_by_id.size()
 		!= citizen_lookup.size()
 	):
 		errors.append(
 			"Citizen index contains "
 				+ str(
-					CityCitizenRegistrySystem.get_current_state().citizen_index_by_id.size()
+					citizen_state.citizen_index_by_id.size()
 				)
 				+ " entries, but "
 				+ str(citizen_lookup.size())
@@ -739,12 +880,12 @@ static func _validate_city_citizen_index(
 
 	if (
 		not citizen_lookup.is_empty()
-		and CityCitizenRegistrySystem.get_current_state().next_citizen_id
+		and citizen_state.next_citizen_id
 		<= maximum_citizen_id
 	):
 		errors.append(
 			"next_city_citizen_id is "
-				+ str(CityCitizenRegistrySystem.get_current_state().next_citizen_id)
+				+ str(citizen_state.next_citizen_id)
 				+ ", but existing citizen ID "
 				+ str(maximum_citizen_id)
 				+ " is equal or greater."

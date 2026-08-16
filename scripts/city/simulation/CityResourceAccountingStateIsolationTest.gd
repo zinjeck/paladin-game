@@ -389,7 +389,11 @@ func _assert_validator_and_final_city_isolation(
 	var state_a_cache_version: int = values["state_a_cache_version"]
 	var state_a_container_version: int = values["state_a_container_version"]
 	var state_a_public_version: int = values["state_a_public_version"]
-	var first_validation := CityStateValidatorScript.validate(true, false)
+	var first_validation := CityStateValidatorScript.validate_for_settlement(
+		WorldPoliticalState.get_settlement_context(city_b_id),
+		true,
+		false
+	)
 	var replacement_state := CityResourceAccountingState.new()
 	replacement_state.owned_resource_amount_cache = cache_b.duplicate(true)
 	replacement_state.owned_resource_amount_cache_container_version = (
@@ -399,7 +403,11 @@ func _assert_validator_and_final_city_isolation(
 	replacement_state.public_storage_version = state_b.public_storage_version
 	var city_b_root = WorldPoliticalState.get_city_simulation_state(city_b_id)
 	city_b_root.resource_accounting_state = replacement_state
-	var second_validation := CityStateValidatorScript.validate(false, false)
+	var second_validation := CityStateValidatorScript.validate_for_settlement(
+		WorldPoliticalState.get_settlement_context(city_b_id),
+		false,
+		false
+	)
 	_expect(
 		int(first_validation.get(
 			"resource_accounting_state_instance_id",
@@ -419,7 +427,11 @@ func _assert_validator_and_final_city_isolation(
 		"Validator caching must include accounting-state identity."
 	)
 	city_b_root.resource_accounting_state = state_b
-	CityStateValidatorScript.validate(true, false)
+	CityStateValidatorScript.validate_for_settlement(
+		WorldPoliticalState.get_settlement_context(city_b_id),
+		true,
+		false
+	)
 	renderer.free()
 
 	_expect(

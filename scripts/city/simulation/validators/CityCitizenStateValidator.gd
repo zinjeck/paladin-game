@@ -1,4 +1,4 @@
-# File responsibility: Validate citizen identity, needs, tasks, and movement state.
+# File responsibility: Validate citizen identity, needs, tasks, and movement for one explicit city target.
 extends RefCounted
 
 const CityWorkSystemScript := preload(
@@ -10,12 +10,16 @@ const CityLogisticsStateValidator := preload("res://scripts/city/simulation/vali
 
 #region Citizen Spatial Identity and Needs
 static func _validate_city_citizen_spatial_state(
+	validation_target: Dictionary,
 	errors: Array[String],
 	citizen_lookup: Dictionary
 ) -> void:
+	var target_city_state: CitySettlementSimulationState = (
+		validation_target.get("city_state")
+	)
 	if citizen_lookup.is_empty():
 		if not (
-			CityCitizenSpatialSystem.get_current_state()
+			target_city_state.citizen_spatial_state
 			.citizen_ids_by_tile
 			.is_empty()
 		):
@@ -26,7 +30,7 @@ static func _validate_city_citizen_spatial_state(
 
 		return
 
-	var city_world = WorldPoliticalState.get_current_city_world()
+	var city_world = target_city_state.city_world
 
 	if city_world == null:
 		errors.append(
@@ -39,7 +43,7 @@ static func _validate_city_citizen_spatial_state(
 			citizen_lookup[citizen_id]
 		)
 		var citizen: Dictionary = (
-			CityCitizenRegistrySystem.get_current_state().citizens[
+			target_city_state.citizen_registry_state.citizens[
 				citizen_index
 			]
 		)
@@ -96,7 +100,8 @@ static func _validate_city_citizen_spatial_state(
 			bool(citizen.get("alive", true))
 			and not (
 				CityNavigationSystem
-				.is_city_tile_walkable_for_citizen(
+				.is_city_tile_walkable_for_citizen_for_city_state(
+					target_city_state,
 					city_world,
 					tile_position,
 					int(citizen_id)
@@ -112,7 +117,7 @@ static func _validate_city_citizen_spatial_state(
 			)
 
 		if not (
-			CityCitizenSpatialSystem.get_current_state().citizen_ids_by_tile.has(
+			target_city_state.citizen_spatial_state.citizen_ids_by_tile.has(
 				tile_position
 			)
 		):
@@ -127,7 +132,7 @@ static func _validate_city_citizen_spatial_state(
 			continue
 
 		var raw_indexed_ids = (
-			CityCitizenSpatialSystem.get_current_state().citizen_ids_by_tile[
+			target_city_state.citizen_spatial_state.citizen_ids_by_tile[
 				tile_position
 			]
 		)
@@ -150,7 +155,7 @@ static func _validate_city_citizen_spatial_state(
 			)
 
 	for raw_tile_position in (
-		CityCitizenSpatialSystem.get_current_state().citizen_ids_by_tile.keys()
+		target_city_state.citizen_spatial_state.citizen_ids_by_tile.keys()
 	):
 		if not raw_tile_position is Vector2i:
 			errors.append(
@@ -163,7 +168,7 @@ static func _validate_city_citizen_spatial_state(
 			raw_tile_position
 		)
 		var raw_citizen_ids = (
-			CityCitizenSpatialSystem.get_current_state().citizen_ids_by_tile[
+			target_city_state.citizen_spatial_state.citizen_ids_by_tile[
 				tile_position
 			]
 		)
@@ -224,7 +229,7 @@ static func _validate_city_citizen_spatial_state(
 				citizen_lookup[citizen_id]
 			)
 			var citizen: Dictionary = (
-				CityCitizenRegistrySystem.get_current_state().citizens[
+				target_city_state.citizen_registry_state.citizens[
 					citizen_index
 				]
 			)
@@ -254,6 +259,7 @@ static func _validate_city_citizen_spatial_state(
 				)
 
 static func _validate_city_citizen_name_pool(
+	validation_target: Dictionary,
 	values: Dictionary
 ) -> void:
 	var errors: Array[String] = values.get("errors", [])
@@ -331,17 +337,22 @@ static func _validate_city_citizen_name_pool(
 
 
 static func _validate_city_citizen_demographics(
+	validation_target: Dictionary,
 	errors: Array[String],
 	citizen_lookup: Dictionary
 ) -> void:
+	var target_city_state: CitySettlementSimulationState = (
+		validation_target.get("city_state")
+	)
 	_validate_city_citizen_culture_state(
+		validation_target,
 		errors,
 		citizen_lookup
 	)
 
 	var global_name_owners: Dictionary = {}
 
-	_validate_city_citizen_name_pool({
+	_validate_city_citizen_name_pool(validation_target, {
 		"errors": errors,
 		"pool_display_name": "Male",
 		"expected_sex": CityCitizens.CITY_CITIZEN_SEX_MALE,
@@ -349,7 +360,7 @@ static func _validate_city_citizen_demographics(
 		"global_name_owners": global_name_owners,
 	})
 
-	_validate_city_citizen_name_pool({
+	_validate_city_citizen_name_pool(validation_target, {
 		"errors": errors,
 		"pool_display_name": "Female",
 		"expected_sex": CityCitizens.CITY_CITIZEN_SEX_FEMALE,
@@ -380,7 +391,7 @@ static func _validate_city_citizen_demographics(
 			citizen_lookup[citizen_id]
 		)
 		var citizen: Dictionary = (
-			CityCitizenRegistrySystem.get_current_state().citizens[
+			target_city_state.citizen_registry_state.citizens[
 				citizen_index
 			]
 		)
@@ -452,16 +463,16 @@ static func _validate_city_citizen_demographics(
 					+ " name pool."
 			)
 
-	var current_city_state = WorldPoliticalState.get_current_city_simulation_state()
+	var current_city_state = target_city_state
 	if (
 		current_city_state is CitySettlementSimulationState
 		and current_city_state.is_city_founded()
 		and (
-			CityCitizenRegistrySystem.get_current_state().citizens.size()
+			target_city_state.citizen_registry_state.citizens.size()
 			== CityCitizenRegistrySystem.STARTING_CITY_POPULATION
 		)
 		and (
-			CityCitizenRegistrySystem.get_current_state().next_citizen_id
+			target_city_state.citizen_registry_state.next_citizen_id
 			== CityCitizenRegistrySystem.STARTING_CITY_POPULATION + 1
 		)
 	):
@@ -489,12 +500,16 @@ static func _validate_city_citizen_demographics(
 
 
 static func _validate_city_citizen_culture_state(
+	validation_target: Dictionary,
 	errors: Array[String],
 	citizen_lookup: Dictionary
 ) -> void:
+	var target_city_state: CitySettlementSimulationState = (
+		validation_target.get("city_state")
+	)
 	for citizen_id in citizen_lookup.keys():
 		var citizen_index := int(citizen_lookup[citizen_id])
-		var citizen: Dictionary = CityCitizenRegistrySystem.get_current_state().citizens[citizen_index]
+		var citizen: Dictionary = target_city_state.citizen_registry_state.citizens[citizen_index]
 
 		if not citizen.has("culture_id"):
 			errors.append(
@@ -533,7 +548,7 @@ static func _validate_city_citizen_culture_state(
 				+ "."
 			)
 
-	var city_state = WorldPoliticalState.get_current_city_simulation_state()
+	var city_state = target_city_state
 	if (
 		not city_state is CitySettlementSimulationState
 		or not city_state.is_city_founded()
@@ -571,9 +586,7 @@ static func _validate_city_citizen_culture_state(
 				+ "."
 			)
 
-	var settlement_context = WorldPoliticalState.get_settlement_context(
-		WorldPoliticalState.active_settlement_id
-	)
+	var settlement_context = validation_target.get("settlement_context")
 	var is_player_capital: bool = (
 		settlement_context != null
 		and settlement_context.is_player_polity
@@ -613,7 +626,7 @@ static func _validate_city_citizen_culture_state(
 
 	if not (
 		primary_culture_id > 0
-		and CityCitizenRegistrySystem.get_current_state().next_citizen_id
+		and target_city_state.citizen_registry_state.next_citizen_id
 		> CityCitizenRegistrySystem.STARTING_CITY_POPULATION
 	):
 		return
@@ -628,7 +641,7 @@ static func _validate_city_citizen_culture_state(
 			continue
 
 		var citizen_index := int(citizen_lookup[citizen_id])
-		var citizen: Dictionary = CityCitizenRegistrySystem.get_current_state().citizens[citizen_index]
+		var citizen: Dictionary = target_city_state.citizen_registry_state.citizens[citizen_index]
 
 		if citizen.get("culture_id") == primary_culture_id:
 			continue
@@ -641,12 +654,16 @@ static func _validate_city_citizen_culture_state(
 
 
 static func _validate_city_citizen_need_state(
+	validation_target: Dictionary,
 	errors: Array[String],
 	citizen_lookup: Dictionary
 ) -> void:
+	var target_city_state: CitySettlementSimulationState = (
+		validation_target.get("city_state")
+	)
 	for citizen_id in citizen_lookup.keys():
 		var citizen_index := int(citizen_lookup[citizen_id])
-		var citizen: Dictionary = CityCitizenRegistrySystem.get_current_state().citizens[citizen_index]
+		var citizen: Dictionary = target_city_state.citizen_registry_state.citizens[citizen_index]
 
 		if not CityCitizens.has_complete_city_citizen_need_state(citizen):
 			errors.append(
@@ -712,6 +729,7 @@ static func _validate_city_citizen_need_state(
 
 #region Citizen Tasks
 static func _validate_city_citizen_task_state(
+	validation_target: Dictionary,
 	errors: Array[String],
 	citizen_lookup: Dictionary,
 	object_lookup: Dictionary
@@ -738,7 +756,7 @@ static func _validate_city_citizen_task_state(
 	var expected_active_task_ids: Array[int] = []
 
 	for raw_citizen_id in citizen_lookup.keys():
-		_validate_city_citizen_task_entry({
+		_validate_city_citizen_task_entry(validation_target, {
 			"errors": errors,
 			"citizen_lookup": citizen_lookup,
 			"object_lookup": object_lookup,
@@ -750,6 +768,7 @@ static func _validate_city_citizen_task_state(
 	expected_active_task_ids.sort()
 
 	_validate_city_active_task_registry(
+		validation_target,
 		errors,
 		citizen_lookup,
 		expected_active_task_ids
@@ -757,8 +776,12 @@ static func _validate_city_citizen_task_state(
 
 
 static func _validate_city_citizen_task_entry(
+	validation_target: Dictionary,
 	values: Dictionary
 ) -> void:
+	var target_city_state: CitySettlementSimulationState = (
+		validation_target.get("city_state")
+	)
 	var errors: Array[String] = values.get("errors", [])
 	var citizen_lookup: Dictionary = values.get("citizen_lookup", {})
 	var object_lookup: Dictionary = values.get("object_lookup", {})
@@ -773,7 +796,7 @@ static func _validate_city_citizen_task_entry(
 	var raw_citizen_id = values.get("raw_citizen_id")
 	var citizen_id: int = raw_citizen_id
 	var citizen_index := int(citizen_lookup[citizen_id])
-	var citizen: Dictionary = CityCitizenRegistrySystem.get_current_state().citizens[citizen_index]
+	var citizen: Dictionary = target_city_state.citizen_registry_state.citizens[citizen_index]
 
 	if not citizen.has("current_task"):
 		errors.append(
@@ -840,14 +863,14 @@ static func _validate_city_citizen_task_entry(
 		),
 	}
 
-	if not _city_citizen_task_fields_have_valid_types(task_field_context):
+	if not _city_citizen_task_fields_have_valid_types(validation_target, task_field_context):
 		return
 
 	var task_kind := str(task_field_context.get("raw_task_kind", ""))
 	var task_source := str(task_field_context.get("raw_task_source", ""))
 	var task_phase := str(task_field_context.get("raw_task_phase", ""))
 
-	if not _city_citizen_task_enums_are_valid({
+	if not _city_citizen_task_enums_are_valid(validation_target, {
 		"errors": errors,
 		"citizen_id": citizen_id,
 		"task_kind": task_kind,
@@ -901,13 +924,14 @@ static func _validate_city_citizen_task_entry(
 	}
 
 	if task_kind == CityCitizens.CITY_CITIZEN_TASK_KIND_NONE:
-		_validate_empty_city_citizen_task_state(task_context)
+		_validate_empty_city_citizen_task_state(validation_target, task_context)
 		return
 
-	_validate_active_city_citizen_task_state(task_context)
+	_validate_active_city_citizen_task_state(validation_target, task_context)
 
 
 static func _city_citizen_task_fields_have_valid_types(
+	validation_target: Dictionary,
 	values: Dictionary
 ) -> bool:
 	var errors: Array[String] = values.get("errors", [])
@@ -1038,6 +1062,7 @@ static func _city_citizen_task_fields_have_valid_types(
 
 
 static func _city_citizen_task_enums_are_valid(
+	validation_target: Dictionary,
 	values: Dictionary
 ) -> bool:
 	var errors: Array[String] = values.get("errors", [])
@@ -1081,6 +1106,7 @@ static func _city_citizen_task_enums_are_valid(
 
 
 static func _validate_empty_city_citizen_task_state(
+	validation_target: Dictionary,
 	values: Dictionary
 ) -> void:
 	var errors: Array[String] = values.get("errors", [])
@@ -1159,6 +1185,7 @@ static func _validate_empty_city_citizen_task_state(
 
 
 static func _validate_active_city_citizen_task_state(
+	validation_target: Dictionary,
 	values: Dictionary
 ) -> void:
 	var errors: Array[String] = values.get("errors", [])
@@ -1305,7 +1332,7 @@ static func _validate_active_city_citizen_task_state(
 				+ " has unified player work without a work order."
 			)
 	else:
-		_validate_city_task_work_order_reference({
+		_validate_city_task_work_order_reference(validation_target, {
 			"errors": errors,
 			"citizen_id": citizen_id,
 			"citizen": citizen,
@@ -1316,7 +1343,7 @@ static func _validate_active_city_citizen_task_state(
 			"job_id": job_id,
 		})
 
-	_validate_city_citizen_task_kind_state({
+	_validate_city_citizen_task_kind_state(validation_target, {
 		"errors": errors,
 		"citizen_id": citizen_id,
 		"citizen": citizen,
@@ -1338,25 +1365,29 @@ static func _validate_active_city_citizen_task_state(
 
 
 static func _validate_city_citizen_task_kind_state(
+	validation_target: Dictionary,
 	values: Dictionary
 ) -> void:
 	var task_kind: String = str(values.get("task_kind", ""))
 
 	match task_kind:
 		CityCitizens.CITY_CITIZEN_TASK_KIND_WORK:
-			_validate_work_task_kind_state(values)
+			_validate_work_task_kind_state(validation_target, values)
 		CityCitizens.CITY_CITIZEN_TASK_KIND_ACQUIRE_FOOD:
-			_validate_acquire_food_task_kind_state(values)
+			_validate_acquire_food_task_kind_state(validation_target, values)
 		CityCitizens.CITY_CITIZEN_TASK_KIND_HAUL:
-			_validate_haul_task_kind_state(values)
+			_validate_haul_task_kind_state(validation_target, values)
 		CityCitizens.CITY_CITIZEN_TASK_KIND_CONSTRUCTION:
-			_validate_construction_task_kind_state(values)
+			_validate_construction_task_kind_state(validation_target, values)
 		CityCitizens.CITY_CITIZEN_TASK_KIND_PLAYER_COMMAND:
-			_validate_player_command_task_kind_state(values)
+			_validate_player_command_task_kind_state(validation_target, values)
 		CityCitizens.CITY_CITIZEN_TASK_KIND_RETURN_HOME:
-			_validate_return_home_task_kind_state(values)
+			_validate_return_home_task_kind_state(validation_target, values)
 
-static func _validate_work_task_kind_state(values: Dictionary) -> void:
+static func _validate_work_task_kind_state(validation_target: Dictionary, values: Dictionary) -> void:
+	var target_city_state: CitySettlementSimulationState = (
+		validation_target.get("city_state")
+	)
 	var errors: Array[String] = values.get("errors", [])
 	var citizen_id := int(values.get("citizen_id", -1))
 	var citizen: Dictionary = values.get("citizen", {})
@@ -1401,7 +1432,8 @@ static func _validate_work_task_kind_state(values: Dictionary) -> void:
 		return
 
 	var target_object := (
-		CityObjectSystem.get_city_object_by_id(
+		CityObjectSystem.get_city_object_by_id_for_city_state(
+			target_city_state,
 			target_object_id
 		)
 	)
@@ -1433,7 +1465,8 @@ static func _validate_work_task_kind_state(values: Dictionary) -> void:
 	if (
 		task_phase
 		== CityCitizens.CITY_CITIZEN_TASK_PHASE_PERFORMING
-		and not CityEmploymentSystem.is_city_citizen_attending_workplace(
+		and not CityEmploymentSystem.is_city_citizen_attending_workplace_for_city_state(
+			target_city_state,
 			citizen_id,
 			target_object_id
 		)
@@ -1448,7 +1481,10 @@ static func _validate_work_task_kind_state(values: Dictionary) -> void:
 		)
 
 
-static func _validate_acquire_food_task_kind_state(values: Dictionary) -> void:
+static func _validate_acquire_food_task_kind_state(validation_target: Dictionary, values: Dictionary) -> void:
+	var target_city_state: CitySettlementSimulationState = (
+		validation_target.get("city_state")
+	)
 	var errors: Array[String] = values.get("errors", [])
 	var citizen_id := int(values.get("citizen_id", -1))
 	var citizen: Dictionary = values.get("citizen", {})
@@ -1489,7 +1525,7 @@ static func _validate_acquire_food_task_kind_state(values: Dictionary) -> void:
 		or not CityCitizens.is_valid_city_citizen_haul_endpoint(
 			food_endpoint
 		)
-		or not CityLogisticsStateValidator._city_haul_endpoint_schema_is_valid(food_endpoint)
+		or not CityLogisticsStateValidator._city_haul_endpoint_schema_is_valid(validation_target, food_endpoint)
 	):
 		errors.append(
 			"Citizen "
@@ -1539,7 +1575,8 @@ static func _validate_acquire_food_task_kind_state(values: Dictionary) -> void:
 
 	if (
 		not raw_food_target_tile is Vector2i
-		or not CitizenNeedsSystem.get_city_citizen_food_endpoint_target_tiles(
+		or not CitizenNeedsSystem.get_city_citizen_food_endpoint_target_tiles_for_city_state(
+			target_city_state,
 			citizen_id,
 			food_endpoint
 		).has(raw_food_target_tile)
@@ -1550,7 +1587,8 @@ static func _validate_acquire_food_task_kind_state(values: Dictionary) -> void:
 			+ " food task has an invalid withdrawal target tile."
 		)
 
-	if not CitizenNeedsSystem.city_citizen_can_withdraw_food_from_endpoint(
+	if not CitizenNeedsSystem.city_citizen_can_withdraw_food_from_endpoint_for_city_state(
+		target_city_state,
 		citizen_id,
 		food_endpoint,
 		food_resource
@@ -1564,7 +1602,7 @@ static func _validate_acquire_food_task_kind_state(values: Dictionary) -> void:
 		)
 
 
-static func _validate_haul_task_kind_state(values: Dictionary) -> void:
+static func _validate_haul_task_kind_state(validation_target: Dictionary, values: Dictionary) -> void:
 	var errors: Array[String] = values.get("errors", [])
 	var citizen_id := int(values.get("citizen_id", -1))
 	var citizen: Dictionary = values.get("citizen", {})
@@ -1698,6 +1736,7 @@ static func _validate_haul_task_kind_state(values: Dictionary) -> void:
 				haul_source
 			)
 			or not CityLogisticsStateValidator._city_haul_endpoint_schema_is_valid(
+				validation_target,
 				haul_source
 			)
 			or str(haul_source.get("kind", ""))
@@ -1726,6 +1765,7 @@ static func _validate_haul_task_kind_state(values: Dictionary) -> void:
 			raw_haul_requester
 		)
 		or not CityLogisticsStateValidator._city_haul_endpoint_schema_is_valid(
+			validation_target,
 			raw_haul_requester
 		)
 	):
@@ -1780,6 +1820,7 @@ static func _validate_haul_task_kind_state(values: Dictionary) -> void:
 				cargo_amount > 0
 			)
 			or not CityLogisticsStateValidator._city_haul_endpoint_schema_is_valid(
+				validation_target,
 				haul_destination,
 				cargo_amount > 0
 			)
@@ -1807,7 +1848,10 @@ static func _validate_haul_task_kind_state(values: Dictionary) -> void:
 			)
 
 
-static func _validate_construction_task_kind_state(values: Dictionary) -> void:
+static func _validate_construction_task_kind_state(validation_target: Dictionary, values: Dictionary) -> void:
+	var target_city_state: CitySettlementSimulationState = (
+		validation_target.get("city_state")
+	)
 	var errors: Array[String] = values.get("errors", [])
 	var citizen_id := int(values.get("citizen_id", -1))
 	var citizen: Dictionary = values.get("citizen", {})
@@ -1832,7 +1876,8 @@ static func _validate_construction_task_kind_state(values: Dictionary) -> void:
 		""
 	)
 	var construction_site := (
-		CityConstructionSystem.get_city_construction_site_by_id(
+		CityConstructionSystem.get_city_construction_site_by_id_for_city_state(
+			target_city_state,
 			target_object_id
 		)
 	)
@@ -1881,7 +1926,10 @@ static func _validate_construction_task_kind_state(values: Dictionary) -> void:
 		)
 
 
-static func _validate_player_command_task_kind_state(values: Dictionary) -> void:
+static func _validate_player_command_task_kind_state(validation_target: Dictionary, values: Dictionary) -> void:
+	var target_city_state: CitySettlementSimulationState = (
+		validation_target.get("city_state")
+	)
 	var errors: Array[String] = values.get("errors", [])
 	var citizen_id := int(values.get("citizen_id", -1))
 	var citizen: Dictionary = values.get("citizen", {})
@@ -1916,7 +1964,8 @@ static func _validate_player_command_task_kind_state(values: Dictionary) -> void
 		return
 
 	var player_command := (
-		CityWorkSystem.get_city_player_command_by_id(
+		CityWorkSystem.get_city_player_command_by_id_for_city_state(
+			target_city_state,
 			target_object_id
 		)
 	)
@@ -1953,7 +2002,8 @@ static func _validate_player_command_task_kind_state(values: Dictionary) -> void
 		)
 
 	if (
-		not CityWorkSystem.get_city_player_command_work_tiles(
+		not CityWorkSystem.get_city_player_command_work_tiles_for_city_state(
+			target_city_state,
 			player_command,
 			citizen_id
 		).has(raw_target_tile)
@@ -1967,7 +2017,10 @@ static func _validate_player_command_task_kind_state(values: Dictionary) -> void
 		)
 
 
-static func _validate_return_home_task_kind_state(values: Dictionary) -> void:
+static func _validate_return_home_task_kind_state(validation_target: Dictionary, values: Dictionary) -> void:
+	var target_city_state: CitySettlementSimulationState = (
+		validation_target.get("city_state")
+	)
 	var errors: Array[String] = values.get("errors", [])
 	var citizen_id := int(values.get("citizen_id", -1))
 	var citizen: Dictionary = values.get("citizen", {})
@@ -2011,7 +2064,8 @@ static func _validate_return_home_task_kind_state(values: Dictionary) -> void:
 		)
 		return
 
-	var target_home := CityObjectSystem.get_city_object_by_id(
+	var target_home := CityObjectSystem.get_city_object_by_id_for_city_state(
+		target_city_state,
 		target_object_id
 	)
 
@@ -2046,7 +2100,8 @@ static func _validate_return_home_task_kind_state(values: Dictionary) -> void:
 			+ "."
 		)
 
-	if not CityAssignmentSystem.get_city_object_resident_ids(
+	if not CityAssignmentSystem.get_city_object_resident_ids_for_city_state(
+		target_city_state,
 		target_home
 	).has(citizen_id):
 		errors.append(
@@ -2057,7 +2112,8 @@ static func _validate_return_home_task_kind_state(values: Dictionary) -> void:
 			+ "."
 		)
 
-	if not CityNavigationSystem.city_citizen_can_access_object_interior(
+	if not CityNavigationSystem.city_citizen_can_access_object_interior_for_city_state(
+		target_city_state,
 		citizen_id,
 		target_home
 	):
@@ -2071,23 +2127,27 @@ static func _validate_return_home_task_kind_state(values: Dictionary) -> void:
 
 
 static func _validate_city_active_task_registry(
+	validation_target: Dictionary,
 	errors: Array[String],
 	citizen_lookup: Dictionary,
 	expected_active_task_ids: Array[int]
 ) -> void:
-	if CityCitizenTaskRuntimeSystem.get_current_state().active_task_ids != expected_active_task_ids:
+	var target_city_state: CitySettlementSimulationState = (
+		validation_target.get("city_state")
+	)
+	if target_city_state.citizen_task_runtime_state.active_task_ids != expected_active_task_ids:
 		errors.append(
 			"Active task registry does not match living citizens "
 				+ "with active tasks. Expected "
 				+ str(expected_active_task_ids)
 				+ ", found "
-				+ str(CityCitizenTaskRuntimeSystem.get_current_state().active_task_ids)
+				+ str(target_city_state.citizen_task_runtime_state.active_task_ids)
 				+ "."
 		)
 
 	var seen_active_task_ids: Dictionary = {}
 
-	for raw_active_task_id in CityCitizenTaskRuntimeSystem.get_current_state().active_task_ids:
+	for raw_active_task_id in target_city_state.citizen_task_runtime_state.active_task_ids:
 		if typeof(raw_active_task_id) != TYPE_INT:
 			errors.append(
 				"Active task registry contains a non-integer ID."
@@ -2113,7 +2173,7 @@ static func _validate_city_active_task_registry(
 					+ "."
 			)
 
-		if not CityCitizenTaskRuntimeSystem.get_current_state().active_task_id_lookup.has(
+		if not target_city_state.citizen_task_runtime_state.active_task_id_lookup.has(
 			active_task_id
 		):
 			errors.append(
@@ -2122,7 +2182,7 @@ static func _validate_city_active_task_registry(
 					+ "."
 			)
 		elif not bool(
-			CityCitizenTaskRuntimeSystem.get_current_state().active_task_id_lookup[active_task_id]
+			target_city_state.citizen_task_runtime_state.active_task_id_lookup[active_task_id]
 		):
 			errors.append(
 				"Active task lookup is false for citizen ID "
@@ -2130,7 +2190,7 @@ static func _validate_city_active_task_registry(
 					+ "."
 			)
 
-	for raw_lookup_id in CityCitizenTaskRuntimeSystem.get_current_state().active_task_id_lookup.keys():
+	for raw_lookup_id in target_city_state.citizen_task_runtime_state.active_task_id_lookup.keys():
 		if typeof(raw_lookup_id) != TYPE_INT:
 			errors.append(
 				"Active task lookup contains a non-integer ID."
@@ -2147,8 +2207,8 @@ static func _validate_city_active_task_registry(
 			)
 
 	if (
-		CityCitizenTaskRuntimeSystem.get_current_state().active_task_id_lookup.size()
-		!= CityCitizenTaskRuntimeSystem.get_current_state().active_task_ids.size()
+		target_city_state.citizen_task_runtime_state.active_task_id_lookup.size()
+		!= target_city_state.citizen_task_runtime_state.active_task_ids.size()
 	):
 		errors.append(
 			"Active task registry array and lookup have different sizes."
@@ -2156,8 +2216,12 @@ static func _validate_city_active_task_registry(
 
 
 static func _validate_city_task_work_order_reference(
+	validation_target: Dictionary,
 	values: Dictionary
 ) -> void:
+	var target_city_state: CitySettlementSimulationState = (
+		validation_target.get("city_state")
+	)
 	var errors: Array[String] = values.get("errors", [])
 	var citizen_id := int(values.get("citizen_id", -1))
 	var citizen: Dictionary = values.get("citizen", {})
@@ -2166,7 +2230,7 @@ static func _validate_city_task_work_order_reference(
 	var target_object_id := int(values.get("target_object_id", -1))
 	var work_order_id := int(values.get("work_order_id", -1))
 	var job_id := str(values.get("job_id", ""))
-	var order := CityWorkSystem.get_city_work_order_by_id(work_order_id)
+	var order := CityWorkSystem.get_city_work_order_by_id_for_city_state(target_city_state, work_order_id)
 
 	if order.is_empty():
 		errors.append(
@@ -2203,7 +2267,8 @@ static func _validate_city_task_work_order_reference(
 	var source_matches_task := false
 
 	if order_type == CityWorkSystemScript.ORDER_TYPE_COMMAND_GROUP:
-		var command := CityWorkSystem.get_city_player_command_by_id(
+		var command := CityWorkSystem.get_city_player_command_by_id_for_city_state(
+			target_city_state,
 			target_object_id
 		)
 		source_matches_task = (
@@ -2215,7 +2280,8 @@ static func _validate_city_task_work_order_reference(
 	elif order_type == CityWorkSystemScript.ORDER_TYPE_CONSTRUCTION_SITE:
 		match task_kind:
 			CityCitizens.CITY_CITIZEN_TASK_KIND_PLAYER_COMMAND:
-				var command := CityWorkSystem.get_city_player_command_by_id(
+				var command := CityWorkSystem.get_city_player_command_by_id_for_city_state(
+					target_city_state,
 					target_object_id
 				)
 				source_matches_task = (
@@ -2257,10 +2323,14 @@ static func _validate_city_task_work_order_reference(
 
 #region Citizen Movement
 static func _validate_city_citizen_movement_state(
+	validation_target: Dictionary,
 	errors: Array[String],
 	citizen_lookup: Dictionary
 ) -> void:
-	var city_world = WorldPoliticalState.get_current_city_world()
+	var target_city_state: CitySettlementSimulationState = (
+		validation_target.get("city_state")
+	)
+	var city_world = target_city_state.city_world
 	var expected_active_ids: Dictionary = {}
 	var required_fields := [
 		"movement_state",
@@ -2274,7 +2344,7 @@ static func _validate_city_citizen_movement_state(
 	]
 
 	for citizen_id in citizen_lookup.keys():
-		_validate_city_citizen_movement_entry({
+		_validate_city_citizen_movement_entry(validation_target, {
 			"errors": errors,
 			"citizen_lookup": citizen_lookup,
 			"city_world": city_world,
@@ -2284,6 +2354,7 @@ static func _validate_city_citizen_movement_state(
 		})
 
 	_validate_city_active_mover_registry(
+		validation_target,
 		errors,
 		citizen_lookup,
 		expected_active_ids
@@ -2291,8 +2362,12 @@ static func _validate_city_citizen_movement_state(
 
 
 static func _validate_city_citizen_movement_entry(
+	validation_target: Dictionary,
 	values: Dictionary
 ) -> void:
+	var target_city_state: CitySettlementSimulationState = (
+		validation_target.get("city_state")
+	)
 	var errors: Array[String] = values.get("errors", [])
 	var citizen_lookup: Dictionary = values.get("citizen_lookup", {})
 	var city_world: WorldData = values.get("city_world")
@@ -2306,7 +2381,7 @@ static func _validate_city_citizen_movement_entry(
 		citizen_lookup[citizen_id]
 	)
 	var citizen: Dictionary = (
-		CityCitizenRegistrySystem.get_current_state().citizens[citizen_index]
+		target_city_state.citizen_registry_state.citizens[citizen_index]
 	)
 	var missing_field := false
 
@@ -2454,15 +2529,20 @@ static func _validate_city_citizen_movement_entry(
 		"raw_failure": raw_failure,
 	}
 	var path_entries_valid := _validate_city_citizen_movement_path(
+		validation_target,
 		movement_context
 	)
 	movement_context["path_entries_valid"] = path_entries_valid
-	_validate_city_citizen_movement_state_details(movement_context)
+	_validate_city_citizen_movement_state_details(validation_target, movement_context)
 
 
 static func _validate_city_citizen_movement_path(
+	validation_target: Dictionary,
 	values: Dictionary
 ) -> bool:
+	var target_city_state: CitySettlementSimulationState = (
+		validation_target.get("city_state")
+	)
 	var errors: Array[String] = values.get("errors", [])
 	var citizen_id := int(values.get("citizen_id", -1))
 	var city_world: WorldData = values.get("city_world")
@@ -2520,7 +2600,8 @@ static func _validate_city_citizen_movement_path(
 
 		if previous_path_tile is Vector2i:
 			var step_cost := (
-				CityNavigationSystem.get_city_citizen_movement_step_cost(
+				CityNavigationSystem.get_city_citizen_movement_step_cost_for_city_state(
+					target_city_state,
 					previous_path_tile,
 					path_tile
 				)
@@ -2535,7 +2616,8 @@ static func _validate_city_citizen_movement_path(
 				path_entries_valid = false
 			elif (
 				city_world != null
-				and not CityNavigationSystem.can_city_citizen_traverse_step(
+				and not CityNavigationSystem.can_city_citizen_traverse_step_for_city_state(
+					target_city_state,
 					city_world,
 					previous_path_tile,
 					path_tile,
@@ -2555,8 +2637,12 @@ static func _validate_city_citizen_movement_path(
 
 
 static func _validate_city_citizen_movement_state_details(
+	validation_target: Dictionary,
 	values: Dictionary
 ) -> void:
+	var target_city_state: CitySettlementSimulationState = (
+		validation_target.get("city_state")
+	)
 	var errors: Array[String] = values.get("errors", [])
 	var citizen_id := int(values.get("citizen_id", -1))
 	var citizen: Dictionary = values.get("citizen", {})
@@ -2581,7 +2667,7 @@ static func _validate_city_citizen_movement_state_details(
 	)
 	var path_entries_valid := bool(values.get("path_entries_valid", false))
 	var citizen_is_active := (
-		CityCitizenMovementRuntimeSystem.get_current_state().active_mover_id_lookup.has(
+		target_city_state.citizen_movement_runtime_state.active_mover_id_lookup.has(
 			int(citizen_id)
 		)
 	)
@@ -2675,7 +2761,8 @@ static func _validate_city_citizen_movement_state_details(
 				)
 			elif path_entries_valid:
 				var current_step_cost := (
-					CityNavigationSystem.get_city_citizen_movement_step_cost(
+					CityNavigationSystem.get_city_citizen_movement_step_cost_for_city_state(
+						target_city_state,
 						movement_path[movement_index - 1],
 						movement_path[movement_index]
 					)
@@ -2729,14 +2816,18 @@ static func _validate_city_citizen_movement_state_details(
 
 
 static func _validate_city_active_mover_registry(
+	validation_target: Dictionary,
 	errors: Array[String],
 	citizen_lookup: Dictionary,
 	expected_active_ids: Dictionary
 ) -> void:
+	var target_city_state: CitySettlementSimulationState = (
+		validation_target.get("city_state")
+	)
 	var active_array_lookup: Dictionary = {}
 	var previous_active_id := -1
 
-	for active_citizen_id in CityCitizenMovementRuntimeSystem.get_current_state().active_mover_ids:
+	for active_citizen_id in target_city_state.citizen_movement_runtime_state.active_mover_ids:
 		if active_array_lookup.has(active_citizen_id):
 			errors.append(
 				"Active-mover registry contains duplicate citizen ID "
@@ -2765,7 +2856,7 @@ static func _validate_city_active_mover_registry(
 			continue
 
 		var active_citizen: Dictionary = (
-			CityCitizenRegistrySystem.get_current_state().citizens[
+			target_city_state.citizen_registry_state.citizens[
 				int(citizen_lookup[active_citizen_id])
 			]
 		)
@@ -2779,7 +2870,7 @@ static func _validate_city_active_mover_registry(
 				"Active-mover registry contains an ineligible citizen."
 			)
 
-		if not CityCitizenMovementRuntimeSystem.get_current_state().active_mover_id_lookup.has(
+		if not target_city_state.citizen_movement_runtime_state.active_mover_id_lookup.has(
 			active_citizen_id
 		):
 			errors.append(
@@ -2788,7 +2879,7 @@ static func _validate_city_active_mover_registry(
 					+ "."
 			)
 
-	for lookup_id in CityCitizenMovementRuntimeSystem.get_current_state().active_mover_id_lookup.keys():
+	for lookup_id in target_city_state.citizen_movement_runtime_state.active_mover_id_lookup.keys():
 		if not active_array_lookup.has(lookup_id):
 			errors.append(
 				"Active-mover lookup contains citizen "

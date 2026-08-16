@@ -203,12 +203,20 @@ func _test_validator_identity_invalidation(
 	city_id: int,
 	original_state: CityCitizenTaskRuntimeState
 ) -> void:
-	var first_validation := CityStateValidatorScript.validate(true, false)
+	var first_validation := CityStateValidatorScript.validate_for_settlement(
+		WorldPoliticalState.get_settlement_context(city_id),
+		true,
+		false
+	)
 	var replacement_state := _clone_task_state(original_state)
 	replacement_state.active_task_id_lookup.clear()
 	var city_root = WorldPoliticalState.get_city_simulation_state(city_id)
 	city_root.citizen_task_runtime_state = replacement_state
-	var second_validation := CityStateValidatorScript.validate(false, false)
+	var second_validation := CityStateValidatorScript.validate_for_settlement(
+		WorldPoliticalState.get_settlement_context(city_id),
+		false,
+		false
+	)
 	_expect(
 		int(first_validation.get(
 			"citizen_task_runtime_state_instance_id",
@@ -225,7 +233,11 @@ func _test_validator_identity_invalidation(
 		"Validator cache must inspect an equal-version task-owner replacement."
 	)
 	city_root.citizen_task_runtime_state = original_state
-	CityStateValidatorScript.validate(true, false)
+	CityStateValidatorScript.validate_for_settlement(
+		WorldPoliticalState.get_settlement_context(city_id),
+		true,
+		false
+	)
 
 
 func _test_reservation_invalidation_is_local(values: Dictionary) -> void:
