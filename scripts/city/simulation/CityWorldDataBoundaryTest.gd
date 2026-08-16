@@ -23,6 +23,29 @@ func _test_catalog_boundary() -> void:
 	_expect(CityObjectCatalog.get_city_object_size_for_type(CityObjectCatalog.CITY_OBJECT_HOUSE) == Vector2i(3, 3), "Object metadata must resolve outside WorldData.")
 	_expect(CityObjectCatalog.get_city_object_resident_capacity({"type": CityObjectCatalog.CITY_OBJECT_HOUSE}) == 4, "Housing policy must resolve through CityObjectCatalog.")
 
+	var stockpile_size := CityObjectCatalog.get_city_object_size_for_type(
+		CityObjectCatalog.CITY_OBJECT_STOCKPILE
+	)
+	var stockpile_top_left := Vector2i(7, 11)
+	var stockpile_footprint := (
+		CityObjectSystem.make_rectangle_city_object_footprint_tiles(
+			stockpile_top_left,
+			stockpile_size
+		)
+	)
+	_expect(
+		stockpile_size == Vector2i(2, 2),
+		"The authoritative Stockpile footprint must remain exactly 2x2."
+	)
+	_expect(
+		stockpile_footprint.size() == 4
+		and stockpile_footprint.has(stockpile_top_left)
+		and stockpile_footprint.has(stockpile_top_left + Vector2i(1, 0))
+		and stockpile_footprint.has(stockpile_top_left + Vector2i(0, 1))
+		and stockpile_footprint.has(stockpile_top_left + Vector2i(1, 1)),
+		"The Stockpile footprint helper must return its four unique 2x2 tiles."
+	)
+
 
 func _test_tile_owner_mutation_boundary() -> void:
 	var world := WorldData.new()
