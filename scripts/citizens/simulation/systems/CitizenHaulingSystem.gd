@@ -41,6 +41,34 @@ static func city_citizen_is_hauling(citizen_id: int) -> bool:
 	)
 
 
+static func city_citizen_is_hauling_for_city_state(
+	city_state: CitySettlementSimulationState,
+	citizen_id: int
+) -> bool:
+	if city_state == null:
+		return false
+	if (
+		CityCitizenInventorySystem.get_city_citizen_haul_cargo_amount_for_city_state(
+			city_state,
+			citizen_id
+		) > 0
+	):
+		return true
+
+	return (
+		str(
+			CityCitizenTaskRuntimeSystem.get_city_citizen_current_haul_for_city_state(
+				city_state,
+				citizen_id
+			).get(
+				"phase",
+				CityCitizens.CITY_CITIZEN_HAUL_PHASE_NONE
+			)
+		)
+		!= CityCitizens.CITY_CITIZEN_HAUL_PHASE_NONE
+	)
+
+
 # Higher-priority interruptions must never strand physical haul cargo. Cargo is
 # atomically converted into one mono-resource ground pile per carried resource,
 # reservations and movement are released, and the interrupted task is cleared.
@@ -2246,15 +2274,13 @@ static func _try_route_cargo_to_best_resource_demand(
 			current_score = (
 				CityResourceMatcherScript.score_resource_destination({
 					"category": (
-						CityResourceMatcherScript
-						.get_resource_demand_category_for_destination(
+						CityResourceMatcherScript.get_resource_demand_category_for_destination(
 							current_endpoint,
 							current_destination_access_purpose
 						)
 					),
 					"order_priority_rank": (
-						CityResourceMatcherScript
-						.get_resource_demand_order_priority_rank_for_destination_for_city_state(
+						CityResourceMatcherScript.get_resource_demand_order_priority_rank_for_destination_for_city_state(
 							city_state,
 							current_endpoint
 						)

@@ -82,6 +82,7 @@ class FakeTerminalService:
 	extends RefCounted
 
 	var terminal_result: Dictionary = {}
+	var synchronous_payload: Dictionary = {"marker": "synchronous"}
 
 
 	func poll() -> void:
@@ -92,6 +93,14 @@ class FakeTerminalService:
 		var result := terminal_result
 		terminal_result = {}
 		return result
+
+
+	func is_valid_request(_request: Dictionary) -> bool:
+		return true
+
+
+	func prepare_synchronously(_request: Dictionary) -> Dictionary:
+		return synchronous_payload.duplicate(true)
 
 
 	func shutdown() -> void:
@@ -135,6 +144,37 @@ class TestGameSession:
 		preparation_failure_messages.append(message)
 
 
+class ExplicitBindingTransactionCityView:
+	extends Control
+
+	var configured_context
+	var session_active: bool = false
+
+
+	func configure_initial_city_presentation(
+		settlement_context,
+		_prepared_payload: Dictionary = {}
+	) -> bool:
+		configured_context = settlement_context
+		return configured_context != null
+
+
+	func validate_city_presentation_binding(settlement_context) -> bool:
+		return configured_context != null and is_same(
+			configured_context,
+			settlement_context
+		)
+
+
+	func get_bound_settlement_context():
+		return configured_context
+
+
+	func set_session_view_active(is_active: bool) -> void:
+		session_active = is_active
+		visible = is_active
+
+
 class FirstEntryTransactionWorldView:
 	extends Control
 
@@ -171,7 +211,7 @@ class FirstEntryTransactionSession:
 
 	func _create_city_view() -> Node:
 		city_view_creation_count += 1
-		var test_city_view := Control.new()
+		var test_city_view := ExplicitBindingTransactionCityView.new()
 		test_city_view.name = "FirstEntryTransactionCityView"
 		return test_city_view
 
@@ -195,12 +235,14 @@ class NullCityViewTransactionSession:
 			reject_next_city_view = false
 			return null
 
-		return Control.new()
+		return ExplicitBindingTransactionCityView.new()
 
 
-	func _synchronize_first_city_entry_foundation() -> bool:
+	func _prepare_first_city_entry(
+		_prepared_payload: Dictionary = {}
+	):
 		synchronization_call_count += 1
-		return true
+		return self
 
 
 	func _select_first_city_detailed_simulation_target() -> bool:
@@ -737,8 +779,7 @@ func _test_first_city_entry_transaction() -> void:
 	for raw_resource in seeded_resources.keys():
 		var resource := str(raw_resource)
 		var accepted := (
-			CityResourceContainerSystem
-			.add_resource_to_city_object_storage(
+			CityResourceContainerSystem.add_resource_to_city_object_storage(
 				keep_id,
 				resource,
 				int(seeded_resources[resource])
@@ -761,8 +802,7 @@ func _test_first_city_entry_transaction() -> void:
 	for raw_resource in seeded_resources.keys():
 		var resource := str(raw_resource)
 		resource_totals_before[resource] = (
-			CityResourceAccountingSystem
-			.get_total_physical_city_resource_amount(resource)
+			CityResourceAccountingSystem.get_total_physical_city_resource_amount(resource)
 		)
 		_expect(
 			int(resource_totals_before[resource])
@@ -1043,9 +1083,10 @@ func _test_game_session_terminal_case(
 		)
 	elif status == PREPARATION_SERVICE.STATUS_FAILED:
 		_expect(
-			session.last_prepared_payload.is_empty()
+			session.last_prepared_payload
+			== preparation.synchronous_payload
 			and session.preparation_failure_messages.size() == 1,
-			"FAILED must preserve synchronous fallback behavior."
+			"FAILED must install the synchronous fallback payload exactly once."
 		)
 	else:
 		_expect(

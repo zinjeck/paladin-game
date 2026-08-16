@@ -139,6 +139,11 @@ func _test_renderer_identity_invalidation(
 	original_state: CityCitizenTaskRuntimeState
 ) -> void:
 	var renderer := CityRenderer.new()
+	var renderer_context = WorldPoliticalState.get_settlement_context(city_id)
+	_expect(
+		renderer.configure_initial_city_presentation(renderer_context),
+		"Renderer observer coverage requires the explicit target settlement binding."
+	)
 	var registry_state := (
 		CityCitizenRegistrySystem.get_current_state()
 	)

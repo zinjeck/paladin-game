@@ -36,8 +36,7 @@ static func mark_city_container_changed(
 	state.container_version += 1
 
 	if (
-		CityResourceContainerSystem
-		.city_object_counts_as_public_city_storage(city_object)
+		CityResourceContainerSystem.city_object_counts_as_public_city_storage(city_object)
 	):
 		state.public_storage_version += 1
 
@@ -54,8 +53,7 @@ static func mark_city_container_changed_for_city_state(
 	accounting_state.container_version += 1
 
 	if (
-		CityResourceContainerSystem
-		.city_object_counts_as_public_city_storage(city_object)
+		CityResourceContainerSystem.city_object_counts_as_public_city_storage(city_object)
 	):
 		accounting_state.public_storage_version += 1
 
@@ -121,8 +119,7 @@ static func get_total_public_city_resource_amount(
 			continue
 
 		total += (
-			CityResourceContainerSystem
-			.get_city_object_stored_resource_amount(city_object, resource)
+			CityResourceContainerSystem.get_city_object_stored_resource_amount(city_object, resource)
 		)
 
 	return total
@@ -150,8 +147,7 @@ static func get_total_public_city_resource_storage_capacity(
 			continue
 
 		total_capacity += (
-			CityResourceContainerSystem
-			.get_city_object_stored_resource_amount(city_object, resource)
+			CityResourceContainerSystem.get_city_object_stored_resource_amount(city_object, resource)
 			+ CityResourceContainerSystem.get_city_object_storage_free_space(
 				city_object
 			)
@@ -178,8 +174,7 @@ static func get_total_stored_city_resource_amount(
 			continue
 
 		total_amount += (
-			CityResourceContainerSystem
-			.get_city_object_stored_resource_amount(city_object, resource)
+			CityResourceContainerSystem.get_city_object_stored_resource_amount(city_object, resource)
 		)
 
 	return total_amount
@@ -222,8 +217,7 @@ static func get_total_physical_city_resource_amount(
 			continue
 
 		total_amount += (
-			CityCitizenInventorySystem
-			.get_city_citizen_record_carried_resource_amount(
+			CityCitizenInventorySystem.get_city_citizen_record_carried_resource_amount(
 				citizen,
 				resource
 			)
@@ -269,8 +263,7 @@ static func get_total_physical_city_resource_amount_for_city_state(
 		var citizen: Dictionary = raw_citizen
 		if bool(citizen.get("alive", false)):
 			total_amount += (
-				CityCitizenInventorySystem
-				.get_city_citizen_record_carried_resource_amount(
+				CityCitizenInventorySystem.get_city_citizen_record_carried_resource_amount(
 					citizen,
 					resource
 				)
@@ -294,7 +287,25 @@ static func get_total_owned_city_resource_amount(
 
 
 static func get_total_owned_city_resource_amounts() -> Dictionary:
-	var state := get_current_state()
+	return _get_total_owned_city_resource_amounts(null)
+
+
+static func get_total_owned_city_resource_amounts_for_city_state(
+	city_state: CitySettlementSimulationState
+) -> Dictionary:
+	return _get_total_owned_city_resource_amounts(city_state)
+
+
+static func _get_total_owned_city_resource_amounts(
+	city_state: CitySettlementSimulationState
+) -> Dictionary:
+	var state := (
+		get_current_state()
+		if city_state == null
+		else get_state_for_city_state(city_state)
+	)
+	if state == null:
+		return {}
 
 	if (
 		state.owned_resource_amount_cache_container_version
@@ -307,7 +318,12 @@ static func get_total_owned_city_resource_amounts() -> Dictionary:
 	for resource in CityResourceCatalog.get_city_resource_types():
 		totals[resource] = 0
 
-	for raw_city_object in CityObjectSystem.get_city_objects():
+	var city_objects: Array = (
+		CityObjectSystem.get_city_objects()
+		if city_state == null
+		else CityObjectSystem.get_city_objects_for_city_state(city_state)
+	)
+	for raw_city_object in city_objects:
 		if not raw_city_object is Dictionary:
 			continue
 
@@ -372,8 +388,7 @@ static func get_total_city_resource_storage_capacity(
 			continue
 
 		total_capacity += (
-			CityResourceContainerSystem
-			.get_city_object_stored_resource_amount(city_object, resource)
+			CityResourceContainerSystem.get_city_object_stored_resource_amount(city_object, resource)
 			+ CityResourceContainerSystem.get_city_object_storage_free_space(
 				city_object
 			)

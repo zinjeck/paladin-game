@@ -13,6 +13,9 @@ const CityPreparationServiceScript := preload(
 const SimulationSpeedControlsScript := preload(
 	"res://scripts/ui/common/SimulationSpeedControls.gd"
 )
+const CitySettlementRuntimeBootstrapScript := preload(
+	"res://scripts/city/simulation/CitySettlementRuntimeBootstrap.gd"
+)
 
 # Scene changes cannot pass constructor arguments. This one-shot request lets
 # launchers choose the initial persistent view without bypassing GameSession.
@@ -131,15 +134,19 @@ func cancel_city_preparation() -> void:
 
 func show_city_view(request: Dictionary = {}) -> void:
 	if city_view != null:
-		show_settlement_city_view(
-			WorldPoliticalState.active_settlement_id
-		)
+		var selected_settlement_id := WorldPoliticalState.active_settlement_id
+		if selected_settlement_id <= 0:
+			selected_settlement_id = (
+				WorldPoliticalState.get_player_capital_settlement_id()
+			)
+		if selected_settlement_id > 0:
+			show_settlement_city_view(selected_settlement_id)
 		return
 
 	if WorldData.has_active_city_save():
 		cancel_city_preparation()
-		_ensure_city_view({})
-		_activate_view(city_view)
+		if _ensure_city_view({}):
+			_activate_view(city_view)
 		return
 
 	if request.is_empty() and world_renderer != null:
@@ -202,6 +209,10 @@ func show_settlement_city_view(
 	if (
 		target_context == null
 		or not target_context.supports_city_simulation()
+		or not _install_prepared_city_payload_for_context(
+			target_context,
+			prepared_payload
+		)
 	):
 		return false
 
@@ -219,13 +230,19 @@ func show_settlement_city_view(
 	):
 		return false
 
+	var bootstrap_result := _bootstrap_city_context(target_context)
+	if not bool(bootstrap_result.get("success", false)):
+		return false
+
 	var previous_settlement_id := WorldPoliticalState.active_settlement_id
 	var previous_detailed_simulation_settlement_id := (
 		SimulationCoordinator.get_detailed_simulation_settlement_id()
 	)
-	var previous_context = WorldPoliticalState.get_settlement_context(
-		previous_settlement_id
-	)
+	var previous_bound_context = _get_renderer_bound_context(lifecycle_owner)
+	if previous_bound_context == null:
+		previous_bound_context = WorldPoliticalState.get_settlement_context(
+			previous_settlement_id
+		)
 	var city_was_active := active_view == city_view
 	var simulation_was_paused := SimulationClock.simulation_paused
 	var simulation_speed_before := SimulationClock.speed_multiplier
@@ -236,40 +253,39 @@ func show_settlement_city_view(
 	if city_was_active:
 		_set_view_active(city_view, false)
 
-	var rebound := false
-	if WorldPoliticalState.set_active_settlement(settlement_id):
+	# The renderer proves it can bind the explicit target before the session
+	# changes either presentation selection or detailed-simulation policy.
+	var rebound := bool(lifecycle_owner.call(
+		"rebind_city_presentation",
+		target_context,
+		prepared_payload
+	))
+	if rebound:
 		rebound = bool(lifecycle_owner.call(
-			"rebind_city_presentation",
-			target_context,
-			prepared_payload
+			"validate_city_presentation_binding",
+			target_context
 		))
-		if rebound:
-			rebound = bool(lifecycle_owner.call(
-				"validate_city_presentation_binding",
-				target_context
-			))
-		if rebound:
-			rebound = (
-				SimulationCoordinator
-				.select_detailed_simulation_settlement(settlement_id)
-			)
+	if rebound:
+		rebound = (
+			SimulationCoordinator.select_detailed_simulation_settlement(settlement_id)
+		)
+	if rebound:
+		rebound = WorldPoliticalState.set_active_settlement(settlement_id)
 
 	if not rebound:
-		if previous_context != null:
+		if previous_bound_context != null:
+			lifecycle_owner.call(
+				"rebind_city_presentation",
+				previous_bound_context,
+				{}
+			)
+		_restore_detailed_simulation_target(
+			previous_detailed_simulation_settlement_id
+		)
+		if previous_settlement_id > 0:
 			WorldPoliticalState.set_active_settlement(
 				previous_settlement_id
 			)
-			lifecycle_owner.call(
-				"rebind_city_presentation",
-				previous_context,
-				{}
-			)
-		if previous_detailed_simulation_settlement_id > 0:
-			SimulationCoordinator.select_detailed_simulation_settlement(
-				previous_detailed_simulation_settlement_id
-			)
-		else:
-			SimulationCoordinator.clear_detailed_simulation_settlement()
 		if city_was_active:
 			_set_view_active(city_view, true)
 			active_view = city_view
@@ -331,8 +347,8 @@ func _consume_pending_city_preparation_terminal() -> void:
 
 		if payload is Dictionary and not payload.is_empty():
 			_clear_pending_city_switch()
-			_ensure_city_view(payload)
-			_activate_view(city_view)
+			if _ensure_city_view(payload):
+				_activate_view(city_view)
 			return
 
 		_finish_failed_city_preparation(
@@ -360,10 +376,24 @@ func _consume_pending_city_preparation_terminal() -> void:
 
 
 func _finish_failed_city_preparation(message: String) -> void:
+	var fallback_request := pending_city_request.duplicate(true)
 	_clear_pending_city_switch()
 	_report_city_preparation_failure(message)
-	_ensure_city_view({})
-	_activate_view(city_view)
+
+	var fallback_payload: Dictionary = {}
+	if city_preparation.is_valid_request(fallback_request):
+		fallback_payload = city_preparation.prepare_synchronously(
+			fallback_request
+		)
+
+	if fallback_payload.is_empty():
+		_report_city_preparation_failure(
+			"Synchronous city preparation also failed; the world view remains active."
+		)
+		return
+
+	if _ensure_city_view(fallback_payload):
+		_activate_view(city_view)
 
 
 func _report_city_preparation_failure(message: String) -> void:
@@ -394,7 +424,7 @@ func _clear_prewarmed_city_preparation_tracking() -> void:
 
 func _ensure_city_view(prepared_payload: Dictionary) -> bool:
 	if city_view != null:
-		return _prepare_first_city_entry()
+		return city_view_has_been_entered
 
 	var candidate_city_view := _create_city_view()
 	if candidate_city_view == null:
@@ -402,18 +432,46 @@ func _ensure_city_view(prepared_payload: Dictionary) -> bool:
 			"GameSession could not instantiate the prepared city view."
 		)
 		return false
-	if not _prepare_first_city_entry():
+
+	var settlement_context: SettlementSimulationContext = (
+		_prepare_first_city_entry(prepared_payload)
+	)
+	if settlement_context == null:
 		candidate_city_view.free()
 		return false
 
-	city_view = candidate_city_view
-
-	if city_view.has_method("set_session_prepared_city_payload"):
-		city_view.call(
-			"set_session_prepared_city_payload",
-			prepared_payload
+	var lifecycle_owner := _find_view_lifecycle_owner(candidate_city_view)
+	if (
+		lifecycle_owner == null
+		or not lifecycle_owner.has_method(
+			"configure_initial_city_presentation"
 		)
+		or not lifecycle_owner.has_method(
+			"validate_city_presentation_binding"
+		)
+		or not bool(lifecycle_owner.call(
+			"configure_initial_city_presentation",
+			settlement_context,
+			prepared_payload
+		))
+	):
+		candidate_city_view.free()
+		_report_first_city_entry_failure(
+			"GameSession could not configure the city renderer before _ready()."
+		)
+		return false
 
+	var previous_detailed_simulation_settlement_id := (
+		SimulationCoordinator.get_detailed_simulation_settlement_id()
+	)
+	if not _select_first_city_detailed_simulation_target():
+		candidate_city_view.free()
+		_report_first_city_entry_failure(
+			"GameSession could not select the founding settlement for detailed simulation."
+		)
+		return false
+
+	city_view = candidate_city_view
 	if city_view.has_method("set_session_view_active"):
 		city_view.call("set_session_view_active", false)
 	else:
@@ -422,6 +480,22 @@ func _ensure_city_view(prepared_payload: Dictionary) -> bool:
 
 	add_child(city_view)
 	_set_view_active(city_view, false)
+	if not bool(lifecycle_owner.call(
+		"validate_city_presentation_binding",
+		settlement_context
+	)):
+		remove_child(city_view)
+		city_view.free()
+		city_view = null
+		_restore_detailed_simulation_target(
+			previous_detailed_simulation_settlement_id
+		)
+		_report_first_city_entry_failure(
+			"The configured city renderer failed its post-ready binding validation."
+		)
+		return false
+
+	_commit_first_city_entry()
 	return true
 
 
@@ -432,10 +506,8 @@ func _create_city_view() -> Node:
 func _activate_view(target_view: Node) -> bool:
 	if target_view == null:
 		return false
-
-	if target_view == city_view and not _prepare_first_city_entry():
+	if target_view == city_view and not city_view_has_been_entered:
 		return false
-
 	if target_view == active_view:
 		return true
 
@@ -445,48 +517,172 @@ func _activate_view(target_view: Node) -> bool:
 	return true
 
 
-func _prepare_first_city_entry() -> bool:
+func _prepare_first_city_entry(
+	prepared_payload: Dictionary = {}
+) -> SettlementSimulationContext:
 	if city_view_has_been_entered:
-		return true
+		var existing_capital_id := (
+			WorldPoliticalState.get_player_capital_settlement_id()
+		)
+		return WorldPoliticalState.get_settlement_context(
+			existing_capital_id
+		)
 
-	# The capital is now one settlement in a world registry, not an implicit
-	# singleton. Its local state still uses the legacy WorldData backend during
-	# this migration pass, but every simulation tick receives its settlement
-	# identity through SettlementSimulationContext.
 	if not _synchronize_first_city_entry_foundation():
 		_report_first_city_entry_failure(
 			"GameSession could not establish the founding settlement context."
 		)
-		return false
-	if not _select_first_city_detailed_simulation_target():
-		_report_first_city_entry_failure(
-			"GameSession could not select the founding settlement for detailed simulation."
+		return null
+
+	var capital_settlement_id := (
+		WorldPoliticalState.get_player_capital_settlement_id()
+	)
+	var settlement_context = WorldPoliticalState.get_settlement_context(
+		capital_settlement_id
+	)
+	if (
+		settlement_context == null
+		or not _install_prepared_city_payload_for_context(
+			settlement_context,
+			prepared_payload
 		)
+	):
+		_report_first_city_entry_failure(
+			"GameSession could not install the prepared world into the founding settlement."
+		)
+		return null
+
+	var bootstrap_result := _bootstrap_city_context(settlement_context)
+	if not bool(bootstrap_result.get("success", false)):
+		_report_first_city_entry_failure(
+			"GameSession could not bootstrap the founding settlement: "
+			+ str(bootstrap_result.get("errors", []))
+		)
+		return null
+
+	return settlement_context
+
+
+func _select_first_city_detailed_simulation_target() -> bool:
+	var capital_settlement_id := (
+		WorldPoliticalState.get_player_capital_settlement_id()
+	)
+	return (
+		capital_settlement_id > 0
+		and SimulationCoordinator.select_detailed_simulation_settlement(
+			capital_settlement_id
+		)
+	)
+
+
+func _synchronize_first_city_entry_foundation() -> bool:
+	if (
+		not WorldPoliticalState.synchronize_foundation_with_world_data()
+		or not WorldPoliticalState.validate_registry_integrity()
+	):
 		return false
 
-	# Commit only after the foundation registry and its settlement-local city
-	# state are both valid. The CityRenderer enters the tree after this point, so
-	# no hidden initialization frame can consume settlement time.
+	var capital_settlement_id := (
+		WorldPoliticalState.get_player_capital_settlement_id()
+	)
+	var capital_context = WorldPoliticalState.get_settlement_context(
+		capital_settlement_id
+	)
+	return (
+		capital_context != null
+		and capital_context.supports_city_simulation()
+		and capital_context.get_city_simulation_state() != null
+	)
+
+
+func _install_prepared_city_payload_for_context(
+	settlement_context: SettlementSimulationContext,
+	prepared_payload: Dictionary
+) -> bool:
+	if (
+		settlement_context == null
+		or not WorldPoliticalState.is_registered_settlement_context(
+			settlement_context
+		)
+	):
+		return false
+
+	var city_state: CitySettlementSimulationState = (
+		settlement_context.get_city_simulation_state()
+	)
+	if city_state == null:
+		return false
+
+	if prepared_payload.is_empty():
+		return (
+			city_state.city_world is WorldData
+			and city_state.city_world.width > 0
+			and city_state.city_world.height > 0
+			and city_state.city_seed > 0
+		)
+
+	var prepared_world = prepared_payload.get("city_world")
+	var prepared_seed_value = prepared_payload.get("city_seed")
+	if (
+		not prepared_world is WorldData
+		or not prepared_seed_value is int
+		or prepared_world.width <= 0
+		or prepared_world.height <= 0
+		or int(prepared_seed_value) <= 0
+	):
+		return false
+
+	var prepared_seed: int = prepared_seed_value
+	if prepared_world.seed != 0 and prepared_world.seed != prepared_seed:
+		return false
+	if (
+		city_state.city_world != null
+		and not is_same(city_state.city_world, prepared_world)
+	):
+		return false
+	if city_state.city_seed != 0 and city_state.city_seed != prepared_seed:
+		return false
+
+	city_state.city_world = prepared_world
+	city_state.city_seed = prepared_seed
+	return true
+
+
+func _bootstrap_city_context(
+	settlement_context: SettlementSimulationContext
+) -> Dictionary:
+	return CitySettlementRuntimeBootstrapScript.ensure_ready(
+		settlement_context
+	)
+
+
+func _commit_first_city_entry() -> void:
+	if city_view_has_been_entered:
+		return
+
 	city_view_has_been_entered = true
 	SimulationClock.start_new_game()
 	SimulationClock.set_simulation_paused(true)
 	_ensure_simulation_speed_controls()
 	_hide_world_region_selection_after_city_entry()
-	return true
 
 
-func _select_first_city_detailed_simulation_target() -> bool:
-	return SimulationCoordinator.select_detailed_simulation_settlement(
-		WorldPoliticalState.active_settlement_id
-	)
+func _restore_detailed_simulation_target(settlement_id: int) -> void:
+	if settlement_id > 0:
+		SimulationCoordinator.select_detailed_simulation_settlement(
+			settlement_id
+		)
+	else:
+		SimulationCoordinator.clear_detailed_simulation_settlement()
 
 
-func _synchronize_first_city_entry_foundation() -> bool:
-	return (
-		WorldPoliticalState.synchronize_foundation_with_world_data()
-		and WorldPoliticalState.validate_registry_integrity()
-		and WorldPoliticalState.get_active_city_simulation_state() != null
-	)
+func _get_renderer_bound_context(lifecycle_owner: Node):
+	if (
+		lifecycle_owner != null
+		and lifecycle_owner.has_method("get_bound_settlement_context")
+	):
+		return lifecycle_owner.call("get_bound_settlement_context")
+	return null
 
 
 func _report_first_city_entry_failure(message: String) -> void:

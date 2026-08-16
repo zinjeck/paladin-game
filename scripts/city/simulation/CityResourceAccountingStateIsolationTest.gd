@@ -177,7 +177,7 @@ func _test_equal_version_city_isolation() -> void:
 		"A -> B -> A must restore City A's exact accounting owner and total."
 	)
 
-	var renderer := _make_resource_renderer(state_a)
+	var renderer := _make_resource_renderer(city_a_id, state_a)
 	var fish_index := renderer.get_city_resource_order().find(WorldData.RESOURCE_FISH)
 	_expect(
 		fish_index >= 0
@@ -329,9 +329,17 @@ func _test_equal_version_city_isolation() -> void:
 
 
 func _make_resource_renderer(
+	settlement_id: int,
 	state: CityResourceAccountingState
 ) -> CityRenderer:
 	var renderer := CityRenderer.new()
+	var renderer_context = WorldPoliticalState.get_settlement_context(
+		settlement_id
+	)
+	_expect(
+		renderer.configure_initial_city_presentation(renderer_context),
+		"Resource UI coverage requires an explicit renderer settlement binding."
+	)
 	renderer.observed_city_resource_accounting_state = state
 	renderer.observed_city_container_version = state.container_version
 	renderer.observed_city_public_storage_version = state.public_storage_version
@@ -393,8 +401,7 @@ func _assert_validator_and_final_city_isolation(
 	_expect(
 		WorldPoliticalState.set_active_settlement(city_a_id)
 		and is_same(
-			CityResourceAccountingSystem
-			.get_current_state().owned_resource_amount_cache,
+			CityResourceAccountingSystem.get_current_state().owned_resource_amount_cache,
 			cache_a
 		)
 		and CityResourceAccountingSystem
@@ -412,8 +419,7 @@ func _assert_validator_and_final_city_isolation(
 	_expect(
 		WorldPoliticalState.set_active_settlement(city_b_id)
 		and is_same(
-			CityResourceAccountingSystem
-			.get_current_state().owned_resource_amount_cache,
+			CityResourceAccountingSystem.get_current_state().owned_resource_amount_cache,
 			cache_b
 		)
 		and CityResourceAccountingSystem.get_city_container_version()

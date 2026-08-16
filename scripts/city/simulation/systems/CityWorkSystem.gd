@@ -2723,6 +2723,20 @@ static func cancel_work_order(order_id: int) -> bool:
 
 
 static func cancel_player_targets_at_tiles(raw_tiles: Array) -> int:
+	return _cancel_player_targets_at_tiles(null, raw_tiles)
+
+
+static func cancel_player_targets_at_tiles_for_city_state(
+	city_state: CitySettlementSimulationState,
+	raw_tiles: Array
+) -> int:
+	return _cancel_player_targets_at_tiles(city_state, raw_tiles)
+
+
+static func _cancel_player_targets_at_tiles(
+	city_state: CitySettlementSimulationState,
+	raw_tiles: Array
+) -> int:
 	var site_ids: Dictionary = {}
 	var command_ids: Dictionary = {}
 
@@ -2731,12 +2745,27 @@ static func cancel_player_targets_at_tiles(raw_tiles: Array) -> int:
 			continue
 
 		var tile: Vector2i = raw_tile
-		var site := CityConstructionSystem.get_city_construction_site_at_tile(tile)
+		var site: Dictionary = (
+			CityConstructionSystem.get_city_construction_site_at_tile(tile)
+			if city_state == null
+			else CityConstructionSystem
+				.get_city_construction_site_at_tile_for_city_state(
+					city_state,
+					tile
+				)
+		)
 
 		if not site.is_empty():
 			site_ids[int(site.get("id", -1))] = true
 
-		var command := get_city_player_command_at_tile(tile)
+		var command: Dictionary = (
+			get_city_player_command_at_tile(tile)
+			if city_state == null
+			else get_city_player_command_at_tile_for_city_state(
+				city_state,
+				tile
+			)
+		)
 
 		if (
 			not command.is_empty()
@@ -2749,23 +2778,57 @@ static func cancel_player_targets_at_tiles(raw_tiles: Array) -> int:
 	ordered_site_ids.sort()
 
 	for raw_site_id in ordered_site_ids:
-		if CityConstructionSystemScript.cancel_city_construction_site(
-			int(raw_site_id)
-		):
+		var site_cancelled: bool = (
+			CityConstructionSystemScript.cancel_city_construction_site(
+				int(raw_site_id)
+			)
+			if city_state == null
+			else CityConstructionSystemScript
+				.cancel_city_construction_site_for_city_state(
+					city_state,
+					int(raw_site_id)
+				)
+		)
+		if site_cancelled:
 			cancelled_count += 1
 
 	var ordered_command_ids: Array = command_ids.keys()
 	ordered_command_ids.sort()
 
 	for raw_command_id in ordered_command_ids:
-		if cancel_city_player_command(int(raw_command_id)):
+		var command_cancelled: bool = (
+			cancel_city_player_command(int(raw_command_id))
+			if city_state == null
+			else cancel_city_player_command_for_city_state(
+				city_state,
+				int(raw_command_id)
+			)
+		)
+		if command_cancelled:
 			cancelled_count += 1
 
-	synchronize_player_work_board()
+	if city_state == null:
+		synchronize_player_work_board()
+	else:
+		synchronize_player_work_board_for_city_state(city_state)
 	return cancelled_count
 
 
 static func get_cancel_preview_tiles(raw_tiles: Array) -> Array[Vector2i]:
+	return _get_cancel_preview_tiles(null, raw_tiles)
+
+
+static func get_cancel_preview_tiles_for_city_state(
+	city_state: CitySettlementSimulationState,
+	raw_tiles: Array
+) -> Array[Vector2i]:
+	return _get_cancel_preview_tiles(city_state, raw_tiles)
+
+
+static func _get_cancel_preview_tiles(
+	city_state: CitySettlementSimulationState,
+	raw_tiles: Array
+) -> Array[Vector2i]:
 	var preview_lookup: Dictionary = {}
 
 	for raw_tile in raw_tiles:
@@ -2773,14 +2836,30 @@ static func get_cancel_preview_tiles(raw_tiles: Array) -> Array[Vector2i]:
 			continue
 
 		var tile: Vector2i = raw_tile
-		var site := CityConstructionSystem.get_city_construction_site_at_tile(tile)
+		var site: Dictionary = (
+			CityConstructionSystem.get_city_construction_site_at_tile(tile)
+			if city_state == null
+			else CityConstructionSystem
+				.get_city_construction_site_at_tile_for_city_state(
+					city_state,
+					tile
+				)
+		)
 
 		if not site.is_empty():
 			for raw_footprint_tile in site.get("footprint_tiles", []):
 				if raw_footprint_tile is Vector2i:
 					preview_lookup[raw_footprint_tile] = true
 
-		if not get_city_player_command_at_tile(tile).is_empty():
+		var command: Dictionary = (
+			get_city_player_command_at_tile(tile)
+			if city_state == null
+			else get_city_player_command_at_tile_for_city_state(
+				city_state,
+				tile
+			)
+		)
+		if not command.is_empty():
 			preview_lookup[tile] = true
 
 	var preview_tiles: Array[Vector2i] = []
