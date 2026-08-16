@@ -187,6 +187,13 @@ func _test_container_accounting_and_cache_invalidation() -> void:
 	)
 
 	var renderer := CityRenderer.new()
+	var renderer_context = WorldPoliticalState.get_settlement_context(
+		WorldPoliticalState.active_settlement_id
+	)
+	_expect(
+		renderer.configure_initial_city_presentation(renderer_context),
+		"Resource regression UI requires an explicit renderer settlement binding."
+	)
 	var resource_order := renderer.get_city_resource_order()
 	for _resource in resource_order:
 		var amount_label := Label.new()

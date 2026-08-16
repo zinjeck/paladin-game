@@ -597,10 +597,16 @@ func _test_parent_orders_and_two_level_fairness() -> void:
 		"The large natural-work fixture must remain one complete command group."
 	)
 
-	var road_site := CityConstructionSystemScript.create_road_site(
-		[Vector2i(4, 4)],
-		"player",
-		city_world
+	var fairness_city_state: CitySettlementSimulationState = (
+		WorldPoliticalState.get_current_city_simulation_state()
+	)
+	var road_site: Dictionary = (
+		CityConstructionSystemScript.create_road_site_for_city_state(
+			fairness_city_state,
+			[Vector2i(4, 4)],
+			"player",
+			city_world
+		)
 	)
 	var site_id := int(road_site.get("id", -1))
 	_expect(site_id > 0, "The fairness fixture must create a road site.")
@@ -1066,10 +1072,16 @@ func _test_rebalance_preserves_active_construction_clearing() -> void:
 		tree_tile,
 		WorldData.CITY_SURFACE_FEATURE_TREE
 	)
-	var clearing_site := CityConstructionSystemScript.create_road_site(
-		[tree_tile],
-		"player",
-		city_world
+	var clearing_city_state: CitySettlementSimulationState = (
+		WorldPoliticalState.get_current_city_simulation_state()
+	)
+	var clearing_site: Dictionary = (
+		CityConstructionSystemScript.create_road_site_for_city_state(
+			clearing_city_state,
+			[tree_tile],
+			"player",
+			city_world
+		)
 	)
 	var clearing_site_id := int(clearing_site.get("id", -1))
 	CityWorkSystemScript.synchronize_player_work_board()

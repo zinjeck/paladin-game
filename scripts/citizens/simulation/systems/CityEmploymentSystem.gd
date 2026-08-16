@@ -546,6 +546,16 @@ static func get_city_object_worker_names(city_object: Dictionary) -> Array:
 	return CityAssignmentSystem.get_city_object_worker_names(city_object)
 
 
+static func get_city_object_worker_names_for_city_state(
+	city_state: CitySettlementSimulationState,
+	city_object: Dictionary
+) -> Array:
+	return CityAssignmentSystem.get_city_object_worker_names_for_city_state(
+		city_state,
+		city_object
+	)
+
+
 static func is_city_citizen_attending_workplace(
 	citizen_id: int,
 	workplace_id: int,

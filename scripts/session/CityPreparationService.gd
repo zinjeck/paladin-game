@@ -319,6 +319,22 @@ func shutdown() -> void:
 	_active_record = {}
 
 
+func prepare_synchronously(request: Dictionary) -> Dictionary:
+	if not is_valid_request(request):
+		return {}
+
+	var synchronous_request := request.duplicate(true)
+	synchronous_request["preparation_generation"] = 0
+	var payload := _build_payload(synchronous_request)
+	if (
+		not bool(payload.get("valid", false))
+		or not _is_valid_success_payload(payload)
+	):
+		return {}
+
+	return payload
+
+
 func is_valid_request(request: Dictionary) -> bool:
 	var required_keys: Array[String] = [
 		"signature",

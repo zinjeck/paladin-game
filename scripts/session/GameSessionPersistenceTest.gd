@@ -82,6 +82,7 @@ class FakeTerminalService:
 	extends RefCounted
 
 	var terminal_result: Dictionary = {}
+	var synchronous_payload: Dictionary = {"marker": "synchronous"}
 
 
 	func poll() -> void:
@@ -92,6 +93,14 @@ class FakeTerminalService:
 		var result := terminal_result
 		terminal_result = {}
 		return result
+
+
+	func is_valid_request(_request: Dictionary) -> bool:
+		return true
+
+
+	func prepare_synchronously(_request: Dictionary) -> Dictionary:
+		return synchronous_payload.duplicate(true)
 
 
 	func shutdown() -> void:
@@ -135,6 +144,37 @@ class TestGameSession:
 		preparation_failure_messages.append(message)
 
 
+class ExplicitBindingTransactionCityView:
+	extends Control
+
+	var configured_context
+	var session_active: bool = false
+
+
+	func configure_initial_city_presentation(
+		settlement_context,
+		_prepared_payload: Dictionary = {}
+	) -> bool:
+		configured_context = settlement_context
+		return configured_context != null
+
+
+	func validate_city_presentation_binding(settlement_context) -> bool:
+		return configured_context != null and is_same(
+			configured_context,
+			settlement_context
+		)
+
+
+	func get_bound_settlement_context():
+		return configured_context
+
+
+	func set_session_view_active(is_active: bool) -> void:
+		session_active = is_active
+		visible = is_active
+
+
 class FirstEntryTransactionWorldView:
 	extends Control
 
@@ -171,7 +211,7 @@ class FirstEntryTransactionSession:
 
 	func _create_city_view() -> Node:
 		city_view_creation_count += 1
-		var test_city_view := Control.new()
+		var test_city_view := ExplicitBindingTransactionCityView.new()
 		test_city_view.name = "FirstEntryTransactionCityView"
 		return test_city_view
 
@@ -187,6 +227,7 @@ class NullCityViewTransactionSession:
 	var city_view_creation_count: int = 0
 	var synchronization_call_count: int = 0
 	var first_entry_failure_messages: Array[String] = []
+	var prepared_context: SettlementSimulationContext
 
 
 	func _create_city_view() -> Node:
@@ -195,12 +236,14 @@ class NullCityViewTransactionSession:
 			reject_next_city_view = false
 			return null
 
-		return Control.new()
+		return ExplicitBindingTransactionCityView.new()
 
 
-	func _synchronize_first_city_entry_foundation() -> bool:
+	func _prepare_first_city_entry(
+		_prepared_payload: Dictionary = {}
+	) -> SettlementSimulationContext:
 		synchronization_call_count += 1
-		return true
+		return prepared_context
 
 
 	func _select_first_city_detailed_simulation_target() -> bool:
@@ -737,8 +780,7 @@ func _test_first_city_entry_transaction() -> void:
 	for raw_resource in seeded_resources.keys():
 		var resource := str(raw_resource)
 		var accepted := (
-			CityResourceContainerSystem
-			.add_resource_to_city_object_storage(
+			CityResourceContainerSystem.add_resource_to_city_object_storage(
 				keep_id,
 				resource,
 				int(seeded_resources[resource])
@@ -761,8 +803,7 @@ func _test_first_city_entry_transaction() -> void:
 	for raw_resource in seeded_resources.keys():
 		var resource := str(raw_resource)
 		resource_totals_before[resource] = (
-			CityResourceAccountingSystem
-			.get_total_physical_city_resource_amount(resource)
+			CityResourceAccountingSystem.get_total_physical_city_resource_amount(resource)
 		)
 		_expect(
 			int(resource_totals_before[resource])
@@ -962,8 +1003,59 @@ func _test_first_city_entry_transaction() -> void:
 	WorldData.reset_runtime_session_state()
 
 
+func _make_null_city_view_context() -> SettlementSimulationContext:
+	var culture := WorldData.create_culture(
+		"Null City View Transaction Culture"
+	)
+	var culture_id := int(culture.get("id", -1))
+	if culture_id <= 0:
+		return null
+	var polity := WorldPoliticalState.create_polity({
+		"name": "Null City View Transaction Realm",
+		"polity_type": PolityData.POLITY_TYPE_KINGDOM,
+		"primary_culture_id": culture_id,
+	})
+	var polity_id := int(polity.get("id", -1))
+	var city := WorldPoliticalState.create_settlement({
+		"name": "Null City View Transaction City",
+		"settlement_type": SettlementData.SETTLEMENT_TYPE_CITY,
+		"polity_id": polity_id,
+		"world_region_top_left": Vector2i(3, 3),
+		"world_region_center": Vector2i(3, 3),
+		"world_region_size": 1,
+		"simulation_backend_kind": (
+			SettlementSimulationContext.BACKEND_CITY_SETTLEMENT_STATE
+		),
+	})
+	var city_id := int(city.get("id", -1))
+	var city_state: CitySettlementSimulationState = (
+		WorldPoliticalState.get_city_simulation_state(city_id)
+	)
+	if polity_id <= 0 or city_id <= 0 or city_state == null:
+		return null
+	city_state.city_world = _make_world(8, 8, 52_099)
+	city_state.city_seed = 52_099
+	city_state.city_runtime_data = {
+		"id": city_id,
+		"name": "Null City View Transaction City",
+		"primary_culture_id": culture_id,
+		"founded": false,
+		"can_build": false,
+	}
+	return WorldPoliticalState.get_settlement_context(city_id)
+
+
 func _test_null_city_view_does_not_commit_first_entry() -> void:
+	var prepared_context := _make_null_city_view_context()
+	_expect(
+		prepared_context != null,
+		"The null-view transaction test must create a registered City context."
+	)
+	if prepared_context == null:
+		WorldData.reset_runtime_session_state()
+		return
 	var session := NullCityViewTransactionSession.new()
+	session.prepared_context = prepared_context
 	SimulationClock.start_new_game(3, 14, 29)
 	SimulationClock.set_speed_multiplier(2.0)
 	SimulationClock.set_simulation_paused(false)
@@ -995,6 +1087,7 @@ func _test_null_city_view_does_not_commit_first_entry() -> void:
 	)
 	session.free()
 	SimulationClock.reset_clock_state()
+	WorldData.reset_runtime_session_state()
 
 
 func _test_game_session_terminal_case(
@@ -1043,9 +1136,10 @@ func _test_game_session_terminal_case(
 		)
 	elif status == PREPARATION_SERVICE.STATUS_FAILED:
 		_expect(
-			session.last_prepared_payload.is_empty()
+			session.last_prepared_payload
+			== preparation.synchronous_payload
 			and session.preparation_failure_messages.size() == 1,
-			"FAILED must preserve synchronous fallback behavior."
+			"FAILED must install the synchronous fallback payload exactly once."
 		)
 	else:
 		_expect(

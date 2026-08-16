@@ -229,6 +229,13 @@ static func get_city_citizen_index_by_id_for_city_state(
 static func get_city_population_count() -> int:
 	return city_citizens.size()
 
+
+static func get_city_population_count_for_city_state(
+	city_state: CitySettlementSimulationState
+) -> int:
+	var registry_state := get_state_for_city_state(city_state)
+	return registry_state.citizens.size() if registry_state != null else 0
+
 static func get_city_citizen_by_id(citizen_id: int) -> Dictionary:
 
 	var citizen_index := get_city_citizen_index_by_id(citizen_id)
@@ -274,7 +281,25 @@ static func get_city_citizen_snapshot() -> Array:
 	return citizen_snapshot
 
 static func get_city_citizen_display_name(citizen_id: int) -> String:
-	var citizen := get_city_citizen_by_id(citizen_id)
+	return _get_city_citizen_display_name(null, citizen_id)
+
+
+static func get_city_citizen_display_name_for_city_state(
+	city_state: CitySettlementSimulationState,
+	citizen_id: int
+) -> String:
+	return _get_city_citizen_display_name(city_state, citizen_id)
+
+
+static func _get_city_citizen_display_name(
+	city_state: CitySettlementSimulationState,
+	citizen_id: int
+) -> String:
+	var citizen := (
+		get_city_citizen_by_id(citizen_id)
+		if city_state == null
+		else get_city_citizen_by_id_for_city_state(city_state, citizen_id)
+	)
 
 	if citizen.is_empty():
 		return "Citizen " + str(citizen_id)

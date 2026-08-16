@@ -47,8 +47,19 @@ func _run_smoke_test() -> void:
 	if renderer == null:
 		return
 
-	add_child(renderer)
 	SimulationClock.set_simulation_paused(true)
+	var binding := (
+		CityRendererBindingSupport.prepare_player_capital_renderer(renderer)
+	)
+	_expect(
+		not binding.is_empty(),
+		"The smoke-test renderer must receive an explicit capital binding before _ready()."
+	)
+	if binding.is_empty():
+		renderer.free()
+		return
+
+	add_child(renderer)
 	await get_tree().process_frame
 	await get_tree().process_frame
 
@@ -117,6 +128,18 @@ func _run_smoke_test() -> void:
 	await get_tree().process_frame
 
 	var reloaded_renderer := CITY_SCENE.instantiate() as CityRenderer
+	var reload_binding := CityRendererBindingSupport.configure_existing_renderer(
+		reloaded_renderer,
+		int(binding["settlement_context"].settlement_id)
+	)
+	_expect(
+		not reload_binding.is_empty(),
+		"City re-entry must explicitly bind the retained settlement before _ready()."
+	)
+	if reload_binding.is_empty():
+		reloaded_renderer.free()
+		WorldData.reset_runtime_session_state()
+		return
 	add_child(reloaded_renderer)
 	SimulationClock.set_simulation_paused(true)
 	await get_tree().process_frame
@@ -1814,8 +1837,7 @@ func _test_universal_construction_core(
 		return
 
 	var initial_progress := (
-		CityConstructionSystemScript
-		.get_city_construction_site_progress_summary(
+		CityConstructionSystemScript.get_city_construction_site_progress_summary(
 			house_site_id
 		)
 	)
@@ -1940,8 +1962,7 @@ func _test_universal_construction_core(
 	)
 
 	var cleanup_candidate := (
-		CityConstructionSystemScript
-		.get_best_assignable_player_work_for_citizen(citizen_id)
+		CityConstructionSystemScript.get_best_assignable_player_work_for_citizen(citizen_id)
 	)
 	_expect(
 		not cleanup_candidate.is_empty()
@@ -2027,8 +2048,7 @@ func _test_universal_construction_core(
 	)
 
 	var cleared_progress := (
-		CityConstructionSystemScript
-		.get_city_construction_site_progress_summary(
+		CityConstructionSystemScript.get_city_construction_site_progress_summary(
 			house_site_id
 		)
 	)
@@ -2189,8 +2209,7 @@ func _test_universal_construction_core(
 	var selected_road_site_id := int(selected_road_site.get("id", -1))
 	var selected_road_tile: Vector2i = road_tiles[1]
 	var road_progress := (
-		CityConstructionSystemScript
-		.get_city_construction_site_progress_summary(
+		CityConstructionSystemScript.get_city_construction_site_progress_summary(
 			selected_road_site_id
 		)
 	)
