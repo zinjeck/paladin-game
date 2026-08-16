@@ -15,11 +15,41 @@ var list_panel: Panel
 var title_label: Label
 var body_label: Label
 var is_open: bool = false
+var presentation_binding: CityPresentationBinding
 
 #region Setup
 
+func bind_city_presentation(binding: CityPresentationBinding) -> bool:
+	if binding == null or not binding.is_valid():
+		return false
+
+	var changed := not is_same(presentation_binding, binding)
+	presentation_binding = binding
+	if changed:
+		is_open = false
+		if list_panel != null:
+			list_panel.visible = false
+		if body_label != null:
+			body_label.text = ""
+	refresh()
+	return true
+
+
+func is_bound_to_city_presentation(
+	binding: CityPresentationBinding
+) -> bool:
+	return (
+		presentation_binding != null
+		and presentation_binding.matches_binding(binding)
+	)
+
+
 func setup(values: Dictionary) -> void:
 	if not _has_valid_setup_values(values):
+		return
+
+	if not bind_city_presentation(values["presentation_binding"]):
+		push_error("CitizenDebugPanel.setup received an invalid presentation binding.")
 		return
 
 	debug_panel_ui = values["debug_panel"]
@@ -35,6 +65,7 @@ func _has_valid_setup_values(values: Dictionary) -> bool:
 	var required_keys: Array[String] = [
 		"debug_panel",
 		"text_provider",
+		"presentation_binding",
 	]
 
 	for key in required_keys:
@@ -54,6 +85,15 @@ func _has_valid_setup_values(values: Dictionary) -> bool:
 	if typeof(values["text_provider"]) != TYPE_CALLABLE:
 		push_error(
 			"CitizenDebugPanel.setup text_provider must be Callable."
+		)
+		return false
+
+	if (
+		not values["presentation_binding"] is CityPresentationBinding
+		or not values["presentation_binding"].is_valid()
+	):
+		push_error(
+			"CitizenDebugPanel.setup presentation_binding must be valid."
 		)
 		return false
 
@@ -274,262 +314,212 @@ func _on_debug_panel_resized() -> void:
 
 #region Citizen debug text presentation
 
-
-static func get_debug_list_text() -> String:
-	var citizens := CityCitizenRegistrySystem.get_city_citizen_snapshot()
-
+func get_debug_list_text() -> String:
+	var city_state := _get_bound_city_state()
+	if city_state == null:
+		return "No bound settlement."
+	var citizens: Array = city_state.citizen_registry_state.citizens
 	if citizens.is_empty():
 		return "No citizens."
 
-	var lines := []
-
-	for citizen in citizens:
-		if not citizen is Dictionary:
-			continue
-
-		lines.append(get_debug_line(citizen))
-
+	var lines: Array[String] = []
+	for raw_citizen in citizens:
+		if raw_citizen is Dictionary:
+			lines.append(get_debug_line(raw_citizen))
 	return "\n".join(lines)
 
 
-static func get_debug_line(citizen: Dictionary) -> String:
+func get_debug_line(citizen: Dictionary) -> String:
+	var city_state := _get_bound_city_state()
+	if city_state == null:
+		return "No bound settlement."
 	var citizen_id := int(citizen.get("id", -1))
-	var citizen_name := str(
-		citizen.get("name", "Citizen " + str(citizen_id))
-	)
-	var home_text := get_home_text(citizen)
-	var job_text := get_job_text(citizen)
-	var task_text := get_task_text(citizen)
-	var state_text := str(citizen.get("state", "unknown"))
+	var citizen_name := str(citizen.get("name", "Citizen " + str(citizen_id)))
 	var raw_position = citizen.get(
 		"city_tile_position",
 		CityCitizens.INVALID_CITY_TILE_POSITION
 	)
-	var position_text := "invalid"
-
-	if raw_position is Vector2i:
-		position_text = str(raw_position)
-
-	var sex_text := (
-		CityCitizens.get_city_citizen_sex_display_name(
-			str(citizen.get("sex", ""))
-		)
+	var position_text := str(raw_position) if raw_position is Vector2i else "invalid"
+	var sex_text := CityCitizens.get_city_citizen_sex_display_name(
+		str(citizen.get("sex", ""))
 	)
-	var hunger := CitizenNeedsSystem.get_city_citizen_hunger(citizen_id)
-	var happiness := CitizenNeedsSystem.get_city_citizen_happiness(citizen_id)
+	var hunger := CitizenNeedsSystem.get_city_citizen_hunger_for_city_state(
+		city_state,
+		citizen_id
+	)
+	var happiness := CitizenNeedsSystem.get_city_citizen_happiness_for_city_state(
+		city_state,
+		citizen_id
+	)
 	var inventory_used := get_inventory_used(citizen)
 	var carry_capacity := (
-		CityCitizenInventorySystem.get_city_citizen_carry_capacity(citizen_id)
+		CityCitizenInventorySystem.get_city_citizen_carry_capacity_for_city_state(
+			city_state,
+			citizen_id
+		)
 	)
-	var haul_text := get_haul_text(citizen)
 
 	return (
 		"#" + str(citizen_id)
 		+ " " + citizen_name
 		+ " | " + sex_text
-		+ " | Home: " + home_text
-		+ " | Job: " + job_text
+		+ " | Home: " + get_home_text(citizen)
+		+ " | Job: " + get_job_text(citizen)
 		+ " | Pos " + position_text
-		+ " | " + state_text
-		+ " | Task: " + task_text
+		+ " | " + str(citizen.get("state", "unknown"))
+		+ " | Task: " + get_task_text(citizen)
 		+ " | Hunger " + str(hunger)
 		+ " | Happiness " + str(happiness)
 		+ " | Inv " + str(inventory_used) + "/" + str(carry_capacity)
-		+ " | Haul " + haul_text
+		+ " | Haul " + get_haul_text(citizen)
 	)
 
 
-static func get_haul_text(citizen: Dictionary) -> String:
+func get_haul_text(citizen: Dictionary) -> String:
+	var city_state := _get_bound_city_state()
+	if city_state == null:
+		return "No"
 	var citizen_id := int(citizen.get("id", -1))
-
-	if not CitizenHaulingSystem.city_citizen_is_hauling(citizen_id):
+	if not CitizenHaulingSystem.city_citizen_is_hauling_for_city_state(
+		city_state,
+		citizen_id
+	):
 		return "No"
 
-	var haul := CityCitizenTaskRuntimeSystem.get_city_citizen_current_haul(citizen_id)
-	var cargo_resources := (
-		CityCitizenInventorySystem.get_city_citizen_haul_cargo_resources(citizen_id)
+	var haul := CityCitizenTaskRuntimeSystem.get_city_citizen_current_haul_for_city_state(
+		city_state,
+		citizen_id
 	)
-	var inventory_used := get_inventory_used(citizen)
+	var cargo_resources := CityCitizenInventorySystem.get_city_citizen_haul_cargo_resources_for_city_state(
+		city_state,
+		citizen_id
+	)
 	var haul_capacity := maxi(
-		CityCitizenInventorySystem.get_city_citizen_carry_capacity(citizen_id)
-		- inventory_used,
+		CityCitizenInventorySystem.get_city_citizen_carry_capacity_for_city_state(
+			city_state,
+			citizen_id
+		) - get_inventory_used(citizen),
 		0
 	)
-	var phase := str(
-		haul.get(
-			"phase",
-			CityCitizens.CITY_CITIZEN_HAUL_PHASE_NONE
-		)
+	var cargo_amount := CityCitizenInventorySystem.get_city_citizen_haul_cargo_amount_for_city_state(
+		city_state,
+		citizen_id
 	)
-
 	return (
 		format_resource_manifest(cargo_resources)
-		+ " "
-		+ str(CityCitizenInventorySystem.get_city_citizen_haul_cargo_amount(citizen_id))
-		+ "/"
-		+ str(haul_capacity)
-		+ " | "
-		+ format_haul_endpoint(haul.get("source", {}))
-		+ " -> "
-		+ format_haul_endpoint(haul.get("destination", {}))
-		+ " | Stops "
-		+ str(maxi(int(haul.get("pickup_stop_count", 0)), 0))
-		+ " | R#"
-		+ str(
-			int(
-				haul.get(
-					"reservation_id",
-					CityCitizens.INVALID_CITY_CITIZEN_HAUL_RESERVATION_ID
-				)
-			)
-		)
-		+ " | "
-		+ phase
+		+ " " + str(cargo_amount) + "/" + str(haul_capacity)
+		+ " | " + format_haul_endpoint(haul.get("source", {}))
+		+ " -> " + format_haul_endpoint(haul.get("destination", {}))
+		+ " | Stops " + str(maxi(int(haul.get("pickup_stop_count", 0)), 0))
+		+ " | R#" + str(int(haul.get(
+			"reservation_id",
+			CityCitizens.INVALID_CITY_CITIZEN_HAUL_RESERVATION_ID
+		)))
+		+ " | " + str(haul.get(
+			"phase",
+			CityCitizens.CITY_CITIZEN_HAUL_PHASE_NONE
+		))
 	)
 
 
-static func get_home_text(citizen: Dictionary) -> String:
-	var home_object_id := int(citizen.get("home_object_id", -1))
+func get_home_text(citizen: Dictionary) -> String:
+	return _get_assigned_object_text(int(citizen.get("home_object_id", -1)))
 
-	if home_object_id < 0:
+
+func get_job_text(citizen: Dictionary) -> String:
+	return _get_assigned_object_text(int(citizen.get("job_object_id", -1)))
+
+
+func _get_assigned_object_text(object_id: int) -> String:
+	if object_id < 0:
 		return "none"
-
-	var home_object := CityObjectSystem.get_city_object_by_id(home_object_id)
-
-	if home_object.is_empty():
-		return "missing #" + str(home_object_id)
-
-	return _get_city_object_display_name(home_object) + " #" + str(home_object_id)
-
-
-static func get_job_text(citizen: Dictionary) -> String:
-	var job_object_id := int(citizen.get("job_object_id", -1))
-
-	if job_object_id < 0:
-		return "none"
-
-	var job_object := CityObjectSystem.get_city_object_by_id(job_object_id)
-
-	if job_object.is_empty():
-		return "missing #" + str(job_object_id)
-
-	return _get_city_object_display_name(job_object) + " #" + str(job_object_id)
+	var city_state := _get_bound_city_state()
+	if city_state == null:
+		return "missing #" + str(object_id)
+	var city_object := CityObjectSystem.get_city_object_by_id_for_city_state(
+		city_state,
+		object_id
+	)
+	if city_object.is_empty():
+		return "missing #" + str(object_id)
+	return _get_city_object_display_name(city_object) + " #" + str(object_id)
 
 
-static func get_task_text(citizen: Dictionary) -> String:
+func get_task_text(citizen: Dictionary) -> String:
+	var city_state := _get_bound_city_state()
+	if city_state == null:
+		return "invalid"
 	var raw_current_task = citizen.get("current_task", {})
-
 	if not raw_current_task is Dictionary:
 		return "invalid"
-
 	var current_task: Dictionary = raw_current_task
-	var task_kind := str(
-		current_task.get(
-			"kind",
-			CityCitizens.CITY_CITIZEN_TASK_KIND_NONE
-		)
-	)
-
+	var task_kind := str(current_task.get(
+		"kind",
+		CityCitizens.CITY_CITIZEN_TASK_KIND_NONE
+	))
 	if task_kind == CityCitizens.CITY_CITIZEN_TASK_KIND_NONE:
 		return "None"
 
-	var task_phase := str(
-		current_task.get(
-			"phase",
-			CityCitizens.CITY_CITIZEN_TASK_PHASE_NONE
-		)
-	)
+	var task_phase := str(current_task.get(
+		"phase",
+		CityCitizens.CITY_CITIZEN_TASK_PHASE_NONE
+	))
 	var task_text := task_kind.capitalize()
-
 	if task_phase != CityCitizens.CITY_CITIZEN_TASK_PHASE_NONE:
 		task_text += " (" + task_phase.capitalize() + ")"
-
-	var target_object_id := int(
-		current_task.get("target_object_id", -1)
-	)
+	var target_object_id := int(current_task.get("target_object_id", -1))
 
 	if task_kind == CityCitizens.CITY_CITIZEN_TASK_KIND_ACQUIRE_FOOD:
-		var food_resource := str(
-			current_task.get(
-				"food_resource_type",
-				WorldData.RESOURCE_NONE
-			)
-		)
-		var food_amount := maxi(
-			int(current_task.get("food_requested_amount", 0)),
-			0
-		)
-
+		var food_resource := str(current_task.get(
+			"food_resource_type",
+			WorldData.RESOURCE_NONE
+		))
+		var food_amount := maxi(int(current_task.get("food_requested_amount", 0)), 0)
 		if food_amount > 0 and food_resource != WorldData.RESOURCE_NONE:
-			task_text += (
-				" ["
-				+ str(food_amount)
-				+ " "
-				+ food_resource.capitalize()
-				+ "]"
-			)
+			task_text += " [" + str(food_amount) + " " + food_resource.capitalize() + "]"
 
 	if task_kind == CityCitizens.CITY_CITIZEN_TASK_KIND_HAUL:
 		var raw_current_haul = citizen.get("current_haul", {})
-
 		if raw_current_haul is Dictionary:
-			task_text += (
-				" -> "
-				+ format_haul_endpoint(
-					raw_current_haul.get("source", {})
-				)
-			)
-
+			task_text += " -> " + format_haul_endpoint(raw_current_haul.get("source", {}))
 		return task_text
 
 	if (
-		task_kind
-		== CityCitizens.CITY_CITIZEN_TASK_KIND_CONSTRUCTION
+		task_kind == CityCitizens.CITY_CITIZEN_TASK_KIND_CONSTRUCTION
 		and target_object_id > 0
 	):
-		var construction_site := (
-			CityConstructionSystem.get_city_construction_site_by_id(
-				target_object_id
-			)
+		var construction_site := CityConstructionSystem.get_city_construction_site_by_id_for_city_state(
+			city_state,
+			target_object_id
 		)
-
 		if construction_site.is_empty():
-			return (
-				task_text
-				+ " -> missing construction site #"
-				+ str(target_object_id)
-			)
-
+			return task_text + " -> missing construction site #" + str(target_object_id)
 		return (
-			task_text
-			+ " -> "
+			task_text + " -> "
 			+ CityObjectCatalog.get_city_object_display_name_for_type(
 				str(construction_site.get("object_type", ""))
 			)
-			+ " Blueprint #"
-			+ str(target_object_id)
+			+ " Blueprint #" + str(target_object_id)
 		)
 
 	if target_object_id > 0:
-		var target_object := CityObjectSystem.get_city_object_by_id(
+		var target_object := CityObjectSystem.get_city_object_by_id_for_city_state(
+			city_state,
 			target_object_id
 		)
-
 		if target_object.is_empty():
 			task_text += " -> missing #" + str(target_object_id)
 		else:
-			task_text += (
-				" -> "
-				+ _get_city_object_display_name(target_object)
-				+ " #"
-				+ str(target_object_id)
-			)
-
+			task_text += " -> " + _get_city_object_display_name(target_object) + " #" + str(target_object_id)
 	return task_text
 
 
-static func get_inventory_used(citizen: Dictionary) -> int:
-	return CityCitizenInventorySystem.get_city_citizen_inventory_used_capacity(
+func get_inventory_used(citizen: Dictionary) -> int:
+	var city_state := _get_bound_city_state()
+	if city_state == null:
+		return 0
+	return CityCitizenInventorySystem.get_city_citizen_inventory_used_capacity_for_city_state(
+		city_state,
 		int(citizen.get("id", -1))
 	)
 
@@ -537,111 +527,78 @@ static func get_inventory_used(citizen: Dictionary) -> int:
 static func format_resource_manifest(resources: Dictionary) -> String:
 	if resources.is_empty():
 		return "Empty"
-
 	var resource_names: Array = resources.keys()
 	resource_names.sort()
 	var parts: Array[String] = []
-
 	for raw_resource in resource_names:
 		var resource := str(raw_resource)
 		var amount := maxi(int(resources.get(raw_resource, 0)), 0)
-
-		if amount <= 0:
-			continue
-
-		parts.append(resource.capitalize() + " " + str(amount))
-
-	if parts.is_empty():
-		return "Empty"
-
-	return ", ".join(parts)
+		if amount > 0:
+			parts.append(resource.capitalize() + " " + str(amount))
+	return ", ".join(parts) if not parts.is_empty() else "Empty"
 
 
-static func format_haul_endpoint(raw_endpoint) -> String:
+func format_haul_endpoint(raw_endpoint) -> String:
 	if not raw_endpoint is Dictionary:
 		return "invalid"
-
+	var city_state := _get_bound_city_state()
+	if city_state == null:
+		return "invalid"
 	var endpoint: Dictionary = raw_endpoint
-	var endpoint_kind := str(
-		endpoint.get(
-			"kind",
-			CityCitizens.CITY_CITIZEN_HAUL_ENDPOINT_KIND_NONE
-		)
-	)
+	var endpoint_kind := str(endpoint.get(
+		"kind",
+		CityCitizens.CITY_CITIZEN_HAUL_ENDPOINT_KIND_NONE
+	))
 	var endpoint_id := int(endpoint.get("id", -1))
-
 	if endpoint_kind == CityCitizens.CITY_CITIZEN_HAUL_ENDPOINT_KIND_NONE:
 		return "none"
 
-	if (
-		endpoint_kind
-		== CityCitizens.CITY_CITIZEN_HAUL_ENDPOINT_KIND_GROUND_PILE
-	):
-		var ground_pile := CityLogisticsSystem.get_city_ground_pile_by_id(
+	if endpoint_kind == CityCitizens.CITY_CITIZEN_HAUL_ENDPOINT_KIND_GROUND_PILE:
+		var ground_pile := CityLogisticsSystem.get_city_ground_pile_by_id_for_city_state(
+			city_state,
 			endpoint_id
 		)
-
 		if ground_pile.is_empty():
 			return "missing ground pile #" + str(endpoint_id)
-
 		return (
-			"Ground Pile #"
-			+ str(endpoint_id)
-			+ " ("
-			+ str(
-				ground_pile.get(
-					"resource_type",
-					WorldData.RESOURCE_NONE
-				)
-			).capitalize()
-			+ " "
-			+ str(maxi(int(ground_pile.get("amount", 0)), 0))
-			+ ")"
+			"Ground Pile #" + str(endpoint_id) + " ("
+			+ str(ground_pile.get("resource_type", WorldData.RESOURCE_NONE)).capitalize()
+			+ " " + str(maxi(int(ground_pile.get("amount", 0)), 0)) + ")"
 		)
 
-	if (
-		endpoint_kind
-		== CityCitizens.CITY_CITIZEN_HAUL_ENDPOINT_KIND_CONSTRUCTION_SITE
-	):
-		var site := CityConstructionSystem.get_city_construction_site_by_id(
+	if endpoint_kind == CityCitizens.CITY_CITIZEN_HAUL_ENDPOINT_KIND_CONSTRUCTION_SITE:
+		var site := CityConstructionSystem.get_city_construction_site_by_id_for_city_state(
+			city_state,
 			endpoint_id
 		)
-
 		if site.is_empty():
 			return "missing construction site #" + str(endpoint_id)
-
 		return (
 			CityObjectCatalog.get_city_object_display_name_for_type(
 				str(site.get("object_type", ""))
-			)
-			+ " Blueprint #"
-			+ str(endpoint_id)
+			) + " Blueprint #" + str(endpoint_id)
 		)
 
-	if (
-		endpoint_kind
-		!= CityCitizens.CITY_CITIZEN_HAUL_ENDPOINT_KIND_CITY_OBJECT_CONTAINER
-	):
+	if endpoint_kind != CityCitizens.CITY_CITIZEN_HAUL_ENDPOINT_KIND_CITY_OBJECT_CONTAINER:
 		return endpoint_kind + " #" + str(endpoint_id)
-
-	var city_object := CityObjectSystem.get_city_object_by_id(endpoint_id)
-
+	var city_object := CityObjectSystem.get_city_object_by_id_for_city_state(
+		city_state,
+		endpoint_id
+	)
 	if city_object.is_empty():
 		return "missing #" + str(endpoint_id)
-
-	return (
-		_get_city_object_display_name(city_object)
-		+ " #"
-		+ str(endpoint_id)
-	)
+	return _get_city_object_display_name(city_object) + " #" + str(endpoint_id)
 
 
-static func _get_city_object_display_name(
-	city_object: Dictionary
-) -> String:
+func _get_bound_city_state() -> CitySettlementSimulationState:
+	if presentation_binding == null or not presentation_binding.is_valid():
+		return null
+	return presentation_binding.city_state
+
+
+static func _get_city_object_display_name(city_object: Dictionary) -> String:
 	if city_object.is_empty():
 		return "Unknown"
-
 	return CityObjectCatalog.get_city_object_display_name_for_type(
 		str(city_object.get("type", ""))
 	)
