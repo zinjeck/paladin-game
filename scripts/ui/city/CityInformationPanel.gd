@@ -98,11 +98,36 @@ var happiness_bar: SlimNeedMeter
 var population_button: Button
 var jobs_button: Button
 var reserved_button: Button
+var presentation_binding: CityPresentationBinding
+
+
+func bind_city_presentation(binding: CityPresentationBinding) -> bool:
+	if binding == null or not binding.is_valid():
+		return false
+
+	presentation_binding = binding
+	if panel != null:
+		refresh_all()
+	return true
+
+
+func is_bound_to_city_presentation(
+	binding: CityPresentationBinding
+) -> bool:
+	return (
+		presentation_binding != null
+		and presentation_binding.matches_binding(binding)
+	)
 
 
 func setup(parent: Control) -> void:
 	if parent == null:
 		push_error("CityInformationPanel.setup requires a parent Control.")
+		return
+	if presentation_binding == null or not presentation_binding.is_valid():
+		push_error(
+			"CityInformationPanel.setup requires an explicit city presentation binding."
+		)
 		return
 
 	panel = Panel.new()
@@ -220,26 +245,29 @@ func refresh_identity() -> void:
 	if city_name_label == null:
 		return
 
-	var city_state = WorldPoliticalState.get_current_city_simulation_state()
 	var city_name := ""
-
-	if city_state is CitySettlementSimulationState:
+	if presentation_binding != null and presentation_binding.is_valid():
 		city_name = str(
-			city_state.city_runtime_data.get("name", "")
+			presentation_binding.city_state.city_runtime_data.get(
+				"name",
+				""
+			)
 		).strip_edges()
 
-	if city_name.is_empty():
-		city_name = str(
-			WorldPoliticalState.get_active_settlement().get("name", "")
-		).strip_edges()
+		if city_name.is_empty():
+			city_name = str(
+				WorldPoliticalState.get_settlement(
+					presentation_binding.settlement_id
+				).get("name", "")
+			).strip_edges()
 
-	if (
-		city_name.is_empty()
-		and WorldPoliticalState.active_settlement_id
-		== SettlementData.INVALID_SETTLEMENT_ID
-		and WorldData.has_official_founding_identity()
-	):
-		city_name = WorldData.get_official_city_name().strip_edges()
+		if (
+			city_name.is_empty()
+			and presentation_binding.settlement_id
+			== WorldPoliticalState.get_player_capital_settlement_id()
+			and WorldData.has_official_founding_identity()
+		):
+			city_name = WorldData.get_official_city_name().strip_edges()
 
 	city_name_label.text = city_name
 	city_name_label.tooltip_text = city_name
@@ -256,46 +284,54 @@ func refresh_time() -> void:
 
 
 func refresh_citizen_data() -> void:
-	var city_state = WorldPoliticalState.get_current_city_simulation_state()
+	var city_state: CitySettlementSimulationState = (
+		presentation_binding.city_state
+		if presentation_binding != null and presentation_binding.is_valid()
+		else null
+	)
 	var city_is_founded: bool = (
-		city_state is CitySettlementSimulationState
-		and city_state.is_city_founded()
+		city_state != null and city_state.is_city_founded()
+	)
+	var citizen_count := (
+		CityCitizenRegistrySystem.get_city_population_count_for_city_state(
+			city_state
+		)
+		if city_state != null
+		else 0
 	)
 
 	if population_button != null:
-		population_button.text = (
-			"Pop\n" + str(CityCitizenRegistrySystem.get_city_population_count())
-		)
+		population_button.text = "Pop\n" + str(citizen_count)
 
 	if hunger_label != null:
 		hunger_label.visible = city_is_founded
-
 	if happiness_label != null:
 		happiness_label.visible = city_is_founded
-
 	if hunger_bar != null:
 		hunger_bar.visible = city_is_founded
-
 	if happiness_bar != null:
 		happiness_bar.visible = city_is_founded
 
-	var citizen_snapshot := CityCitizenRegistrySystem.get_city_citizen_snapshot()
-	var citizen_count := citizen_snapshot.size()
 	var average_hunger := 0.0
 	var average_happiness := 0.0
-
-	if citizen_count > 0:
+	if city_state != null and citizen_count > 0:
 		var total_hunger := 0.0
 		var total_happiness := 0.0
-
-		for raw_citizen in citizen_snapshot:
-			var citizen: Dictionary = raw_citizen
-			var citizen_id := int(citizen.get("id", -1))
+		for raw_citizen in city_state.citizen_registry_state.citizens:
+			if not raw_citizen is Dictionary:
+				continue
+			var citizen_id := int(raw_citizen.get("id", -1))
 			total_hunger += float(
-				CitizenNeedsSystem.get_city_citizen_hunger(citizen_id)
+				CitizenNeedsSystem.get_city_citizen_hunger_for_city_state(
+					city_state,
+					citizen_id
+				)
 			)
 			total_happiness += float(
-				CitizenNeedsSystem.get_city_citizen_happiness(citizen_id)
+				CitizenNeedsSystem.get_city_citizen_happiness_for_city_state(
+					city_state,
+					citizen_id
+				)
 			)
 
 		average_hunger = total_hunger / float(citizen_count)
@@ -303,7 +339,6 @@ func refresh_citizen_data() -> void:
 
 	if hunger_bar != null:
 		hunger_bar.value = average_hunger
-
 	if happiness_bar != null:
 		happiness_bar.value = average_happiness
 

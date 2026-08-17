@@ -99,6 +99,10 @@ func _test_atomic_settlement_presentation_rebind() -> void:
 	var state_b: CitySettlementSimulationState = fixture_b["state"]
 	var object_a: Dictionary = fixture_a["object"]
 	var object_b: Dictionary = fixture_b["object"]
+	var citizen_a: Dictionary = fixture_a["citizen"]
+	var citizen_b: Dictionary = fixture_b["citizen"]
+	var citizen_a_name := str(citizen_a.get("name", ""))
+	var citizen_b_name := str(citizen_b.get("name", ""))
 	var feature_a: Vector2i = fixture_a["feature_tile"]
 	var feature_b: Vector2i = fixture_b["feature_tile"]
 	var state_a_snapshot := _capture_gameplay_snapshot(state_a)
@@ -120,6 +124,16 @@ func _test_atomic_settlement_presentation_rebind() -> void:
 		and SimulationClock.simulation_paused
 		and is_equal_approx(SimulationClock.speed_multiplier, 2.0),
 		"Renderer _ready() must retain its explicit A binding while global presentation remains B and must not resume the clock."
+	)
+	var renderer_binding_a := renderer.get_city_presentation_binding()
+	_expect_renderer_helpers_bound(
+		renderer,
+		renderer_binding_a,
+		0,
+		citizen_a_name,
+		citizen_b_name,
+		null,
+		"Every renderer-owned helper must share A's exact binding generation and diagnostic source."
 	)
 
 	var a_camera_position := Vector2(23.0, 17.0)
@@ -184,6 +198,16 @@ func _test_atomic_settlement_presentation_rebind() -> void:
 		and not renderer.city_rock_multimesh_index_by_tile.has(feature_a),
 		"B's object, UI identity, and natural-feature cache must replace every A presentation source."
 	)
+	var renderer_binding_b := renderer.get_city_presentation_binding()
+	_expect_renderer_helpers_bound(
+		renderer,
+		renderer_binding_b,
+		renderer_binding_a.generation,
+		citizen_b_name,
+		citizen_a_name,
+		renderer_binding_a,
+		"A-to-B rebind must replace every helper binding and diagnostic source in one generation."
+	)
 	_expect(
 		_capture_gameplay_snapshot(state_a) == state_a_snapshot
 		and _capture_gameplay_snapshot(state_b) == state_b_snapshot
@@ -230,6 +254,16 @@ func _test_atomic_settlement_presentation_rebind() -> void:
 		) == "owner_a",
 		"A/B/A must restore City A presentation from A authority, never from B's equal local IDs."
 	)
+	var renderer_binding_a_again := renderer.get_city_presentation_binding()
+	_expect_renderer_helpers_bound(
+		renderer,
+		renderer_binding_a_again,
+		renderer_binding_b.generation,
+		citizen_a_name,
+		citizen_b_name,
+		renderer_binding_b,
+		"A/B/A must bind every helper to the new A generation rather than reusing stale helper state."
+	)
 	_expect(
 		renderer.camera.position.is_equal_approx(a_camera_position)
 		and renderer.camera.zoom.is_equal_approx(a_camera_zoom),
@@ -258,6 +292,42 @@ func _test_atomic_settlement_presentation_rebind() -> void:
 	session.free()
 	renderer.queue_free()
 	await get_tree().process_frame
+
+
+func _expect_renderer_helpers_bound(
+	renderer: CityRenderer,
+	binding: CityPresentationBinding,
+	minimum_generation: int,
+	included_citizen_name: String,
+	excluded_citizen_name: String,
+	stale_binding: CityPresentationBinding,
+	message: String
+) -> void:
+	var citizen_debug_text := renderer.get_citizen_debug_list_text()
+	var helpers_match := (
+		binding != null
+		and binding.is_valid()
+		and binding.generation > minimum_generation
+		and renderer.city_information_ui.is_bound_to_city_presentation(binding)
+		and renderer.citizen_debug_ui.is_bound_to_city_presentation(binding)
+		and renderer.city_debug_presentation.is_bound_to_city_presentation(binding)
+		and renderer.city_citizen_movement_presentation.is_bound_to_city_presentation(
+			binding
+		)
+		and renderer.workplace_zone_overlay_cache.is_bound_to_city_presentation(
+			binding
+		)
+		and included_citizen_name in citizen_debug_text
+		and excluded_citizen_name not in citizen_debug_text
+	)
+	if stale_binding != null:
+		helpers_match = (
+			helpers_match
+			and not renderer.city_information_ui.is_bound_to_city_presentation(
+				stale_binding
+			)
+		)
+	_expect(helpers_match, message)
 
 
 func _arm_stale_city_a_presentation(renderer: CityRenderer, object_id: int) -> void:
@@ -315,9 +385,18 @@ func _seed_city(
 			"object_owner": object_owner,
 		}
 	)
+	var female_names := CityCitizens.get_city_citizen_name_pool_for_sex(
+		CityCitizens.CITY_CITIZEN_SEX_FEMALE
+	)
+	var citizen_name_index := 0 if object_owner == "owner_a" else 1
+	var citizen_name := (
+		str(female_names[citizen_name_index])
+		if female_names.size() > citizen_name_index
+		else ""
+	)
 	var citizen := CityCitizenRegistrySystem.add_city_citizen_for_city_state(
 		state,
-		"",
+		citizen_name,
 		Vector2i(width - 2, 1),
 		CityCitizens.CITY_CITIZEN_SEX_FEMALE,
 		culture_id

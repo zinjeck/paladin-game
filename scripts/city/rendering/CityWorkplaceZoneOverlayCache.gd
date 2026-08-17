@@ -25,8 +25,27 @@ const SELECTED_BORDER_COLOR: Color = (
 
 var _preview_cache: Dictionary = {}
 var _selected_cache: Dictionary = {}
+var presentation_binding: CityPresentationBinding
 
 #region Public cache API
+
+func bind_city_presentation(binding: CityPresentationBinding) -> bool:
+	if binding == null or not binding.is_valid():
+		return false
+	if not is_same(presentation_binding, binding):
+		presentation_binding = binding
+		invalidate_all()
+	return true
+
+
+func is_bound_to_city_presentation(
+	binding: CityPresentationBinding
+) -> bool:
+	return (
+		presentation_binding != null
+		and presentation_binding.matches_binding(binding)
+	)
+
 
 func invalidate_all() -> void:
 	_invalidate_cache(_preview_cache)
@@ -34,7 +53,10 @@ func invalidate_all() -> void:
 
 
 func prepare(values: Dictionary) -> Dictionary:
+	if presentation_binding == null or not presentation_binding.is_valid():
+		return {}
 	var request := values.duplicate(false)
+	request["city_world"] = presentation_binding.city_world
 	request["allow_rebuild"] = true
 	return _get_cached(request)
 
@@ -43,6 +65,12 @@ func has_cached_zone(
 	preview_mode: bool,
 	city_world: WorldData
 ) -> bool:
+	if (
+		presentation_binding == null
+		or not presentation_binding.is_valid()
+		or not is_same(city_world, presentation_binding.city_world)
+	):
+		return false
 	var render_cache := _get_cached({
 		"city_object": city_object,
 		"preview_mode": preview_mode,
@@ -54,9 +82,13 @@ func has_cached_zone(
 	return bool(render_cache.get("has_zone", false))
 
 func draw_cached(values: Dictionary) -> bool:
+	if presentation_binding == null or not presentation_binding.is_valid():
+		return false
 	var city_object: Dictionary = values.get("city_object", {})
 	var preview_mode := bool(values.get("preview_mode", false))
 	var city_world: WorldData = values.get("city_world", null)
+	if not is_same(city_world, presentation_binding.city_world):
+		return false
 	var draw_target: CanvasItem = values.get("draw_target", null)
 	var render_cache := _get_cached({
 		"city_object": city_object,
@@ -121,11 +153,15 @@ func _invalidate_cache(render_cache: Dictionary) -> void:
 
 
 func _get_cached(values: Dictionary) -> Dictionary:
+	if presentation_binding == null or not presentation_binding.is_valid():
+		return {}
 	var city_object: Dictionary = values.get("city_object", {})
 	var preview_mode := bool(values.get("preview_mode", false))
 	var city_world: WorldData = values.get("city_world", null)
 	var city_tile_size := int(values.get("city_tile_size", 0))
 	var allow_rebuild := bool(values.get("allow_rebuild", false))
+	if not is_same(city_world, presentation_binding.city_world):
+		return {}
 	var object_id := int(city_object.get("id", -1))
 	var object_type := str(city_object.get("type", ""))
 	var top_left: Vector2i = city_object.get(
@@ -140,6 +176,19 @@ func _get_cached(values: Dictionary) -> Dictionary:
 		city_object
 	)
 	var footprint_hash_value := int(hash(footprint_tiles))
+	if not preview_mode and object_id > 0:
+		var authoritative_object := CityObjectSystem.get_city_object_by_id_for_city_state(
+			presentation_binding.city_state,
+			object_id
+		)
+		if (
+			authoritative_object.is_empty()
+			or not is_same(authoritative_object, city_object)
+			or str(authoritative_object.get("type", "")) != object_type
+			or authoritative_object.get("top_left", Vector2i(-1, -1)) != top_left
+			or authoritative_object.get("size", Vector2i.ZERO) != size_tiles
+		):
+			return {}
 	var tile_data_version := -1
 
 	if city_world != null:
@@ -160,6 +209,9 @@ func _get_cached(values: Dictionary) -> Dictionary:
 		"size_tiles": size_tiles,
 		"footprint_hash_value": footprint_hash_value,
 		"tile_data_version": tile_data_version,
+		"city_state_instance_id": int(presentation_binding.city_state.get_instance_id()),
+		"city_world_instance_id": int(presentation_binding.city_world.get_instance_id()),
+		"binding_generation": presentation_binding.generation,
 	}):
 		return active_cache
 
@@ -187,6 +239,9 @@ func _get_cached(values: Dictionary) -> Dictionary:
 		"size": size_tiles,
 		"footprint_hash": footprint_hash_value,
 		"tile_data_version": tile_data_version,
+		"city_state_instance_id": int(presentation_binding.city_state.get_instance_id()),
+		"city_world_instance_id": int(presentation_binding.city_world.get_instance_id()),
+		"binding_generation": presentation_binding.generation,
 		"has_zone": false,
 		"texture": reusable_texture,
 		"image": reusable_image,
@@ -243,6 +298,9 @@ func _cache_matches(values: Dictionary) -> bool:
 		values.get("footprint_hash_value", -1)
 	)
 	var tile_data_version := int(values.get("tile_data_version", -1))
+	var city_state_instance_id := int(values.get("city_state_instance_id", -1))
+	var city_world_instance_id := int(values.get("city_world_instance_id", -1))
+	var binding_generation := int(values.get("binding_generation", -1))
 
 	if render_cache.is_empty():
 		return false
@@ -262,6 +320,12 @@ func _cache_matches(values: Dictionary) -> bool:
 		== footprint_hash_value
 		and int(render_cache.get("tile_data_version", -2))
 		== tile_data_version
+		and int(render_cache.get("city_state_instance_id", -2))
+		== city_state_instance_id
+		and int(render_cache.get("city_world_instance_id", -2))
+		== city_world_instance_id
+		and int(render_cache.get("binding_generation", -2))
+		== binding_generation
 	)
 
 #endregion

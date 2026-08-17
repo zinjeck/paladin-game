@@ -864,17 +864,17 @@ PASS9_REQUIRED_TEST_CALLS = {
 
 PASS9_FOCUSED_QUERY_CONSUMERS = {
     "scripts/ui/city/CityInformationPanel.gd": (
-        "get_city_citizen_hunger",
-        "get_city_citizen_happiness",
+        "get_city_citizen_hunger_for_city_state",
+        "get_city_citizen_happiness_for_city_state",
     ),
     "scripts/ui/debug/CitizenDebugPanel.gd": (
-        "get_city_citizen_hunger",
-        "get_city_citizen_happiness",
-        "get_city_citizen_carry_capacity",
-        "get_city_citizen_inventory_used_capacity",
-        "get_city_citizen_haul_cargo_amount",
-        "get_city_citizen_haul_cargo_resources",
-        "city_citizen_is_hauling",
+        "get_city_citizen_hunger_for_city_state",
+        "get_city_citizen_happiness_for_city_state",
+        "get_city_citizen_carry_capacity_for_city_state",
+        "get_city_citizen_inventory_used_capacity_for_city_state",
+        "get_city_citizen_haul_cargo_amount_for_city_state",
+        "get_city_citizen_haul_cargo_resources_for_city_state",
+        "city_citizen_is_hauling_for_city_state",
     ),
     "scripts/city/rendering/CityRenderer.gd": (
         "get_city_citizen_hunger_for_city_state",
@@ -4994,7 +4994,7 @@ def main() -> int:
             "_clear_city_presentation_interactions()",
             "_reset_city_presentation_observers()",
             "workplace_zone_overlay_cache.invalidate_all()",
-            "city_citizen_movement_presentation.initialize(bound_city_state)",
+            "_bind_city_presentation_references(",
             "rebuild_city_terrain_texture()",
             "rebuild_city_natural_feature_multimeshes()",
             "_configure_city_camera_for_bound_settlement()",
@@ -6335,6 +6335,224 @@ def main() -> int:
                 f"{required_path.relative_to(ROOT)}: missing explicit validator "
                 "A/B cache-isolation coverage"
             )
+
+    # PR 6: every helper owned by CityRenderer must share one exact,
+    # non-authoritative presentation binding. Helpers may read only the state,
+    # world, and settlement identity supplied by that binding; active/current
+    # City discovery and no-target domain queries are forbidden here.
+    presentation_binding_path = (
+        ROOT / "scripts/city/rendering/CityPresentationBinding.gd"
+    )
+    presentation_helper_contracts = {
+        "scripts/ui/city/CityInformationPanel.gd": (
+            "bind_city_presentation",
+            "is_bound_to_city_presentation",
+        ),
+        "scripts/ui/debug/CitizenDebugPanel.gd": (
+            "bind_city_presentation",
+            "is_bound_to_city_presentation",
+        ),
+        "scripts/city/rendering/CityDebugPresentation.gd": (
+            "bind_city_presentation",
+            "is_bound_to_city_presentation",
+        ),
+        "scripts/citizens/rendering/CityCitizenMovementPresentation.gd": (
+            "bind_city_presentation",
+            "is_bound_to_city_presentation",
+        ),
+        "scripts/city/rendering/CityWorkplaceZoneOverlayCache.gd": (
+            "bind_city_presentation",
+            "is_bound_to_city_presentation",
+        ),
+    }
+    presentation_helper_forbidden_patterns = (
+        r"\bWorldPoliticalState\s*\.\s*active_settlement_id\b",
+        r"\bWorldPoliticalState\s*\.\s*get_active_city_simulation_state\s*\(",
+        r"\bWorldPoliticalState\s*\.\s*get_current_city_",
+        r"\b[A-Z][A-Za-z0-9_]*System(?:Script)?\s*\.\s*get_current_state\s*\(",
+        r"\bCityWorkSystem(?:Script)?\s*\.\s*get_current_work_state\s*\(",
+        r"\bCityStateValidator(?:Script)?\s*\.\s*get_summary_text\s*\(",
+        r"\bCityStateValidator(?:Script)?\s*\.\s*validate\s*\(",
+        r"\bCityCitizenRegistrySystem\s*\.\s*get_city_population_count\s*\(",
+        r"\bCityCitizenRegistrySystem\s*\.\s*get_city_citizen_by_id\s*\(",
+        r"\bCityCitizenSpatialSystem\s*\.\s*get_city_citizen_ids_at_tile\s*\(",
+        r"\bCityCitizenMovementRuntimeSystem\s*\.\s*get_city_active_mover_ids_snapshot\s*\(",
+        r"\bCityCitizenTaskRuntimeSystem\s*\.\s*get_city_active_task_ids_snapshot\s*\(",
+        r"\bCityCitizenTaskRuntimeSystem\s*\.\s*get_city_citizen_current_(?:task|haul)\s*\(",
+        r"\bCitizenNeedsSystem\s*\.\s*get_city_citizen_(?:hunger|happiness)\s*\(",
+        r"\bCitizenHaulingSystem\s*\.\s*city_citizen_is_hauling\s*\(",
+        r"\bCityCitizenInventorySystem\s*\.\s*get_city_citizen_(?:carry_capacity|inventory_used_capacity|haul_cargo_amount|haul_cargo_resources)\s*\(",
+        r"\bCityObjectSystem\s*\.\s*get_city_object_(?:by_id|at_tile)\s*\(",
+        r"\bCityConstructionSystem(?:Script)?\s*\.\s*get_city_construction_site_by_id\s*\(",
+        r"\bCityLogisticsSystem\s*\.\s*get_city_ground_pile_by_id\s*\(",
+        r"\bCityNavigationSystem(?:Script)?\s*\.\s*get_city_citizen_movement_step_cost\s*\(",
+    )
+
+    if not presentation_binding_path.exists():
+        errors.append(
+            "scripts/city/rendering/CityPresentationBinding.gd: missing PR 6 "
+            "explicit helper binding"
+        )
+    else:
+        presentation_binding_text = presentation_binding_path.read_text(
+            encoding="utf-8"
+        )
+        for required_surface in (
+            "class_name CityPresentationBinding",
+            "var settlement_context: SettlementSimulationContext",
+            "var city_state: CitySettlementSimulationState",
+            "var settlement_id: int",
+            "var city_world: WorldData",
+            "var city_seed: int",
+            "var generation: int",
+            "func configure(",
+            "func is_valid(",
+            "func matches_binding(",
+        ):
+            if required_surface not in presentation_binding_text:
+                errors.append(
+                    "scripts/city/rendering/CityPresentationBinding.gd: "
+                    f"missing binding surface {required_surface}"
+                )
+
+    for helper_relative, required_functions in presentation_helper_contracts.items():
+        helper_path = ROOT / helper_relative
+        if not helper_path.exists():
+            errors.append(f"{helper_relative}: missing PR 6 presentation helper")
+            continue
+        helper_text = helper_path.read_text(encoding="utf-8")
+        masked_helper_text = gdscript_masked_code(helper_text)
+        if "var presentation_binding: CityPresentationBinding" not in helper_text:
+            errors.append(
+                f"{helper_relative}: helper must retain the renderer's exact "
+                "CityPresentationBinding"
+            )
+        for required_function in required_functions:
+            if not re.search(
+                rf"^func\s+{re.escape(required_function)}\s*\(",
+                helper_text,
+                re.MULTILINE,
+            ):
+                errors.append(
+                    f"{helper_relative}: missing PR 6 helper boundary "
+                    f"{required_function}"
+                )
+        for forbidden_pattern in presentation_helper_forbidden_patterns:
+            if re.search(forbidden_pattern, masked_helper_text):
+                errors.append(
+                    f"{helper_relative}: renderer-owned helper must not "
+                    "resolve active/current or no-target City authority"
+                )
+                break
+
+    renderer_binding_path = ROOT / "scripts/city/rendering/CityRenderer.gd"
+    if renderer_binding_path.exists():
+        renderer_binding_text = renderer_binding_path.read_text(encoding="utf-8")
+        renderer_binding_body = gdscript_function_body(
+            renderer_binding_text,
+            "_bind_city_presentation_helpers",
+        ) or ""
+        for required_helper in (
+            "city_information_ui.bind_city_presentation",
+            "citizen_debug_ui.bind_city_presentation",
+            "city_citizen_movement_presentation.bind_city_presentation",
+            "workplace_zone_overlay_cache.bind_city_presentation",
+            "city_debug_presentation.bind_city_presentation",
+        ):
+            if required_helper not in renderer_binding_body:
+                errors.append(
+                    "scripts/city/rendering/CityRenderer.gd: PR 6 binding "
+                    f"does not configure {required_helper}"
+                )
+        for required_surface in (
+            "var city_presentation_binding: CityPresentationBinding",
+            "var city_presentation_binding_generation: int",
+            "func get_city_presentation_binding() -> CityPresentationBinding:",
+            "find_path_to_any_city_tile_for_city_state(",
+        ):
+            if required_surface not in renderer_binding_text:
+                errors.append(
+                    "scripts/city/rendering/CityRenderer.gd: missing PR 6 "
+                    f"binding-generation surface {required_surface}"
+                )
+        if "find_path_to_any_city_tile({" in renderer_binding_text:
+            errors.append(
+                "scripts/city/rendering/CityRenderer.gd: debug navigation "
+                "must pass the renderer's bound city state explicitly"
+            )
+
+    camera_state_path = ROOT / "scripts/map/MapCameraSessionState.gd"
+    if camera_state_path.exists():
+        camera_state_text = camera_state_path.read_text(encoding="utf-8")
+        for required_surface in (
+            "city_camera_state_by_settlement_id",
+            "store_city_camera_for_binding",
+            "get_city_camera_for_binding",
+            '"city_state_ref": weakref(binding.city_state)',
+            '"city_world_ref": weakref(binding.city_world)',
+        ):
+            if required_surface not in camera_state_text:
+                errors.append(
+                    "scripts/map/MapCameraSessionState.gd: missing exact "
+                    f"settlement camera identity surface {required_surface}"
+                )
+        for retired_surface in (
+            "static var has_city_camera_state",
+            "static var city_camera_position",
+            "static var city_camera_zoom",
+            "static func store_city_camera(",
+        ):
+            if retired_surface in camera_state_text:
+                errors.append(
+                    "scripts/map/MapCameraSessionState.gd: unkeyed city "
+                    f"camera state must remain retired: {retired_surface}"
+                )
+
+    texture_state_path = ROOT / "scripts/map/visuals/MapTextureCacheState.gd"
+    if texture_state_path.exists():
+        texture_state_text = texture_state_path.read_text(encoding="utf-8")
+        for required_surface in (
+            "world_source_ref: WeakRef",
+            "city_source_ref: WeakRef",
+            "weakref(source_world)",
+            "weakref(source_city_world)",
+            "is_same(cached_world, source_world)",
+            "is_same(cached_city_world, source_city_world)",
+        ):
+            if required_surface not in texture_state_text:
+                errors.append(
+                    "scripts/map/visuals/MapTextureCacheState.gd: shared "
+                    f"texture cache lacks exact source identity {required_surface}"
+                )
+
+    helper_test_path = (
+        ROOT / "scripts/city/rendering/CityPresentationHelperBindingTest.gd"
+    )
+    helper_test_scene_path = helper_test_path.with_suffix(".tscn")
+    for required_path in (helper_test_path, helper_test_scene_path):
+        if not required_path.exists():
+            errors.append(
+                f"{required_path.relative_to(ROOT)}: missing PR 6 A/B helper "
+                "binding regression"
+            )
+    if helper_test_path.exists():
+        helper_test_text = helper_test_path.read_text(encoding="utf-8")
+        for required_token in (
+            "WorldPoliticalState.set_active_settlement(city_b_id)",
+            "information_ui.bind_city_presentation(binding_a)",
+            "citizen_debug.bind_city_presentation(binding_a)",
+            "debug_presentation.bind_city_presentation(",
+            "movement_presentation.bind_city_presentation(binding_a)",
+            "overlay_cache.bind_city_presentation(binding_a)",
+            "MapCameraSessionStateScript.store_city_camera_for_binding(",
+            "MapTextureCacheStateScript.has_valid_city_cache(",
+            "replacement_binding_a.configure(replacement_context_a, 3)",
+        ):
+            if required_token not in helper_test_text:
+                errors.append(
+                    "scripts/city/rendering/CityPresentationHelperBindingTest.gd: "
+                    f"missing PR 6 collision coverage {required_token}"
+                )
 
     report = {
         "script_count": len(scripts),
