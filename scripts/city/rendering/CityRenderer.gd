@@ -47,8 +47,6 @@ const CityWorkSystemScript = preload(
 @export var local_tiles_per_world_tile: int = CityWorldGeneratorScript.DEFAULT_LOCAL_TILES_PER_WORLD_TILE
 @export var city_tile_size: int = 2
 
-var city_presentation_binding: CityPresentationBinding
-var city_presentation_binding_generation: int = 0
 var bound_settlement_context: SettlementSimulationContext
 var bound_city_state: CitySettlementSimulationState
 var bound_city_settlement_id: int = SettlementData.INVALID_SETTLEMENT_ID
@@ -60,6 +58,7 @@ var session_view_active: bool = true
 var city_layers_have_been_presented: bool = false
 var city_presentation_rebind_generation: int = 0
 var city_presentation_rebind_pending: bool = false
+var city_camera_state_by_settlement_id: Dictionary = {}
 var camera: Camera2D
 var observed_city_camera_position: Vector2 = Vector2.ZERO
 var observed_city_camera_zoom: Vector2 = Vector2.ZERO
@@ -114,7 +113,6 @@ var debug_selected_city_tile: Vector2i = (
 	CityCitizens.INVALID_CITY_TILE_POSITION
 )
 var citizen_debug_ui = CitizenDebugPanelScript.new()
-var city_debug_presentation = CityDebugPresentationScript.new()
 const DEFAULT_CITY_OBJECT_FRAME_COLOR: Color = Color(0.32, 0.30, 0.24, 0.95)
 const DEFAULT_CITY_OBJECT_FILL_COLOR: Color = Color(0.86, 0.84, 0.76, 0.55)
 const DEFAULT_CITY_OBJECT_FRAME_THICKNESS: float = 0.35
@@ -358,6 +356,7 @@ func _ready() -> void:
 		session_prepared_city_payload.get("preparation_duration_usec", 0)
 	)
 	install_session_prepared_city_map_textures()
+	city_citizen_movement_presentation.initialize(bound_city_state)
 	synchronized_city_citizen_movement_version = (
 		bound_city_state.citizen_movement_runtime_state.citizen_movement_version
 	)
@@ -414,11 +413,7 @@ func configure_initial_city_presentation(
 	if not can_rebind_city_presentation(settlement_context, prepared_payload):
 		return false
 
-	if not _bind_city_presentation_references(
-		settlement_context,
-		prepared_payload
-	):
-		return false
+	_bind_city_presentation_references(settlement_context, prepared_payload)
 	initial_city_presentation_configured = true
 	return true
 
@@ -426,47 +421,18 @@ func configure_initial_city_presentation(
 func _bind_city_presentation_references(
 	settlement_context: SettlementSimulationContext,
 	prepared_payload: Dictionary
-) -> bool:
-	city_presentation_binding_generation += 1
-	var next_binding := CityPresentationBinding.new()
-	if not next_binding.configure(
-		settlement_context,
-		city_presentation_binding_generation
-	):
-		return false
-
-	city_presentation_binding = next_binding
-	bound_settlement_context = next_binding.settlement_context
-	bound_city_state = next_binding.city_state
-	bound_city_settlement_id = next_binding.settlement_id
-	city_world = next_binding.city_world
-	city_seed = next_binding.city_seed
+) -> void:
+	bound_settlement_context = settlement_context
+	bound_city_state = settlement_context.get_city_simulation_state()
+	bound_city_settlement_id = settlement_context.settlement_id
+	city_world = bound_city_state.city_world
+	city_seed = bound_city_state.city_seed
 	session_prepared_city_payload = prepared_payload.duplicate(true)
-	return _bind_city_presentation_helpers()
-
-
-func _bind_city_presentation_helpers() -> bool:
-	return (
-		city_information_ui.bind_city_presentation(city_presentation_binding)
-		and citizen_debug_ui.bind_city_presentation(city_presentation_binding)
-		and city_citizen_movement_presentation.bind_city_presentation(
-			city_presentation_binding
-		)
-		and workplace_zone_overlay_cache.bind_city_presentation(
-			city_presentation_binding
-		)
-		and city_debug_presentation.bind_city_presentation(
-			city_presentation_binding,
-			citizen_debug_ui
-		)
-	)
 
 
 func _has_valid_bound_city_presentation() -> bool:
 	return (
 		initial_city_presentation_configured
-		and city_presentation_binding != null
-		and city_presentation_binding.is_valid()
 		and bound_settlement_context != null
 		and bound_city_state != null
 		and WorldPoliticalState.is_registered_settlement_context(
@@ -481,30 +447,11 @@ func _has_valid_bound_city_presentation() -> bool:
 		and city_world != null
 		and is_same(city_world, bound_city_state.city_world)
 		and city_seed == bound_city_state.city_seed
-		and city_information_ui.is_bound_to_city_presentation(
-			city_presentation_binding
-		)
-		and citizen_debug_ui.is_bound_to_city_presentation(
-			city_presentation_binding
-		)
-		and city_citizen_movement_presentation.is_bound_to_city_presentation(
-			city_presentation_binding
-		)
-		and workplace_zone_overlay_cache.is_bound_to_city_presentation(
-			city_presentation_binding
-		)
-		and city_debug_presentation.is_bound_to_city_presentation(
-			city_presentation_binding
-		)
 	)
 
 
 func get_bound_settlement_context():
 	return bound_settlement_context
-
-
-func get_city_presentation_binding() -> CityPresentationBinding:
-	return city_presentation_binding
 
 
 func set_session_view_active(is_active: bool) -> void:
@@ -610,13 +557,9 @@ func rebind_city_presentation(
 	city_citizen_draw_buffer.clear()
 	city_citizen_rect_draw_buffer.clear()
 
-	if not _bind_city_presentation_references(
-		settlement_context,
-		prepared_payload
-	):
-		city_presentation_rebind_pending = false
-		return false
+	_bind_city_presentation_references(settlement_context, prepared_payload)
 	initial_city_presentation_configured = true
+	city_citizen_movement_presentation.initialize(bound_city_state)
 	CityCitizenMovementRuntimeSystem.clear_city_citizen_movement_visual_events_for_city_state(
 			bound_city_state
 		)
@@ -662,23 +605,6 @@ func validate_city_presentation_binding(settlement_context) -> bool:
 		or not is_same(bound_city_state, target_state)
 		or not is_same(city_world, target_state.city_world)
 		or city_seed != target_state.city_seed
-		or city_presentation_binding == null
-		or not city_presentation_binding.matches_context(settlement_context)
-		or not city_information_ui.is_bound_to_city_presentation(
-			city_presentation_binding
-		)
-		or not citizen_debug_ui.is_bound_to_city_presentation(
-			city_presentation_binding
-		)
-		or not city_citizen_movement_presentation.is_bound_to_city_presentation(
-			city_presentation_binding
-		)
-		or not workplace_zone_overlay_cache.is_bound_to_city_presentation(
-			city_presentation_binding
-		)
-		or not city_debug_presentation.is_bound_to_city_presentation(
-			city_presentation_binding
-		)
 		or city_terrain_texture == null
 		or city_terrain_texture.get_width() != city_world.width
 		or city_terrain_texture.get_height() != city_world.height
@@ -822,22 +748,21 @@ func _capture_bound_city_presentation_versions(
 
 
 func _store_bound_city_camera_state() -> void:
-	if camera == null or city_presentation_binding == null:
+	if camera == null or bound_city_settlement_id <= 0:
 		return
-	MapCameraSessionStateScript.store_city_camera_for_binding(
-		city_presentation_binding,
-		camera.position,
-		camera.zoom
-	)
+	city_camera_state_by_settlement_id[bound_city_settlement_id] = {
+		"position": camera.position,
+		"zoom": camera.zoom,
+	}
 
 
 func _configure_city_camera_for_bound_settlement() -> void:
-	if camera == null or city_presentation_binding == null:
+	if camera == null or city_world == null:
 		return
-	var stored_camera := MapCameraSessionStateScript.get_city_camera_for_binding(
-		city_presentation_binding
+	var stored_camera = city_camera_state_by_settlement_id.get(
+		bound_city_settlement_id
 	)
-	var has_stored_camera := not stored_camera.is_empty()
+	var has_stored_camera := stored_camera is Dictionary
 	camera.configure_for_map(
 		city_world.width,
 		city_world.height,
@@ -1787,19 +1712,16 @@ func create_city_camera() -> void:
 
 	add_child(camera)
 
-	var stored_camera := MapCameraSessionStateScript.get_city_camera_for_binding(
-		city_presentation_binding
-	)
 	camera.configure_for_map(
 		city_world.width,
 		city_world.height,
 		city_tile_size,
-		stored_camera.is_empty()
+		not MapCameraSessionStateScript.has_city_camera_state
 	)
 
-	if not stored_camera.is_empty():
-		camera.position = stored_camera.get("position", camera.position)
-		camera.zoom = stored_camera.get("zoom", camera.zoom)
+	if MapCameraSessionStateScript.has_city_camera_state:
+		camera.position = MapCameraSessionStateScript.city_camera_position
+		camera.zoom = MapCameraSessionStateScript.city_camera_zoom
 		camera.clamp_camera_to_map_bounds()
 
 	camera.make_current()
@@ -1810,8 +1732,7 @@ func store_current_city_camera_state() -> void:
 	if camera == null:
 		return
 
-	MapCameraSessionStateScript.store_city_camera_for_binding(
-		city_presentation_binding,
+	MapCameraSessionStateScript.store_city_camera(
 		camera.position,
 		camera.zoom
 	)
@@ -3426,7 +3347,7 @@ func update_selected_city_citizen_panel() -> void:
 	var state_text := str(
 		citizen.get("state", "unknown")
 	).capitalize()
-	var task_text := citizen_debug_ui.get_task_text(citizen)
+	var task_text := CitizenDebugPanelScript.get_task_text(citizen)
 	var task_target_text := "none"
 	var raw_current_task = citizen.get("current_task", {})
 
@@ -3492,11 +3413,11 @@ func update_selected_city_citizen_panel() -> void:
 			)
 			+ " nutrition",
 		"Home: "
-			+ citizen_debug_ui.get_home_text(
+			+ CitizenDebugPanelScript.get_home_text(
 				citizen
 			),
 		"Workplace: "
-			+ citizen_debug_ui.get_job_text(
+			+ CitizenDebugPanelScript.get_job_text(
 				citizen
 			)
 	]
@@ -3645,7 +3566,7 @@ func get_city_resource_manifest_display_text(
 	)
 
 func get_haul_endpoint_display_text(raw_endpoint) -> String:
-	return citizen_debug_ui.format_haul_endpoint(
+	return CitizenDebugPanelScript.format_haul_endpoint(
 		raw_endpoint
 	)
 
@@ -8075,7 +7996,6 @@ func create_debug_panel() -> void:
 
 	citizen_debug_ui.setup({
 		"debug_panel": debug_panel_ui,
-		"presentation_binding": city_presentation_binding,
 		"text_provider": Callable(
 			self,
 			"get_citizen_debug_list_text"
@@ -8218,13 +8138,11 @@ func request_debug_navigation_path() -> void:
 		destination_tiles.append(target_tile)
 
 	var result := (
-		CityNavigationSystemScript.find_path_to_any_city_tile_for_city_state(
-			bound_city_state,
-			{
-				"start_tile": start_tile,
-				"destination_tiles": destination_tiles,
-			}
-		)
+		CityNavigationSystemScript.find_path_to_any_city_tile({
+			"city_world": city_world,
+			"start_tile": start_tile,
+			"destination_tiles": destination_tiles,
+		})
 	)
 
 	debug_navigation_status = str(
@@ -8356,7 +8274,7 @@ func assign_debug_navigation_path_to_selected_citizen() -> void:
 	)
 
 func get_navigation_debug_text() -> String:
-	return city_debug_presentation.get_navigation_text(
+	return CityDebugPresentationScript.get_navigation_text(
 		_get_city_debug_presentation_values()
 	)
 
@@ -8366,12 +8284,12 @@ func format_debug_navigation_path_cost(path_cost: int) -> String:
 	)
 
 func get_simulation_debug_text() -> String:
-	return city_debug_presentation.get_simulation_text(
+	return CityDebugPresentationScript.get_simulation_text(
 		_get_city_debug_presentation_values()
 	)
 
 func get_citizen_debug_list_text() -> String:
-	return citizen_debug_ui.get_debug_list_text()
+	return CitizenDebugPanelScript.get_debug_list_text()
 
 func toggle_debug_mode() -> void:
 	if debug_panel_ui == null:
@@ -8394,7 +8312,7 @@ func toggle_debug_mode() -> void:
 		print("Debug mode: OFF")
 
 func get_city_debug_panel_text() -> String:
-	return city_debug_presentation.get_panel_text(
+	return CityDebugPresentationScript.get_panel_text(
 		_get_city_debug_presentation_values()
 	)
 
