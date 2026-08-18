@@ -1,0 +1,321 @@
+name: Recover and publish real PR 7
+
+on:
+  push:
+    branches:
+      - staging/recover-real-pr7-20260817
+
+permissions:
+  contents: write
+  pull-requests: write
+  actions: read
+
+jobs:
+  recover:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+      EXPECTED_PATCH_SHA256: f60f085ab81e24c6428d741394e1fcd23267cd15f05a37b36570f567f9e91d6b
+      TARGET_BRANCH: refactor/citizen-systems-explicit-settlement-state-redo
+    steps:
+      - name: Check out recovery history
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Recover the exact verified patch
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch origin '+refs/heads/*:refs/remotes/origin/*'
+          rm -rf /tmp/pr7-candidates
+          mkdir -p /tmp/pr7-candidates
+
+          # Preserve every historical version of every transport fragment.
+          mapfile -t paths < <(
+            git log --all --pretty=format: --name-only -- \
+              'transport/pr7*' 'recovery/*' | sed '/^$/d' | sort -u
+          )
+          for path in "${paths[@]}"; do
+            safe=$(printf '%s' "$path" | tr '/ ' '__')
+            while read -r commit; do
+              [[ -n "$commit" ]] || continue
+              if git cat-file -e "$commit:$path" 2>/dev/null; then
+                git show "$commit:$path" > "/tmp/pr7-candidates/${safe}_${commit}.bin"
+              fi
+            done < <(git rev-list --all -- "$path")
+          done
+
+          # Explicitly recover the two orphaned Git blobs from the dedicated branch.
+          for path in recovery/blob-1ed7.bin recovery/blob-30b787.bin; do
+            safe=$(printf '%s' "$path" | tr '/ ' '__')
+            git show "origin/staging/pr7-orphaned-blob-recovery-20260818:$path" \
+              > "/tmp/pr7-candidates/${safe}_orphan.bin"
+          done
+
+          python3 <<'PY'
+          from __future__ import annotations
+
+          import base64
+          import bz2
+          import glob
+          import hashlib
+          import itertools
+          import os
+          import re
+          from collections import Counter
+          from pathlib import Path
+
+          expected = os.environ['EXPECTED_PATCH_SHA256']
+          root = Path('/tmp/pr7-candidates')
+          base64_re = re.compile(br'^[A-Za-z0-9+/=]+$')
+
+          def clean_ascii(data: bytes) -> bytes | None:
+              stripped = b''.join(data.split())
+              if stripped and base64_re.fullmatch(stripped):
+                  return stripped
+              return None
+
+          raw_items: list[tuple[str, bytes]] = []
+          for filename in sorted(glob.glob(str(root / '*'))):
+              data = Path(filename).read_bytes()
+              raw_items.append((Path(filename).name, data))
+
+          # Exact first attempts: historical whole-file streams in lexical chunk order.
+          groups: dict[str, list[tuple[str, bytes]]] = {}
+          for name, data in raw_items:
+              if 'transport_pr7b_chunk_' in name:
+                  commit = name.rsplit('_', 1)[-1].split('.')[0]
+                  groups.setdefault(commit, []).append((name, data))
+
+          def recover(stream64: bytes) -> bytes | None:
+              compact = b''.join(stream64.split())
+              if not compact:
+                  return None
+              try:
+                  decoded = base64.b64decode(compact + b'=' * (-len(compact) % 4), validate=False)
+                  dec = bz2.BZ2Decompressor()
+                  output = dec.decompress(decoded)
+              except Exception:
+                  return None
+              if not dec.eof:
+                  return None
+              if hashlib.sha256(output).hexdigest() != expected:
+                  return None
+              return output
+
+          for items in groups.values():
+              items.sort(key=lambda item: item[0])
+              output = recover(b''.join(data for _, data in items))
+              if output is not None:
+                  Path('/tmp/pr7.patch').write_bytes(output)
+                  raise SystemExit(0)
+
+          # Build a deduplicated pool of plausible base64 stream fragments. Oversized
+          # connector writes are split at likely 10,000-character transport boundaries;
+          # orphaned binary pieces are tried both raw and base64-encoded.
+          fragments: dict[bytes, str] = {}
+          for name, data in raw_items:
+              representations: list[tuple[str, bytes]] = []
+              ascii_data = clean_ascii(data)
+              if ascii_data is not None:
+                  representations.append((name + ':ascii', ascii_data))
+              representations.append((name + ':b64raw', base64.b64encode(data)))
+
+              for label, rep in representations:
+                  if not rep:
+                      continue
+                  fragments.setdefault(rep, label)
+                  offsets = {0, max(0, len(rep) - 10000), len(rep) % 10000}
+                  offsets.update(range(0, len(rep), 10000))
+                  for offset in sorted(offsets):
+                      if offset >= len(rep):
+                          continue
+                      frag = rep[offset:offset + 10000]
+                      if frag:
+                          fragments.setdefault(frag, f'{label}@{offset}')
+                  # Preserve short terminal suffixes as possible final fragments.
+                  for size in (768, 3260, 6159, 9345):
+                      if len(rep) >= size:
+                          fragments.setdefault(rep[-size:], f'{label}:tail{size}')
+
+          # Current known-good leading chunks receive first priority.
+          current: dict[int, bytes] = {}
+          for path in sorted(Path('transport/pr7b').glob('chunk_*.txt')):
+              match = re.search(r'chunk_(\d+)', path.name)
+              if match:
+                  value = clean_ascii(path.read_bytes())
+                  if value is not None:
+                      current[int(match.group(1))] = value
+
+          ordered_pool: list[bytes] = []
+          for index in sorted(current):
+              value = current[index]
+              if value not in ordered_pool:
+                  ordered_pool.append(value)
+          for value in fragments:
+              if value not in ordered_pool:
+                  ordered_pool.append(value)
+
+          def probe(parts: tuple[bytes, ...]) -> tuple[str, int, bytes | None]:
+              stream = b''.join(parts)
+              try:
+                  decoded = base64.b64decode(stream + b'=' * (-len(stream) % 4), validate=False)
+                  dec = bz2.BZ2Decompressor()
+                  output = dec.decompress(decoded)
+              except Exception:
+                  return ('bad', -1, None)
+              if dec.eof:
+                  digest = hashlib.sha256(output).hexdigest()
+                  if digest == expected:
+                      return ('done', len(output), output)
+                  return ('wrong_eof', len(output), None)
+              return ('open', len(output), None)
+
+          # Identify the longest current prefix that remains a viable bzip stream.
+          prefix: tuple[bytes, ...] = ()
+          for index in sorted(current):
+              candidate = prefix + (current[index],)
+              state, _, output = probe(candidate)
+              if state == 'bad':
+                  break
+              if state == 'done':
+                  Path('/tmp/pr7.patch').write_bytes(output)
+                  raise SystemExit(0)
+              prefix = candidate
+
+          # Beam-search the damaged tail. Output progress is the ranking signal;
+          # bzip2 block CRCs prune incorrect fragments once a block closes.
+          states: list[tuple[bytes, ...]] = [prefix]
+          seen = {hashlib.sha256(b''.join(prefix)).digest()}
+          max_depth = 18
+          beam_width = 3000
+          for _depth in range(max_depth):
+              next_states: list[tuple[int, tuple[bytes, ...]]] = []
+              for parts in states:
+                  counts = Counter(parts)
+                  for fragment in ordered_pool:
+                      if counts[fragment] >= 2:
+                          continue
+                      candidate = parts + (fragment,)
+                      key = hashlib.sha256(b''.join(candidate)).digest()
+                      if key in seen:
+                          continue
+                      seen.add(key)
+                      state, progress, output = probe(candidate)
+                      if state == 'done' and output is not None:
+                          Path('/tmp/pr7.patch').write_bytes(output)
+                          raise SystemExit(0)
+                      if state == 'open':
+                          next_states.append((progress, candidate))
+              if not next_states:
+                  break
+              next_states.sort(key=lambda row: row[0], reverse=True)
+              states = [parts for _, parts in next_states[:beam_width]]
+
+          raise SystemExit('Unable to reconstruct the verified PR7 patch from all available fragments')
+          PY
+
+          echo "$EXPECTED_PATCH_SHA256  /tmp/pr7.patch" | sha256sum -c -
+
+      - name: Apply and verify PR 7
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch origin main
+          git checkout -B "$TARGET_BRANCH" origin/main
+          git config user.name 'zinjeck'
+          git config user.email 'asundergameco@gmail.com'
+
+          # The recovered mail patch may mention old temporary workflows. Strip
+          # workflow/transport diff sections before applying to the clean PR6 mainline.
+          python3 <<'PY'
+          from pathlib import Path
+          import re
+
+          source = Path('/tmp/pr7.patch').read_text(encoding='utf-8', errors='surrogateescape')
+          marker = re.compile(r'^diff --git a/(.+?) b/(.+?)$', re.MULTILINE)
+          matches = list(marker.finditer(source))
+          if not matches:
+              Path('/tmp/pr7-clean.patch').write_text(source, encoding='utf-8', errors='surrogateescape')
+              raise SystemExit(0)
+          header = source[:matches[0].start()]
+          kept = []
+          for index, match in enumerate(matches):
+              end = matches[index + 1].start() if index + 1 < len(matches) else len(source)
+              path = match.group(2)
+              if path.startswith('.github/workflows/') or path.startswith('transport/') or path.startswith('recovery/'):
+                  continue
+              kept.append(source[match.start():end])
+          Path('/tmp/pr7-clean.patch').write_text(header + ''.join(kept), encoding='utf-8', errors='surrogateescape')
+          PY
+
+          if ! git am -3 /tmp/pr7-clean.patch; then
+            git am --abort || true
+            echo 'Recovered patch did not apply cleanly to the merged PR6 tree.' >&2
+            exit 1
+          fi
+
+          # Collapse onto one intentional implementation commit.
+          git reset --soft origin/main
+          git commit -m 'Redo PR 7: close citizen systems over explicit settlement state'
+
+          ! git diff --name-only origin/main...HEAD | grep -E '^(\.github/workflows/|transport/|recovery/)'
+          git diff --check origin/main...HEAD
+          python3 ci/settlement_locality_guard.py
+          python3 ci/audit_gdscript.py
+
+          # PR7 must remove every PR7-owned grandfathered locality scope while
+          # leaving PR8 work for its own pass.
+          python3 ci/settlement_locality_guard.py 2>&1 | tee /tmp/locality.txt
+          ! grep -E 'PR 7\s*=\s*[1-9]|PR 7[^0-9]+[1-9][0-9]*' /tmp/locality.txt
+
+          git push --force origin "HEAD:refs/heads/$TARGET_BRANCH"
+
+      - name: Open the canonical draft PR 7
+        shell: bash
+        run: |
+          set -euo pipefail
+          body=$(cat <<'EOF'
+          ## Ownership boundary
+
+          Citizen simulation now operates through an explicitly supplied `CitySettlementSimulationState` or one of its exact subordinate state owners. Citizen-domain production code no longer discovers local authority from the globally active/current city.
+
+          ## What changed
+
+          - Removed current-city compatibility from citizen registry, spatial, movement-runtime, task-runtime, inventory, needs, assignment, employment, decision, movement, task, and hauling systems.
+          - Migrated production and regression callers to explicit settlement-owned state.
+          - Preserved task invalidation, navigation behavior, hauling conservation, hunger/work recovery, and existing simulation rules.
+          - Added and migrated A/B isolation coverage using overlapping local citizen/object IDs while another settlement is selected for presentation.
+          - Removed every locality-ratchet scope assigned to PR 7 without expanding the allowlist.
+
+          ## Verification before publication
+
+          - Recovered source patch verified by SHA-256.
+          - `git diff --check` passed.
+          - Settlement-locality guard passed with no PR 7-owned scopes remaining.
+          - Static GDScript/resource audit passed.
+          - No workflow, transport, or recovery files are present in the diff.
+
+          GitHub's complete Godot 4.7.1 CI run is the final merge gate.
+
+          ## Scope discipline
+
+          - Based directly on the merged PR 6 redo.
+          - No PR 8 city/world/session bridge work is included.
+          - No gameplay balancing or Stockpile-footprint change.
+          - This PR remains draft until the exact-head CI gate passes.
+          EOF
+          )
+
+          existing=$(gh pr list --repo "$GITHUB_REPOSITORY" --head "$TARGET_BRANCH" --state open --json number --jq '.[0].number // empty')
+          if [[ -n "$existing" ]]; then
+            gh pr edit "$existing" --repo "$GITHUB_REPOSITORY" \
+              --title 'Redo PR 7: Close citizen systems over explicit settlement state' \
+              --body "$body"
+          else
+            gh pr create --repo "$GITHUB_REPOSITORY" --base main --head "$TARGET_BRANCH" --draft \
+              --title 'Redo PR 7: Close citizen systems over explicit settlement state' \
+              --body "$body"
+          fi
