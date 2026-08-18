@@ -1,0 +1,100 @@
+name: Finalize real PR 7 and export PR 8 baseline
+
+on:
+  push:
+    branches:
+      - staging/recover-real-pr7-20260817
+
+permissions:
+  contents: write
+  pull-requests: write
+  actions: read
+  checks: read
+
+jobs:
+  finalize:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+      TARGET_BRANCH: refactor/citizen-systems-explicit-settlement-state-redo
+      EXPORT_BRANCH: staging/pr8-redo-source-20260818
+    steps:
+      - name: Check out repository history
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Verify the canonical PR 7 diff
+        id: pr
+        shell: bash
+        run: |
+          set -euo pipefail
+          pr=$(gh pr list --repo "$GITHUB_REPOSITORY" --head "$TARGET_BRANCH" --state open --json number --jq '.[0].number // empty')
+          [[ -n "$pr" ]] || { echo 'Canonical PR 7 was not created.' >&2; exit 1; }
+          echo "number=$pr" >> "$GITHUB_OUTPUT"
+
+          gh pr view "$pr" --repo "$GITHUB_REPOSITORY" --json files --jq '.files[].path' > /tmp/pr7-files.txt
+          ! grep -E '^(\.github/workflows/|transport/|recovery/)' /tmp/pr7-files.txt
+          grep -Fx 'scripts/citizens/simulation/systems/CitizenDecisionSystem.gd' /tmp/pr7-files.txt
+          grep -Fx 'scripts/citizens/simulation/systems/CityCitizenRegistrySystem.gd' /tmp/pr7-files.txt
+          grep -Fx 'scripts/citizens/simulation/systems/CityCitizenTaskRuntimeSystem.gd' /tmp/pr7-files.txt
+          grep -Fx 'scripts/city/simulation/CityEmploymentFoodDeadlockTest.gd' /tmp/pr7-files.txt
+          grep -Fx 'scripts/city/simulation/CityUnifiedWorkSystemTest.gd' /tmp/pr7-files.txt
+
+          count=$(wc -l < /tmp/pr7-files.txt)
+          (( count >= 20 )) || { echo "PR 7 is unexpectedly small: $count files" >&2; exit 1; }
+
+      - name: Wait for the exact PR 7 CI gate
+        shell: bash
+        run: |
+          set -euo pipefail
+          pr='${{ steps.pr.outputs.number }}'
+          head=$(gh pr view "$pr" --repo "$GITHUB_REPOSITORY" --json headRefOid --jq '.headRefOid')
+          [[ -n "$head" ]]
+          gh pr checks "$pr" --repo "$GITHUB_REPOSITORY" --watch --interval 20
+
+          failures=$(gh pr checks "$pr" --repo "$GITHUB_REPOSITORY" --json state --jq '[.[] | select(.state != "SUCCESS" and .state != "SKIPPED" and .state != "NEUTRAL")] | length')
+          [[ "$failures" == '0' ]] || { echo 'PR 7 has a non-successful check.' >&2; exit 1; }
+          current=$(gh pr view "$pr" --repo "$GITHUB_REPOSITORY" --json headRefOid --jq '.headRefOid')
+          [[ "$current" == "$head" ]] || { echo 'PR 7 head changed during CI.' >&2; exit 1; }
+          echo "$head" > /tmp/pr7-head.txt
+
+      - name: Merge PR 7
+        shell: bash
+        run: |
+          set -euo pipefail
+          pr='${{ steps.pr.outputs.number }}'
+          head=$(cat /tmp/pr7-head.txt)
+          gh pr ready "$pr" --repo "$GITHUB_REPOSITORY" || true
+          gh pr merge "$pr" --repo "$GITHUB_REPOSITORY" --squash --delete-branch --match-head-commit "$head"
+          state=$(gh pr view "$pr" --repo "$GITHUB_REPOSITORY" --json state --jq '.state')
+          [[ "$state" == 'MERGED' ]]
+
+      - name: Verify merged main and publish the PR 8 source baseline
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch origin main
+          git checkout --detach origin/main
+
+          test ! -e .github/workflows/recover-real-pr7.yml
+          test ! -e .github/workflows/finalize-real-pr7.yml
+          test ! -e transport
+          test ! -e recovery
+          git diff --check
+          python3 ci/settlement_locality_guard.py
+          python3 ci/audit_gdscript.py
+
+          rm -rf /tmp/pr8-export
+          mkdir -p /tmp/pr8-export/recovery
+          tar --exclude=.git --exclude=.godot -czf /tmp/pr8-export/recovery/paladin-main-after-pr7-redo.tar.gz .
+
+          git checkout -B "$EXPORT_BRANCH" origin/main
+          mkdir -p recovery
+          cp /tmp/pr8-export/recovery/paladin-main-after-pr7-redo.tar.gz recovery/
+          git add recovery/paladin-main-after-pr7-redo.tar.gz
+          git config user.name 'zinjeck'
+          git config user.email 'asundergameco@gmail.com'
+          git commit -m 'Export merged PR 7 source for PR 8 redo'
+          git push --force origin "HEAD:refs/heads/$EXPORT_BRANCH"
