@@ -1,6 +1,0 @@
-[gd_scene load_steps=2 format=3]
-
-[ext_resource type="Script" uid="uid://d6k3p8t1w5y2z" path="res://scripts/city/simulation/CityEmploymentFoodDeadlockTest.gd" id="1_test"]
-
-[node name="CityEmploymentFoodDeadlockTest" type="Node"]
-script = ExtResource("1_test")

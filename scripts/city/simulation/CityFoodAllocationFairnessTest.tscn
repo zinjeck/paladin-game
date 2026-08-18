@@ -1,6 +1,0 @@
-[gd_scene load_steps=2 format=3]
-
-[ext_resource type="Script" uid="uid://b7f4a9k2m6q8x" path="res://scripts/city/simulation/CityFoodAllocationFairnessTest.gd" id="1_test"]
-
-[node name="CityFoodAllocationFairnessTest" type="Node"]
-script = ExtResource("1_test")
