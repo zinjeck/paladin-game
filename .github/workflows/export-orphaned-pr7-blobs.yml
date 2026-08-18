@@ -1,0 +1,29 @@
+name: Export orphaned PR7 recovery blobs
+
+on:
+  push:
+    branches:
+      - staging/pr7-orphaned-blob-recovery-20260818
+
+permissions:
+  contents: read
+
+jobs:
+  export:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out recovery blobs
+        uses: actions/checkout@v4
+      - name: Inspect blobs
+        shell: bash
+        run: |
+          set -euo pipefail
+          file recovery/*
+          sha256sum recovery/*
+      - name: Upload blobs
+        uses: actions/upload-artifact@v4
+        with:
+          name: orphaned-pr7-recovery-blobs
+          path: recovery/*
+          if-no-files-found: error
+          retention-days: 2
