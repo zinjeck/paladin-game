@@ -4,6 +4,9 @@ on:
   push:
     branches:
       - staging/pr7-orphaned-blob-recovery-20260818
+  pull_request:
+    branches:
+      - main
 
 permissions:
   contents: read
