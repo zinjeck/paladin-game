@@ -1,0 +1,35 @@
+name: Export PR 7 redo source
+
+on:
+  push:
+    branches:
+      - staging/pr7-redo-source-export-20260818
+
+permissions:
+  contents: read
+
+jobs:
+  export:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out current post-PR6 main source
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+          path: source
+      - name: Package source and git history
+        shell: bash
+        run: |
+          set -euo pipefail
+          tar --exclude=.git --exclude=.godot -C source -czf /tmp/paladin-main-after-pr6-redo.tar.gz .
+          git -C source bundle create /tmp/paladin-main-after-pr6-redo.bundle --all
+      - name: Upload source
+        uses: actions/upload-artifact@v4
+        with:
+          name: paladin-main-after-pr6-redo-source
+          path: |
+            /tmp/paladin-main-after-pr6-redo.tar.gz
+            /tmp/paladin-main-after-pr6-redo.bundle
+          if-no-files-found: error
+          retention-days: 2
