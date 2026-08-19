@@ -38,14 +38,10 @@ func _test_focused_behavior_gateways_and_state_isolation() -> void:
 	_expect(
 		int(city_a["citizen_id"]) == 1
 		and int(city_b["citizen_id"]) == 1
-		and int(city_a["registry_version"])
-		== int(city_b["registry_version"])
-		and int(city_a["spatial_version"])
-		== int(city_b["spatial_version"])
-		and int(city_a["movement_version"])
-		== int(city_b["movement_version"])
-		and int(city_a["task_version"])
-		== int(city_b["task_version"]),
+		and int(city_a["registry_version"]) == int(city_b["registry_version"])
+		and int(city_a["spatial_version"]) == int(city_b["spatial_version"])
+		and int(city_a["movement_version"]) == int(city_b["movement_version"])
+		and int(city_a["task_version"]) == int(city_b["task_version"]),
 		"Both Cities must independently reuse citizen ID and local versions."
 	)
 	_expect(
@@ -57,31 +53,21 @@ func _test_focused_behavior_gateways_and_state_isolation() -> void:
 	)
 
 	_expect(
-		WorldPoliticalState.set_active_settlement(city_a_id)
-		and _active_city_matches(city_a),
+		_bind_fixture_city(city_a_id) and _active_city_matches(city_a),
 		"Switching B -> A must restore City A through focused gateways."
 	)
 	_expect(
-		WorldPoliticalState.set_active_settlement(city_b_id)
-		and _active_city_matches(city_b),
+		_bind_fixture_city(city_b_id) and _active_city_matches(city_b),
 		"Switching A -> B must restore City B through focused gateways."
 	)
 	_expect(
-		WorldPoliticalState.set_active_settlement(city_a_id)
-		and _active_city_matches(city_a),
+		_bind_fixture_city(city_a_id) and _active_city_matches(city_a),
 		"A -> B -> A must restore City A despite equal IDs and versions."
 	)
 
 
-func _exercise_city_gateways(
-	city_id: int,
-	culture_id: int,
-	seed_value: int
-) -> Dictionary:
-	_expect(
-		WorldPoliticalState.set_active_settlement(city_id),
-		"The City under test must become active."
-	)
+func _exercise_city_gateways(city_id: int, culture_id: int, seed_value: int) -> Dictionary:
+	_expect(_bind_fixture_city(city_id), "The City under test must become active.")
 	var city_world := _make_world(16, 16, seed_value)
 	WorldPoliticalState.set_current_city_world(city_world)
 	WorldPoliticalState.set_current_city_seed(seed_value)
@@ -104,18 +90,13 @@ func _exercise_city_gateways(
 	var house := CityObjectSystem.add_city_object({
 		"object_type": CityObjectCatalog.CITY_OBJECT_HOUSE,
 		"top_left": Vector2i(8, 8),
-		"size_tiles": CityObjectCatalog.get_city_object_size_for_type(
-			CityObjectCatalog.CITY_OBJECT_HOUSE
-		),
+		"size_tiles": CityObjectCatalog.get_city_object_size_for_type(CityObjectCatalog.CITY_OBJECT_HOUSE),
 		"object_owner": "player",
 		"city_world": city_world,
 	})
 	var house_id := int(house.get("id", -1))
 	var citizen := CityCitizenRegistrySystem.add_city_citizen(
-		"",
-		TILE_A,
-		CityCitizens.CITY_CITIZEN_SEX_MALE,
-		culture_id
+		"", TILE_A, CityCitizens.CITY_CITIZEN_SEX_MALE, culture_id
 	)
 	var citizen_id := int(citizen.get("id", -1))
 	var registry_state := CityCitizenRegistrySystem.get_current_state()
@@ -126,16 +107,9 @@ func _exercise_city_gateways(
 	_expect(
 		house_id > 0
 		and citizen_id == 1
-		and CityCitizenRegistrySystem.get_city_citizen_index_by_id(citizen_id)
-		== 0
-		and int(
-			CityCitizenRegistrySystem.get_city_citizen_by_id(citizen_id).get(
-				"id",
-				-1
-			)
-		) == citizen_id
-		and CityCitizenSpatialSystem.get_city_citizen_ids_at_tile(TILE_A)
-		== [citizen_id],
+		and CityCitizenRegistrySystem.get_city_citizen_index_by_id(citizen_id) == 0
+		and int(CityCitizenRegistrySystem.get_city_citizen_by_id(citizen_id).get("id", -1)) == citizen_id
+		and CityCitizenSpatialSystem.get_city_citizen_ids_at_tile(TILE_A) == [citizen_id],
 		"WorldData creation must register through focused lookup and spatial APIs."
 	)
 
@@ -150,11 +124,7 @@ func _exercise_city_gateways(
 		})
 		and task_state.active_task_ids == [citizen_id]
 		and task_state.citizen_task_version == task_version_before + 1
-		and str(
-			CityCitizenTaskRuntimeSystem.get_city_citizen_current_task(
-				citizen_id
-			).get("kind", "")
-		) == CityCitizens.CITY_CITIZEN_TASK_KIND_RETURN_HOME,
+		and str(CityCitizenTaskRuntimeSystem.get_city_citizen_current_task(citizen_id).get("kind", "")) == CityCitizens.CITY_CITIZEN_TASK_KIND_RETURN_HOME,
 		"Task assignment must update the focused task registry exactly once."
 	)
 	_expect(
@@ -162,47 +132,34 @@ func _exercise_city_gateways(
 		and task_state.active_task_ids.is_empty()
 		and task_state.active_task_id_lookup.is_empty()
 		and task_state.citizen_task_version == task_version_before + 2
-		and str(
-			CityCitizenTaskRuntimeSystem.get_city_citizen_current_task(
-				citizen_id
-			).get("kind", "")
-		) == CityCitizens.CITY_CITIZEN_TASK_KIND_NONE,
+		and str(CityCitizenTaskRuntimeSystem.get_city_citizen_current_task(citizen_id).get("kind", "")) == CityCitizens.CITY_CITIZEN_TASK_KIND_NONE,
 		"Task clearing must retire registry membership and invalidate once."
 	)
 
 	var movement_version_before := movement_state.citizen_movement_version
 	var spatial_version_before := spatial_state.citizen_spatial_version
 	_expect(
-		CityCitizenMovementRuntimeSystem.assign_city_citizen_movement_order(
-			citizen_id,
-			[TILE_A, TILE_B]
-		)
+		CityCitizenMovementRuntimeSystem.assign_city_citizen_movement_order(citizen_id, [TILE_A, TILE_B])
 		and movement_state.active_mover_ids == [citizen_id]
-		and movement_state.citizen_movement_version
-		== movement_version_before + 1,
+		and movement_state.citizen_movement_version == movement_version_before + 1,
 		"Movement assignment must register the mover through its focused API."
 	)
 
 	CitizenMovementSystem.run_tick(seed_value, 1)
 	_expect(
-		CityCitizenSpatialSystem.get_city_citizen_tile_position(citizen_id)
-		== TILE_A
+		CityCitizenSpatialSystem.get_city_citizen_tile_position(citizen_id) == TILE_A
 		and spatial_state.citizen_spatial_version == spatial_version_before
-		and movement_state.citizen_movement_version
-		== movement_version_before + 2,
+		and movement_state.citizen_movement_version == movement_version_before + 2,
 		"A partial movement tick must not publish a false spatial change."
 	)
 
 	CitizenMovementSystem.run_tick(seed_value + 1, 1)
 	_expect(
-		CityCitizenSpatialSystem.get_city_citizen_tile_position(citizen_id)
-		== TILE_B
+		CityCitizenSpatialSystem.get_city_citizen_tile_position(citizen_id) == TILE_B
 		and CityCitizenSpatialSystem.get_city_citizen_ids_at_tile(TILE_A).is_empty()
-		and CityCitizenSpatialSystem.get_city_citizen_ids_at_tile(TILE_B)
-		== [citizen_id]
+		and CityCitizenSpatialSystem.get_city_citizen_ids_at_tile(TILE_B) == [citizen_id]
 		and spatial_state.citizen_spatial_version == spatial_version_before + 1
-		and movement_state.citizen_movement_version
-		== movement_version_before + 3
+		and movement_state.citizen_movement_version == movement_version_before + 3
 		and movement_state.active_mover_ids.is_empty()
 		and movement_state.active_mover_id_lookup.is_empty(),
 		"A completed movement tick must commit citizen and spatial state atomically."
@@ -221,49 +178,30 @@ func _exercise_city_gateways(
 	}
 
 
+func _bind_fixture_city(city_id: int) -> bool:
+	var city_state = WorldPoliticalState.get_city_simulation_state(city_id)
+	if not city_state is CitySettlementSimulationState:
+		return false
+	CityCitizenUnboundCompatibility.bind_legacy_fixture_state(city_state)
+	return WorldPoliticalState.set_active_settlement(city_id)
+
+
 func _active_city_matches(expected: Dictionary) -> bool:
 	var citizen_id := int(expected["citizen_id"])
 	return (
-		is_same(
-			CityCitizenRegistrySystem.get_current_state(),
-			expected["registry_state"]
-		)
-		and is_same(
-			CityCitizenSpatialSystem.get_current_state(),
-			expected["spatial_state"]
-		)
-		and is_same(
-			CityCitizenMovementRuntimeSystem.get_current_state(),
-			expected["movement_state"]
-		)
-		and is_same(
-			CityCitizenTaskRuntimeSystem.get_current_state(),
-			expected["task_state"]
-		)
-		and CityCitizenRegistrySystem.get_current_state().citizen_version
-		== int(expected["registry_version"])
-		and CityCitizenSpatialSystem.get_current_state().citizen_spatial_version
-		== int(expected["spatial_version"])
-		and (
-			CityCitizenMovementRuntimeSystem.get_current_state()
-			.citizen_movement_version
-		) == int(expected["movement_version"])
-		and CityCitizenTaskRuntimeSystem.get_current_state().citizen_task_version
-		== int(expected["task_version"])
-		and int(
-			CityCitizenRegistrySystem.get_city_citizen_by_id(citizen_id).get(
-				"id",
-				-1
-			)
-		) == citizen_id
-		and CityCitizenSpatialSystem.get_city_citizen_tile_position(citizen_id)
-		== TILE_B
-		and CityCitizenSpatialSystem.get_city_citizen_ids_at_tile(TILE_B)
-		== [citizen_id]
-		and CityCitizenMovementRuntimeSystem.get_current_state().active_mover_ids
-		.is_empty()
-		and CityCitizenTaskRuntimeSystem.get_current_state().active_task_ids
-		.is_empty()
+		is_same(CityCitizenRegistrySystem.get_current_state(), expected["registry_state"])
+		and is_same(CityCitizenSpatialSystem.get_current_state(), expected["spatial_state"])
+		and is_same(CityCitizenMovementRuntimeSystem.get_current_state(), expected["movement_state"])
+		and is_same(CityCitizenTaskRuntimeSystem.get_current_state(), expected["task_state"])
+		and CityCitizenRegistrySystem.get_current_state().citizen_version == int(expected["registry_version"])
+		and CityCitizenSpatialSystem.get_current_state().citizen_spatial_version == int(expected["spatial_version"])
+		and CityCitizenMovementRuntimeSystem.get_current_state().citizen_movement_version == int(expected["movement_version"])
+		and CityCitizenTaskRuntimeSystem.get_current_state().citizen_task_version == int(expected["task_version"])
+		and int(CityCitizenRegistrySystem.get_city_citizen_by_id(citizen_id).get("id", -1)) == citizen_id
+		and CityCitizenSpatialSystem.get_city_citizen_tile_position(citizen_id) == TILE_B
+		and CityCitizenSpatialSystem.get_city_citizen_ids_at_tile(TILE_B) == [citizen_id]
+		and CityCitizenMovementRuntimeSystem.get_current_state().active_mover_ids.is_empty()
+		and CityCitizenTaskRuntimeSystem.get_current_state().active_task_ids.is_empty()
 	)
 
 
@@ -289,11 +227,7 @@ func _make_two_city_fixture() -> Dictionary:
 	}
 
 
-func _create_city(
-	city_name: String,
-	polity_id: int,
-	region_center: Vector2i
-) -> Dictionary:
+func _create_city(city_name: String, polity_id: int, region_center: Vector2i) -> Dictionary:
 	return WorldPoliticalState.create_settlement({
 		"name": city_name,
 		"settlement_type": SettlementData.SETTLEMENT_TYPE_CITY,
@@ -301,9 +235,7 @@ func _create_city(
 		"world_region_top_left": region_center,
 		"world_region_center": region_center,
 		"world_region_size": 1,
-		"simulation_backend_kind": (
-			SettlementSimulationContext.BACKEND_CITY_SETTLEMENT_STATE
-		),
+		"simulation_backend_kind": SettlementSimulationContext.BACKEND_CITY_SETTLEMENT_STATE,
 	})
 
 
