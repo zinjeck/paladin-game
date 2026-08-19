@@ -1,6 +1,11 @@
 extends RefCounted
 class_name CityConstructionSystem
 
+static func _get_compatibility_city_state() -> CitySettlementSimulationState:
+	return CityCitizenUnboundCompatibility.get_city_state()
+
+
+
 # File responsibility: Authoritative construction behavior/API for one active city settlement. Mutable construction registries live in CityConstructionState.
 # Navigation regions are organizational only; they do not define runtime ownership.
 

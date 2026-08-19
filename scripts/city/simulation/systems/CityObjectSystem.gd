@@ -1,6 +1,11 @@
 extends RefCounted
 class_name CityObjectSystem
 
+static func _get_compatibility_city_state() -> CitySettlementSimulationState:
+	return CityCitizenUnboundCompatibility.get_city_state()
+
+
+
 const CITY_TOPOLOGY_MUTATION_FAILURE_NONE := "none"
 const CITY_TOPOLOGY_MUTATION_FAILURE_INVALID_REQUEST := "invalid_request"
 const CITY_TOPOLOGY_MUTATION_FAILURE_TILE_BLOCKED := "tile_blocked"

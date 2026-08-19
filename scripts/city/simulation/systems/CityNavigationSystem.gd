@@ -1,6 +1,11 @@
 extends RefCounted
 class_name CityNavigationSystem
 
+static func _get_compatibility_city_state() -> CitySettlementSimulationState:
+	return CityCitizenUnboundCompatibility.get_city_state()
+
+
+
 const CITY_CARDINAL_TILE_OFFSETS := [
 	Vector2i(0, -1),
 	Vector2i(-1, 0),

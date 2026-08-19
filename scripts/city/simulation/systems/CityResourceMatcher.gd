@@ -1,6 +1,11 @@
 extends RefCounted
 class_name CityResourceMatcher
 
+static func _get_compatibility_city_state() -> CitySettlementSimulationState:
+	return CityCitizenUnboundCompatibility.get_city_state()
+
+
+
 # File responsibility: Food-demand accounting plus central resource supply,
 # demand, endpoint, and reachability matching. Authoritative carried resources
 # remain embedded in citizen records behind CityCitizenInventorySystem.

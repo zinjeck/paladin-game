@@ -1,6 +1,11 @@
 extends RefCounted
 class_name CityLogisticsSystem
 
+static func _get_compatibility_city_state() -> CitySettlementSimulationState:
+	return CityCitizenUnboundCompatibility.get_city_state()
+
+
+
 # File responsibility: Physical city logistics for the active CITY settlement.
 # CityLogisticsState owns pile/reservation data; this system owns ground-pile
 # mutation, haul endpoint accounting, reservation lifecycle, and related rules.

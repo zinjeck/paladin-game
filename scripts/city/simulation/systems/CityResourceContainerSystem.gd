@@ -1,6 +1,11 @@
 extends RefCounted
 class_name CityResourceContainerSystem
 
+static func _get_compatibility_city_state() -> CitySettlementSimulationState:
+	return CityCitizenUnboundCompatibility.get_city_state()
+
+
+
 # File responsibility: Generic sparse resource-container primitives plus
 # completed-city-object storage policy, capacity, and authoritative mutation.
 # This system answers questions about one container at a time; settlement-wide

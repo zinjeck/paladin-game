@@ -1,6 +1,11 @@
 extends RefCounted
 class_name CityWorkSystem
 
+static func _get_compatibility_city_state() -> CitySettlementSimulationState:
+	return CityCitizenUnboundCompatibility.get_city_state()
+
+
+
 # File responsibility: Player-command and work-order state access, mutation, scheduling, job generation, assignment, and diagnostics for the active CITY settlement.
 # CityWorkState owns the data; this system owns the behavior. WorldData is not a work-state owner or API surface.
 

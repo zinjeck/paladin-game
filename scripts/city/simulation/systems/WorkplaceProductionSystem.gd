@@ -1,6 +1,11 @@
 extends RefCounted
 class_name WorkplaceProductionSystem
 
+static func _get_compatibility_city_state() -> CitySettlementSimulationState:
+	return CityCitizenUnboundCompatibility.get_city_state()
+
+
+
 const WORK_UNITS_PER_WORKER_MINUTE: int = 1_000
 static var _resource_source_evaluation_cache: Dictionary = {}
 static var _preview_resource_source_evaluation_cache: Dictionary = {}
