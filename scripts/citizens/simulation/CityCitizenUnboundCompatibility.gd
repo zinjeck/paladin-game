@@ -28,8 +28,9 @@ static func clear_legacy_fixture_state() -> void:
 
 
 static func get_city_state() -> CitySettlementSimulationState:
-	if _explicit_legacy_fixture_state != null:
-		return _explicit_legacy_fixture_state
+	var bound_fixture_state := _get_bound_legacy_fixture_state()
+	if bound_fixture_state != null:
+		return bound_fixture_state
 
 	var capital_state = WorldPoliticalState.get_player_capital_city_simulation_state()
 	if capital_state is CitySettlementSimulationState:
@@ -71,6 +72,23 @@ static func get_city_state() -> CitySettlementSimulationState:
 	)
 	city_state.navigation_state = WorldPoliticalState._unbound_city_navigation_state
 	return city_state
+
+
+static func _get_bound_legacy_fixture_state() -> CitySettlementSimulationState:
+	if _explicit_legacy_fixture_state == null:
+		return null
+
+	for raw_state in WorldPoliticalState.settlement_city_state_by_id.values():
+		if (
+			raw_state is CitySettlementSimulationState
+			and is_same(raw_state, _explicit_legacy_fixture_state)
+		):
+			return _explicit_legacy_fixture_state
+
+	# reset_state() replaces the settlement registry. Never let a fixture binding
+	# from the previous registry survive into the next test/session.
+	_explicit_legacy_fixture_state = null
+	return null
 
 
 static func _get_only_registered_city_state() -> CitySettlementSimulationState:
