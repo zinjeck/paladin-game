@@ -5,23 +5,28 @@ const CityCitizensScript = preload(
 	"res://scripts/citizens/simulation/CityCitizens.gd"
 )
 
-# Authoritative current-task and task-runtime behavior for the active
-# settlement. Task selection/execution remains in the focused behavior systems.
+# Authoritative current-task and task-runtime behavior for an explicitly
+# supplied settlement. Task selection/execution remains in the focused behavior
+# systems.
+
+static func _get_compatibility_city_state() -> CitySettlementSimulationState:
+	return CityCitizenUnboundCompatibility.get_city_state()
+
 
 static func get_current_state() -> CityCitizenTaskRuntimeState:
-	return WorldPoliticalState.get_current_city_citizen_task_runtime_state()
+	return _get_compatibility_city_state().citizen_task_runtime_state
 
 
-static func _get_task_state(city_state = null) -> CityCitizenTaskRuntimeState:
-	if city_state is CitySettlementSimulationState:
-		return city_state.citizen_task_runtime_state
-	return get_current_state()
+static func _get_task_state(
+	city_state: CitySettlementSimulationState
+) -> CityCitizenTaskRuntimeState:
+	return city_state.citizen_task_runtime_state
 
 
-static func _get_registry_state(city_state = null) -> CityCitizenRegistryState:
-	if city_state is CitySettlementSimulationState:
-		return city_state.citizen_registry_state
-	return CityCitizenRegistrySystem.get_current_state()
+static func _get_registry_state(
+	city_state: CitySettlementSimulationState
+) -> CityCitizenRegistryState:
+	return city_state.citizen_registry_state
 
 
 static var city_active_task_ids: Array[int]:
@@ -46,7 +51,9 @@ static var city_citizen_task_version: int:
 
 
 static func get_city_citizen_task_version() -> int:
-	return _get_task_state().citizen_task_version
+	return _get_task_state(
+		_get_compatibility_city_state()
+	).citizen_task_version
 
 
 static func get_city_citizen_task_version_for_city_state(
@@ -56,7 +63,9 @@ static func get_city_citizen_task_version_for_city_state(
 
 
 static func reset_city_citizen_task_runtime_state() -> void:
-	_reset_city_citizen_task_runtime_state(null)
+	_reset_city_citizen_task_runtime_state(
+		_get_compatibility_city_state()
+	)
 
 
 static func reset_city_citizen_task_runtime_state_for_city_state(
@@ -65,7 +74,9 @@ static func reset_city_citizen_task_runtime_state_for_city_state(
 	_reset_city_citizen_task_runtime_state(city_state)
 
 
-static func _reset_city_citizen_task_runtime_state(city_state) -> void:
+static func _reset_city_citizen_task_runtime_state(
+	city_state: CitySettlementSimulationState
+) -> void:
 	var task_state := _get_task_state(city_state)
 	task_state.active_task_ids.clear()
 	task_state.active_task_id_lookup.clear()
@@ -73,7 +84,9 @@ static func _reset_city_citizen_task_runtime_state(city_state) -> void:
 
 
 static func mark_city_citizen_task_changed() -> void:
-	_mark_city_citizen_task_changed(null)
+	_mark_city_citizen_task_changed(
+		_get_compatibility_city_state()
+	)
 
 
 static func mark_city_citizen_task_changed_for_city_state(
@@ -82,12 +95,14 @@ static func mark_city_citizen_task_changed_for_city_state(
 	_mark_city_citizen_task_changed(city_state)
 
 
-static func _mark_city_citizen_task_changed(city_state) -> void:
+static func _mark_city_citizen_task_changed(
+	city_state: CitySettlementSimulationState
+) -> void:
 	_get_task_state(city_state).citizen_task_version += 1
 
 static func _add_city_active_task_id(
 	citizen_id: int,
-	city_state = null
+	city_state: CitySettlementSimulationState
 ) -> bool:
 	var task_state := _get_task_state(city_state)
 	var active_ids := task_state.active_task_ids
@@ -132,7 +147,7 @@ static func _add_city_active_task_id(
 
 static func _remove_city_active_task_id(
 	citizen_id: int,
-	city_state = null
+	city_state: CitySettlementSimulationState
 ) -> bool:
 	var changed := _get_task_state(city_state).active_task_id_lookup.erase(citizen_id)
 
@@ -143,7 +158,7 @@ static func _remove_city_active_task_id(
 
 static func _remove_all_city_active_task_array_entries(
 	citizen_id: int,
-	city_state = null
+	city_state: CitySettlementSimulationState
 ) -> bool:
 	var active_ids := _get_task_state(city_state).active_task_ids
 	var original_size := active_ids.size()
@@ -166,7 +181,9 @@ static func _remove_all_city_active_task_array_entries(
 	return write_index != original_size
 
 static func rebuild_city_active_task_registry() -> bool:
-	return _rebuild_city_active_task_registry(null)
+	return _rebuild_city_active_task_registry(
+		_get_compatibility_city_state()
+	)
 
 
 static func rebuild_city_active_task_registry_for_city_state(
@@ -175,7 +192,9 @@ static func rebuild_city_active_task_registry_for_city_state(
 	return _rebuild_city_active_task_registry(city_state)
 
 
-static func _rebuild_city_active_task_registry(city_state) -> bool:
+static func _rebuild_city_active_task_registry(
+	city_state: CitySettlementSimulationState
+) -> bool:
 	var task_state := _get_task_state(city_state)
 	var registry_state := _get_registry_state(city_state)
 	var previous_active_ids := task_state.active_task_ids.duplicate()
@@ -232,7 +251,9 @@ static func _rebuild_city_active_task_registry(city_state) -> bool:
 	return registry_changed
 
 static func get_city_active_task_ids_snapshot() -> Array[int]:
-	return _get_task_state().active_task_ids.duplicate()
+	return _get_task_state(
+		_get_compatibility_city_state()
+	).active_task_ids.duplicate()
 
 
 static func get_city_active_task_ids_snapshot_for_city_state(
@@ -243,7 +264,10 @@ static func get_city_active_task_ids_snapshot_for_city_state(
 static func get_city_citizen_current_haul(
 	citizen_id: int
 ) -> Dictionary:
-	return _get_city_citizen_current_haul(null, citizen_id)
+	return _get_city_citizen_current_haul(
+		_get_compatibility_city_state(),
+		citizen_id
+	)
 
 
 static func get_city_citizen_current_haul_for_city_state(
@@ -254,7 +278,7 @@ static func get_city_citizen_current_haul_for_city_state(
 
 
 static func _get_city_citizen_current_haul(
-	city_state,
+	city_state: CitySettlementSimulationState,
 	citizen_id: int
 ) -> Dictionary:
 	var citizen: Dictionary = {}
@@ -282,7 +306,11 @@ static func set_city_citizen_current_haul(
 	citizen_id: int,
 	haul_values: Dictionary
 ) -> bool:
-	return _set_city_citizen_current_haul(null, citizen_id, haul_values)
+	return _set_city_citizen_current_haul(
+		_get_compatibility_city_state(),
+		citizen_id,
+		haul_values
+	)
 
 
 static func set_city_citizen_current_haul_for_city_state(
@@ -298,7 +326,7 @@ static func set_city_citizen_current_haul_for_city_state(
 
 
 static func _set_city_citizen_current_haul(
-	city_state,
+	city_state: CitySettlementSimulationState,
 	citizen_id: int,
 	haul_values: Dictionary
 ) -> bool:
@@ -359,7 +387,7 @@ static func get_city_food_task_reserved_endpoint_amount(
 	excluding_citizen_id: int = -1
 ) -> int:
 	return _get_city_food_task_reserved_endpoint_amount(
-		null,
+		_get_compatibility_city_state(),
 		endpoint_kind,
 		endpoint_id,
 		resource,
@@ -384,7 +412,7 @@ static func get_city_food_task_reserved_endpoint_amount_for_city_state(
 
 
 static func _get_city_food_task_reserved_endpoint_amount(
-	city_state,
+	city_state: CitySettlementSimulationState,
 	endpoint_kind: String,
 	endpoint_id: int,
 	resource: String,
@@ -438,7 +466,9 @@ static func _get_city_food_task_reserved_endpoint_amount(
 	return reserved_amount
 
 static func ensure_city_citizen_task_state() -> int:
-	return _ensure_city_citizen_task_state(null)
+	return _ensure_city_citizen_task_state(
+		_get_compatibility_city_state()
+	)
 
 
 static func ensure_city_citizen_task_state_for_city_state(
@@ -447,7 +477,9 @@ static func ensure_city_citizen_task_state_for_city_state(
 	return _ensure_city_citizen_task_state(city_state)
 
 
-static func _ensure_city_citizen_task_state(city_state) -> int:
+static func _ensure_city_citizen_task_state(
+	city_state: CitySettlementSimulationState
+) -> int:
 	var registry_state := _get_registry_state(city_state)
 	var task_state := _get_task_state(city_state)
 	if registry_state.citizens.is_empty():
@@ -493,7 +525,6 @@ static func _ensure_city_citizen_task_state(city_state) -> int:
 					CityCitizens.make_city_citizen_haul(
 						raw_current_haul
 					)
-				)
 			else:
 				CityCitizens.reset_city_citizen_haul_runtime_state(
 					citizen
@@ -520,7 +551,10 @@ static func _ensure_city_citizen_task_state(city_state) -> int:
 static func get_city_citizen_current_task(
 	citizen_id: int
 ) -> Dictionary:
-	return _get_city_citizen_current_task(null, citizen_id)
+	return _get_city_citizen_current_task(
+		_get_compatibility_city_state(),
+		citizen_id
+	)
 
 
 static func get_city_citizen_current_task_for_city_state(
@@ -531,7 +565,7 @@ static func get_city_citizen_current_task_for_city_state(
 
 
 static func _get_city_citizen_current_task(
-	city_state,
+	city_state: CitySettlementSimulationState,
 	citizen_id: int
 ) -> Dictionary:
 	var citizen: Dictionary = {}
@@ -556,7 +590,11 @@ static func assign_city_citizen_task(
 	citizen_id: int,
 	task_values: Dictionary
 ) -> bool:
-	return _assign_city_citizen_task(null, citizen_id, task_values)
+	return _assign_city_citizen_task(
+		_get_compatibility_city_state(),
+		citizen_id,
+		task_values
+	)
 
 
 static func assign_city_citizen_task_for_city_state(
@@ -568,7 +606,7 @@ static func assign_city_citizen_task_for_city_state(
 
 
 static func _assign_city_citizen_task(
-	city_state,
+	city_state: CitySettlementSimulationState,
 	citizen_id: int,
 	task_values: Dictionary
 ) -> bool:
@@ -587,7 +625,7 @@ static func _assign_city_citizen_task(
 	return _commit_city_citizen_task_assignment(city_state, assignment)
 
 static func _make_city_citizen_task_assignment_context(
-	city_state,
+	city_state: CitySettlementSimulationState,
 	citizen_id: int,
 	task_values: Dictionary
 ) -> Dictionary:
@@ -744,7 +782,7 @@ static func _make_city_citizen_task_assignment_context(
 	}
 
 static func _prepare_city_citizen_task_assignment(
-	city_state,
+	city_state: CitySettlementSimulationState,
 	assignment: Dictionary
 ) -> bool:
 	match str(assignment.get("task_kind", CityCitizens.CITY_CITIZEN_TASK_KIND_NONE)):
@@ -779,7 +817,7 @@ static func _prepare_city_citizen_task_assignment(
 			return false
 
 static func _prepare_city_work_task_assignment(
-	city_state,
+	city_state: CitySettlementSimulationState,
 	assignment: Dictionary
 ) -> bool:
 	var citizen: Dictionary = assignment.get("citizen", {})
@@ -799,7 +837,7 @@ static func _prepare_city_work_task_assignment(
 	return int(citizen.get("job_object_id", -1)) == target_object_id
 
 static func _prepare_city_food_task_assignment(
-	city_state,
+	city_state: CitySettlementSimulationState,
 	assignment: Dictionary
 ) -> bool:
 	var citizen_id := int(assignment.get("citizen_id", -1))
@@ -948,7 +986,7 @@ static func _prepare_city_food_task_assignment(
 	return true
 
 static func _prepare_city_player_command_task_assignment(
-	city_state,
+	city_state: CitySettlementSimulationState,
 	assignment: Dictionary
 ) -> bool:
 	var citizen_id := int(assignment.get("citizen_id", -1))
@@ -991,7 +1029,7 @@ static func _prepare_city_player_command_task_assignment(
 	return true
 
 static func _prepare_city_haul_task_assignment(
-	city_state,
+	city_state: CitySettlementSimulationState,
 	assignment: Dictionary
 ) -> bool:
 	var citizen_id := int(assignment.get("citizen_id", -1))
@@ -1198,7 +1236,7 @@ static func _prepare_city_haul_task_assignment(
 	return true
 
 static func _prepare_city_return_home_task_assignment(
-	city_state,
+	city_state: CitySettlementSimulationState,
 	assignment: Dictionary
 ) -> bool:
 	var citizen_id := int(assignment.get("citizen_id", -1))
@@ -1248,7 +1286,7 @@ static func _prepare_city_return_home_task_assignment(
 	)
 
 static func _commit_city_citizen_task_assignment(
-	city_state,
+	city_state: CitySettlementSimulationState,
 	assignment: Dictionary
 ) -> bool:
 	var citizen_id := int(assignment.get("citizen_id", -1))
@@ -1308,7 +1346,11 @@ static func set_city_citizen_task_phase(
 	citizen_id: int,
 	task_phase: String
 ) -> bool:
-	return _set_city_citizen_task_phase(null, citizen_id, task_phase)
+	return _set_city_citizen_task_phase(
+		_get_compatibility_city_state(),
+		citizen_id,
+		task_phase
+	)
 
 
 static func set_city_citizen_task_phase_for_city_state(
@@ -1320,7 +1362,7 @@ static func set_city_citizen_task_phase_for_city_state(
 
 
 static func _set_city_citizen_task_phase(
-	city_state,
+	city_state: CitySettlementSimulationState,
 	citizen_id: int,
 	task_phase: String
 ) -> bool:
@@ -1374,7 +1416,7 @@ static func set_city_citizen_task_target_object_id(
 	target_object_id: int
 ) -> bool:
 	return _set_city_citizen_task_target_object_id(
-		null,
+		_get_compatibility_city_state(),
 		citizen_id,
 		target_object_id
 	)
@@ -1393,7 +1435,7 @@ static func set_city_citizen_task_target_object_id_for_city_state(
 
 
 static func _set_city_citizen_task_target_object_id(
-	city_state,
+	city_state: CitySettlementSimulationState,
 	citizen_id: int,
 	target_object_id: int
 ) -> bool:
@@ -1439,7 +1481,10 @@ static func _set_city_citizen_task_target_object_id(
 static func set_city_citizen_task_activity_state(
 	values: Dictionary
 ) -> bool:
-	return _set_city_citizen_task_activity_state(null, values)
+	return _set_city_citizen_task_activity_state(
+		_get_compatibility_city_state(),
+		values
+	)
 
 
 static func set_city_citizen_task_activity_state_for_city_state(
@@ -1450,7 +1495,7 @@ static func set_city_citizen_task_activity_state_for_city_state(
 
 
 static func _set_city_citizen_task_activity_state(
-	city_state,
+	city_state: CitySettlementSimulationState,
 	values: Dictionary
 ) -> bool:
 	if not values.has("citizen_id") or not values.has("target_tile"):
@@ -1568,7 +1613,11 @@ static func clear_city_citizen_task(
 	citizen_id: int,
 	requesting_source: String = CityCitizens.CITY_CITIZEN_TASK_SOURCE_NONE
 ) -> bool:
-	return _clear_city_citizen_task(null, citizen_id, requesting_source)
+	return _clear_city_citizen_task(
+		_get_compatibility_city_state(),
+		citizen_id,
+		requesting_source
+	)
 
 
 static func clear_city_citizen_task_for_city_state(
@@ -1584,7 +1633,7 @@ static func clear_city_citizen_task_for_city_state(
 
 
 static func _clear_city_citizen_task(
-	city_state,
+	city_state: CitySettlementSimulationState,
 	citizen_id: int,
 	requesting_source: String
 ) -> bool:
