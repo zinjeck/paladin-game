@@ -9,11 +9,28 @@ class_name CityCitizenUnboundCompatibility
 # registry exists it exposes the pre-registry unbound owners. After foundation
 # it targets the fixed player-capital owner. A legacy one-city fixture may also
 # use its sole registered city because that owner is unambiguous and cannot be
-# redirected by presentation selection. PR 9 will retire this compatibility
-# backend altogether.
+# redirected by presentation selection. Multi-city legacy tests may bind one
+# exact CitySettlementSimulationState explicitly; presentation selection still
+# has no authority over citizen gameplay state. PR 9 will retire this
+# compatibility backend altogether.
+
+static var _explicit_legacy_fixture_state: CitySettlementSimulationState = null
+
+
+static func bind_legacy_fixture_state(
+	city_state: CitySettlementSimulationState
+) -> void:
+	_explicit_legacy_fixture_state = city_state
+
+
+static func clear_legacy_fixture_state() -> void:
+	_explicit_legacy_fixture_state = null
 
 
 static func get_city_state() -> CitySettlementSimulationState:
+	if _explicit_legacy_fixture_state != null:
+		return _explicit_legacy_fixture_state
+
 	var capital_state = WorldPoliticalState.get_player_capital_city_simulation_state()
 	if capital_state is CitySettlementSimulationState:
 		return capital_state
