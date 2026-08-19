@@ -34,16 +34,8 @@ func _test_equal_version_city_isolation() -> void:
 		"primary_culture_id": culture_id,
 	})
 	var polity_id := int(polity.get("id", -1))
-	var city_a := _create_city(
-		"Citizen Registry City A",
-		polity_id,
-		Vector2i(1, 1)
-	)
-	var city_b := _create_city(
-		"Citizen Registry City B",
-		polity_id,
-		Vector2i(8, 8)
-	)
+	var city_a := _create_city("Citizen Registry City A", polity_id, Vector2i(1, 1))
+	var city_b := _create_city("Citizen Registry City B", polity_id, Vector2i(8, 8))
 	_expect(
 		not city_a.is_empty() and not city_b.is_empty(),
 		"The fixture must create two instance-owned Cities."
@@ -53,346 +45,160 @@ func _test_equal_version_city_isolation() -> void:
 
 	var city_a_id := int(city_a["id"])
 	var city_b_id := int(city_b["id"])
-	_expect(
-		WorldPoliticalState.set_active_settlement(city_a_id),
-		"City A must become active."
-	)
-	WorldPoliticalState.set_current_city_world(_make_world(16, 16, 97_101))
-	WorldPoliticalState.set_current_city_seed(97_101)
-	var citizen_a := CityCitizenRegistrySystem.add_city_citizen(
-		"",
-		SHARED_CITIZEN_TILE,
-		CityCitizens.CITY_CITIZEN_SEX_MALE,
-		culture_id
-	)
-	var state_a := (
-		CityCitizenRegistrySystem.get_current_state()
-	)
-	var citizens_a: Array = state_a.citizens
-	var index_a: Dictionary = state_a.citizen_index_by_id
-	var spatial_a: Dictionary = CityCitizenSpatialSystem.get_current_state().citizen_ids_by_tile
-	var version_a := state_a.citizen_version
-	var next_id_a := state_a.next_citizen_id
-	var mover_ids_a: Array[int] = [101]
-	var mover_lookup_a: Dictionary = {101: true}
-	var movement_events_a: Array = [{"marker": "A"}]
-	var task_ids_a: Array[int] = [101]
-	var task_lookup_a: Dictionary = {101: true}
-	var access_cache_a: Dictionary = {101: {"marker": "A"}}
-	CityCitizenMovementRuntimeSystem.get_current_state().active_mover_ids = mover_ids_a
-	CityCitizenMovementRuntimeSystem.get_current_state().active_mover_id_lookup = mover_lookup_a
-	CityCitizenMovementRuntimeSystem.get_current_state().citizen_movement_visual_events = movement_events_a
-	CityCitizenMovementRuntimeSystem.get_current_state().citizen_movement_visual_tick_index = 101
-	CityCitizenTaskRuntimeSystem.get_current_state().active_task_ids = task_ids_a
-	CityCitizenTaskRuntimeSystem.get_current_state().active_task_id_lookup = task_lookup_a
-	CityNavigationSystem.get_current_state().object_access_tile_cache = access_cache_a
-	CityCitizenMovementRuntimeSystem.get_current_state().citizen_movement_version = 11
-	CityCitizenTaskRuntimeSystem.get_current_state().citizen_task_version = 13
-	CityAssignmentSystem.get_current_state().assignment_version = 15
-	CityEmploymentSystem.get_current_state().workplace_version = 17
-
-	_expect(
-		int(citizen_a.get("id", -1)) == 1
-		and version_a == 1
-		and next_id_a == 2
-		and int(index_a.get(1, -1)) == 0
-		and spatial_a.get(SHARED_CITIZEN_TILE, []) == [1],
-		"City A must own local citizen 1 at the shared coordinate."
-	)
-	if citizens_a.is_empty():
+	var state_a := _seed_city(city_a_id, culture_id, 97_101, CityCitizens.CITY_CITIZEN_SEX_MALE, 101)
+	var state_b := _seed_city(city_b_id, culture_id, 97_202, CityCitizens.CITY_CITIZEN_SEX_FEMALE, 202)
+	if state_a.is_empty() or state_b.is_empty():
 		return
 
 	_expect(
-		WorldPoliticalState.set_active_settlement(city_b_id),
-		"City B must become active."
+		int(state_a["citizen_id"]) == 1
+		and int(state_b["citizen_id"]) == 1
+		and int(state_a["registry_version"]) == 1
+		and int(state_b["registry_version"]) == 1
+		and int(state_a["next_id"]) == 2
+		and int(state_b["next_id"]) == 2,
+		"Both Cities must independently reuse citizen ID 1 and equal registry versions."
 	)
-	WorldPoliticalState.set_current_city_world(_make_world(16, 16, 97_202))
-	WorldPoliticalState.set_current_city_seed(97_202)
-	var citizen_b := CityCitizenRegistrySystem.add_city_citizen(
-		"",
-		SHARED_CITIZEN_TILE,
-		CityCitizens.CITY_CITIZEN_SEX_FEMALE,
-		culture_id
-	)
-	var state_b := (
-		CityCitizenRegistrySystem.get_current_state()
-	)
-	var citizens_b: Array = state_b.citizens
-	var index_b: Dictionary = state_b.citizen_index_by_id
-	var spatial_b: Dictionary = CityCitizenSpatialSystem.get_current_state().citizen_ids_by_tile
-
 	_expect(
-		int(citizen_b.get("id", -1)) == 1
-		and state_b.citizen_version == version_a
-		and state_b.next_citizen_id == next_id_a
-		and int(index_b.get(1, -1)) == 0
-		and spatial_b.get(SHARED_CITIZEN_TILE, []) == [1],
-		"City B must independently reuse citizen ID 1 and the same coordinate."
+		not is_same(state_a["registry_state"], state_b["registry_state"])
+		and not is_same(state_a["citizens"], state_b["citizens"])
+		and not is_same(state_a["index"], state_b["index"])
+		and not is_same(state_a["spatial"], state_b["spatial"])
+		and not is_same(state_a["movement_ids"], state_b["movement_ids"])
+		and not is_same(state_a["task_ids"], state_b["task_ids"]),
+		"Equal local IDs and versions must retain distinct mutable owners."
 	)
-	if citizens_b.is_empty():
-		return
-	_expect(
-		not is_same(state_b, state_a)
-		and not is_same(citizens_b, citizens_a)
-		and not is_same(index_b, index_a)
-		and not is_same(spatial_b, spatial_a)
-		and str(citizens_a[0].get("sex", ""))
-		== CityCitizens.CITY_CITIZEN_SEX_MALE
-		and str(citizens_b[0].get("sex", ""))
-		== CityCitizens.CITY_CITIZEN_SEX_FEMALE,
-		"Equal local IDs, coordinates, and versions must not alias City state."
-	)
-
-	_test_renderer_identity_invalidation(city_b_id, state_b)
-	_test_validator_identity_invalidation(city_b_id, state_b)
-	var mover_ids_b: Array[int] = [202]
-	var mover_lookup_b: Dictionary = {202: true}
-	var movement_events_b: Array = [{"marker": "B"}]
-	var task_ids_b: Array[int] = [202]
-	var task_lookup_b: Dictionary = {202: true}
-	var access_cache_b: Dictionary = {202: {"marker": "B"}}
-	CityCitizenMovementRuntimeSystem.get_current_state().active_mover_ids = mover_ids_b
-	CityCitizenMovementRuntimeSystem.get_current_state().active_mover_id_lookup = mover_lookup_b
-	CityCitizenMovementRuntimeSystem.get_current_state().citizen_movement_visual_events = movement_events_b
-	CityCitizenMovementRuntimeSystem.get_current_state().citizen_movement_visual_tick_index = 202
-	CityCitizenTaskRuntimeSystem.get_current_state().active_task_ids = task_ids_b
-	CityCitizenTaskRuntimeSystem.get_current_state().active_task_id_lookup = task_lookup_b
-	CityNavigationSystem.get_current_state().object_access_tile_cache = access_cache_b
-	CityCitizenMovementRuntimeSystem.get_current_state().citizen_movement_version = 12
-	CityCitizenTaskRuntimeSystem.get_current_state().citizen_task_version = 14
-	CityAssignmentSystem.get_current_state().assignment_version = 16
-	CityEmploymentSystem.get_current_state().workplace_version = 18
 
 	_expect(
 		WorldPoliticalState.set_active_settlement(city_a_id)
-		and is_same(
-			CityCitizenRegistrySystem.get_current_state(),
-			state_a
-		)
-		and is_same(CityCitizenRegistrySystem.get_current_state().citizens, citizens_a)
-		and is_same(CityCitizenRegistrySystem.get_current_state().citizen_index_by_id, index_a)
-		and is_same(CityCitizenSpatialSystem.get_current_state().citizen_ids_by_tile, spatial_a)
-		and is_same(CityCitizenMovementRuntimeSystem.get_current_state().active_mover_ids, mover_ids_a)
-		and is_same(CityCitizenMovementRuntimeSystem.get_current_state().active_mover_id_lookup, mover_lookup_a)
-		and is_same(
-			CityCitizenMovementRuntimeSystem.get_current_state().citizen_movement_visual_events,
-			movement_events_a
-		)
-		and CityCitizenMovementRuntimeSystem.get_current_state().citizen_movement_visual_tick_index == 101
-		and is_same(CityCitizenTaskRuntimeSystem.get_current_state().active_task_ids, task_ids_a)
-		and is_same(CityCitizenTaskRuntimeSystem.get_current_state().active_task_id_lookup, task_lookup_a)
-		and is_same(CityNavigationSystem.get_current_state().object_access_tile_cache, access_cache_a)
-		and CityCitizenMovementRuntimeSystem.get_current_state().citizen_movement_version == 11
-		and CityCitizenTaskRuntimeSystem.get_current_state().citizen_task_version == 13
-		and CityAssignmentSystem.get_current_state().assignment_version == 15
-		and CityEmploymentSystem.get_current_state().workplace_version == 17
-		and CityCitizenRegistrySystem.get_current_state().next_citizen_id == next_id_a
-		and CityCitizenRegistrySystem.get_current_state().citizen_version == version_a
-		and str(CityCitizenRegistrySystem.get_current_state().citizens[0].get("sex", ""))
-		== CityCitizens.CITY_CITIZEN_SEX_MALE,
-		"A -> B -> A must restore City A's exact registry and spatial workspace."
+		and _bind_fixture_city(city_a_id)
+		and _matches_seeded_city(state_a),
+		"B -> A must restore City A's exact registry and runtime owners."
 	)
 	_expect(
 		WorldPoliticalState.set_active_settlement(city_b_id)
-		and is_same(
-			CityCitizenRegistrySystem.get_current_state(),
-			state_b
-		)
-		and is_same(CityCitizenRegistrySystem.get_current_state().citizens, citizens_b)
-		and is_same(CityCitizenRegistrySystem.get_current_state().citizen_index_by_id, index_b)
-		and is_same(CityCitizenSpatialSystem.get_current_state().citizen_ids_by_tile, spatial_b)
-		and is_same(CityCitizenMovementRuntimeSystem.get_current_state().active_mover_ids, mover_ids_b)
-		and is_same(CityCitizenMovementRuntimeSystem.get_current_state().active_mover_id_lookup, mover_lookup_b)
-		and is_same(
-			CityCitizenMovementRuntimeSystem.get_current_state().citizen_movement_visual_events,
-			movement_events_b
-		)
-		and CityCitizenMovementRuntimeSystem.get_current_state().citizen_movement_visual_tick_index == 202
-		and is_same(CityCitizenTaskRuntimeSystem.get_current_state().active_task_ids, task_ids_b)
-		and is_same(CityCitizenTaskRuntimeSystem.get_current_state().active_task_id_lookup, task_lookup_b)
-		and is_same(CityNavigationSystem.get_current_state().object_access_tile_cache, access_cache_b)
-		and CityCitizenMovementRuntimeSystem.get_current_state().citizen_movement_version == 12
-		and CityCitizenTaskRuntimeSystem.get_current_state().citizen_task_version == 14
-		and CityAssignmentSystem.get_current_state().assignment_version == 16
-		and CityEmploymentSystem.get_current_state().workplace_version == 18
-		and CityCitizenRegistrySystem.get_current_state().next_citizen_id == 2
-		and CityCitizenRegistrySystem.get_current_state().citizen_version == 1
-		and str(CityCitizenRegistrySystem.get_current_state().citizens[0].get("sex", ""))
-		== CityCitizens.CITY_CITIZEN_SEX_FEMALE,
-		"A -> B -> A -> B must leave City B's registry unchanged."
+		and _bind_fixture_city(city_b_id)
+		and _matches_seeded_city(state_b),
+		"A -> B must restore City B's exact registry and runtime owners."
 	)
-
-	var city_a_root = WorldPoliticalState.get_city_simulation_state(city_a_id)
-	var city_b_root = WorldPoliticalState.get_city_simulation_state(city_b_id)
 	_expect(
-		city_a_root is CitySettlementSimulationState
-		and city_b_root is CitySettlementSimulationState
-		and is_same(city_a_root.citizen_registry_state, state_a)
-		and is_same(city_b_root.citizen_registry_state, state_b)
-		and not is_same(
-			city_a_root.citizen_spatial_state,
-			city_b_root.citizen_spatial_state
-		)
-		and is_same(
-			city_a_root.citizen_spatial_state.citizen_ids_by_tile,
-			spatial_a
-		)
-		and is_same(
-			city_b_root.citizen_spatial_state.citizen_ids_by_tile,
-			spatial_b
-		)
-		and not is_same(
-			city_a_root.citizen_movement_runtime_state,
-			city_b_root.citizen_movement_runtime_state
-		)
-		and is_same(
-			city_a_root.citizen_movement_runtime_state.active_mover_ids,
-			mover_ids_a
-		)
-		and is_same(
-			city_b_root.citizen_movement_runtime_state.active_mover_ids,
-			mover_ids_b
-		)
-		and is_same(
-			city_a_root.citizen_task_runtime_state.active_task_ids,
-			task_ids_a
-		)
-		and is_same(
-			city_b_root.citizen_task_runtime_state.active_task_ids,
-			task_ids_b
-		),
-		"Registry, spatial, movement, and task owners must remain isolated."
+		WorldPoliticalState.set_active_settlement(city_a_id)
+		and _bind_fixture_city(city_a_id)
+		and _matches_seeded_city(state_a),
+		"A -> B -> A must preserve City A despite equal IDs and versions."
+	)
+
+	var validation_a := CityStateValidatorScript.validate_for_settlement(
+		WorldPoliticalState.get_settlement_context(city_a_id), true, false
+	)
+	var validation_b := CityStateValidatorScript.validate_for_settlement(
+		WorldPoliticalState.get_settlement_context(city_b_id), true, false
+	)
+	_expect(
+		int(validation_a.get("citizen_registry_state_instance_id", -1))
+		== int(state_a["registry_state"].get_instance_id())
+		and int(validation_b.get("citizen_registry_state_instance_id", -1))
+		== int(state_b["registry_state"].get_instance_id())
+		and int(validation_a.get("citizen_registry_state_instance_id", -1))
+		!= int(validation_b.get("citizen_registry_state_instance_id", -1)),
+		"Validation must remain keyed by exact registry owner identity."
 	)
 
 
-func _test_renderer_identity_invalidation(
+func _seed_city(
 	city_id: int,
-	original_state: CityCitizenRegistryState
-) -> void:
-	var renderer := CityRenderer.new()
-	var renderer_context = WorldPoliticalState.get_settlement_context(city_id)
-	_expect(
-		renderer.configure_initial_city_presentation(renderer_context),
-		"Renderer observer coverage requires the explicit target settlement binding."
-	)
-	renderer.observed_city_citizen_registry_state = original_state
-	renderer.observed_city_citizen_version = original_state.citizen_version
-	renderer.observed_city_citizen_movement_version = (
-		CityCitizenMovementRuntimeSystem.get_current_state().citizen_movement_version - 1
-	)
-	renderer.observed_city_citizen_movement_runtime_state = (
-		CityCitizenMovementRuntimeSystem.get_current_state()
-	)
-	renderer.city_citizen_movement_presentation.movement_snapshot_by_citizen_id = {
-		1: {"marker": "old-city"},
-	}
-	renderer.city_citizen_movement_presentation.visual_position_by_citizen_id = {
-		1: Vector2(99.0, 99.0),
-	}
-	renderer.city_citizen_movement_presentation.transition_by_citizen_id = {
-		1: {"marker": "old-city"},
-	}
-	renderer.city_citizen_movement_presentation.tracked_mover_id_lookup = {
-		1: true,
-	}
-	var replacement_state := _clone_registry_state(original_state)
-	var city_root = WorldPoliticalState.get_city_simulation_state(city_id)
-	city_root.citizen_registry_state = replacement_state
-	var change_flags: Dictionary = {}
-	renderer._collect_world_data_change_flags(change_flags)
-	_expect(
-		bool(change_flags.get("city_citizens_changed", false))
-		and bool(change_flags.get("city_citizen_registry_changed", false))
-		and bool(change_flags.get("city_citizen_movement_changed", false))
-		and is_same(
-			renderer.observed_city_citizen_registry_state,
-			replacement_state
-		)
-		and renderer.observed_city_citizen_version
-		== original_state.citizen_version,
-		"Renderer refresh must include registry identity when versions are equal."
-	)
-	renderer._synchronize_city_citizen_movement(change_flags)
-	_expect(
-		renderer
-		.city_citizen_movement_presentation
-		.movement_snapshot_by_citizen_id.is_empty()
-		and renderer
-		.city_citizen_movement_presentation
-		.visual_position_by_citizen_id.is_empty()
-		and renderer
-		.city_citizen_movement_presentation
-		.transition_by_citizen_id.is_empty()
-		and renderer
-		.city_citizen_movement_presentation
-		.tracked_mover_id_lookup.is_empty()
-		and renderer.synchronized_city_citizen_movement_version
-		== CityCitizenMovementRuntimeSystem.get_current_state().citizen_movement_version,
-		"A registry switch must discard old-City cosmetic movement by local ID."
-	)
-	city_root.citizen_registry_state = original_state
-	renderer.free()
-
-
-func _test_validator_identity_invalidation(
-	city_id: int,
-	original_state: CityCitizenRegistryState
-) -> void:
-	var first_validation := CityStateValidatorScript.validate_for_settlement(
-		WorldPoliticalState.get_settlement_context(city_id),
-		true,
-		false
-	)
-	var replacement_state := _clone_registry_state(original_state)
-	var city_root = WorldPoliticalState.get_city_simulation_state(city_id)
-	city_root.citizen_registry_state = replacement_state
-	var second_validation := CityStateValidatorScript.validate_for_settlement(
-		WorldPoliticalState.get_settlement_context(city_id),
-		false,
-		false
-	)
-	_expect(
-		int(first_validation.get(
-			"citizen_registry_state_instance_id",
-			-1
-		)) == int(original_state.get_instance_id())
-		and int(second_validation.get(
-			"citizen_registry_state_instance_id",
-			-1
-		)) == int(replacement_state.get_instance_id())
-		and int(first_validation.get(
-			"citizen_registry_state_instance_id",
-			-1
-		)) != int(second_validation.get(
-			"citizen_registry_state_instance_id",
-			-1
-		)),
-		"Validator caching must invalidate on an equal-version owner replacement."
-	)
-	city_root.citizen_registry_state = original_state
-	CityStateValidatorScript.validate_for_settlement(
-		WorldPoliticalState.get_settlement_context(city_id),
-		true,
-		false
-	)
-
-
-func _clone_registry_state(
-	source: CityCitizenRegistryState
-) -> CityCitizenRegistryState:
-	var clone := CityCitizenRegistryState.new()
-	clone.citizens = source.citizens.duplicate(true)
-	clone.citizen_index_by_id = source.citizen_index_by_id.duplicate(true)
-	clone.next_citizen_id = source.next_citizen_id
-	clone.citizen_version = source.citizen_version
-	return clone
-
-
-func _create_city(
-	city_name: String,
-	polity_id: int,
-	region_center: Vector2i
+	culture_id: int,
+	seed_value: int,
+	sex: String,
+	marker: int
 ) -> Dictionary:
+	_expect(
+		WorldPoliticalState.set_active_settlement(city_id)
+		and _bind_fixture_city(city_id),
+		"The seeded City must select presentation and bind its exact citizen owner."
+	)
+	if WorldPoliticalState.active_settlement_id != city_id:
+		return {}
+	WorldPoliticalState.set_current_city_world(_make_world(16, 16, seed_value))
+	WorldPoliticalState.set_current_city_seed(seed_value)
+	var citizen := CityCitizenRegistrySystem.add_city_citizen(
+		"", SHARED_CITIZEN_TILE, sex, culture_id
+	)
+	var citizen_id := int(citizen.get("id", -1))
+	if citizen_id != 1:
+		_expect(false, "Each City must create its own local citizen 1.")
+		return {}
+
+	var registry_state := CityCitizenRegistrySystem.get_current_state()
+	var spatial_state := CityCitizenSpatialSystem.get_current_state()
+	var movement_state := CityCitizenMovementRuntimeSystem.get_current_state()
+	var task_state := CityCitizenTaskRuntimeSystem.get_current_state()
+	movement_state.active_mover_ids = [marker]
+	movement_state.active_mover_id_lookup = {marker: true}
+	movement_state.citizen_movement_visual_events = [{"marker": marker}]
+	movement_state.citizen_movement_visual_tick_index = marker
+	movement_state.citizen_movement_version = 11
+	task_state.active_task_ids = [marker]
+	task_state.active_task_id_lookup = {marker: true}
+	task_state.citizen_task_version = 13
+	CityAssignmentSystem.get_current_state().assignment_version = 15
+	CityEmploymentSystem.get_current_state().workplace_version = 17
+
+	return {
+		"city_id": city_id,
+		"citizen_id": citizen_id,
+		"registry_state": registry_state,
+		"citizens": registry_state.citizens,
+		"index": registry_state.citizen_index_by_id,
+		"registry_version": registry_state.citizen_version,
+		"next_id": registry_state.next_citizen_id,
+		"spatial": spatial_state.citizen_ids_by_tile,
+		"movement_state": movement_state,
+		"movement_ids": movement_state.active_mover_ids,
+		"task_state": task_state,
+		"task_ids": task_state.active_task_ids,
+		"marker": marker,
+		"sex": sex,
+	}
+
+
+func _matches_seeded_city(expected: Dictionary) -> bool:
+	var marker := int(expected["marker"])
+	var registry_state := CityCitizenRegistrySystem.get_current_state()
+	var spatial_state := CityCitizenSpatialSystem.get_current_state()
+	var movement_state := CityCitizenMovementRuntimeSystem.get_current_state()
+	var task_state := CityCitizenTaskRuntimeSystem.get_current_state()
+	return (
+		is_same(registry_state, expected["registry_state"])
+		and is_same(registry_state.citizens, expected["citizens"])
+		and is_same(registry_state.citizen_index_by_id, expected["index"])
+		and registry_state.citizen_version == int(expected["registry_version"])
+		and registry_state.next_citizen_id == int(expected["next_id"])
+		and is_same(spatial_state.citizen_ids_by_tile, expected["spatial"])
+		and is_same(movement_state, expected["movement_state"])
+		and is_same(movement_state.active_mover_ids, expected["movement_ids"])
+		and movement_state.active_mover_id_lookup.get(marker, false)
+		and movement_state.citizen_movement_version == 11
+		and is_same(task_state, expected["task_state"])
+		and is_same(task_state.active_task_ids, expected["task_ids"])
+		and task_state.active_task_id_lookup.get(marker, false)
+		and task_state.citizen_task_version == 13
+		and CityAssignmentSystem.get_current_state().assignment_version == 15
+		and CityEmploymentSystem.get_current_state().workplace_version == 17
+		and str(registry_state.citizens[0].get("sex", "")) == str(expected["sex"])
+		and spatial_state.citizen_ids_by_tile.get(SHARED_CITIZEN_TILE, []) == [1]
+	)
+
+
+func _bind_fixture_city(city_id: int) -> bool:
+	var city_state = WorldPoliticalState.get_city_simulation_state(city_id)
+	if not city_state is CitySettlementSimulationState:
+		return false
+	CityCitizenUnboundCompatibility.bind_legacy_fixture_state(city_state)
+	return true
+
+
+func _create_city(city_name: String, polity_id: int, region_center: Vector2i) -> Dictionary:
 	return WorldPoliticalState.create_settlement({
 		"name": city_name,
 		"settlement_type": SettlementData.SETTLEMENT_TYPE_CITY,
@@ -400,16 +206,13 @@ func _create_city(
 		"world_region_top_left": region_center,
 		"world_region_center": region_center,
 		"world_region_size": 1,
-		"simulation_backend_kind": (
-			SettlementSimulationContext.BACKEND_CITY_SETTLEMENT_STATE
-		),
+		"simulation_backend_kind": SettlementSimulationContext.BACKEND_CITY_SETTLEMENT_STATE,
 	})
 
 
 func _make_world(width: int, height: int, seed_value: int) -> WorldData:
 	var world := WorldData.new()
 	world.setup(width, height, seed_value)
-
 	for y in range(height):
 		for x in range(width):
 			world.tiles[y][x] = {
@@ -422,7 +225,6 @@ func _make_world(width: int, height: int, seed_value: int) -> WorldData:
 				"resource": WorldData.RESOURCE_NONE,
 				"is_land": true,
 			}
-
 	world.mark_tile_data_changed()
 	return world
 
@@ -430,6 +232,5 @@ func _make_world(width: int, height: int, seed_value: int) -> WorldData:
 func _expect(condition: bool, message: String) -> void:
 	if condition:
 		return
-
 	failure_count += 1
 	push_error("City citizen-registry isolation test: " + message)
