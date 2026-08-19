@@ -7,15 +7,20 @@ class_name CityCitizenUnboundCompatibility
 #
 # This view never resolves the active/presented settlement. Before the political
 # registry exists it exposes the pre-registry unbound owners. After foundation
-# it targets the fixed player-capital owner, preserving the historical capital
-# adapter without letting presentation selection redirect gameplay. PR 9 will
-# retire this compatibility backend altogether.
+# it targets the fixed player-capital owner. A legacy one-city fixture may also
+# use its sole registered city because that owner is unambiguous and cannot be
+# redirected by presentation selection. PR 9 will retire this compatibility
+# backend altogether.
 
 
 static func get_city_state() -> CitySettlementSimulationState:
 	var capital_state = WorldPoliticalState.get_player_capital_city_simulation_state()
 	if capital_state is CitySettlementSimulationState:
 		return capital_state
+
+	var only_registered_state := _get_only_registered_city_state()
+	if only_registered_state != null:
+		return only_registered_state
 
 	var city_state := CitySettlementSimulationState.new()
 	city_state.city_world = WorldPoliticalState._unbound_city_world
@@ -49,3 +54,14 @@ static func get_city_state() -> CitySettlementSimulationState:
 	)
 	city_state.navigation_state = WorldPoliticalState._unbound_city_navigation_state
 	return city_state
+
+
+static func _get_only_registered_city_state() -> CitySettlementSimulationState:
+	var only_state: CitySettlementSimulationState = null
+	for raw_state in WorldPoliticalState.settlement_city_state_by_id.values():
+		if not raw_state is CitySettlementSimulationState:
+			continue
+		if only_state != null:
+			return null
+		only_state = raw_state
+	return only_state
