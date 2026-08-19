@@ -118,7 +118,11 @@ func _seed_city(
 		and _bind_fixture_city(city_id),
 		"The seeded City must select presentation and bind its citizen owner."
 	)
-	WorldPoliticalState.set_current_city_world(_make_world(16, 16, seed_value))
+	var city_state = WorldPoliticalState.get_city_simulation_state(city_id)
+	if not city_state is CitySettlementSimulationState:
+		return {}
+	var city_world := _make_world(16, 16, seed_value)
+	WorldPoliticalState.set_current_city_world(city_world)
 	WorldPoliticalState.set_current_city_seed(seed_value)
 	var citizen := CityCitizenRegistrySystem.add_city_citizen(
 		"",
@@ -131,7 +135,12 @@ func _seed_city(
 		_expect(false, "Each City must create local citizen 1.")
 		return {}
 	_expect(
-		CityCitizenSpatialSystem.set_city_citizen_tile_position(citizen_id, target_tile),
+		CityCitizenSpatialSystem.set_city_citizen_tile_position_for_city_state(
+			city_state,
+			city_world,
+			citizen_id,
+			target_tile
+		),
 		"The explicit fixture must move citizen 1 into its City-local spatial slot."
 	)
 	return {
