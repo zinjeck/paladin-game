@@ -111,7 +111,9 @@ func _test_real_founding_spatial_bootstrap() -> void:
 	)
 	var spatial_index: Dictionary = spatial_state.citizen_ids_by_tile
 	var city_world := _make_world(20, 20, 98_102)
-	WorldData.store_city_world_save(city_world, 98_102)
+	WorldData.store_city_world_for_city_state(
+		CityCitizenUnboundCompatibility.get_city_state(),
+		city_world, 98_102)
 	var keep_size := CityObjectCatalog.get_city_object_size_for_type(
 		CityObjectCatalog.CITY_OBJECT_CITY_CENTER
 	)

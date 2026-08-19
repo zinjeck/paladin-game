@@ -15,10 +15,7 @@ class_name CityResourceAccountingSystem
 # compatibility owner. They never follow the settlement selected for
 # presentation. Production simulation enters through the *_for_city_state APIs.
 static func get_current_state() -> CityResourceAccountingState:
-	return (
-		CityCitizenUnboundCompatibility.get_city_state()
-		.resource_accounting_state
-	)
+	return CityCitizenUnboundCompatibility.get_city_state().resource_accounting_state
 
 
 static func _get_compatibility_city_state() -> CitySettlementSimulationState:

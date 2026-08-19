@@ -72,16 +72,9 @@ static func city_object_is_household_home(
 static func get_city_home_food_target_nutrition(
 	home: Dictionary
 ) -> int:
-	if not city_object_is_household_home(home):
-		return 0
-
-	return ceili(
-		float(
-			CityAssignmentSystem.get_city_object_resident_count(home)
-			* CityCitizens.CITIZEN_HUNGER_LOSS_PER_DAY
-			* HOUSEHOLD_FOOD_TARGET_DAY_NUMERATOR
-	)
-		/ float(HOUSEHOLD_FOOD_TARGET_DAY_DENOMINATOR)
+	return get_city_home_food_target_nutrition_for_city_state(
+		_get_compatibility_city_state(),
+		home
 	)
 
 
@@ -114,18 +107,9 @@ static func get_city_home_one_day_food_target_nutrition(
 	return get_city_home_food_target_nutrition(home)
 
 static func get_living_city_citizen_count() -> int:
-	var living_count := 0
-
-	for raw_citizen in CityCitizenRegistrySystem.get_current_state().citizens:
-		if not raw_citizen is Dictionary:
-			continue
-
-		var citizen: Dictionary = raw_citizen
-
-		if bool(citizen.get("alive", false)):
-			living_count += 1
-
-	return living_count
+	return get_living_city_citizen_count_for_city_state(
+		_get_compatibility_city_state()
+	)
 
 
 static func get_living_city_citizen_count_for_city_state(
@@ -140,13 +124,8 @@ static func get_living_city_citizen_count_for_city_state(
 	return living_count
 
 static func get_city_public_food_reserve_target_nutrition() -> int:
-	return ceili(
-		float(
-			get_living_city_citizen_count()
-			* CityCitizens.CITIZEN_HUNGER_LOSS_PER_DAY
-			* PUBLIC_FOOD_RESERVE_TARGET_DAY_NUMERATOR
-		)
-		/ float(PUBLIC_FOOD_RESERVE_TARGET_DAY_DENOMINATOR)
+	return get_city_public_food_reserve_target_nutrition_for_city_state(
+		_get_compatibility_city_state()
 	)
 
 
@@ -167,8 +146,8 @@ static func get_city_food_task_reserved_source_amount(
 	resource: String,
 	excluding_citizen_id: int = -1
 ) -> int:
-	return CityCitizenTaskRuntimeSystem.get_city_food_task_reserved_endpoint_amount(
-		CityCitizens.CITY_CITIZEN_HAUL_ENDPOINT_KIND_CITY_OBJECT_CONTAINER,
+	return get_city_food_task_reserved_source_amount_for_city_state(
+		_get_compatibility_city_state(),
 		object_id,
 		resource,
 		excluding_citizen_id
@@ -195,21 +174,11 @@ static func get_city_object_unreserved_food_amount(
 	resource: String,
 	excluding_citizen_id: int = -1
 ) -> int:
-	if city_object.is_empty() or CityResourceCatalog.get_city_food_hunger_restore(resource) <= 0:
-		return 0
-
-	var object_id := int(city_object.get("id", -1))
-	var endpoint := CityLogisticsSystem.make_city_citizen_haul_endpoint(object_id)
-
-	return maxi(
-		CityResourceContainerSystem.get_city_object_stored_resource_amount(city_object, resource)
-		- CityLogisticsSystem.get_city_haul_endpoint_source_reserved_amount(endpoint, resource)
-		- get_city_food_task_reserved_source_amount(
-			object_id,
-			resource,
-			excluding_citizen_id
-		),
-		0
+	return get_city_object_unreserved_food_amount_for_city_state(
+		_get_compatibility_city_state(),
+		city_object,
+		resource,
+		excluding_citizen_id
 	)
 
 
@@ -248,28 +217,9 @@ static func get_city_object_unreserved_food_amount_for_city_state(
 	)
 
 static func get_city_public_unreserved_food_nutrition() -> int:
-	var total_nutrition := 0
-
-	for raw_city_object in CityObjectSystem.get_city_objects():
-		if not raw_city_object is Dictionary:
-			continue
-
-		var city_object: Dictionary = raw_city_object
-
-		if (
-			CityResourceContainerSystem.get_city_object_public_storage_tier(city_object)
-			== CityObjectCatalog.PUBLIC_CITY_STORAGE_TIER_NONE
-			or not CityResourceContainerSystem.city_object_container_is_publicly_usable(city_object)
-		):
-			continue
-
-		for resource in CityResourceCatalog.get_city_food_resource_types():
-			total_nutrition += (
-				get_city_object_unreserved_food_amount(city_object, resource)
-				* CityResourceCatalog.get_city_food_hunger_restore(resource)
-			)
-
-	return total_nutrition
+	return get_city_public_unreserved_food_nutrition_for_city_state(
+		_get_compatibility_city_state()
+	)
 
 
 static func get_city_public_unreserved_food_nutrition_for_city_state(
@@ -308,10 +258,8 @@ static func get_city_public_unreserved_food_nutrition_for_city_state(
 	return total_nutrition
 
 static func get_city_public_food_surplus_nutrition() -> int:
-	return maxi(
-		get_city_public_unreserved_food_nutrition()
-		- get_city_public_food_reserve_target_nutrition(),
-		0
+	return get_city_public_food_surplus_nutrition_for_city_state(
+		_get_compatibility_city_state()
 	)
 
 
@@ -327,11 +275,9 @@ static func get_city_public_food_surplus_nutrition_for_city_state(
 static func get_city_home_stored_food_nutrition(
 	home: Dictionary
 ) -> int:
-	if not city_object_is_household_home(home):
-		return 0
-
-	return CityResourceContainerSystem.get_food_nutrition_in_resource_container(
-		home.get("stored_resources", {})
+	return get_city_home_stored_food_nutrition_for_city_state(
+		_get_compatibility_city_state(),
+		home
 	)
 
 
@@ -347,56 +293,11 @@ static func get_city_home_incoming_food_nutrition(
 		CityCitizens.INVALID_CITY_CITIZEN_HAUL_RESERVATION_ID
 	)
 ) -> int:
-	if not city_object_is_household_home(home):
-		return 0
-
-	var home_endpoint := CityLogisticsSystem.make_city_citizen_haul_endpoint(
-		int(home.get("id", -1))
+	return get_city_home_incoming_food_nutrition_for_city_state(
+		_get_compatibility_city_state(),
+		home,
+		excluding_reservation_id
 	)
-	var incoming_nutrition := 0
-
-	for raw_reservation in CityLogisticsSystem.get_current_state().haul_reservations.values():
-		if not raw_reservation is Dictionary:
-			continue
-
-		var reservation: Dictionary = raw_reservation
-		var reservation_id := int(reservation.get("id", -1))
-
-		if reservation_id == excluding_reservation_id:
-			continue
-
-		if (
-			str(
-				reservation.get(
-					"destination_access_purpose",
-					CityObjectCatalog.CONTAINER_HAUL_PURPOSE_NONE
-				)
-			)
-			!= CityObjectCatalog.CONTAINER_HAUL_PURPOSE_HOME_DELIVERY
-			or not CityLogisticsSystem.city_citizen_haul_endpoints_match(
-				reservation.get("destination", {}),
-				home_endpoint
-			)
-		):
-			continue
-
-		var resource := str(
-			reservation.get("resource_type", WorldData.RESOURCE_NONE)
-		)
-		incoming_nutrition += (
-			maxi(
-				int(
-					reservation.get(
-						"destination_reserved_amount",
-						0
-					)
-				),
-				0
-			)
-			* CityResourceCatalog.get_city_food_hunger_restore(resource)
-		)
-
-	return incoming_nutrition
 
 
 static func get_city_home_incoming_food_nutrition_for_city_state(
@@ -456,14 +357,10 @@ static func get_city_home_unfulfilled_food_nutrition(
 		CityCitizens.INVALID_CITY_CITIZEN_HAUL_RESERVATION_ID
 	)
 ) -> int:
-	return maxi(
-		get_city_home_food_target_nutrition(home)
-		- get_city_home_stored_food_nutrition(home)
-		- get_city_home_incoming_food_nutrition(
-			home,
-			excluding_reservation_id
-		),
-		0
+	return get_city_home_unfulfilled_food_nutrition_for_city_state(
+		_get_compatibility_city_state(),
+		home,
+		excluding_reservation_id
 	)
 
 
@@ -492,25 +389,12 @@ static func get_city_home_requested_food_units(
 		CityCitizens.INVALID_CITY_CITIZEN_HAUL_RESERVATION_ID
 	)
 ) -> int:
-	var hunger_restore := CityResourceCatalog.get_city_food_hunger_restore(resource)
-
-	if hunger_restore <= 0:
-		return 0
-
-	var unfulfilled_nutrition := (
-		get_city_home_unfulfilled_food_nutrition(
-			home,
-			excluding_reservation_id
-		)
+	return get_city_home_requested_food_units_for_city_state(
+		_get_compatibility_city_state(),
+		home,
+		resource,
+		excluding_reservation_id
 	)
-
-	if unfulfilled_nutrition <= 0:
-		return 0
-
-	var pantry_requested_units := ceili(
-		float(unfulfilled_nutrition) / float(hunger_restore)
-	)
-	return pantry_requested_units
 
 
 static func get_city_home_requested_food_units_for_city_state(
@@ -542,16 +426,10 @@ static func get_city_home_requested_food_units_for_city_state(
 static func get_city_home_food_supply_status(
 	home: Dictionary
 ) -> Dictionary:
-	return {
-		"target_nutrition": (
-			get_city_home_food_target_nutrition(home)
-		),
-		"stored_nutrition": get_city_home_stored_food_nutrition(home),
-		"incoming_nutrition": get_city_home_incoming_food_nutrition(home),
-		"unfulfilled_nutrition": (
-			get_city_home_unfulfilled_food_nutrition(home)
-		),
-	}
+	return get_city_home_food_supply_status_for_city_state(
+		_get_compatibility_city_state(),
+		home
+	)
 
 
 static func get_city_home_food_supply_status_for_city_state(
@@ -652,15 +530,10 @@ static func get_resource_demand_category_for_destination(
 static func get_resource_demand_order_priority_rank_for_destination(
 	destination: Dictionary
 ) -> int:
-	if (
-		str(destination.get("kind", ""))
-		== CityCitizens.CITY_CITIZEN_HAUL_ENDPOINT_KIND_CONSTRUCTION_SITE
-	):
-		return _get_construction_order_priority_rank(
-			int(destination.get("id", -1))
-		)
-
-	return 0
+	return get_resource_demand_order_priority_rank_for_destination_for_city_state(
+		_get_compatibility_city_state(),
+		destination
+	)
 
 
 static func get_resource_demand_order_priority_rank_for_destination_for_city_state(
@@ -2036,62 +1909,12 @@ static func get_resource_supply_candidates(
 	resource: String,
 	requested_amount: int
 ) -> Array[Dictionary]:
-	var candidates: Array[Dictionary] = []
-
-	if (
-		purpose != PURPOSE_CONSTRUCTION_SUPPLY
-		or not CityResourceCatalog.is_city_resource_type(resource)
-		or requested_amount <= 0
-	):
-		return candidates
-
-	for raw_object in CityObjectSystem.get_city_objects():
-		if not raw_object is Dictionary:
-			continue
-
-		var city_object: Dictionary = raw_object
-
-		if not CityResourceContainerSystem.city_object_container_is_publicly_usable(city_object):
-			continue
-
-		var endpoint := CityLogisticsSystem.make_city_citizen_haul_endpoint(
-			int(city_object.get("id", -1))
-		)
-		_append_supply_candidate({
-			"candidates": candidates,
-			"endpoint": endpoint,
-			"resource": resource,
-			"requested_amount": requested_amount,
-			"source_access_purpose": (
-				CityObjectCatalog.CONTAINER_HAUL_PURPOSE_CONSTRUCTION
-			),
-			"source_tier": _get_public_storage_source_tier(city_object),
-			"protect_public_food": true,
-		})
-
-	for raw_pile in CityLogisticsSystem.get_city_ground_pile_snapshot():
-		if (
-			not raw_pile is Dictionary
-			or CityLogisticsSystem.city_ground_pile_is_construction_reserved(raw_pile)
-		):
-			continue
-
-		_append_supply_candidate({
-			"candidates": candidates,
-			"endpoint": CityLogisticsSystem.make_city_ground_pile_haul_endpoint(
-				int(raw_pile.get("id", -1))
-			),
-			"resource": resource,
-			"requested_amount": requested_amount,
-			"source_access_purpose": (
-				CityObjectCatalog.CONTAINER_HAUL_PURPOSE_CONSTRUCTION
-			),
-			"source_tier": 2,
-			"protect_public_food": false,
-		})
-
-	candidates.sort_custom(_sort_supply_candidates)
-	return candidates
+	return get_resource_supply_candidates_for_city_state(
+		_get_compatibility_city_state(),
+		purpose,
+		resource,
+		requested_amount
+	)
 
 
 static func get_resource_supply_candidates_for_city_state(
@@ -2225,57 +2048,10 @@ static func _append_supply_candidate_for_city_state(
 
 
 static func _append_supply_candidate(values: Dictionary) -> void:
-	var candidates: Array[Dictionary] = values.get("candidates", [])
-	var endpoint: Dictionary = values.get("endpoint", {})
-	var resource := str(values.get("resource", WorldData.RESOURCE_NONE))
-	var requested_amount := maxi(int(values.get("requested_amount", 0)), 0)
-	var source_access_purpose := str(
-		values.get(
-			"source_access_purpose",
-			CityObjectCatalog.CONTAINER_HAUL_PURPOSE_NONE
-		)
+	_append_supply_candidate_for_city_state(
+		_get_compatibility_city_state(),
+		values
 	)
-	var source_tier := int(values.get("source_tier", 0))
-	var protect_public_food := bool(
-		values.get("protect_public_food", false)
-	)
-
-	if not CityLogisticsSystem.city_haul_endpoint_can_provide_resource({
-		"endpoint": endpoint,
-		"resource": resource,
-		"withdrawal_purpose": source_access_purpose,
-		"require_unreserved_amount": true,
-	}):
-		return
-
-	var available_amount := (
-		CityLogisticsSystem.get_city_haul_endpoint_unreserved_resource_amount(
-			endpoint,
-			resource
-		)
-	)
-	var hunger_restore := CityResourceCatalog.get_city_food_hunger_restore(resource)
-
-	if protect_public_food and hunger_restore > 0:
-		available_amount = mini(
-			available_amount,
-			floori(
-				float(get_city_public_food_surplus_nutrition())
-				/ float(hunger_restore)
-			)
-		)
-
-	available_amount = mini(available_amount, requested_amount)
-
-	if available_amount <= 0:
-		return
-
-	candidates.append({
-		"endpoint": endpoint,
-		"available_amount": available_amount,
-		"source_access_purpose": source_access_purpose,
-		"source_tier": source_tier,
-	})
 
 
 static func _get_public_storage_source_tier(city_object: Dictionary) -> int:
@@ -2320,120 +2096,13 @@ static func find_best_survival_food_source(
 	available_capacity: int,
 	maximum_path_requests: int
 ) -> Dictionary:
-	var citizen_id := int(citizen.get("id", -1))
-	var raw_current_tile = citizen.get(
-		"city_tile_position",
-		CityCitizens.INVALID_CITY_TILE_POSITION
+	return find_best_survival_food_source_for_city_state(
+		_get_compatibility_city_state(),
+		citizen,
+		desired_nutrition,
+		available_capacity,
+		maximum_path_requests
 	)
-
-	if (
-		citizen_id <= 0
-		or not raw_current_tile is Vector2i
-		or desired_nutrition <= 0
-		or available_capacity <= 0
-		or maximum_path_requests <= 0
-	):
-		return {}
-
-	var home_candidates: Array[Dictionary] = []
-	var alternative_candidates: Array[Dictionary] = []
-	var source_groups := _get_survival_source_groups(citizen)
-	var source_preference_ranks: Array[int] = [
-		SURVIVAL_SOURCE_PREFERENCE_HOME,
-		SURVIVAL_SOURCE_PREFERENCE_STOCKPILE,
-		SURVIVAL_SOURCE_PREFERENCE_KEEP,
-		SURVIVAL_SOURCE_PREFERENCE_WORKPLACE,
-		SURVIVAL_SOURCE_PREFERENCE_GROUND_PILE,
-	]
-
-	for group_index in range(source_groups.size()):
-		var raw_source_group = source_groups[group_index]
-
-		if not raw_source_group is Array:
-			continue
-
-		var source_preference_rank := (
-			source_preference_ranks[group_index]
-			if group_index < source_preference_ranks.size()
-			else source_preference_ranks.size()
-		)
-
-		for raw_endpoint in raw_source_group:
-			if not raw_endpoint is Dictionary:
-				continue
-
-			var candidate := _make_survival_endpoint_candidate(
-				citizen_id,
-				raw_endpoint,
-				desired_nutrition,
-				available_capacity,
-				source_preference_rank
-			)
-
-			if candidate.is_empty():
-				continue
-
-			if source_preference_rank == SURVIVAL_SOURCE_PREFERENCE_HOME:
-				home_candidates.append(candidate)
-			else:
-				alternative_candidates.append(candidate)
-
-	var current_tile: Vector2i = raw_current_tile
-	var is_critical := (
-		CitizenNeedsSystem.get_city_citizen_hunger(citizen_id)
-		<= CityCitizens.CITIZEN_CRITICAL_FOOD_SEEK_TRIGGER_HUNGER
-	)
-
-	# Critical hunger ignores routine source preferences and takes the fastest
-	# reachable legal food. With only one path request available, normal hunger
-	# also falls back to this complete search rather than hiding valid sources.
-	if (
-		is_critical
-		or home_candidates.is_empty()
-		or alternative_candidates.is_empty()
-		or maximum_path_requests < 2
-	):
-		var all_candidates: Array[Dictionary] = []
-		all_candidates.append_array(home_candidates)
-		all_candidates.append_array(alternative_candidates)
-		return _find_best_reachable_source_candidate(
-			citizen_id,
-			current_tile,
-			all_candidates
-		)
-
-	# Normal hunger compares the resident's pantry against every other legal
-	# source. Home wins when its exact route is at most 25% longer, preserving a
-	# useful household routine without sending citizens across the city past a
-	# much closer stockpile, workplace, or ground pile.
-	var alternative_result := _find_best_reachable_source_candidate(
-		citizen_id,
-		current_tile,
-		alternative_candidates
-	)
-	var path_requests_used := int(
-		alternative_result.get("path_requests_used", 0)
-	)
-	var home_result: Dictionary = {}
-
-	if path_requests_used < maximum_path_requests:
-		home_result = _find_best_reachable_source_candidate(
-			citizen_id,
-			current_tile,
-			home_candidates
-		)
-		path_requests_used += int(home_result.get("path_requests_used", 0))
-
-	var best_result := _choose_normal_survival_food_result(
-		home_result,
-		alternative_result
-	)
-
-	if not best_result.is_empty():
-		best_result["path_requests_used"] = path_requests_used
-		return best_result
-
-	return {"path_requests_used": path_requests_used}
 
 
 static func _choose_normal_survival_food_result(
@@ -2472,197 +2141,28 @@ static func find_best_household_food_source(
 	requested_amount: int,
 	maximum_path_requests: int = 32
 ) -> Dictionary:
-	var citizen_id := int(citizen.get("id", -1))
-	var raw_current_tile = citizen.get(
-		"city_tile_position",
-		CityCitizens.INVALID_CITY_TILE_POSITION
+	return find_best_household_food_source_for_city_state(
+		_get_compatibility_city_state(),
+		citizen,
+		resource,
+		requested_amount,
+		maximum_path_requests
 	)
-
-	if (
-		citizen_id <= 0
-		or not raw_current_tile is Vector2i
-		or CityResourceCatalog.get_city_food_hunger_restore(resource) <= 0
-		or requested_amount <= 0
-		or maximum_path_requests <= 0
-		or get_city_public_food_surplus_nutrition() <= 0
-	):
-		return {}
-
-	var current_tile: Vector2i = raw_current_tile
-	var path_requests_used := 0
-
-	for source_group in _get_household_source_groups():
-		if path_requests_used >= maximum_path_requests:
-			break
-
-		var candidates: Array[Dictionary] = []
-
-		for raw_source in source_group:
-			if not raw_source is Dictionary:
-				continue
-
-			var candidate := _make_household_source_candidate(
-				citizen_id,
-				raw_source,
-				resource,
-				requested_amount
-			)
-
-			if not candidate.is_empty():
-				candidates.append(candidate)
-
-		var best_result := _find_best_reachable_source_candidate(
-			citizen_id,
-			current_tile,
-			candidates
-		)
-		path_requests_used += int(
-			best_result.get("path_requests_used", 0)
-		)
-
-		if best_result.get("endpoint", {}) is Dictionary and (
-			int(best_result.get("available_amount", 0)) > 0
-		):
-			best_result["path_requests_used"] = path_requests_used
-			return best_result
-
-	return {"path_requests_used": path_requests_used}
 
 
 static func _get_survival_source_groups(
 	citizen: Dictionary
 ) -> Array:
-	var own_home_group: Array[Dictionary] = []
-	var stockpile_group: Array[Dictionary] = []
-	var keep_group: Array[Dictionary] = []
-	var workplace_group: Array[Dictionary] = []
-	var ground_pile_group: Array[Dictionary] = []
-	var home_id := int(citizen.get("home_object_id", -1))
-	var home := CityObjectSystem.get_city_object_by_id(home_id)
-
-	if city_object_is_household_home(home):
-		own_home_group.append(
-			CityLogisticsSystem.make_city_citizen_haul_endpoint(home_id)
-		)
-
-	for raw_object in CityObjectSystem.get_city_objects():
-		if not raw_object is Dictionary:
-			continue
-
-		var city_object: Dictionary = raw_object
-		var object_id := int(city_object.get("id", -1))
-		var endpoint := CityLogisticsSystem.make_city_citizen_haul_endpoint(object_id)
-		var storage_tier := CityResourceContainerSystem.get_city_object_public_storage_tier(
-			city_object
-		)
-
-		if storage_tier == CityObjectCatalog.PUBLIC_CITY_STORAGE_TIER_STOCKPILE:
-			stockpile_group.append(endpoint)
-		elif storage_tier == CityObjectCatalog.PUBLIC_CITY_STORAGE_TIER_CITY_KEEP:
-			keep_group.append(endpoint)
-		elif CityResourceContainerSystem.get_city_object_container_type(city_object) == (
-			CityObjectCatalog.CONTAINER_TYPE_WORKPLACE_STORAGE
-		):
-			workplace_group.append(endpoint)
-
-	for raw_pile in CityLogisticsSystem.get_city_ground_pile_snapshot():
-		if (
-			not raw_pile is Dictionary
-			or CityLogisticsSystem.city_ground_pile_is_construction_reserved(raw_pile)
-			or CityResourceCatalog.get_city_food_hunger_restore(
-				str(raw_pile.get("resource_type", WorldData.RESOURCE_NONE))
-			) <= 0
-		):
-			continue
-
-		ground_pile_group.append(
-			CityLogisticsSystem.make_city_ground_pile_haul_endpoint(
-				int(raw_pile.get("id", -1))
-			)
-		)
-
-	_sort_endpoint_group(own_home_group)
-	_sort_endpoint_group(stockpile_group)
-	_sort_endpoint_group(keep_group)
-	_sort_endpoint_group(workplace_group)
-	_sort_endpoint_group(ground_pile_group)
-	return [
-		own_home_group,
-		stockpile_group,
-		keep_group,
-		workplace_group,
-		ground_pile_group,
-	]
+	return _get_survival_source_groups_for_city_state(
+		_get_compatibility_city_state(),
+		citizen
+	)
 
 
 static func _get_household_source_groups() -> Array:
-	var stockpile_group: Array[Dictionary] = []
-	var keep_group: Array[Dictionary] = []
-	var workplace_group: Array[Dictionary] = []
-	var ground_pile_group: Array[Dictionary] = []
-
-	for raw_object in CityObjectSystem.get_city_objects():
-		if not raw_object is Dictionary:
-			continue
-
-		var city_object: Dictionary = raw_object
-		var endpoint := CityLogisticsSystem.make_city_citizen_haul_endpoint(
-			int(city_object.get("id", -1))
-		)
-		var storage_tier := CityResourceContainerSystem.get_city_object_public_storage_tier(
-			city_object
-		)
-		var source := {
-			"endpoint": endpoint,
-			"source_access_purpose": (
-				CityObjectCatalog.CONTAINER_HAUL_PURPOSE_HOME_DELIVERY
-			),
-			"protect_public_food": true,
-			"source_class": "public_storage",
-		}
-
-		if storage_tier == CityObjectCatalog.PUBLIC_CITY_STORAGE_TIER_STOCKPILE:
-			stockpile_group.append(source)
-		elif storage_tier == CityObjectCatalog.PUBLIC_CITY_STORAGE_TIER_CITY_KEEP:
-			keep_group.append(source)
-		elif CityResourceContainerSystem.get_city_object_container_type(city_object) == (
-			CityObjectCatalog.CONTAINER_TYPE_WORKPLACE_STORAGE
-		):
-			source["source_access_purpose"] = (
-				CityObjectCatalog.CONTAINER_HAUL_PURPOSE_HOUSEHOLD_FOOD_SOURCE
-			)
-			source["protect_public_food"] = false
-			source["source_class"] = "workplace_output"
-			workplace_group.append(source)
-
-	for raw_pile in CityLogisticsSystem.get_city_ground_pile_snapshot():
-		if (
-			not raw_pile is Dictionary
-			or CityLogisticsSystem.city_ground_pile_is_construction_reserved(raw_pile)
-		):
-			continue
-
-		ground_pile_group.append({
-			"endpoint": CityLogisticsSystem.make_city_ground_pile_haul_endpoint(
-				int(raw_pile.get("id", -1))
-			),
-			"source_access_purpose": (
-				CityObjectCatalog.CONTAINER_HAUL_PURPOSE_HOUSEHOLD_FOOD_SOURCE
-			),
-			"protect_public_food": false,
-			"source_class": "ground_pile",
-		})
-
-	_sort_source_group(stockpile_group)
-	_sort_source_group(keep_group)
-	_sort_source_group(workplace_group)
-	_sort_source_group(ground_pile_group)
-	return [
-		stockpile_group,
-		keep_group,
-		workplace_group,
-		ground_pile_group,
-	]
+	return _get_household_source_groups_for_city_state(
+		_get_compatibility_city_state()
+	)
 
 
 static func _make_survival_endpoint_candidate(
@@ -2672,65 +2172,14 @@ static func _make_survival_endpoint_candidate(
 	available_capacity: int,
 	source_preference_rank: int
 ) -> Dictionary:
-	var best_resource := WorldData.RESOURCE_NONE
-	var requested_amount := 0
-
-	for resource in CityResourceCatalog.get_city_food_resource_types():
-		if not CitizenNeedsSystem.city_citizen_can_withdraw_food_from_endpoint(
-			citizen_id,
-			endpoint,
-			resource
-		):
-			continue
-
-		var hunger_restore := CityResourceCatalog.get_city_food_hunger_restore(resource)
-		var available_amount := (
-			CitizenNeedsSystem.get_city_food_endpoint_unreserved_amount(
-				citizen_id,
-				endpoint,
-				resource
-			)
-		)
-
-		if hunger_restore <= 0 or available_amount <= 0:
-			continue
-
-		best_resource = resource
-		requested_amount = mini(
-			available_amount,
-			mini(
-				available_capacity,
-				ceili(float(desired_nutrition) / float(hunger_restore))
-			)
-		)
-		# Shared survival food is allocated one physical item at a time.
-		# The citizen must re-enter the hunger queue after that item, so
-		# nearby citizens cannot reserve a private multi-meal bundle while
-		# equally or more hungry citizens are still waiting.
-		requested_amount = mini(requested_amount, 1)
-		break
-
-	if requested_amount <= 0:
-		return {}
-
-	var target_tiles := CitizenNeedsSystem.get_city_citizen_food_endpoint_target_tiles(
+	return _make_survival_endpoint_candidate_for_city_state(
+		_get_compatibility_city_state(),
 		citizen_id,
-		endpoint
+		endpoint,
+		desired_nutrition,
+		available_capacity,
+		source_preference_rank
 	)
-
-	if target_tiles.is_empty():
-		return {}
-
-	return {
-		"endpoint": endpoint,
-		"source_id": int(endpoint.get("id", -1)),
-		"source_kind": str(endpoint.get("kind", "")),
-		"object_id": int(endpoint.get("id", -1)),
-		"resource_type": best_resource,
-		"requested_amount": requested_amount,
-		"source_preference_rank": source_preference_rank,
-		"candidate_access_tiles": target_tiles,
-	}
 
 
 static func _make_household_source_candidate(
@@ -2739,133 +2188,24 @@ static func _make_household_source_candidate(
 	resource: String,
 	requested_amount: int
 ) -> Dictionary:
-	var endpoint = source.get("endpoint", {})
-	var source_access_purpose := str(
-		source.get(
-			"source_access_purpose",
-			CityObjectCatalog.CONTAINER_HAUL_PURPOSE_NONE
-		)
+	return _make_household_source_candidate_for_city_state(
+		_get_compatibility_city_state(),
+		citizen_id,
+		source,
+		resource,
+		requested_amount
 	)
-
-	if not endpoint is Dictionary:
-		return {}
-
-	var available_amount := (
-		CityLogisticsSystem.get_city_haul_endpoint_unreserved_resource_amount(
-			endpoint,
-			resource
-		)
-	)
-
-	if bool(source.get("protect_public_food", false)):
-		available_amount = mini(
-			available_amount,
-			floori(
-				float(get_city_public_food_surplus_nutrition())
-				/ float(CityResourceCatalog.get_city_food_hunger_restore(resource))
-			)
-		)
-
-	if (
-		available_amount <= 0
-		or not CityLogisticsSystem.city_haul_endpoint_can_provide_resource({
-			"endpoint": endpoint,
-			"resource": resource,
-			"withdrawal_purpose": source_access_purpose,
-			"require_unreserved_amount": true,
-		})
-	):
-		return {}
-
-	var access_tiles := _get_endpoint_access_tiles(endpoint, citizen_id)
-
-	if access_tiles.is_empty():
-		return {}
-
-	return {
-		"endpoint": endpoint,
-		"source_access_purpose": source_access_purpose,
-		"available_amount": mini(available_amount, requested_amount),
-		"source_class": str(source.get("source_class", "")),
-		"candidate_access_tiles": access_tiles,
-	}
-
-
-# One exact multi-destination request resolves an entire strict preference
-# tier. Unreachable low-ID endpoints therefore cannot repeatedly consume the
-# whole per-tick budget and hide a reachable fallback tier forever.
 static func _find_best_reachable_source_candidate(
 	citizen_id: int,
 	current_tile: Vector2i,
 	candidates: Array[Dictionary]
 ) -> Dictionary:
-	var target_tiles: Array = []
-	var candidates_by_target_tile: Dictionary = {}
-
-	for candidate in candidates:
-		var raw_access_tiles = candidate.get("candidate_access_tiles", [])
-
-		if not raw_access_tiles is Array:
-			continue
-
-		for raw_access_tile in raw_access_tiles:
-			if not raw_access_tile is Vector2i:
-				continue
-
-			var access_tile: Vector2i = raw_access_tile
-
-			if not candidates_by_target_tile.has(access_tile):
-				candidates_by_target_tile[access_tile] = []
-				target_tiles.append(access_tile)
-
-			var tile_candidates: Array = candidates_by_target_tile[access_tile]
-			tile_candidates.append(candidate)
-			candidates_by_target_tile[access_tile] = tile_candidates
-
-	if target_tiles.is_empty():
-		return {}
-
-	var path_result := CityNavigationSystemScript.find_path_to_any_city_tile({
-		"city_world": WorldPoliticalState.get_current_city_world(),
-		"start_tile": current_tile,
-		"destination_tiles": target_tiles,
-		"max_expanded_nodes": CityNavigationSystemScript.get_city_wide_path_expansion_limit(
-			WorldPoliticalState.get_current_city_world()
-		),
-		"citizen_id": citizen_id,
-		"heuristic_weight": EXACT_PATH_HEURISTIC_WEIGHT,
-	})
-	if not bool(path_result.get("success", false)):
-		return {"path_requests_used": 1}
-
-	var raw_target_tile = path_result.get(
-		"destination_tile",
-		CityCitizens.INVALID_CITY_TILE_POSITION
+	return _find_best_reachable_source_candidate_for_city_state(
+		_get_compatibility_city_state(),
+		citizen_id,
+		current_tile,
+		candidates
 	)
-
-	if (
-		not raw_target_tile is Vector2i
-		or not candidates_by_target_tile.has(raw_target_tile)
-	):
-		return {"path_requests_used": 1}
-
-	var best_result: Dictionary = {}
-	var path_cost := int(path_result.get("path_cost", 0))
-
-	for raw_candidate in candidates_by_target_tile[raw_target_tile]:
-		if not raw_candidate is Dictionary:
-			continue
-
-		var result: Dictionary = raw_candidate.duplicate(true)
-		result.erase("candidate_access_tiles")
-		result["target_tile"] = raw_target_tile
-		result["path_cost"] = path_cost
-		result["path_requests_used"] = 1
-
-		if _source_result_is_better(result, best_result):
-			best_result = result
-
-	return best_result
 
 
 #endregion
@@ -2877,33 +2217,11 @@ static func _get_endpoint_access_tiles(
 	endpoint: Dictionary,
 	citizen_id: int
 ) -> Array:
-	match str(endpoint.get("kind", "")):
-		CityCitizens.CITY_CITIZEN_HAUL_ENDPOINT_KIND_CITY_OBJECT_CONTAINER:
-			return CityNavigationSystem.get_city_object_access_tiles(
-				WorldPoliticalState.get_current_city_world(),
-				CityObjectSystem.get_city_object_by_id(int(endpoint.get("id", -1)))
-			)
-
-		CityCitizens.CITY_CITIZEN_HAUL_ENDPOINT_KIND_GROUND_PILE:
-			var pile := CityLogisticsSystem.get_city_ground_pile_by_id(
-				int(endpoint.get("id", -1))
-			)
-			var raw_tile = pile.get(
-				"tile_position",
-				CityCitizens.INVALID_CITY_TILE_POSITION
-			)
-
-			if (
-				raw_tile is Vector2i
-				and CityNavigationSystem.is_city_tile_walkable_for_citizen(
-					WorldPoliticalState.get_current_city_world(),
-					raw_tile,
-					citizen_id
-				)
-			):
-				return [raw_tile]
-
-	return []
+	return _get_endpoint_access_tiles_for_city_state(
+		_get_compatibility_city_state(),
+		endpoint,
+		citizen_id
+	)
 
 
 
@@ -2912,58 +2230,11 @@ static func get_haul_endpoint_access_tiles(
 	city_world: WorldData,
 	endpoint: Dictionary
 ) -> Array:
-	var endpoint_kind := str(
-		endpoint.get(
-			"kind",
-			CityCitizens.CITY_CITIZEN_HAUL_ENDPOINT_KIND_NONE
-		)
+	return get_haul_endpoint_access_tiles_for_city_state(
+		_get_compatibility_city_state(),
+		city_world,
+		endpoint
 	)
-	var endpoint_id := int(endpoint.get("id", -1))
-
-	if endpoint_kind == CityCitizens.CITY_CITIZEN_HAUL_ENDPOINT_KIND_GROUND_PILE:
-		var ground_pile := CityLogisticsSystem.get_city_ground_pile_by_id(endpoint_id)
-		var raw_tile_position = ground_pile.get(
-			"tile_position",
-			CityCitizens.INVALID_CITY_TILE_POSITION
-		)
-
-		if raw_tile_position is Vector2i:
-			return [raw_tile_position]
-
-		return []
-
-	if endpoint_kind == CityCitizens.CITY_CITIZEN_HAUL_ENDPOINT_KIND_GROUND_TILE:
-		var raw_ground_tile = endpoint.get(
-			"tile_position",
-			CityCitizens.INVALID_CITY_TILE_POSITION
-		)
-
-		if (
-			raw_ground_tile is Vector2i
-			and CityLogisticsSystem.can_city_ground_pile_exist_at_tile(
-				city_world,
-				raw_ground_tile
-			)
-		):
-			return [raw_ground_tile]
-
-		return []
-
-	if (
-		endpoint_kind
-		== CityCitizens.CITY_CITIZEN_HAUL_ENDPOINT_KIND_CONSTRUCTION_SITE
-	):
-		return CityConstructionSystem.get_city_construction_site_access_tiles(
-			city_world,
-			CityConstructionSystem.get_city_construction_site_by_id(endpoint_id)
-		)
-
-	var city_object := _get_container_object_for_endpoint(endpoint)
-
-	if city_object.is_empty():
-		return []
-
-	return CityNavigationSystem.get_city_object_access_tiles(city_world, city_object)
 
 
 static func _get_container_object_for_endpoint(

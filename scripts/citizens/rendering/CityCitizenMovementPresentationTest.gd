@@ -469,7 +469,9 @@ func _test_completed_road_doubles_visual_travel_speed() -> void:
 			tile["biome"] = WorldData.BIOME_PLAIN
 			tile["is_land"] = true
 
-	WorldData.store_city_world_save(city_world, 91_733)
+	WorldData.store_city_world_for_city_state(
+		CityCitizenUnboundCompatibility.get_city_state(),
+		city_world, 91_733)
 	_expect(
 		not CityObjectSystem.add_city_road_object(
 			[Vector2i(1, 0)],

@@ -52,7 +52,7 @@ const CITY_CONSTRUCTION_LABOR_ATOMIC_MINUTES: int = 30
 
 
 static func get_current_state() -> CityConstructionState:
-	return WorldPoliticalState.get_current_city_construction_state()
+	return CityCitizenUnboundCompatibility.get_city_state().construction_state
 
 
 static func get_state_for_city_state(
@@ -78,7 +78,7 @@ static func _get_city_world(
 	city_state: CitySettlementSimulationState = null
 ) -> WorldData:
 	return (
-		WorldPoliticalState.get_current_city_world()
+		CityCitizenUnboundCompatibility.get_city_state().city_world
 		if city_state == null
 		else city_state.city_world
 	)
@@ -103,7 +103,11 @@ static func can_place_city_road_tile(
 	city_world: WorldData,
 	tile_position: Vector2i
 ) -> bool:
-	return _can_place_city_road_tile(null, city_world, tile_position)
+	return can_place_city_road_tile_for_city_state(
+		_get_compatibility_city_state(),
+		city_world,
+		tile_position
+	)
 
 
 static func can_place_city_road_tile_for_city_state(
@@ -129,7 +133,9 @@ static func _can_place_city_road_tile(
 	)
 
 static func mark_city_construction_changed() -> void:
-	get_current_state().construction_version += 1
+	mark_city_construction_changed_for_city_state(
+		_get_compatibility_city_state()
+	)
 
 
 static func mark_city_construction_changed_for_city_state(
@@ -144,7 +150,10 @@ static func mark_city_construction_changed_for_city_state(
 static func get_city_construction_site_index_by_id(
 	site_id: int
 ) -> int:
-	return _get_city_construction_site_index_by_id(null, site_id)
+	return get_city_construction_site_index_by_id_for_city_state(
+		_get_compatibility_city_state(),
+		site_id
+	)
 
 
 static func get_city_construction_site_index_by_id_for_city_state(
@@ -186,7 +195,10 @@ static func _get_city_construction_site_index_by_id(
 static func get_city_construction_site_by_id(
 	site_id: int
 ) -> Dictionary:
-	return _get_city_construction_site_by_id(null, site_id)
+	return get_city_construction_site_by_id_for_city_state(
+		_get_compatibility_city_state(),
+		site_id
+	)
 
 
 static func get_city_construction_site_by_id_for_city_state(
@@ -217,8 +229,8 @@ static func can_place_city_construction_footprint(
 	require_external_access: bool = false,
 	allowed_occupied_object_id: int = -1
 ) -> bool:
-	return _can_place_city_construction_footprint(
-		null,
+	return can_place_city_construction_footprint_for_city_state(
+		_get_compatibility_city_state(),
 		city_world,
 		raw_footprint_tiles,
 		require_external_access,
@@ -366,8 +378,8 @@ static func get_city_construction_site_reserved_resource_amount(
 	site_id: int,
 	resource: String
 ) -> int:
-	return _get_city_construction_site_reserved_resource_amount(
-		null,
+	return get_city_construction_site_reserved_resource_amount_for_city_state(
+		_get_compatibility_city_state(),
 		site_id,
 		resource
 	)
@@ -392,7 +404,7 @@ static func _get_city_construction_site_reserved_resource_amount(
 ) -> int:
 	var total_amount := 0
 	var logistics_state: CityLogisticsState = (
-		CityLogisticsSystem.get_current_state()
+		CityCitizenUnboundCompatibility.get_city_state().logistics_state
 		if city_state == null
 		else city_state.logistics_state
 	)
@@ -423,8 +435,8 @@ static func get_city_construction_site_remaining_resource_amount(
 	site_id: int,
 	resource: String
 ) -> int:
-	return _get_city_construction_site_remaining_resource_amount(
-		null,
+	return get_city_construction_site_remaining_resource_amount_for_city_state(
+		_get_compatibility_city_state(),
 		site_id,
 		resource
 	)
@@ -474,8 +486,8 @@ static func get_city_construction_site_destination_reserved_resource_amount(
 		CityCitizens.INVALID_CITY_CITIZEN_HAUL_RESERVATION_ID
 	)
 ) -> int:
-	return _get_city_construction_site_destination_reserved_resource_amount(
-		null,
+	return get_city_construction_site_destination_reserved_resource_amount_for_city_state(
+		_get_compatibility_city_state(),
 		site_id,
 		resource,
 		excluding_reservation_id
@@ -509,7 +521,7 @@ static func _get_city_construction_site_destination_reserved_resource_amount(
 	)
 	var reserved_amount := 0
 	var logistics_state: CityLogisticsState = (
-		CityLogisticsSystem.get_current_state()
+		CityCitizenUnboundCompatibility.get_city_state().logistics_state
 		if city_state == null
 		else city_state.logistics_state
 	)
@@ -565,8 +577,8 @@ static func get_city_construction_site_unreserved_resource_space(
 		CityCitizens.INVALID_CITY_CITIZEN_HAUL_RESERVATION_ID
 	)
 ) -> int:
-	return _get_city_construction_site_unreserved_resource_space(
-		null,
+	return get_city_construction_site_unreserved_resource_space_for_city_state(
+		_get_compatibility_city_state(),
 		site_id,
 		resource,
 		excluding_reservation_id
@@ -616,8 +628,8 @@ static func get_city_construction_site_unreserved_total_space(
 		CityCitizens.INVALID_CITY_CITIZEN_HAUL_RESERVATION_ID
 	)
 ) -> int:
-	return _get_city_construction_site_unreserved_total_space(
-		null,
+	return get_city_construction_site_unreserved_total_space_for_city_state(
+		_get_compatibility_city_state(),
 		site_id,
 		excluding_reservation_id
 	)
@@ -657,7 +669,10 @@ static func _get_city_construction_site_unreserved_total_space(
 static func prepare_city_construction_task_assignment(
 	assignment: Dictionary
 ) -> bool:
-	return _prepare_city_construction_task_assignment(null, assignment)
+	return prepare_city_construction_task_assignment_for_city_state(
+		_get_compatibility_city_state(),
+		assignment
+	)
 
 
 static func prepare_city_construction_task_assignment_for_city_state(
@@ -705,12 +720,8 @@ static func can_place_city_object_construction(
 	size_tiles: Vector2i,
 	object_type: String
 ) -> bool:
-	var city_state = WorldPoliticalState.get_current_city_simulation_state()
-	if not city_state is CitySettlementSimulationState:
-		return false
-
-	return _can_place_city_object_construction(
-		city_state,
+	return can_place_city_object_construction_for_city_state(
+		_get_compatibility_city_state(),
 		city_world,
 		top_left,
 		size_tiles,
@@ -765,7 +776,9 @@ static func _can_place_city_object_construction(
 #region Construction Site Registry Operations
 
 static func rebuild_city_construction_site_index() -> void:
-	_rebuild_city_construction_site_index(null)
+	rebuild_city_construction_site_index_for_city_state(
+		_get_compatibility_city_state()
+	)
 
 
 static func rebuild_city_construction_site_index_for_city_state(
@@ -806,7 +819,9 @@ static func _rebuild_city_construction_site_index(
 
 
 static func get_city_construction_site_snapshot() -> Array:
-	return get_current_state().construction_sites.duplicate(true)
+	return get_city_construction_site_snapshot_for_city_state(
+		_get_compatibility_city_state()
+	)
 
 
 static func get_city_construction_site_snapshot_for_city_state(
@@ -823,7 +838,10 @@ static func get_city_construction_site_snapshot_for_city_state(
 static func get_city_construction_site_at_tile(
 	tile_position: Vector2i
 ) -> Dictionary:
-	return _get_city_construction_site_at_tile(null, tile_position)
+	return get_city_construction_site_at_tile_for_city_state(
+		_get_compatibility_city_state(),
+		tile_position
+	)
 
 
 static func get_city_construction_site_at_tile_for_city_state(
@@ -854,11 +872,10 @@ static func _get_city_construction_site_at_tile(
 static func create_city_construction_site(
 	values: Dictionary
 ) -> Dictionary:
-	var city_state = WorldPoliticalState.get_current_city_simulation_state()
-	if not city_state is CitySettlementSimulationState:
-		return {}
-
-	return _create_city_construction_site(city_state, values)
+	return create_city_construction_site_for_city_state(
+		_get_compatibility_city_state(),
+		values
+	)
 
 
 static func create_city_construction_site_for_city_state(
@@ -1034,7 +1051,10 @@ static func _create_city_construction_site(
 static func update_city_construction_site(
 	site: Dictionary
 ) -> bool:
-	return _update_city_construction_site(null, site)
+	return update_city_construction_site_for_city_state(
+		_get_compatibility_city_state(),
+		site
+	)
 
 
 static func update_city_construction_site_for_city_state(
@@ -1139,7 +1159,7 @@ static func _can_update_city_construction_site_footprint(
 	var construction_state := _get_state(city_state)
 	var city_world := _get_city_world(city_state)
 	var logistics_state: CityLogisticsState = (
-		CityLogisticsSystem.get_current_state()
+		CityCitizenUnboundCompatibility.get_city_state().logistics_state
 		if city_state == null
 		else city_state.logistics_state
 	)
@@ -1231,7 +1251,10 @@ static func _can_update_city_construction_site_footprint(
 static func remove_city_construction_site_record(
 	site_id: int
 ) -> bool:
-	return _remove_city_construction_site_record(null, site_id)
+	return remove_city_construction_site_record_for_city_state(
+		_get_compatibility_city_state(),
+		site_id
+	)
 
 
 static func remove_city_construction_site_record_for_city_state(
@@ -1295,8 +1318,8 @@ static func get_city_construction_site_access_tiles(
 	site: Dictionary,
 	citizen_id: int = -1
 ) -> Array[Vector2i]:
-	return _get_city_construction_site_access_tiles(
-		null,
+	return get_city_construction_site_access_tiles_for_city_state(
+		_get_compatibility_city_state(),
 		city_world,
 		site,
 		citizen_id
@@ -1361,7 +1384,10 @@ static func _get_city_construction_site_access_tiles(
 static func city_construction_site_has_all_materials(
 	site_id: int
 ) -> bool:
-	return _city_construction_site_has_all_materials(null, site_id)
+	return city_construction_site_has_all_materials_for_city_state(
+		_get_compatibility_city_state(),
+		site_id
+	)
 
 
 static func city_construction_site_has_all_materials_for_city_state(
@@ -1421,8 +1447,8 @@ static func add_resource_to_city_construction_site(
 	resource: String,
 	requested_amount: int
 ) -> int:
-	return _add_resource_to_city_construction_site(
-		null,
+	return add_resource_to_city_construction_site_for_city_state(
+		_get_compatibility_city_state(),
 		site_id,
 		resource,
 		requested_amount
@@ -1498,8 +1524,8 @@ static func remove_resource_from_city_construction_site(
 	resource: String,
 	requested_amount: int
 ) -> int:
-	return _remove_resource_from_city_construction_site(
-		null,
+	return remove_resource_from_city_construction_site_for_city_state(
+		_get_compatibility_city_state(),
 		site_id,
 		resource,
 		requested_amount
@@ -1532,7 +1558,7 @@ static func _remove_resource_from_city_construction_site(
 	var remaining_amount := requested_amount
 	var pile_ids: Array[int] = []
 	var logistics_state: CityLogisticsState = (
-		CityLogisticsSystem.get_current_state()
+		CityCitizenUnboundCompatibility.get_city_state().logistics_state
 		if city_state == null
 		else city_state.logistics_state
 	)
@@ -1602,11 +1628,10 @@ static func _remove_resource_from_city_construction_site(
 #region Construction Site Creation
 
 static func create_rectangular_site(values: Dictionary) -> Dictionary:
-	var city_state = WorldPoliticalState.get_current_city_simulation_state()
-	if not city_state is CitySettlementSimulationState:
-		return {}
-
-	return _create_rectangular_site(city_state, values)
+	return create_rectangular_site_for_city_state(
+		_get_compatibility_city_state(),
+		values
+	)
 
 
 static func create_rectangular_site_for_city_state(
@@ -1711,12 +1736,8 @@ static func create_road_sites(
 	object_owner: String = "player",
 	city_world: WorldData = null
 ) -> Array[Dictionary]:
-	var city_state = WorldPoliticalState.get_current_city_simulation_state()
-	if not city_state is CitySettlementSimulationState:
-		return []
-
-	return _create_road_sites(
-		city_state,
+	return create_road_sites_for_city_state(
+		_get_compatibility_city_state(),
 		raw_tile_positions,
 		object_owner,
 		city_world
@@ -2005,7 +2026,9 @@ static func _build_external_work_positions(
 #region Construction Site Refresh and Progress
 
 static func refresh_all_city_construction_sites() -> void:
-	_refresh_all_city_construction_sites(null)
+	refresh_all_city_construction_sites_for_city_state(
+		_get_compatibility_city_state()
+	)
 
 
 static func refresh_all_city_construction_sites_for_city_state(
@@ -2037,7 +2060,10 @@ static func _refresh_all_city_construction_sites(
 static func refresh_city_construction_site(
 	site_id: int
 ) -> bool:
-	return _refresh_city_construction_site(null, site_id)
+	return refresh_city_construction_site_for_city_state(
+		_get_compatibility_city_state(),
+		site_id
+	)
 
 
 static func refresh_city_construction_site_for_city_state(
@@ -2505,7 +2531,7 @@ static func _site_has_ordinary_ground_pile(
 	var site_id := int(site.get("id", -1))
 	var footprint_tiles: Array = site.get("footprint_tiles", [])
 	var logistics_state: CityLogisticsState = (
-		CityLogisticsSystem.get_current_state()
+		CityCitizenUnboundCompatibility.get_city_state().logistics_state
 		if city_state == null
 		else city_state.logistics_state
 	)
@@ -2577,8 +2603,8 @@ static func get_best_assignable_player_work_for_citizen_and_site(
 	citizen_id: int,
 	site_id: int
 ) -> Dictionary:
-	return _get_best_assignable_player_work_for_citizen_and_site(
-		null,
+	return get_best_assignable_player_work_for_citizen_and_site_for_city_state(
+		_get_compatibility_city_state(),
 		citizen_id,
 		site_id
 	)
@@ -2642,8 +2668,8 @@ static func get_best_assignable_batchable_road_work_for_citizen(
 	citizen_id: int,
 	raw_site_ids: Array
 ) -> Dictionary:
-	return _get_best_assignable_batchable_road_work_for_citizen(
-		null,
+	return get_best_assignable_batchable_road_work_for_citizen_for_city_state(
+		_get_compatibility_city_state(),
 		citizen_id,
 		raw_site_ids
 	)
@@ -2754,7 +2780,7 @@ static func _get_best_assignable_batchable_road_work_for_citizen(
 						claimed_positions.has(position)
 						or not (
 							CityNavigationSystem.is_city_tile_walkable_for_citizen(
-								WorldPoliticalState.get_current_city_world(),
+								CityCitizenUnboundCompatibility.get_city_state().city_world,
 								position,
 								citizen_id
 							)
@@ -3045,8 +3071,8 @@ static func can_relocate_ground_pile_outside_site(
 	site_id: int,
 	ground_pile_id: int
 ) -> bool:
-	return _can_relocate_ground_pile_outside_site(
-		null,
+	return can_relocate_ground_pile_outside_site_for_city_state(
+		_get_compatibility_city_state(),
 		site_id,
 		ground_pile_id
 	)
@@ -3458,7 +3484,7 @@ static func _get_labor_candidate(
 			claimed_positions.has(position)
 			or not (
 				CityNavigationSystem.is_city_tile_walkable_for_citizen(
-					WorldPoliticalState.get_current_city_world(),
+					CityCitizenUnboundCompatibility.get_city_state().city_world,
 					position,
 					citizen_id
 				)
@@ -3531,7 +3557,7 @@ static func _get_active_laborer_count(
 ) -> int:
 	var count := 0
 	var registry_state: CityCitizenRegistryState = (
-		CityCitizenRegistrySystem.get_current_state()
+		CityCitizenUnboundCompatibility.get_city_state().citizen_registry_state
 		if city_state == null
 		else city_state.citizen_registry_state
 	)
@@ -3564,7 +3590,7 @@ static func _get_claimed_labor_positions(
 ) -> Dictionary:
 	var claimed_positions: Dictionary = {}
 	var registry_state: CityCitizenRegistryState = (
-		CityCitizenRegistrySystem.get_current_state()
+		CityCitizenUnboundCompatibility.get_city_state().citizen_registry_state
 		if city_state == null
 		else city_state.citizen_registry_state
 	)
@@ -3668,7 +3694,11 @@ static func assign_player_work_candidate(
 	citizen_id: int,
 	candidate: Dictionary
 ) -> bool:
-	return _assign_player_work_candidate(null, citizen_id, candidate)
+	return assign_player_work_candidate_for_city_state(
+		_get_compatibility_city_state(),
+		citizen_id,
+		candidate
+	)
 
 
 static func assign_player_work_candidate_for_city_state(
@@ -3760,7 +3790,11 @@ static func advance_labor_task(
 	city_world: WorldData,
 	values: Dictionary
 ) -> int:
-	return _advance_labor_task(null, city_world, values)
+	return advance_labor_task_for_city_state(
+		_get_compatibility_city_state(),
+		city_world,
+		values
+	)
 
 
 static func advance_labor_task_for_city_state(
@@ -4055,7 +4089,10 @@ static func _release_labor_task(
 static func complete_city_construction_site(
 	site_id: int
 ) -> Dictionary:
-	return _complete_city_construction_site(null, site_id)
+	return complete_city_construction_site_for_city_state(
+		_get_compatibility_city_state(),
+		site_id
+	)
 
 
 static func complete_city_construction_site_for_city_state(
@@ -4416,7 +4453,10 @@ static func _restore_site_materials(
 
 
 static func cancel_city_construction_site(site_id: int) -> bool:
-	return _cancel_city_construction_site(null, site_id)
+	return cancel_city_construction_site_for_city_state(
+		_get_compatibility_city_state(),
+		site_id
+	)
 
 
 static func cancel_city_construction_site_for_city_state(
@@ -4463,7 +4503,7 @@ static func _release_site_delivery_tasks(
 	site_id: int
 ) -> bool:
 	var registry_state: CityCitizenRegistryState = (
-		CityCitizenRegistrySystem.get_current_state()
+		CityCitizenUnboundCompatibility.get_city_state().citizen_registry_state
 		if city_state == null
 		else city_state.citizen_registry_state
 	)
@@ -4614,7 +4654,7 @@ static func _clear_site_labor_tasks(
 	site_id: int
 ) -> void:
 	var registry_state: CityCitizenRegistryState = (
-		CityCitizenRegistrySystem.get_current_state()
+		CityCitizenUnboundCompatibility.get_city_state().citizen_registry_state
 		if city_state == null
 		else city_state.citizen_registry_state
 	)
@@ -4937,8 +4977,9 @@ static func _set_rebalance_task_phase(
 static func rebalance_uncommitted_construction_workers(
 	triggering_site_id: int
 ) -> int:
-	return rebalance_uncommitted_construction_workers_for_sites(
-		[triggering_site_id]
+	return rebalance_uncommitted_construction_workers_for_city_state(
+		_get_compatibility_city_state(),
+		triggering_site_id
 	)
 
 
@@ -4955,11 +4996,8 @@ static func rebalance_uncommitted_construction_workers_for_city_state(
 static func rebalance_uncommitted_construction_workers_for_sites(
 	raw_triggering_site_ids: Array
 ) -> int:
-	return _rebalance_uncommitted_construction_workers_for_sites(
-		null,
-		get_current_state(),
-		CityCitizenRegistrySystem.get_current_state(),
-		CityWorkSystem.get_current_work_state(),
+	return rebalance_uncommitted_construction_workers_for_sites_for_city_state(
+		_get_compatibility_city_state(),
 		raw_triggering_site_ids
 	)
 
@@ -5258,7 +5296,7 @@ static func _get_current_construction_path_cost(
 ) -> int:
 	var citizen := _get_rebalance_citizen(city_state, citizen_id)
 	var city_world: WorldData = (
-		WorldPoliticalState.get_current_city_world()
+		CityCitizenUnboundCompatibility.get_city_state().city_world
 		if city_state == null
 		else city_state.city_world
 	)
@@ -5478,7 +5516,11 @@ static func start_assigned_player_work_candidate(
 	citizen_id: int,
 	candidate: Dictionary
 ) -> bool:
-	return _start_assigned_player_work_candidate(null, citizen_id, candidate)
+	return start_assigned_player_work_candidate_for_city_state(
+		_get_compatibility_city_state(),
+		citizen_id,
+		candidate
+	)
 
 
 static func start_assigned_player_work_candidate_for_city_state(
@@ -5812,7 +5854,10 @@ static func _make_construction_rebalance_restore_candidate(
 static func citizen_task_is_interruptible_construction(
 	citizen_id: int
 ) -> bool:
-	return _citizen_task_is_interruptible_construction(null, citizen_id)
+	return citizen_task_is_interruptible_construction_for_city_state(
+		_get_compatibility_city_state(),
+		citizen_id
+	)
 
 
 static func citizen_task_is_interruptible_construction_for_city_state(
@@ -5887,7 +5932,10 @@ static func _citizen_task_is_interruptible_construction(
 static func interrupt_citizen_construction_for_food(
 	citizen_id: int
 ) -> bool:
-	return _interrupt_citizen_construction_for_food(null, citizen_id)
+	return interrupt_citizen_construction_for_food_for_city_state(
+		_get_compatibility_city_state(),
+		citizen_id
+	)
 
 
 static func interrupt_citizen_construction_for_food_for_city_state(
@@ -5922,7 +5970,7 @@ static func _interrupt_citizen_construction_for_food(
 
 	return (
 		CitizenHaulingSystemScript.drop_citizen_haul_cargo_for_priority_interrupt(
-			WorldPoliticalState.get_current_city_world(),
+			CityCitizenUnboundCompatibility.get_city_state().city_world,
 			citizen_id,
 			CityCitizens.CITY_CITIZEN_TASK_SOURCE_PLAYER
 		)

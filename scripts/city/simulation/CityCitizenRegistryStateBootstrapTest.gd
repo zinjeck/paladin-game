@@ -133,7 +133,9 @@ func _test_real_founding_population_bootstrap() -> void:
 	var registry_array: Array = registry_state.citizens
 	var registry_index: Dictionary = registry_state.citizen_index_by_id
 	var city_world := _make_world(20, 20, 96_102)
-	WorldData.store_city_world_save(city_world, 96_102)
+	WorldData.store_city_world_for_city_state(
+		CityCitizenUnboundCompatibility.get_city_state(),
+		city_world, 96_102)
 	var keep_size := CityObjectCatalog.get_city_object_size_for_type(
 		CityObjectCatalog.CITY_OBJECT_CITY_CENTER
 	)
