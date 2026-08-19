@@ -9,7 +9,7 @@ class_name CityAssignmentSystem
 
 
 static func get_current_state() -> CityAssignmentState:
-	return WorldPoliticalState.get_current_city_assignment_state()
+	return CityCitizenUnboundCompatibility.get_city_state().assignment_state
 
 
 static func get_city_assignment_version() -> int:
@@ -48,7 +48,7 @@ static func _get_registry_state(
 	city_state: CitySettlementSimulationState
 ) -> CityCitizenRegistryState:
 	if city_state == null:
-		return CityCitizenRegistrySystem.get_current_state()
+		return CityCitizenUnboundCompatibility.get_city_state().citizen_registry_state
 	return city_state.citizen_registry_state
 
 
@@ -82,7 +82,7 @@ static func _mark_assignments_changed(
 
 
 static func get_city_housed_citizen_count() -> int:
-	return _get_city_housed_citizen_count(null)
+	return _get_city_housed_citizen_count(CityCitizenUnboundCompatibility.get_city_state())
 
 
 static func get_city_housed_citizen_count_for_city_state(
@@ -108,7 +108,7 @@ static func _get_city_housed_citizen_count(
 
 
 static func get_city_unemployed_citizen_count() -> int:
-	return _get_city_unemployed_citizen_count(null)
+	return _get_city_unemployed_citizen_count(CityCitizenUnboundCompatibility.get_city_state())
 
 
 static func get_city_unemployed_citizen_count_for_city_state(
@@ -134,7 +134,7 @@ static func _get_city_unemployed_citizen_count(
 
 
 static func get_city_object_resident_count(city_object: Dictionary) -> int:
-	return _get_city_object_resident_ids(null, city_object).size()
+	return _get_city_object_resident_ids(CityCitizenUnboundCompatibility.get_city_state(), city_object).size()
 
 
 static func get_city_object_resident_count_for_city_state(
@@ -145,7 +145,7 @@ static func get_city_object_resident_count_for_city_state(
 
 
 static func get_city_object_resident_ids(city_object: Dictionary) -> Array:
-	return _get_city_object_resident_ids(null, city_object)
+	return _get_city_object_resident_ids(CityCitizenUnboundCompatibility.get_city_state(), city_object)
 
 
 static func get_city_object_resident_ids_for_city_state(
@@ -179,7 +179,7 @@ static func _get_city_object_resident_ids(
 
 
 static func get_city_object_resident_names(city_object: Dictionary) -> Array:
-	return _get_city_object_resident_names(null, city_object)
+	return _get_city_object_resident_names(CityCitizenUnboundCompatibility.get_city_state(), city_object)
 
 
 static func get_city_object_resident_names_for_city_state(
@@ -215,7 +215,7 @@ static func _get_city_object_resident_names(
 
 
 static func get_total_city_resident_capacity() -> int:
-	return _get_total_city_resident_capacity(null)
+	return _get_total_city_resident_capacity(CityCitizenUnboundCompatibility.get_city_state())
 
 
 static func get_total_city_resident_capacity_for_city_state(
@@ -229,7 +229,7 @@ static func set_city_object_resident_capacity(
 	resident_capacity: int
 ) -> bool:
 	return _set_city_object_resident_capacity(
-		null,
+		CityCitizenUnboundCompatibility.get_city_state(),
 		object_id,
 		resident_capacity
 	)
@@ -314,7 +314,7 @@ static func _get_total_city_resident_capacity(
 
 
 static func get_city_object_worker_ids(city_object: Dictionary) -> Array:
-	return _get_city_object_worker_ids(null, city_object)
+	return _get_city_object_worker_ids(CityCitizenUnboundCompatibility.get_city_state(), city_object)
 
 
 static func get_city_object_worker_ids_for_city_state(
@@ -348,7 +348,7 @@ static func _get_city_object_worker_ids(
 
 
 static func get_city_object_worker_count(city_object: Dictionary) -> int:
-	return _get_city_object_worker_ids(null, city_object).size()
+	return _get_city_object_worker_ids(CityCitizenUnboundCompatibility.get_city_state(), city_object).size()
 
 
 static func get_city_object_worker_count_for_city_state(
@@ -359,7 +359,7 @@ static func get_city_object_worker_count_for_city_state(
 
 
 static func get_city_object_worker_names(city_object: Dictionary) -> Array:
-	return _get_city_object_worker_names(null, city_object)
+	return _get_city_object_worker_names(CityCitizenUnboundCompatibility.get_city_state(), city_object)
 
 
 static func get_city_object_worker_names_for_city_state(
@@ -392,7 +392,7 @@ static func _get_city_object_worker_names(
 
 
 static func ensure_city_citizen_assignment_state() -> int:
-	return _ensure_city_citizen_assignment_state(null)
+	return _ensure_city_citizen_assignment_state(CityCitizenUnboundCompatibility.get_city_state())
 
 
 static func ensure_city_citizen_assignment_state_for_city_state(
@@ -643,7 +643,7 @@ static func _patch_city_object_assignment_projection(
 
 
 static func assign_homeless_citizens_to_available_housing() -> int:
-	return _assign_homeless_citizens_to_available_housing(null)
+	return _assign_homeless_citizens_to_available_housing(CityCitizenUnboundCompatibility.get_city_state())
 
 
 static func assign_homeless_citizens_to_available_housing_for_city_state(
@@ -716,7 +716,7 @@ static func assign_city_citizen_home(
 	citizen_id: int,
 	house_id: int
 ) -> bool:
-	return _assign_city_citizen_home(null, citizen_id, house_id)
+	return _assign_city_citizen_home(CityCitizenUnboundCompatibility.get_city_state(), citizen_id, house_id)
 
 
 static func assign_city_citizen_home_for_city_state(
@@ -852,7 +852,7 @@ static func _assign_city_citizen_home(
 
 
 static func remove_city_citizen_home(citizen_id: int) -> bool:
-	return _remove_city_citizen_home(null, citizen_id)
+	return _remove_city_citizen_home(CityCitizenUnboundCompatibility.get_city_state(), citizen_id)
 
 
 static func remove_city_citizen_home_for_city_state(
@@ -907,7 +907,7 @@ static func assign_city_citizen_job(
 	citizen_id: int,
 	workplace_id: int
 ) -> bool:
-	return _assign_city_citizen_job(null, citizen_id, workplace_id)
+	return _assign_city_citizen_job(CityCitizenUnboundCompatibility.get_city_state(), citizen_id, workplace_id)
 
 
 static func assign_city_citizen_job_for_city_state(
@@ -1084,7 +1084,7 @@ static func _assign_city_citizen_job(
 
 
 static func remove_city_citizen_job(citizen_id: int) -> bool:
-	return _remove_city_citizen_job(null, citizen_id)
+	return _remove_city_citizen_job(CityCitizenUnboundCompatibility.get_city_state(), citizen_id)
 
 
 static func remove_city_citizen_job_for_city_state(

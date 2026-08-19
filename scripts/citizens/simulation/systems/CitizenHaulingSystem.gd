@@ -81,7 +81,7 @@ static func drop_citizen_haul_cargo_for_priority_interrupt(
 		CityCitizens.CITY_CITIZEN_TASK_SOURCE_PLAYER
 	)
 ) -> bool:
-	var city_state = WorldPoliticalState.get_current_city_simulation_state()
+	var city_state = CityCitizenUnboundCompatibility.get_city_state()
 	if not city_state is CitySettlementSimulationState:
 		return false
 	return drop_citizen_haul_cargo_for_priority_interrupt_for_city_state(
@@ -361,7 +361,7 @@ static func make_public_storage_haul_task_request(
 ) -> Dictionary:
 	var raw_city_state = values.get("city_state")
 	if not values.has("city_state"):
-		raw_city_state = WorldPoliticalState.get_current_city_simulation_state()
+		raw_city_state = CityCitizenUnboundCompatibility.get_city_state()
 	if not raw_city_state is CitySettlementSimulationState:
 		return {}
 
@@ -658,7 +658,7 @@ static func make_directed_haul_task_request(
 ) -> Dictionary:
 	var raw_city_state = values.get("city_state")
 	if not values.has("city_state"):
-		raw_city_state = WorldPoliticalState.get_current_city_simulation_state()
+		raw_city_state = CityCitizenUnboundCompatibility.get_city_state()
 	if not raw_city_state is CitySettlementSimulationState:
 		return {}
 
@@ -897,7 +897,7 @@ static func advance_haul_task(
 	city_world: WorldData,
 	values: Dictionary
 ) -> int:
-	var city_state = WorldPoliticalState.get_current_city_simulation_state()
+	var city_state = CityCitizenUnboundCompatibility.get_city_state()
 	if not city_state is CitySettlementSimulationState:
 		return maxi(int(values.get("path_requests_remaining", 0)), 0)
 	return advance_haul_task_for_city_state(city_state, city_world, values)
@@ -2454,7 +2454,7 @@ static func _advance_pending_destination(
 	city_world: WorldData,
 	values: Dictionary
 ) -> int:
-	var city_state = WorldPoliticalState.get_current_city_simulation_state()
+	var city_state = CityCitizenUnboundCompatibility.get_city_state()
 	if not city_state is CitySettlementSimulationState:
 		return maxi(int(values.get("path_requests_remaining", 0)), 0)
 	return _advance_pending_destination_for_city_state(

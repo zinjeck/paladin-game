@@ -13,7 +13,7 @@ const MAX_AUTOMATIC_ASSIGNMENTS_PER_TICK: int = 32
 
 
 static func get_current_state() -> CityWorkplaceState:
-	return WorldPoliticalState.get_current_city_workplace_state()
+	return CityCitizenUnboundCompatibility.get_city_state().workplace_state
 
 
 static func get_city_workplace_version() -> int:
@@ -93,7 +93,7 @@ static func run_tick(
 	_tick_index: int,
 	minutes_advanced: int
 ) -> void:
-	_run_tick(null, _tick_index, minutes_advanced)
+	_run_tick(CityCitizenUnboundCompatibility.get_city_state(), _tick_index, minutes_advanced)
 
 
 static func run_tick_for_city_state(
@@ -110,7 +110,7 @@ static func _run_tick(
 	minutes_advanced: int
 ) -> void:
 	var city_world = (
-		WorldPoliticalState.get_current_city_world()
+		CityCitizenUnboundCompatibility.get_city_state().city_world
 		if city_state == null
 		else city_state.city_world
 	)
@@ -141,7 +141,7 @@ static func is_valid_staffing_mode(staffing_mode: String) -> bool:
 
 
 static func ensure_workplace_staffing_state() -> int:
-	return _ensure_workplace_staffing_state(null)
+	return _ensure_workplace_staffing_state(CityCitizenUnboundCompatibility.get_city_state())
 
 
 static func ensure_workplace_staffing_state_for_city_state(
@@ -242,7 +242,7 @@ static func set_city_workplace_worker_capacity(
 	worker_capacity: int
 ) -> bool:
 	return _set_city_workplace_worker_capacity(
-		null,
+		CityCitizenUnboundCompatibility.get_city_state(),
 		workplace_id,
 		worker_capacity
 	)
@@ -303,7 +303,7 @@ static func set_workplace_staffing_mode(
 	workplace_id: int,
 	staffing_mode: String
 ) -> bool:
-	return _set_workplace_staffing_mode(null, workplace_id, staffing_mode)
+	return _set_workplace_staffing_mode(CityCitizenUnboundCompatibility.get_city_state(), workplace_id, staffing_mode)
 
 
 static func set_workplace_staffing_mode_for_city_state(
@@ -395,7 +395,7 @@ static func set_workplace_desired_worker_count(
 	desired_worker_count: int
 ) -> bool:
 	return _set_workplace_desired_worker_count(
-		null,
+		CityCitizenUnboundCompatibility.get_city_state(),
 		workplace_id,
 		desired_worker_count
 	)
@@ -562,7 +562,7 @@ static func is_city_citizen_attending_workplace(
 	source_world = null
 ) -> bool:
 	return _is_city_citizen_attending_workplace(
-		null,
+		CityCitizenUnboundCompatibility.get_city_state(),
 		citizen_id,
 		workplace_id,
 		source_world
@@ -601,7 +601,7 @@ static func _is_city_citizen_attending_workplace(
 
 	if city_world == null:
 		city_world = (
-			WorldPoliticalState.get_current_city_world()
+			CityCitizenUnboundCompatibility.get_city_state().city_world
 			if city_state == null
 			else city_state.city_world
 		)
@@ -630,7 +630,7 @@ static func get_city_object_attending_worker_ids(
 	source_world = null
 ) -> Array[int]:
 	return _get_city_object_attending_worker_ids(
-		null,
+		CityCitizenUnboundCompatibility.get_city_state(),
 		city_object,
 		source_world
 	)
@@ -671,7 +671,7 @@ static func _get_city_object_attending_worker_ids(
 
 	if city_world == null:
 		city_world = (
-			WorldPoliticalState.get_current_city_world()
+			CityCitizenUnboundCompatibility.get_city_state().city_world
 			if city_state == null
 			else city_state.city_world
 		)
@@ -732,7 +732,7 @@ static func get_city_object_attending_worker_count(
 	source_world = null
 ) -> int:
 	return _get_city_object_attending_worker_ids(
-		null,
+		CityCitizenUnboundCompatibility.get_city_state(),
 		city_object,
 		source_world
 	).size()
@@ -751,7 +751,7 @@ static func get_city_object_attending_worker_count_for_city_state(
 
 
 static func reconcile_automatic_workplaces() -> int:
-	return _reconcile_automatic_workplaces(null)
+	return _reconcile_automatic_workplaces(CityCitizenUnboundCompatibility.get_city_state())
 
 
 static func reconcile_automatic_workplaces_for_city_state(
@@ -889,7 +889,7 @@ static func _get_unemployed_candidate_ids(
 	var candidate_ids: Array[int] = []
 
 	var registry_state := (
-		CityCitizenRegistrySystem.get_current_state()
+		CityCitizenUnboundCompatibility.get_city_state().citizen_registry_state
 		if city_state == null
 		else city_state.citizen_registry_state
 	)

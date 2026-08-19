@@ -9,7 +9,7 @@ class_name CityCitizenInventorySystem
 
 static func ensure_city_citizen_inventory_state() -> int:
 	return _ensure_city_citizen_inventory_state(
-		CityCitizenRegistrySystem.get_current_state()
+		CityCitizenUnboundCompatibility.get_city_state().citizen_registry_state
 	)
 
 
@@ -123,7 +123,7 @@ static func _resolve_registry_state(
 ) -> CityCitizenRegistryState:
 	if registry_state != null:
 		return registry_state
-	return CityCitizenRegistrySystem.get_current_state()
+	return CityCitizenUnboundCompatibility.get_city_state().citizen_registry_state
 
 
 static func _get_city_citizen_index_by_id(

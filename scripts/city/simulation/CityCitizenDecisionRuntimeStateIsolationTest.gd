@@ -31,7 +31,7 @@ func _test_city_isolation_and_future_ordering() -> void:
 	var city_b_id := int(fixture["city_b_id"])
 
 	_expect(
-		WorldPoliticalState.set_active_settlement(city_a_id),
+		_bind_fixture_city(city_a_id),
 		"City A must become active."
 	)
 	var state_a := CitizenDecisionSystem.get_current_state()
@@ -40,7 +40,7 @@ func _test_city_isolation_and_future_ordering() -> void:
 	var values_a := _capture_values(state_a)
 
 	_expect(
-		WorldPoliticalState.set_active_settlement(city_b_id),
+		_bind_fixture_city(city_b_id),
 		"City B must become active."
 	)
 	var state_b := CitizenDecisionSystem.get_current_state()
@@ -74,14 +74,14 @@ func _test_city_isolation_and_future_ordering() -> void:
 	)
 
 	_expect(
-		WorldPoliticalState.set_active_settlement(city_a_id)
+		_bind_fixture_city(city_a_id)
 		and is_same(CitizenDecisionSystem.get_current_state(), state_a)
 		and _matches_identity(state_a, identity_a)
 		and _matches_values(state_a, values_a),
 		"A -> B -> A must restore City A exactly."
 	)
 	_expect(
-		WorldPoliticalState.set_active_settlement(city_b_id)
+		_bind_fixture_city(city_b_id)
 		and is_same(CitizenDecisionSystem.get_current_state(), state_b)
 		and _matches_identity(state_b, identity_b)
 		and _matches_values(state_b, values_b),
@@ -96,7 +96,7 @@ func _test_city_isolation_and_future_ordering() -> void:
 		"Running City B must mutate only City B's scheduler owner."
 	)
 	_expect(
-		WorldPoliticalState.set_active_settlement(city_a_id)
+		_bind_fixture_city(city_a_id)
 		and _matches_identity(state_a, identity_a)
 		and _matches_values(state_a, values_a),
 		"Running City B must not mutate any City A decision runtime."
@@ -121,7 +121,7 @@ func _test_city_isolation_and_future_ordering() -> void:
 	# Merely making B visible/active must not reset or advance A. B's next scan is
 	# independent; A then continues with the exact next index it had before.
 	_expect(
-		WorldPoliticalState.set_active_settlement(city_b_id),
+		_bind_fixture_city(city_b_id),
 		"City B must become visible for the ordering check."
 	)
 	state_b.normal_food_scan_cursor = 4
@@ -131,7 +131,7 @@ func _test_city_isolation_and_future_ordering() -> void:
 		"City B must advance its own independent future ordering."
 	)
 	_expect(
-		WorldPoliticalState.set_active_settlement(city_a_id)
+		_bind_fixture_city(city_a_id)
 		and _matches_identity(state_a, identity_a)
 		and _matches_values(state_a, a_values_after_step),
 		"A visible-city round trip alone must not alter City A's future order."
@@ -160,6 +160,14 @@ func _test_city_isolation_and_future_ordering() -> void:
 		),
 		"Settlement context must expose City B's exact decision owner."
 	)
+
+
+func _bind_fixture_city(city_id: int) -> bool:
+	var city_state = WorldPoliticalState.get_city_simulation_state(city_id)
+	if not city_state is CitySettlementSimulationState:
+		return false
+	CityCitizenUnboundCompatibility.bind_legacy_fixture_state(city_state)
+	return WorldPoliticalState.set_active_settlement(city_id)
 
 
 func _seed_state(state: CityCitizenDecisionRuntimeStateScript, base: int) -> void:

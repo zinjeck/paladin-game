@@ -5,12 +5,12 @@ const STARTING_CITY_POPULATION := 8
 const STARTING_CITY_MALE_POPULATION: int = 4
 const STARTING_CITY_FEMALE_POPULATION: int = 4
 
-# Authoritative registry behavior for the active settlement. The paired state
-# remains data-only; this system owns lookup, index repair, and registry
-# invalidation without routing callers through WorldData.
+# Authoritative registry behavior for an explicitly supplied settlement. The
+# paired state remains data-only; this system owns lookup, index repair, and
+# registry invalidation without routing production callers through WorldData.
 
 static func get_current_state() -> CityCitizenRegistryState:
-	return WorldPoliticalState.get_current_city_citizen_registry_state()
+	return CityCitizenUnboundCompatibility.get_city_state().citizen_registry_state
 
 
 static func get_state_for_city_state(
@@ -321,7 +321,7 @@ static func reset_city_citizen_state() -> void:
 
 static func get_city_citizen_name_seed() -> int:
 	var name_seed := get_city_citizen_name_seed_for_city_state(
-		WorldPoliticalState.get_current_city_simulation_state()
+		CityCitizenUnboundCompatibility.get_city_state()
 	)
 
 	if name_seed == 0:
@@ -435,7 +435,7 @@ static func resolve_city_citizen_culture_id(
 	requested_culture_id: int = WorldData.INVALID_CULTURE_ID
 ) -> int:
 	return resolve_city_citizen_culture_id_for_city_state(
-		WorldPoliticalState.get_current_city_simulation_state(),
+		CityCitizenUnboundCompatibility.get_city_state(),
 		requested_culture_id
 	)
 
@@ -479,7 +479,7 @@ static func make_city_citizen(
 	culture_id: int = WorldData.INVALID_CULTURE_ID
 ) -> Dictionary:
 	return make_city_citizen_for_city_state(
-		WorldPoliticalState.get_current_city_simulation_state(),
+		CityCitizenUnboundCompatibility.get_city_state(),
 		display_name,
 		initial_city_tile_position,
 		citizen_sex,
@@ -541,7 +541,7 @@ static func add_city_citizen(
 	culture_id: int = WorldData.INVALID_CULTURE_ID
 ) -> Dictionary:
 	return add_city_citizen_for_city_state(
-		WorldPoliticalState.get_current_city_simulation_state(),
+		CityCitizenUnboundCompatibility.get_city_state(),
 		display_name,
 		initial_city_tile_position,
 		citizen_sex,
@@ -598,7 +598,7 @@ static func add_city_citizen_for_city_state(
 
 static func initialize_starting_city_population() -> int:
 	return initialize_starting_city_population_for_city_state(
-		WorldPoliticalState.get_current_city_simulation_state()
+		CityCitizenUnboundCompatibility.get_city_state()
 	)
 
 

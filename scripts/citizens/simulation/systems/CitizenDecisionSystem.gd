@@ -88,7 +88,7 @@ const MAX_FOOD_SOURCE_PATH_REQUESTS_PER_TICK: int = 8
 const HOME_FOOD_SOURCE_MAX_EXTRA_TILES: int = 4
 
 static func get_current_state() -> CityCitizenDecisionRuntimeStateScript:
-	return WorldPoliticalState.get_current_city_citizen_decision_runtime_state()
+	return CityCitizenUnboundCompatibility.get_city_state().citizen_decision_runtime_state
 
 
 static var _pending_decision_ids: Array[int]:
@@ -187,7 +187,7 @@ static func run_tick(
 	_tick_index: int,
 	minutes_advanced: int
 ) -> void:
-	var city_state = WorldPoliticalState.get_current_city_simulation_state()
+	var city_state = CityCitizenUnboundCompatibility.get_city_state()
 	if not city_state is CitySettlementSimulationState:
 		return
 	run_tick_for_city_state(city_state, _tick_index, minutes_advanced)
@@ -351,7 +351,7 @@ static func run_tick_for_city_state(
 # enters through run_tick_for_city_state() and cannot reach this compatibility
 # lookup path.
 static func _get_legacy_current_city_state() -> CitySettlementSimulationState:
-	var city_state = WorldPoliticalState.get_current_city_simulation_state()
+	var city_state = CityCitizenUnboundCompatibility.get_city_state()
 	if city_state is CitySettlementSimulationState:
 		return city_state
 	return null

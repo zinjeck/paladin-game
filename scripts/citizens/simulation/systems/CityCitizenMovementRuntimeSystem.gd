@@ -6,11 +6,15 @@ const CityCitizensScript = preload(
 )
 
 # Authoritative movement-order, mover-registry, atomic commit, and transient
-# visual-event behavior for the active settlement. Tick/repath computation
-# remains in CitizenMovementSystem.
+# visual-event behavior for an explicitly supplied settlement. Tick/repath
+# computation remains in CitizenMovementSystem.
+
+static func _get_compatibility_city_state() -> CitySettlementSimulationState:
+	return CityCitizenUnboundCompatibility.get_city_state()
+
 
 static func get_current_state() -> CityCitizenMovementRuntimeState:
-	return WorldPoliticalState.get_current_city_citizen_movement_runtime_state()
+	return _get_compatibility_city_state().citizen_movement_runtime_state
 
 
 static func _get_runtime_state(
@@ -18,7 +22,7 @@ static func _get_runtime_state(
 ) -> CityCitizenMovementRuntimeState:
 	if city_state is CitySettlementSimulationState:
 		return city_state.citizen_movement_runtime_state
-	return get_current_state()
+	return _get_compatibility_city_state().citizen_movement_runtime_state
 
 
 static func _get_registry_state(
@@ -26,13 +30,13 @@ static func _get_registry_state(
 ) -> CityCitizenRegistryState:
 	if city_state is CitySettlementSimulationState:
 		return city_state.citizen_registry_state
-	return CityCitizenRegistrySystem.get_current_state()
+	return _get_compatibility_city_state().citizen_registry_state
 
 
 static func _get_city_world(city_state = null):
 	if city_state is CitySettlementSimulationState:
 		return city_state.city_world
-	return WorldPoliticalState.get_current_city_world()
+	return _get_compatibility_city_state().city_world
 
 
 static var city_active_mover_ids: Array[int]:
@@ -81,7 +85,9 @@ static func get_city_citizen_movement_version_for_city_state(
 
 
 static func reset_city_citizen_movement_runtime_state() -> void:
-	_reset_city_citizen_movement_runtime_state(null)
+	_reset_city_citizen_movement_runtime_state(
+		_get_compatibility_city_state()
+	)
 
 
 static func reset_city_citizen_movement_runtime_state_for_city_state(
@@ -100,7 +106,7 @@ static func _reset_city_citizen_movement_runtime_state(city_state) -> void:
 
 
 static func mark_city_citizen_movement_changed() -> void:
-	_mark_city_citizen_movement_changed(null)
+	_mark_city_citizen_movement_changed(_get_compatibility_city_state())
 
 
 static func mark_city_citizen_movement_changed_for_city_state(
@@ -174,7 +180,9 @@ static func _remove_city_active_mover_id(
 	return changed
 
 static func rebuild_city_active_mover_registry() -> bool:
-	return _rebuild_city_active_mover_registry(null)
+	return _rebuild_city_active_mover_registry(
+		_get_compatibility_city_state()
+	)
 
 
 static func rebuild_city_active_mover_registry_for_city_state(
@@ -244,7 +252,10 @@ static func get_city_active_mover_ids_snapshot_for_city_state(
 static func begin_city_citizen_movement_visual_tick(
 	tick_index: int
 ) -> void:
-	_begin_city_citizen_movement_visual_tick(null, tick_index)
+	_begin_city_citizen_movement_visual_tick(
+		_get_compatibility_city_state(),
+		tick_index
+	)
 
 
 static func begin_city_citizen_movement_visual_tick_for_city_state(
@@ -263,7 +274,9 @@ static func _begin_city_citizen_movement_visual_tick(
 	runtime_state.citizen_movement_visual_tick_index = tick_index
 
 static func clear_city_citizen_movement_visual_events() -> void:
-	_clear_city_citizen_movement_visual_events(null)
+	_clear_city_citizen_movement_visual_events(
+		_get_compatibility_city_state()
+	)
 
 
 static func clear_city_citizen_movement_visual_events_for_city_state(
@@ -281,7 +294,7 @@ static func take_city_citizen_movement_visual_events(
 	expected_tick_index: int
 ) -> Array:
 	return _take_city_citizen_movement_visual_events(
-		null,
+		_get_compatibility_city_state(),
 		expected_tick_index
 	)
 
@@ -312,7 +325,9 @@ static func _take_city_citizen_movement_visual_events(
 	return events
 
 static func ensure_city_citizen_movement_state() -> int:
-	return _ensure_city_citizen_movement_state(null)
+	return _ensure_city_citizen_movement_state(
+		_get_compatibility_city_state()
+	)
 
 
 static func ensure_city_citizen_movement_state_for_city_state(
@@ -446,7 +461,10 @@ static func _get_clean_city_citizen_movement_path(
 static func cancel_city_citizen_movement(
 	citizen_id: int
 ) -> bool:
-	return _cancel_city_citizen_movement(null, citizen_id)
+	return _cancel_city_citizen_movement(
+		_get_compatibility_city_state(),
+		citizen_id
+	)
 
 
 static func cancel_city_citizen_movement_for_city_state(
@@ -490,7 +508,11 @@ static func assign_city_citizen_movement_order(
 	citizen_id: int,
 	raw_path: Array
 ) -> bool:
-	return _assign_city_citizen_movement_order(null, citizen_id, raw_path)
+	return _assign_city_citizen_movement_order(
+		_get_compatibility_city_state(),
+		citizen_id,
+		raw_path
+	)
 
 
 static func assign_city_citizen_movement_order_for_city_state(
@@ -600,7 +622,7 @@ static func commit_city_citizen_movement_tick(
 	raw_next_active_mover_ids: Array[int]
 ) -> Dictionary:
 	return _commit_city_citizen_movement_tick(
-		null,
+		_get_compatibility_city_state(),
 		city_world,
 		raw_citizen_updates,
 		raw_next_active_mover_ids
