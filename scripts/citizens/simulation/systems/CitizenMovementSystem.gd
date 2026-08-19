@@ -334,10 +334,8 @@ static func _advance_active_mover_path(
 			var repath_path := _find_bounded_repath(city_state, {
 				"city_world": city_world,
 				"start_tile": current_tile,
-				"destination_tiles": [movement_destination],
-				"max_expanded_nodes": MAX_REPATH_EXPANDED_NODES,
+				"destination_tile": movement_destination,
 				"citizen_id": citizen_id,
-				"heuristic_weight": CityNavigationSystem.HEURISTIC_WEIGHT,
 			})
 
 			if repath_path.is_empty():
