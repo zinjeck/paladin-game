@@ -25,12 +25,10 @@ jobs:
         run: |
           set -euo pipefail
           git bundle create paladin-pr8-exact.bundle HEAD
-          tar \
-            --exclude=.git \
-            --exclude=.godot \
-            --exclude=paladin-pr8-exact.bundle \
-            --exclude=paladin-pr8-exact-source.tar.gz \
-            -czf paladin-pr8-exact-source.tar.gz .
+          git archive \
+            --format=tar.gz \
+            --output=paladin-pr8-exact-source.tar.gz \
+            HEAD
 
       - name: Upload exact PR 8 source
         uses: actions/upload-artifact@v4
