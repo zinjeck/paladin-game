@@ -1,0 +1,77 @@
+name: PR 8 repair missing compatibility helpers
+
+on:
+  push:
+    branches:
+      - refactor/city-systems-explicit-state-only-redo
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  repair:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out PR 8 branch
+        uses: actions/checkout@v4
+        with:
+          ref: refactor/city-systems-explicit-state-only-redo
+          fetch-depth: 0
+
+      - name: Restore explicit unbound compatibility helper declarations
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          helper = (
+              "static func _get_compatibility_city_state() -> "
+              "CitySettlementSimulationState:\n"
+              "\treturn CityCitizenUnboundCompatibility.get_city_state()\n\n\n"
+          )
+          changed = []
+          for path in sorted(Path("scripts").rglob("*.gd")):
+              text = path.read_text(encoding="utf-8")
+              if "_get_compatibility_city_state()" not in text:
+                  continue
+              if "static func _get_compatibility_city_state(" in text:
+                  continue
+
+              lines = text.splitlines(keepends=True)
+              insertion_index = None
+              for index, line in enumerate(lines):
+                  if line.startswith("class_name "):
+                      insertion_index = index + 1
+                      break
+              if insertion_index is None:
+                  for index, line in enumerate(lines):
+                      if line.startswith("extends "):
+                          insertion_index = index + 1
+                          break
+              if insertion_index is None:
+                  raise RuntimeError(f"No insertion point for {path}")
+
+              lines.insert(insertion_index, "\n" + helper)
+              path.write_text("".join(lines), encoding="utf-8")
+              changed.append(path.as_posix())
+
+          if not changed:
+              raise RuntimeError("No missing compatibility helper declarations found")
+
+          print("Restored helper declarations in:")
+          for path in changed:
+              print(f"  {path}")
+          PY
+
+      - name: Validate patch whitespace
+        run: git diff --check
+
+      - name: Commit repair to PR branch
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add scripts
+          git commit -m "Fix missing city compatibility helper declarations"
+          git push origin HEAD:refactor/city-systems-explicit-state-only-redo
