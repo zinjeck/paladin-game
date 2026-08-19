@@ -19,14 +19,14 @@ run_godot_command() {
     echo "============================================================"
 
     set +e
-    timeout 240s godot --headless --path "$PROJECT_ROOT" "$@" >"$log_file" 2>&1
+    timeout 45s godot --headless --path "$PROJECT_ROOT" "$@" >"$log_file" 2>&1
     local status=$?
     set -e
 
     cat "$log_file"
 
     if [[ $status -eq 124 ]]; then
-        echo "::error::$name timed out after 240 seconds."
+        echo "::error::$name timed out after 45 seconds."
         failures=$((failures + 1))
     elif [[ $status -ne 0 ]]; then
         echo "::error::$name exited with status $status."
