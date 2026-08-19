@@ -66,6 +66,7 @@ func _run_state_isolation_test() -> void:
 	)
 	if player_state == null:
 		return
+	CityCitizenUnboundCompatibility.bind_legacy_fixture_state(player_state)
 	_seed_city_runtime_data(
 		player_state,
 		player_city_id,
@@ -261,6 +262,7 @@ func _run_state_isolation_test() -> void:
 		WorldPoliticalState.set_active_settlement(cpu_city_id),
 		"The CPU city must become activatable."
 	)
+	CityCitizenUnboundCompatibility.bind_legacy_fixture_state(cpu_state)
 	_expect(
 		WorldPoliticalState.get_current_city_world() == null
 		and WorldPoliticalState.get_current_city_seed() == 0,
@@ -398,6 +400,7 @@ func _run_state_isolation_test() -> void:
 		WorldPoliticalState.set_active_settlement(player_city_id),
 		"The player city must remain activatable after CPU state mutation."
 	)
+	CityCitizenUnboundCompatibility.bind_legacy_fixture_state(player_state)
 	_expect(
 		WorldPoliticalState.get_current_city_world() == player_city_world
 		and WorldPoliticalState.get_current_city_seed() == 91_101,
@@ -444,6 +447,7 @@ func _run_state_isolation_test() -> void:
 		WorldPoliticalState.set_active_settlement(cpu_city_id),
 		"The CPU city must be reactivatable."
 	)
+	CityCitizenUnboundCompatibility.bind_legacy_fixture_state(cpu_state)
 	_expect(
 		WorldPoliticalState.get_current_city_world() == cpu_city_world
 		and WorldPoliticalState.get_current_city_seed() == 91_202,
@@ -493,11 +497,13 @@ func _run_state_isolation_test() -> void:
 	# Leave the player settlement selected so existing tests and session teardown
 	# see the same player-facing state they expect.
 	WorldPoliticalState.set_active_settlement(player_city_id)
+	CityCitizenUnboundCompatibility.bind_legacy_fixture_state(player_state)
 
 
 func _test_validator_cache_tracks_object_state_identity() -> void:
 	WorldPoliticalState.reset_state()
 	WorldData.reset_runtime_session_state()
+	CityCitizenUnboundCompatibility.clear_legacy_fixture_state()
 	var city_world := _make_world(8, 8, 91_303)
 	var first_city_state := _create_owned_city_fixture(
 		"Validator Identity City A",
@@ -533,6 +539,7 @@ func _test_validator_cache_tracks_object_state_identity() -> void:
 	# Rotate only the selected object-state owner. Every numeric version used by
 	# the validator remains equal, so identity is the only valid cache boundary.
 	WorldPoliticalState.reset_state()
+	CityCitizenUnboundCompatibility.clear_legacy_fixture_state()
 	var second_city_world := _make_world(8, 8, 91_304)
 	var second_city_state := _create_owned_city_fixture(
 		"Validator Identity City B",
