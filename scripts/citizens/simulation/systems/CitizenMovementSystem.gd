@@ -12,12 +12,12 @@ static func run_tick(
 	tick_index: int,
 	minutes_advanced: int
 ) -> void:
-	var city_state = WorldPoliticalState.get_current_city_simulation_state()
+	var city_state := CityCitizenUnboundCompatibility.get_city_state()
 	run_tick_for_city_state(city_state, tick_index, minutes_advanced)
 
 
 static func _make_legacy_city_state_view() -> CitySettlementSimulationState:
-	return WorldPoliticalState.get_current_city_simulation_state()
+	return CityCitizenUnboundCompatibility.get_city_state()
 
 
 static func run_tick_for_city_state(
@@ -334,8 +334,10 @@ static func _advance_active_mover_path(
 			var repath_path := _find_bounded_repath(city_state, {
 				"city_world": city_world,
 				"start_tile": current_tile,
-				"destination_tile": movement_destination,
+				"destination_tiles": [movement_destination],
+				"max_expanded_nodes": MAX_REPATH_EXPANDED_NODES,
 				"citizen_id": citizen_id,
+				"heuristic_weight": CityNavigationSystem.HEURISTIC_WEIGHT,
 			})
 
 			if repath_path.is_empty():
