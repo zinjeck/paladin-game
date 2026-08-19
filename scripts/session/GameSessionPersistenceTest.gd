@@ -744,7 +744,9 @@ func _test_first_city_entry_transaction() -> void:
 		return
 
 	var city_world := _make_world(20, 20, 52_102)
-	WorldData.store_city_world_save(city_world, 52_102)
+	WorldData.store_city_world_for_city_state(
+		CityCitizenUnboundCompatibility.get_city_state(),
+		city_world, 52_102)
 	var keep_size := CityObjectCatalog.get_city_object_size_for_type(
 		CityObjectCatalog.CITY_OBJECT_CITY_CENTER
 	)
@@ -1230,7 +1232,9 @@ func _test_persistent_world_city_views() -> void:
 	_expect(locked, "The persistence fixture must lock its world save.")
 
 	var city_world := _make_world(16, 16, 8123)
-	WorldData.store_city_world_save(city_world, 8123)
+	WorldData.store_city_world_for_city_state(
+		CityCitizenUnboundCompatibility.get_city_state(),
+		city_world, 8123)
 
 	# Reproduce a clock that drifted while the founding world remained visible.
 	# First city entry must discard that pre-settlement time and begin at 06:00.
@@ -1426,7 +1430,9 @@ func _test_requested_initial_city_entry() -> void:
 		"culture_name": "Dev Culture",
 	})
 	_expect(locked, "Requested-entry fixture must lock the dev identity.")
-	WorldData.store_city_world_save(_make_world(16, 16, 7722), 7722)
+	WorldData.store_city_world_for_city_state(
+		CityCitizenUnboundCompatibility.get_city_state(),
+		_make_world(16, 16, 7722), 7722)
 
 	GameSession.request_next_session_city_entry()
 	_expect(

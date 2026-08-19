@@ -54,7 +54,9 @@ func _test_real_founding_records_and_clean_ensures() -> void:
 		return
 
 	var city_world := _make_world(20, 20, 98_902)
-	WorldData.store_city_world_save(city_world, 98_902)
+	WorldData.store_city_world_for_city_state(
+		CityCitizenUnboundCompatibility.get_city_state(),
+		city_world, 98_902)
 	var keep := CityObjectSystem.add_city_object({
 		"object_type": CityObjectCatalog.CITY_OBJECT_CITY_CENTER,
 		"top_left": Vector2i(6, 6),

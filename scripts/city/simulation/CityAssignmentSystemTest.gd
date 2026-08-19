@@ -508,7 +508,9 @@ func _make_assignment_fixture(seed: int) -> Dictionary:
 		"can_build": true,
 	}, true)
 	var city_world := _make_world(TEST_WORLD_SIZE.x, TEST_WORLD_SIZE.y, seed)
-	WorldData.store_city_world_save(city_world, seed)
+	WorldData.store_city_world_for_city_state(
+		CityCitizenUnboundCompatibility.get_city_state(),
+		city_world, seed)
 
 	var house_a := _register_object(
 		CityObjectCatalog.CITY_OBJECT_HOUSE,

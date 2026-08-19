@@ -671,7 +671,9 @@ func _reset_fixture(seed: int) -> WorldData:
 			"founded": false,
 			"can_build": false,
 		}, true)
-	WorldData.store_city_world_save(city_world, seed)
+	WorldData.store_city_world_for_city_state(
+		CityCitizenUnboundCompatibility.get_city_state(),
+		city_world, seed)
 	return city_world
 
 

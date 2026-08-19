@@ -794,7 +794,9 @@ func _reset_fixture(seed: int, founded: bool = true) -> WorldData:
 			tile["fertility"] = 50.0
 			city_world.set_tile(x, y, tile)
 
-	WorldData.store_city_world_save(city_world, seed)
+	WorldData.store_city_world_for_city_state(
+		CityCitizenUnboundCompatibility.get_city_state(),
+		city_world, seed)
 	var city_state = WorldPoliticalState.get_current_city_simulation_state()
 	city_state.city_runtime_data.clear()
 	city_state.city_runtime_data.merge({

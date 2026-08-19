@@ -1,6 +1,11 @@
 extends RefCounted
 class_name CityObjectSystem
 
+static func _get_compatibility_city_state() -> CitySettlementSimulationState:
+	return CityCitizenUnboundCompatibility.get_city_state()
+
+
+
 const CITY_TOPOLOGY_MUTATION_FAILURE_NONE := "none"
 const CITY_TOPOLOGY_MUTATION_FAILURE_INVALID_REQUEST := "invalid_request"
 const CITY_TOPOLOGY_MUTATION_FAILURE_TILE_BLOCKED := "tile_blocked"
@@ -35,7 +40,7 @@ const _CITY_OBJECT_STORAGE_MUTABLE_FIELDS := [
 
 
 static func get_current_state() -> CityObjectState:
-	return WorldPoliticalState.get_current_city_object_state()
+	return CityCitizenUnboundCompatibility.get_city_state().object_state
 
 
 static func get_state_for_city_state(
@@ -121,11 +126,9 @@ static func _ensure_city_object_records_are_read_only(
 
 
 static func get_city_objects() -> Array:
-	var object_state := _state()
-	_ensure_city_object_records_are_read_only(object_state)
-	# Protect membership and order with a shallow outer copy. The shared records
-	# are recursively read-only, keeping hot iteration allocation-light.
-	return object_state.objects.duplicate()
+	return get_city_objects_for_city_state(
+		_get_compatibility_city_state()
+	)
 
 
 static func get_city_objects_for_city_state(
@@ -145,12 +148,10 @@ static func get_city_object_snapshot() -> Array:
 
 
 static func get_city_object_by_id(object_id: int) -> Dictionary:
-	var object_index := get_city_object_index_by_id(object_id)
-
-	if object_index < 0:
-		return {}
-
-	return _ensure_city_object_record_is_read_only(_state(), object_index)
+	return get_city_object_by_id_for_city_state(
+		_get_compatibility_city_state(),
+		object_id
+	)
 
 
 static func get_city_object_by_id_for_city_state(
@@ -299,13 +300,11 @@ static func patch_city_object_assignment_fields(
 	field_values: Dictionary,
 	fields_to_erase: Array = []
 ) -> bool:
-	return _patch_city_object_fields_at_index(
-		_state(),
-		get_city_object_index_by_id(object_id),
+	return patch_city_object_assignment_fields_for_city_state(
+		_get_compatibility_city_state(),
 		object_id,
 		field_values,
-		fields_to_erase,
-		_CITY_OBJECT_ASSIGNMENT_MUTABLE_FIELDS
+		fields_to_erase
 	)
 
 
@@ -330,13 +329,11 @@ static func patch_city_object_workplace_fields(
 	field_values: Dictionary,
 	fields_to_erase: Array = []
 ) -> bool:
-	return _patch_city_object_fields_at_index(
-		_state(),
-		get_city_object_index_by_id(object_id),
+	return patch_city_object_workplace_fields_for_city_state(
+		_get_compatibility_city_state(),
 		object_id,
 		field_values,
-		fields_to_erase,
-		_CITY_OBJECT_WORKPLACE_MUTABLE_FIELDS
+		fields_to_erase
 	)
 
 
@@ -361,13 +358,11 @@ static func patch_city_object_storage_fields(
 	field_values: Dictionary,
 	fields_to_erase: Array = []
 ) -> bool:
-	return _patch_city_object_fields_at_index(
-		_state(),
-		get_city_object_index_by_id(object_id),
+	return patch_city_object_storage_fields_for_city_state(
+		_get_compatibility_city_state(),
 		object_id,
 		field_values,
-		fields_to_erase,
-		_CITY_OBJECT_STORAGE_MUTABLE_FIELDS
+		fields_to_erase
 	)
 
 
@@ -391,30 +386,9 @@ static func write_city_object_at_index(
 	object_index: int,
 	city_object: Dictionary
 ) -> bool:
-	var state := _state()
-
-	if (
-		city_object.is_empty()
-		or object_index < 0
-		or object_index >= state.objects.size()
-	):
-		return false
-
-	var existing := _ensure_city_object_record_is_read_only(state, object_index)
-	var object_id := int(city_object.get("id", -1))
-
-	if (
-		existing.is_empty()
-		or object_id <= 0
-		or int(existing.get("id", -1)) != object_id
-		or int(state.object_index_by_id.get(object_id, -1)) != object_index
-	):
-		return false
-
-	return _write_compatible_city_object_record(
-		state,
+	return write_city_object_at_index_for_city_state(
+		_get_compatibility_city_state(),
 		object_index,
-		existing,
 		city_object
 	)
 
@@ -521,7 +495,9 @@ static func get_next_city_object_id() -> int:
 
 
 static func get_city_object_version() -> int:
-	return _state().object_version
+	return get_city_object_version_for_city_state(
+		_get_compatibility_city_state()
+	)
 
 
 static func get_city_object_version_for_city_state(
@@ -547,7 +523,9 @@ static func _get_city_object_debug_fingerprint_for_state(
 
 
 static func get_city_object_debug_fingerprint() -> int:
-	return _get_city_object_debug_fingerprint_for_state(_state())
+	return get_city_object_debug_fingerprint_for_city_state(
+		_get_compatibility_city_state()
+	)
 
 
 static func get_city_object_debug_fingerprint_for_city_state(
@@ -559,7 +537,9 @@ static func get_city_object_debug_fingerprint_for_city_state(
 
 
 static func mark_city_objects_changed() -> void:
-	_state().object_version += 1
+	mark_city_objects_changed_for_city_state(
+		_get_compatibility_city_state()
+	)
 
 
 static func mark_city_objects_changed_for_city_state(
@@ -715,27 +695,10 @@ static func _find_authoritative_city_object_index(object_id: int) -> int:
 
 
 static func get_city_object_index_by_id(object_id: int) -> int:
-	if object_id <= 0:
-		return -1
-
-	var object_index := _get_valid_indexed_city_object_index(object_id)
-
-	if object_index >= 0:
-		return object_index
-
-	# The object array is authoritative. Scan a failed lookup before deciding
-	# whether repair is needed: healthy misses stay read-only, while missing keys
-	# and full-size wrong-key indexes are rebuilt from the source records.
-	var authoritative_index := _find_authoritative_city_object_index(object_id)
-
-	if authoritative_index < 0:
-		if _state().object_index_by_id.has(object_id):
-			rebuild_city_object_index()
-
-		return -1
-
-	rebuild_city_object_index()
-	return _get_valid_indexed_city_object_index(object_id)
+	return get_city_object_index_by_id_for_city_state(
+		_get_compatibility_city_state(),
+		object_id
+	)
 
 
 static func get_city_object_index_by_id_for_city_state(
@@ -781,12 +744,10 @@ static func get_city_object_index_by_id_for_city_state(
 
 
 static func get_city_object_id_at_tile(tile_position: Vector2i) -> int:
-	var object_id := int(_state().occupied_tiles.get(tile_position, -1))
-
-	if object_id <= 0:
-		return -1
-
-	return object_id
+	return get_city_object_id_at_tile_for_city_state(
+		_get_compatibility_city_state(),
+		tile_position
+	)
 
 
 static func get_city_object_id_at_tile_for_city_state(
@@ -802,7 +763,10 @@ static func get_city_object_id_at_tile_for_city_state(
 
 
 static func has_city_object_at_tile(tile_position: Vector2i) -> bool:
-	return get_city_object_id_at_tile(tile_position) > 0
+	return has_city_object_at_tile_for_city_state(
+		_get_compatibility_city_state(),
+		tile_position
+	)
 
 
 static func has_city_object_at_tile_for_city_state(
@@ -816,12 +780,10 @@ static func has_city_object_at_tile_for_city_state(
 
 
 static func get_city_object_at_tile(tile_position: Vector2i) -> Dictionary:
-	var object_id := get_city_object_id_at_tile(tile_position)
-
-	if object_id <= 0:
-		return {}
-
-	return get_city_object_by_id(object_id)
+	return get_city_object_at_tile_for_city_state(
+		_get_compatibility_city_state(),
+		tile_position
+	)
 
 
 static func get_city_object_at_tile_for_city_state(
@@ -953,10 +915,11 @@ static func get_city_object_topology_blocking_citizen_ids(
 	object_type: String,
 	footprint_tiles: Array
 ) -> Array[int]:
-	if city_object_type_preserves_citizen_walkability(object_type):
-		return []
-
-	return CityCitizenSpatialSystem.get_living_city_citizen_ids_in_tiles(footprint_tiles)
+	return get_city_object_topology_blocking_citizen_ids_for_city_state(
+		_get_compatibility_city_state(),
+		object_type,
+		footprint_tiles
+	)
 
 
 static func get_city_object_topology_blocking_citizen_ids_for_city_state(
@@ -1042,7 +1005,7 @@ static func validate_city_object_topology_mutation(
 			return result
 
 		var construction_site_id := int(
-			CityConstructionSystem.get_current_state().construction_site_id_by_tile.get(
+			CityCitizenUnboundCompatibility.get_city_state().construction_state.construction_site_id_by_tile.get(
 				tile_position,
 				-1
 			)
@@ -1090,9 +1053,8 @@ static func can_place_city_object(
 	size_tiles: Vector2i,
 	object_type: String = ""
 ) -> bool:
-	return _can_place_city_object(
-		null,
-		CityConstructionSystem.get_current_state(),
+	return can_place_city_object_for_city_state(
+		_get_compatibility_city_state(),
 		city_world,
 		top_left,
 		size_tiles,
@@ -1221,8 +1183,8 @@ static func city_object_placement_has_walkable_access_tile(
 	top_left: Vector2i,
 	size_tiles: Vector2i
 ) -> bool:
-	return _city_object_placement_has_walkable_access_tile(
-		null,
+	return city_object_placement_has_walkable_access_tile_for_city_state(
+		_get_compatibility_city_state(),
 		city_world,
 		top_left,
 		size_tiles
@@ -1371,11 +1333,9 @@ static func city_object_boundary_tile_allows_entry(
 
 
 static func is_completed_city_road_tile(tile_position: Vector2i) -> bool:
-	var city_object := get_city_object_at_tile(tile_position)
-
-	return (
-		not city_object.is_empty()
-		and str(city_object.get("type", "")) == CityObjectCatalog.CITY_OBJECT_ROAD
+	return is_completed_city_road_tile_for_city_state(
+		_get_compatibility_city_state(),
+		tile_position
 	)
 
 
@@ -1396,77 +1356,31 @@ static func is_completed_city_road_tile_for_city_state(
 
 
 static func register_completed_city_object(values: Dictionary) -> Dictionary:
-	return _register_completed_city_object(values)
+	return register_completed_city_object_for_city_state(
+		_get_compatibility_city_state(),
+		values
+	)
 
 
 static func register_completed_city_object_from_construction_site(
 	construction_site_id: int,
 	values: Dictionary
 ) -> Dictionary:
-	var city_state = WorldPoliticalState.get_current_city_simulation_state()
-
-	if (
-		not city_state is CitySettlementSimulationState
-		or not _registration_matches_authoritative_construction_site(
-			city_state,
-			construction_site_id,
-			values
-		)
-	):
-		return {}
-
-	return _register_completed_city_object(values, construction_site_id)
+	return register_completed_city_object_from_construction_site_for_city_state(
+		_get_compatibility_city_state(),
+		construction_site_id,
+		values
+	)
 
 
 static func _register_completed_city_object(
 	values: Dictionary,
 	preauthorized_construction_site_id: int = -1
 ) -> Dictionary:
-	var object_type := str(values.get("object_type", ""))
-	var definition := CityObjectCatalog.get_city_object_definition(object_type)
-	var city_state = WorldPoliticalState.get_current_city_simulation_state()
-
-	if (
-		definition.is_empty()
-		or not city_state is CitySettlementSimulationState
-		or (
-			preauthorized_construction_site_id <= 0
-			and not can_use_city_object_definition_for_city_state(
-				city_state,
-				object_type
-			)
-		)
-		or not _can_defer_foundation_surface_feature_clear(
-			city_state,
-			definition,
-			values
-		)
-	):
-		return {}
-
-	var registration_values := values.duplicate()
-	# A caller-supplied site ID is never authority. Only the narrow completion
-	# API above may supply a site resolved from the settlement-owned registry.
-	registration_values.erase("allowed_construction_site_id")
-	if preauthorized_construction_site_id > 0:
-		registration_values["allowed_construction_site_id"] = (
-			preauthorized_construction_site_id
-		)
-
-	var shape_mode := str(
-		definition.get(
-			"shape_mode",
-			CityObjectCatalog.CITY_OBJECT_SHAPE_RECTANGLE
-		)
-	)
-
-	if shape_mode == CityObjectCatalog.CITY_OBJECT_SHAPE_TILE_AREA:
-		return _register_completed_road(registration_values)
-
-	return _register_completed_rectangle(
-		registration_values,
-		definition,
-		shape_mode
+	return _register_completed_city_object_for_city_state(
+		_get_compatibility_city_state(),
+		values,
+		preauthorized_construction_site_id
 	)
 
 
@@ -1974,7 +1888,7 @@ static func _register_completed_rectangle(
 		city_object[_DEFERRED_FOUNDATION_SURFACE_CLEAR_FIELD] = true
 		city_object[_DEFERRED_FOUNDATION_REGISTRATION_BASELINE_FIELD] = (
 			_make_deferred_foundation_registration_baseline(
-				WorldPoliticalState.get_current_city_simulation_state()
+				CityCitizenUnboundCompatibility.get_city_state()
 			)
 		)
 	var resident_capacity := int(definition.get("resident_capacity", 0))
@@ -2025,7 +1939,7 @@ static func _register_completed_rectangle(
 	var feature_world := city_world
 
 	if feature_world == null:
-		feature_world = WorldPoliticalState.get_current_city_world()
+		feature_world = CityCitizenUnboundCompatibility.get_city_state().city_world
 
 	if not bool(values.get("defer_surface_feature_clear", false)):
 		WorldData.clear_city_surface_features_at_tiles(
@@ -2070,7 +1984,7 @@ static func _register_completed_road(values: Dictionary) -> Dictionary:
 	var city_world: WorldData = values.get("city_world")
 
 	if city_world == null:
-		city_world = WorldPoliticalState.get_current_city_world()
+		city_world = CityCitizenUnboundCompatibility.get_city_state().city_world
 
 	var topology_validation := validate_city_object_topology_mutation({
 		"city_world": city_world,
@@ -2201,7 +2115,7 @@ static func _sort_city_tiles_y_then_x(
 
 static func can_use_city_object_definition(object_type: String) -> bool:
 	return can_use_city_object_definition_for_city_state(
-		WorldPoliticalState.get_current_city_simulation_state(),
+		_get_compatibility_city_state(),
 		object_type
 	)
 

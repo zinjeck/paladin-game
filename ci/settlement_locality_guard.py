@@ -264,7 +264,7 @@ def main() -> int:
     baseline_hits: list[Hit] = []
     for path in baseline_paths:
         baseline_hits.extend(scan_text(path, read_baseline_file(path)))
-    baseline_counts, baseline_first_hits = inventory(baseline_hits)
+    baseline_counts, _baseline_first_hits = inventory(baseline_hits)
 
     current_hits: list[Hit] = []
     current_paths = production_scripts()
@@ -343,6 +343,19 @@ def main() -> int:
         "Settlement locality guard passed. Remaining grandfathered exact scopes: "
         f"{len(remaining_legacy_keys)} ({pass_summary})."
     )
+
+    # Keep the ratchet inspectable: CI now prints every remaining exact scope,
+    # grouped implicitly by the pass recorded in legacy_metadata(). This is a
+    # permanent audit surface, not a permissive allowlist or a temporary probe.
+    for key in sorted(remaining_legacy_keys):
+        hit = current_first_hits[key]
+        metadata = legacy_metadata(hit)
+        if metadata is None:
+            continue
+        print(
+            f"  REMAINING [{metadata.remove_in}] {hit.path}:{hit.line} "
+            f"{hit.scope} via {hit.token}"
+        )
     return 0
 
 

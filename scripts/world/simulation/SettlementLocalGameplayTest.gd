@@ -479,7 +479,7 @@ func _test_player_capital_bridge_uses_exact_local_state() -> void:
 
 	_expect(
 		WorldPoliticalState.set_active_settlement(npc_city_id)
-		and not WorldData.can_build_in_city(),
+		and not WorldData.can_build_in_city_for_settlement(npc_city_id),
 		"Build compatibility must read the active unfounded NPC rather than the founded player capital."
 	)
 	_expect(
@@ -498,7 +498,7 @@ func _test_player_capital_bridge_uses_exact_local_state() -> void:
 	_expect(
 		WorldData.has_player_city()
 		and WorldData.has_player_city_foundation()
-		and WorldData.can_build_in_city()
+		and WorldData.can_build_in_city_for_settlement(npc_city_id)
 		and WorldData.player_city_founded
 		and WorldData.player_city_foundation_top_left
 		== capital_keep.get("top_left")
@@ -539,7 +539,7 @@ func _test_player_capital_bridge_uses_exact_local_state() -> void:
 	_expect(
 		not WorldData.has_player_city()
 		and not WorldData.has_player_city_foundation()
-		and WorldData.can_build_in_city()
+		and WorldData.can_build_in_city_for_settlement(npc_city_id)
 		and not WorldData.player_city_founded
 		and WorldData.player_city_foundation_top_left == Vector2i(-1, -1)
 		and WorldData.player_city_foundation_size == Vector2i.ZERO,

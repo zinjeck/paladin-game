@@ -86,10 +86,17 @@ func _enter_requested_initial_city_view() -> void:
 	show_city_view()
 
 
+func _get_presented_settlement_id() -> int:
+	var presented_context = WorldPoliticalState.get_active_settlement_context()
+	if presented_context != null:
+		return int(presented_context.settlement_id)
+	return WorldPoliticalState.get_player_capital_settlement_id()
+
+
 func prepare_city_view(request: Dictionary) -> void:
 	if (
 		city_view != null
-		or WorldData.has_active_city_save()
+		or WorldData.has_player_capital_city_save()
 		or pending_city_switch
 	):
 		return
@@ -134,16 +141,12 @@ func cancel_city_preparation() -> void:
 
 func show_city_view(request: Dictionary = {}) -> void:
 	if city_view != null:
-		var selected_settlement_id := WorldPoliticalState.active_settlement_id
-		if selected_settlement_id <= 0:
-			selected_settlement_id = (
-				WorldPoliticalState.get_player_capital_settlement_id()
-			)
+		var selected_settlement_id := _get_presented_settlement_id()
 		if selected_settlement_id > 0:
 			show_settlement_city_view(selected_settlement_id)
 		return
 
-	if WorldData.has_active_city_save():
+	if WorldData.has_player_capital_city_save():
 		cancel_city_preparation()
 		if _ensure_city_view({}):
 			_activate_view(city_view)
@@ -234,7 +237,7 @@ func show_settlement_city_view(
 	if not bool(bootstrap_result.get("success", false)):
 		return false
 
-	var previous_settlement_id := WorldPoliticalState.active_settlement_id
+	var previous_settlement_id := _get_presented_settlement_id()
 	var previous_detailed_simulation_settlement_id := (
 		SimulationCoordinator.get_detailed_simulation_settlement_id()
 	)

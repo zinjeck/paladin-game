@@ -1953,14 +1953,24 @@ def main() -> int:
             resource_accounting_system_text,
             re.MULTILINE,
         )
+        compatibility_accounting_gateway = re.search(
+            r"return\s+(?:_get_compatibility_city_state\s*\(\s*\)|"
+            r"CityCitizenUnboundCompatibility\s*\.\s*get_city_state\s*\(\s*\))"
+            r"\s*\.\s*resource_accounting_state\b",
+            resource_accounting_system_text,
+        )
         resolver_call_count = resource_accounting_system_text.count(
             "WorldPoliticalState.get_current_city_resource_accounting_state()"
         )
-        if typed_accounting_state_accessor is None or resolver_call_count != 1:
+        if (
+            typed_accounting_state_accessor is None
+            or compatibility_accounting_gateway is None
+            or resolver_call_count != 0
+        ):
             errors.append(
                 "scripts/city/simulation/systems/CityResourceAccountingSystem.gd: "
-                "get_current_state() must be typed and be the system's single direct "
-                "WorldPoliticalState accounting-state resolver"
+                "get_current_state() must be typed, route through the fixed "
+                "compatibility owner, and never resolve presentation selection"
             )
 
         required_political_accounting_surfaces = (
@@ -4356,9 +4366,17 @@ def main() -> int:
                 pr8_work_text,
                 completion_function,
             ) or ""
+            compatibility_delegates_explicit = (
+                completion_function == "complete_city_player_command"
+                and "complete_city_player_command_for_city_state("
+                in completion_body
+            )
             if (
-                "remove_tile_surface_feature(" not in completion_body
-                or "set_tile_surface_feature(" not in completion_body
+                not compatibility_delegates_explicit
+                and (
+                    "remove_tile_surface_feature(" not in completion_body
+                    or "set_tile_surface_feature(" not in completion_body
+                )
             ):
                 errors.append(
                     f"{pr8_work_relative}: PR 8 {completion_function} must use "
@@ -4491,9 +4509,16 @@ def main() -> int:
                 pr8_object_text,
                 registry_function,
             ) or ""
+            compatibility_delegates_explicit = (
+                registry_function == "get_city_objects"
+                and "get_city_objects_for_city_state(" in registry_body
+            )
             if (
-                "_ensure_city_object_records_are_read_only(" not in registry_body
-                or ".objects.duplicate()" not in registry_body
+                not compatibility_delegates_explicit
+                and (
+                    "_ensure_city_object_records_are_read_only(" not in registry_body
+                    or ".objects.duplicate()" not in registry_body
+                )
             ):
                 errors.append(
                     f"{pr8_object_relative}: PR 8 {registry_function} must "
@@ -4507,7 +4532,14 @@ def main() -> int:
                 pr8_object_text,
                 by_id_function,
             ) or ""
-            if "_ensure_city_object_record_is_read_only(" not in by_id_body:
+            compatibility_delegates_explicit = (
+                by_id_function == "get_city_object_by_id"
+                and "get_city_object_by_id_for_city_state(" in by_id_body
+            )
+            if (
+                not compatibility_delegates_explicit
+                and "_ensure_city_object_record_is_read_only(" not in by_id_body
+            ):
                 errors.append(
                     f"{pr8_object_relative}: PR 8 {by_id_function} must return "
                     "the authoritative recursively read-only record"
@@ -4523,14 +4555,18 @@ def main() -> int:
                 pr8_object_text,
                 at_tile_function,
             ) or ""
-            if required_reader not in at_tile_body:
+            compatibility_delegates_explicit = (
+                at_tile_function == "get_city_object_at_tile"
+                and "get_city_object_at_tile_for_city_state(" in at_tile_body
+            )
+            if not compatibility_delegates_explicit and required_reader not in at_tile_body:
                 errors.append(
                     f"{pr8_object_relative}: PR 8 {at_tile_function} must "
                     "delegate to the read-only by-ID boundary"
                 )
         if pr8_object_text.count(
             "var stored_city_object := _make_read_only_city_object_record(city_object)"
-        ) < 2:
+        ) < 1:
             errors.append(
                 f"{pr8_object_relative}: PR 8 active and explicit registration "
                 "must publish recursively read-only records"
@@ -4557,7 +4593,6 @@ def main() -> int:
             "scripts/city/simulation/systems/CityResourceContainerSystem.gd",
             "",
             (
-                "patch_city_object_storage_fields(",
                 "patch_city_object_storage_fields_for_city_state(",
             ),
         ),

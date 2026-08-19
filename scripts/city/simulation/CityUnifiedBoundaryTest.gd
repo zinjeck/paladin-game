@@ -1078,7 +1078,7 @@ func _test_world_founding_identity_commit_boundaries() -> void:
 	)
 
 	WorldData.reset_player_city_state()
-	WorldData.reset_city_session_state()
+	WorldData.reset_all_city_session_state()
 	_expect(
 		WorldData.has_active_world_save()
 		and WorldData.has_official_founding_identity()
@@ -1125,7 +1125,9 @@ func _reset_fixture() -> WorldData:
 			tile.erase("surface_feature")
 
 	city_world.mark_tile_data_changed()
-	WorldData.store_city_world_save(city_world, TEST_WORLD_SEED)
+	WorldData.store_city_world_for_city_state(
+		CityCitizenUnboundCompatibility.get_city_state(),
+		city_world, TEST_WORLD_SEED)
 	var primary_culture := WorldData.create_culture(
 		"Boundary Test Culture"
 	)

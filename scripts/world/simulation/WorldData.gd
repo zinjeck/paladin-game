@@ -704,14 +704,92 @@ static func has_active_world_save() -> bool:
 	return save_locked and official_world != null
 
 
-static func has_active_city_save() -> bool:
-	return WorldPoliticalState.get_current_city_world() != null
+static func has_city_world_for_city_state(
+	city_state: CitySettlementSimulationState
+) -> bool:
+	return (
+		city_state != null
+		and city_state.city_world is WorldData
+		and city_state.city_world.width > 0
+		and city_state.city_world.height > 0
+		and city_state.city_seed > 0
+	)
 
 
-static func store_city_world_save(city_world: WorldData, city_seed: int) -> void:
+static func has_city_world_for_settlement(settlement_id: int) -> bool:
+	return has_city_world_for_city_state(
+		WorldPoliticalState.get_city_simulation_state(settlement_id)
+	)
+
+
+static func has_player_capital_city_save() -> bool:
+	return has_city_world_for_settlement(
+		WorldPoliticalState.get_player_capital_settlement_id()
+	)
+
+
+static func store_city_world_for_city_state(
+	city_state: CitySettlementSimulationState,
+	city_world: WorldData,
+	city_seed: int
+) -> bool:
+	if (
+		city_state == null
+		or city_world == null
+		or city_world.width <= 0
+		or city_world.height <= 0
+		or city_seed <= 0
+		or (city_world.seed != 0 and city_world.seed != city_seed)
+	):
+		return false
+
+	city_state.city_world = city_world
+	city_state.city_seed = city_seed
 	WorkplaceProductionSystem.clear_resource_source_evaluation_cache()
-	WorldPoliticalState.store_current_city_world(city_world, city_seed)
 	MapTextureCacheStateScript.clear_city_cache()
+	return true
+
+
+static func store_city_world_for_settlement(
+	settlement_id: int,
+	city_world: WorldData,
+	city_seed: int
+) -> bool:
+	return store_city_world_for_city_state(
+		WorldPoliticalState.get_city_simulation_state(settlement_id),
+		city_world,
+		city_seed
+	)
+
+
+static func store_player_capital_city_world_save(
+	city_world: WorldData,
+	city_seed: int
+) -> bool:
+	return store_city_world_for_settlement(
+		WorldPoliticalState.get_player_capital_settlement_id(),
+		city_world,
+		city_seed
+	)
+
+
+static func clear_city_world_for_city_state(
+	city_state: CitySettlementSimulationState
+) -> bool:
+	if city_state == null:
+		return false
+
+	city_state.city_world = null
+	city_state.city_seed = 0
+	WorkplaceProductionSystem.clear_resource_source_evaluation_cache()
+	MapTextureCacheStateScript.clear_city_cache()
+	return true
+
+
+static func clear_city_world_for_settlement(settlement_id: int) -> bool:
+	return clear_city_world_for_city_state(
+		WorldPoliticalState.get_city_simulation_state(settlement_id)
+	)
 
 
 static func _clear_player_city_mirrors() -> void:
@@ -884,9 +962,22 @@ static func has_player_city() -> bool:
 	return capital_state != null and capital_state.is_city_founded()
 
 
-static func can_build_in_city() -> bool:
-	var city_state = WorldPoliticalState.get_active_city_simulation_state()
+static func can_build_in_city_for_city_state(
+	city_state: CitySettlementSimulationState
+) -> bool:
 	return city_state != null and city_state.can_build_city_objects()
+
+
+static func can_build_in_city_for_settlement(settlement_id: int) -> bool:
+	return can_build_in_city_for_city_state(
+		WorldPoliticalState.get_city_simulation_state(settlement_id)
+	)
+
+
+static func can_build_in_player_capital() -> bool:
+	return can_build_in_city_for_settlement(
+		WorldPoliticalState.get_player_capital_settlement_id()
+	)
 
 #endregion
 
@@ -1062,7 +1153,7 @@ static func reset_player_city_state() -> void:
 
 static func reset_runtime_session_state(clear_debug: bool = false) -> void:
 	reset_world_session_state()
-	reset_city_session_state()
+	reset_all_city_session_state()
 	reset_player_city_state()
 	clear_visual_texture_caches()
 
@@ -1090,10 +1181,26 @@ static func reset_world_session_state() -> void:
 	MapTextureCacheStateScript.clear_world_cache()
 
 
-static func reset_city_session_state() -> void:
-	WorldPoliticalState.clear_current_city_world()
+static func reset_city_session_state_for_settlement(
+	settlement_id: int
+) -> bool:
+	if not clear_city_world_for_settlement(settlement_id):
+		return false
+
+	MapCameraSessionStateScript.reset_city_camera_for_settlement(settlement_id)
+	return true
+
+
+static func reset_all_city_session_state() -> void:
+	for raw_settlement in WorldPoliticalState.get_settlement_snapshot():
+		if not raw_settlement is Dictionary:
+			continue
+		var settlement_id := int(raw_settlement.get("id", -1))
+		if settlement_id > 0:
+			clear_city_world_for_settlement(settlement_id)
 
 	reset_city_camera_state()
+	WorkplaceProductionSystem.clear_resource_source_evaluation_cache()
 	MapTextureCacheStateScript.clear_city_cache()
 
 

@@ -204,7 +204,9 @@ func _reset_fixture() -> WorldData:
 			tile["fertility"] = 50.0
 
 	city_world.mark_tile_data_changed()
-	WorldData.store_city_world_save(city_world, TEST_WORLD_SEED)
+	WorldData.store_city_world_for_city_state(
+		CityCitizenUnboundCompatibility.get_city_state(),
+		city_world, TEST_WORLD_SEED)
 	var culture := WorldData.create_culture("Food Allocation Test Culture")
 	test_culture_id = int(culture.get("id", -1))
 	WorldPoliticalState.replace_current_city_runtime_data({

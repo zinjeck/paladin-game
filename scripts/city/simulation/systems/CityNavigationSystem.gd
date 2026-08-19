@@ -1,6 +1,11 @@
 extends RefCounted
 class_name CityNavigationSystem
 
+static func _get_compatibility_city_state() -> CitySettlementSimulationState:
+	return CityCitizenUnboundCompatibility.get_city_state()
+
+
+
 const CITY_CARDINAL_TILE_OFFSETS := [
 	Vector2i(0, -1),
 	Vector2i(-1, 0),
@@ -30,7 +35,7 @@ const EXACT_DESTINATION_HEURISTIC_LIMIT: int = 8
 const HEURISTIC_WEIGHT: int = 1
 
 static func get_current_state() -> CityNavigationState:
-	return WorldPoliticalState.get_current_city_navigation_state()
+	return CityCitizenUnboundCompatibility.get_city_state().navigation_state
 
 
 static func get_state_for_city_state(
@@ -73,11 +78,10 @@ static func get_city_object_access_tiles(
 	city_world: WorldData,
 	city_object: Dictionary
 ) -> Array:
-	return _get_city_object_access_tiles(
+	return get_city_object_access_tiles_for_city_state(
+		_get_compatibility_city_state(),
 		city_world,
-		city_object,
-		get_current_state(),
-		null
+		city_object
 	)
 
 
@@ -206,10 +210,10 @@ static func city_citizen_can_access_object_interior(
 	citizen_id: int,
 	city_object: Dictionary
 ) -> bool:
-	return _city_citizen_can_access_object_interior(
+	return city_citizen_can_access_object_interior_for_city_state(
+		_get_compatibility_city_state(),
 		citizen_id,
-		city_object,
-		null
+		city_object
 	)
 
 
@@ -358,7 +362,11 @@ static func get_city_citizen_movement_step_cost(
 	from_tile: Vector2i,
 	to_tile: Vector2i
 ) -> int:
-	return _get_city_citizen_movement_step_cost(from_tile, to_tile, null)
+	return get_city_citizen_movement_step_cost_for_city_state(
+		_get_compatibility_city_state(),
+		from_tile,
+		to_tile
+	)
 
 
 static func get_city_citizen_movement_step_cost_for_city_state(
@@ -413,12 +421,12 @@ static func can_city_citizen_traverse_step(
 	to_tile: Vector2i,
 	citizen_id: int = -1
 ) -> bool:
-	return _can_city_citizen_traverse_step(
+	return can_city_citizen_traverse_step_for_city_state(
+		_get_compatibility_city_state(),
 		city_world,
 		from_tile,
 		to_tile,
-		citizen_id,
-		null
+		citizen_id
 	)
 
 
@@ -590,11 +598,11 @@ static func is_city_tile_walkable_for_citizen(
 	tile_position: Vector2i,
 	citizen_id: int = -1
 ) -> bool:
-	return _is_city_tile_walkable_for_citizen(
+	return is_city_tile_walkable_for_citizen_for_city_state(
+		_get_compatibility_city_state(),
 		city_world,
 		tile_position,
-		citizen_id,
-		null
+		citizen_id
 	)
 
 
@@ -724,309 +732,9 @@ static func _is_city_tile_walkable_for_citizen(
 	)
 
 static func find_path_to_any_city_tile(values: Dictionary) -> Dictionary:
-	var city_world: WorldData = values.get("city_world")
-	var raw_city_state = values.get("city_state")
-	var city_state = (
-		raw_city_state
-		if raw_city_state is CitySettlementSimulationState
-		else null
-	)
-	var start_tile: Vector2i = values.get(
-		"start_tile",
-		CityCitizens.INVALID_CITY_TILE_POSITION
-	)
-	var raw_destination_tiles: Array = values.get("destination_tiles", [])
-	var max_expanded_nodes := maxi(
-		int(values.get("max_expanded_nodes", DEFAULT_MAX_EXPANDED_NODES)),
-		1
-	)
-	var citizen_id := int(values.get("citizen_id", -1))
-	var heuristic_weight := maxi(
-		int(values.get("heuristic_weight", HEURISTIC_WEIGHT)),
-		1
-	)
-	var search_start_usec := Time.get_ticks_usec()
-
-	var result := {
-		"success": false,
-		"status": PATH_STATUS_INVALID_WORLD,
-		"path": [],
-		"start_tile": start_tile,
-		"destination_tile": (
-			CityCitizens.INVALID_CITY_TILE_POSITION
-		),
-		"destination_candidate_count": 0,
-		"expanded_node_count": 0,
-		"path_cost": 0,
-		"duration_usec": 0
-	}
-
-	if city_world == null:
-		return _finish_result(
-			result,
-			search_start_usec
-		)
-
-	if not _is_city_tile_walkable_for_citizen(
-		city_world,
-		start_tile,
-		citizen_id,
-		city_state
-	):
-		result["status"] = PATH_STATUS_INVALID_START
-
-		return _finish_result(
-			result,
-			search_start_usec
-		)
-
-	var destination_tiles := (
-		_get_clean_destination_tiles(
-			city_world,
-			raw_destination_tiles,
-			citizen_id,
-			city_state
-		)
-	)
-
-	result["destination_candidate_count"] = (
-		destination_tiles.size()
-	)
-
-	if destination_tiles.is_empty():
-		result["status"] = PATH_STATUS_NO_DESTINATIONS
-
-		return _finish_result(
-			result,
-			search_start_usec
-		)
-
-	var destination_lookup: Dictionary = {}
-
-	for destination_tile in destination_tiles:
-		destination_lookup[destination_tile] = true
-
-	if destination_lookup.has(start_tile):
-		result["success"] = true
-		result["status"] = PATH_STATUS_SUCCESS
-		result["path"] = [start_tile]
-		result["destination_tile"] = start_tile
-
-		return _finish_result(
-			result,
-			search_start_usec
-		)
-
-	# This permissive terrain-only component is a supergraph of citizen
-	# traversal: it ignores objects and diagonal corner restrictions. Therefore
-	# a different component proves that A* cannot succeed, while a shared
-	# component says nothing and preserves the existing search exactly.
-	if (
-		max_expanded_nodes >= city_world.width * city_world.height
-		and not _base_land_component_has_destination(
-			city_world,
-			start_tile,
-			destination_tiles,
-			city_state
-		)
-	):
-		result["status"] = PATH_STATUS_UNREACHABLE
-
-		return _finish_result(
-			result,
-			search_start_usec
-		)
-
-	var open_heap: Array = []
-	var travel_cost_by_tile: Dictionary = {
-		start_tile: 0
-	}
-	var previous_tile_by_tile: Dictionary = {}
-	var closed_tile_lookup: Dictionary = {}
-
-	var destination_heuristic := (
-		_make_destination_heuristic(destination_tiles)
-	)
-	var start_heuristic := _get_destination_heuristic(
-		start_tile,
-		destination_heuristic
-	)
-	var safe_heuristic_weight := maxi(
-		heuristic_weight,
-		1
-	)
-
-	_push_open_heap_entry(
-		open_heap,
-		start_tile,
-		0,
-		start_heuristic,
-		safe_heuristic_weight
-	)
-
-	var expanded_node_count := 0
-	var safe_max_expanded_nodes := maxi(
-		max_expanded_nodes,
-		1
-	)
-
-	while not open_heap.is_empty():
-		if (
-			expanded_node_count
-			>= safe_max_expanded_nodes
-		):
-			result["status"] = (
-				PATH_STATUS_SEARCH_LIMIT_REACHED
-			)
-			result["expanded_node_count"] = (
-				expanded_node_count
-			)
-
-			return _finish_result(
-				result,
-				search_start_usec
-			)
-
-		var current_entry := (
-			_pop_open_heap_entry(
-				open_heap
-			)
-		)
-
-		if current_entry.is_empty():
-			break
-
-		var current_tile: Vector2i = (
-			current_entry[HEAP_TILE_INDEX]
-		)
-		var current_travel_cost := int(
-			current_entry[
-				HEAP_TRAVEL_COST_INDEX
-			]
-		)
-
-		if closed_tile_lookup.has(current_tile):
-			continue
-
-		if (
-			current_travel_cost
-			!= int(
-				travel_cost_by_tile.get(
-					current_tile,
-					MAXIMUM_PATH_COST
-				)
-			)
-		):
-			continue
-
-		closed_tile_lookup[current_tile] = true
-		expanded_node_count += 1
-
-		if destination_lookup.has(current_tile):
-			var path := _reconstruct_path(
-				previous_tile_by_tile,
-				start_tile,
-				current_tile
-			)
-
-			if path.is_empty():
-				result["status"] = (
-					PATH_STATUS_RECONSTRUCTION_FAILED
-				)
-			else:
-				result["success"] = true
-				result["status"] = (
-					PATH_STATUS_SUCCESS
-				)
-				result["path"] = path
-				result["destination_tile"] = (
-					current_tile
-				)
-				result["path_cost"] = (
-					current_travel_cost
-				)
-
-			result["expanded_node_count"] = (
-				expanded_node_count
-			)
-
-			return _finish_result(
-				result,
-				search_start_usec
-			)
-
-		for offset in NEIGHBOR_OFFSETS:
-			var neighbor_tile: Vector2i = (
-				current_tile + offset
-			)
-
-			if closed_tile_lookup.has(neighbor_tile):
-				continue
-
-			if not _can_city_citizen_traverse_step(
-				city_world,
-				current_tile,
-				neighbor_tile,
-				citizen_id,
-				city_state
-			):
-				continue
-
-			var step_cost := (
-				_get_city_citizen_movement_step_cost(
-					current_tile,
-					neighbor_tile,
-					city_state
-				)
-			)
-
-			if step_cost <= 0:
-				continue
-
-			var proposed_travel_cost := (
-				current_travel_cost + step_cost
-			)
-			var known_travel_cost := int(
-				travel_cost_by_tile.get(
-					neighbor_tile,
-					MAXIMUM_PATH_COST
-				)
-			)
-
-			if (
-				proposed_travel_cost
-				>= known_travel_cost
-			):
-				continue
-
-			travel_cost_by_tile[neighbor_tile] = (
-				proposed_travel_cost
-			)
-			previous_tile_by_tile[neighbor_tile] = (
-				current_tile
-			)
-
-			var neighbor_heuristic := _get_destination_heuristic(
-				neighbor_tile,
-				destination_heuristic
-			)
-
-			_push_open_heap_entry(
-				open_heap,
-				neighbor_tile,
-				proposed_travel_cost,
-				neighbor_heuristic,
-				safe_heuristic_weight
-			)
-
-	result["status"] = PATH_STATUS_UNREACHABLE
-	result["expanded_node_count"] = (
-		expanded_node_count
-	)
-
-	return _finish_result(
-		result,
-		search_start_usec
+	return find_path_to_any_city_tile_for_city_state(
+		_get_compatibility_city_state(),
+		values
 	)
 
 
