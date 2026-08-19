@@ -12,7 +12,7 @@ class_name CitizenNeedsSystem
 
 static func ensure_city_citizen_need_state() -> int:
 	return _ensure_city_citizen_need_state(
-		CityCitizenRegistrySystem.get_current_state()
+		CityCitizenUnboundCompatibility.get_city_state().citizen_registry_state
 	)
 
 
@@ -91,7 +91,7 @@ static func _get_registry_state(
 	city_state: CitySettlementSimulationState
 ) -> CityCitizenRegistryState:
 	if city_state == null:
-		return CityCitizenRegistrySystem.get_current_state()
+		return CityCitizenUnboundCompatibility.get_city_state().citizen_registry_state
 	return city_state.citizen_registry_state
 
 
@@ -105,7 +105,7 @@ static func _mark_city_citizens_changed(
 
 
 static func get_city_citizen_hunger(citizen_id: int) -> int:
-	return _get_city_citizen_hunger(null, citizen_id)
+	return _get_city_citizen_hunger(CityCitizenUnboundCompatibility.get_city_state(), citizen_id)
 
 
 static func get_city_citizen_hunger_for_city_state(
@@ -137,7 +137,7 @@ static func set_city_citizen_hunger_state(
 	hunger_decay_remainder: int
 ) -> bool:
 	return _set_city_citizen_hunger_state(
-		null,
+		CityCitizenUnboundCompatibility.get_city_state(),
 		citizen_id,
 		hunger,
 		hunger_decay_remainder
@@ -208,7 +208,7 @@ static func _set_city_citizen_hunger_state(
 
 
 static func get_city_citizen_happiness(citizen_id: int) -> int:
-	return _get_city_citizen_happiness(null, citizen_id)
+	return _get_city_citizen_happiness(CityCitizenUnboundCompatibility.get_city_state(), citizen_id)
 
 
 static func get_city_citizen_happiness_for_city_state(
@@ -238,7 +238,7 @@ static func set_city_citizen_happiness(
 	citizen_id: int,
 	happiness: int
 ) -> bool:
-	return _set_city_citizen_happiness(null, citizen_id, happiness)
+	return _set_city_citizen_happiness(CityCitizenUnboundCompatibility.get_city_state(), citizen_id, happiness)
 
 
 static func set_city_citizen_happiness_for_city_state(
@@ -398,7 +398,7 @@ static func _get_city_citizen_direct_food_withdrawal_target_tiles(
 			):
 				return (
 					CityNavigationSystem.get_city_object_access_tiles(
-						WorldPoliticalState.get_current_city_world(),
+						CityCitizenUnboundCompatibility.get_city_state().city_world,
 						city_object
 					)
 					if city_state == null
@@ -417,7 +417,7 @@ static func _get_city_citizen_direct_food_withdrawal_target_tiles(
 			):
 				return (
 					CityNavigationSystem.get_city_object_access_tiles(
-						WorldPoliticalState.get_current_city_world(),
+						CityCitizenUnboundCompatibility.get_city_state().city_world,
 						city_object
 					)
 					if city_state == null
@@ -437,7 +437,7 @@ static func city_citizen_can_withdraw_food_from_endpoint(
 	resource: String
 ) -> bool:
 	return _city_citizen_can_withdraw_food_from_endpoint(
-		null,
+		CityCitizenUnboundCompatibility.get_city_state(),
 		citizen_id,
 		endpoint,
 		resource
@@ -525,7 +525,7 @@ static func get_city_citizen_food_endpoint_target_tiles(
 	endpoint: Dictionary
 ) -> Array:
 	return _get_city_citizen_food_endpoint_target_tiles(
-		null,
+		CityCitizenUnboundCompatibility.get_city_state(),
 		citizen_id,
 		endpoint
 	)
@@ -593,7 +593,7 @@ static func _get_city_citizen_food_endpoint_target_tiles(
 				and raw_tile is Vector2i
 				and (
 					CityNavigationSystem.is_city_tile_walkable_for_citizen(
-						WorldPoliticalState.get_current_city_world(),
+						CityCitizenUnboundCompatibility.get_city_state().city_world,
 						raw_tile,
 						citizen_id
 					)
@@ -618,7 +618,7 @@ static func get_city_food_endpoint_unreserved_amount(
 	excluding_citizen_id: int = -1
 ) -> int:
 	return _get_city_food_endpoint_unreserved_amount(
-		null,
+		CityCitizenUnboundCompatibility.get_city_state(),
 		citizen_id,
 		endpoint,
 		resource,
@@ -682,7 +682,7 @@ static func transfer_city_food_endpoint_to_citizen_inventory(
 	requested_amount: int
 ) -> int:
 	return _transfer_city_food_endpoint_to_citizen_inventory(
-		null,
+		CityCitizenUnboundCompatibility.get_city_state(),
 		citizen_id,
 		endpoint,
 		resource,
@@ -924,7 +924,7 @@ static func run_tick(
 	_tick_index: int,
 	minutes_advanced: int
 ) -> void:
-	_run_tick(null, _tick_index, minutes_advanced)
+	_run_tick(CityCitizenUnboundCompatibility.get_city_state(), _tick_index, minutes_advanced)
 
 
 static func run_tick_for_city_state(
@@ -941,7 +941,7 @@ static func _run_tick(
 	minutes_advanced: int
 ) -> void:
 	var resolved_city_state = (
-		WorldPoliticalState.get_current_city_simulation_state()
+		CityCitizenUnboundCompatibility.get_city_state()
 		if city_state == null
 		else city_state
 	)
@@ -1003,7 +1003,7 @@ static func get_single_food_allocation_nutrition_cap() -> int:
 
 
 static func get_citizen_food_need_nutrition(citizen_id: int) -> int:
-	return _get_citizen_food_need_nutrition(null, citizen_id)
+	return _get_citizen_food_need_nutrition(CityCitizenUnboundCompatibility.get_city_state(), citizen_id)
 
 
 static func get_citizen_food_need_nutrition_for_city_state(
@@ -1045,7 +1045,7 @@ static func _get_citizen_food_need_nutrition(
 static func get_citizen_next_food_allocation_nutrition(
 	citizen_id: int
 ) -> int:
-	return _get_citizen_next_food_allocation_nutrition(null, citizen_id)
+	return _get_citizen_next_food_allocation_nutrition(CityCitizenUnboundCompatibility.get_city_state(), citizen_id)
 
 
 static func get_citizen_next_food_allocation_nutrition_for_city_state(
@@ -1077,7 +1077,7 @@ static func _get_citizen_next_food_allocation_nutrition(
 
 
 static func citizen_should_seek_food(citizen_id: int) -> bool:
-	return _citizen_should_seek_food(null, citizen_id)
+	return _citizen_should_seek_food(CityCitizenUnboundCompatibility.get_city_state(), citizen_id)
 
 
 static func citizen_should_seek_food_for_city_state(
@@ -1120,7 +1120,7 @@ static func _citizen_should_seek_food(
 
 
 static func citizen_has_critical_food_need(citizen_id: int) -> bool:
-	return _citizen_has_critical_food_need(null, citizen_id)
+	return _citizen_has_critical_food_need(CityCitizenUnboundCompatibility.get_city_state(), citizen_id)
 
 
 static func citizen_has_critical_food_need_for_city_state(
@@ -1142,7 +1142,7 @@ static func _citizen_has_critical_food_need(
 
 
 static func eat_personal_food_if_hungry(citizen_id: int) -> void:
-	_eat_personal_food_if_hungry(null, citizen_id)
+	_eat_personal_food_if_hungry(CityCitizenUnboundCompatibility.get_city_state(), citizen_id)
 
 
 static func eat_personal_food_if_hungry_for_city_state(

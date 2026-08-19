@@ -438,9 +438,9 @@ WORLD_DATA_CITIZEN_TASK_RUNTIME_PROPERTIES = {
     "city_citizen_task_version": ("int", "citizen_task_version"),
 }
 
-# Pass 8 makes the focused citizen systems the only public behavior gateways.
-# The state classes remain data-only owners, while WorldPoliticalState remains
-# the one low-level resolver behind each system's typed get_current_state API.
+# Citizen behavior systems retain temporary no-target compatibility only through
+# CityCitizenUnboundCompatibility. Production settlement paths use explicit owners,
+# and presentation selection is never a gameplay-state resolver.
 CITIZEN_BEHAVIOR_SYSTEMS = {
     "registry": {
         "path": "scripts/citizens/simulation/systems/CityCitizenRegistrySystem.gd",
@@ -3276,14 +3276,21 @@ def main() -> int:
             )
 
         resolver = str(config["resolver"])
-        if not re.search(
-            rf"return\s+WorldPoliticalState\s*\.\s*"
-            rf"{re.escape(resolver)}\s*\(\s*\)",
-            system_text,
+        compatibility_property = resolver.removeprefix("get_current_city_")
+        compatibility_gateway_patterns = (
+            rf"return\s+_get_compatibility_city_state\s*\(\s*\)\s*\.\s*"
+            rf"{re.escape(compatibility_property)}\b",
+            rf"return\s+CityCitizenUnboundCompatibility\s*\.\s*"
+            rf"get_city_state\s*\(\s*\)\s*\.\s*"
+            rf"{re.escape(compatibility_property)}\b",
+        )
+        if not any(
+            re.search(pattern, system_text)
+            for pattern in compatibility_gateway_patterns
         ):
             errors.append(
-                f"{config['path']}: get_current_state must route through "
-                f"WorldPoliticalState.{resolver}()"
+                f"{config['path']}: get_current_state must route through the "
+                f"unbound compatibility owner .{compatibility_property}"
             )
 
         declared_functions = set(FUNC_RE.findall(system_text))
@@ -3626,12 +3633,14 @@ def main() -> int:
 
         if (
             requires_registry_routing
-            and "CityCitizenRegistrySystem.get_current_state()"
-            not in system_text
+            and (
+                "CityCitizenUnboundCompatibility.get_city_state().citizen_registry_state"
+                not in system_text
+            )
         ):
             errors.append(
-                f"{system_relative}: embedded citizen state must route through "
-                "CityCitizenRegistrySystem.get_current_state()"
+                f"{system_relative}: embedded citizen compatibility must route "
+                "through the unbound citizen-registry owner"
             )
 
         for function_name in primitive_mutators:
