@@ -5976,7 +5976,7 @@ def main() -> int:
         if (
             "static func get_current_state() -> CityAssignmentState:"
             not in assignment_system_text
-            or "WorldPoliticalState.get_current_city_assignment_state()"
+            or "CityCitizenUnboundCompatibility.get_city_state().assignment_state"
             not in assignment_system_text
         ):
             errors.append(
@@ -6006,7 +6006,7 @@ def main() -> int:
         if (
             "static func get_current_state() -> CityWorkplaceState:"
             not in employment_system_text
-            or "WorldPoliticalState.get_current_city_workplace_state()"
+            or "CityCitizenUnboundCompatibility.get_city_state().workplace_state"
             not in employment_system_text
         ):
             errors.append(
