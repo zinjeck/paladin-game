@@ -30,7 +30,7 @@ const EXACT_DESTINATION_HEURISTIC_LIMIT: int = 8
 const HEURISTIC_WEIGHT: int = 1
 
 static func get_current_state() -> CityNavigationState:
-	return WorldPoliticalState.get_current_city_navigation_state()
+	return CityCitizenUnboundCompatibility.get_city_state().navigation_state
 
 
 static func get_state_for_city_state(
