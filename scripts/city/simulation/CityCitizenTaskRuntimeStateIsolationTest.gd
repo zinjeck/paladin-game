@@ -1,6 +1,7 @@
 extends Node
 
 const SHARED_CITIZEN_TILE := Vector2i(3, 3)
+const SHARED_HOUSE_TILE := Vector2i(6, 6)
 const CityStateValidatorScript = preload(
 	"res://scripts/city/simulation/CityStateValidator.gd"
 )
@@ -55,10 +56,12 @@ func _test_equal_version_city_isolation() -> void:
 	_expect(
 		int(state_a["citizen_id"]) == 1
 		and int(state_b["citizen_id"]) == 1
+		and int(state_a["house_id"]) == 1
+		and int(state_b["house_id"]) == 1
 		and task_state_a.active_task_ids == [1]
 		and task_state_b.active_task_ids == [1]
 		and task_state_a.citizen_task_version == task_state_b.citizen_task_version,
-		"Both Cities must independently reuse citizen/task ID 1 and equal versions."
+		"Both Cities must independently reuse citizen, house, task IDs and equal versions."
 	)
 	_expect(
 		not is_same(task_state_a, task_state_b)
@@ -122,8 +125,28 @@ func _seed_city(
 		and _bind_fixture_city(city_id),
 		"The seeded City must select presentation and bind its citizen owner."
 	)
-	WorldPoliticalState.set_current_city_world(_make_world(12, 12, seed_value))
+	var city_state = WorldPoliticalState.get_city_simulation_state(city_id)
+	if not city_state is CitySettlementSimulationState:
+		return {}
+	var city_world := _make_world(12, 12, seed_value)
+	WorldPoliticalState.set_current_city_world(city_world)
 	WorldPoliticalState.set_current_city_seed(seed_value)
+	city_state.city_runtime_data.merge({
+		"name": "Task Runtime Isolation City",
+		"primary_culture_id": culture_id,
+		"founded": true,
+		"can_build": true,
+	}, true)
+	var house := CityObjectSystem.register_completed_city_object({
+		"object_type": CityObjectCatalog.CITY_OBJECT_HOUSE,
+		"top_left": SHARED_HOUSE_TILE,
+		"size_tiles": CityObjectCatalog.get_city_object_size_for_type(
+			CityObjectCatalog.CITY_OBJECT_HOUSE
+		),
+		"object_owner": "player",
+		"city_world": city_world,
+	})
+	var house_id := int(house.get("id", -1))
 	var citizen := CityCitizenRegistrySystem.add_city_citizen(
 		"",
 		SHARED_CITIZEN_TILE,
@@ -131,21 +154,24 @@ func _seed_city(
 		culture_id
 	)
 	var citizen_id := int(citizen.get("id", -1))
-	if citizen_id != 1:
-		_expect(false, "Each City must create local citizen 1.")
+	if citizen_id != 1 or house_id != 1:
+		_expect(false, "Each City must create local citizen 1 and house 1.")
 		return {}
 	var task := {
-		"kind": CityCitizens.CITY_CITIZEN_TASK_KIND_IDLE,
+		"kind": CityCitizens.CITY_CITIZEN_TASK_KIND_RETURN_HOME,
 		"source": CityCitizens.CITY_CITIZEN_TASK_SOURCE_SCHEDULE,
-		"priority": 10,
+		"priority": 50,
+		"target_object_id": house_id,
 		"marker": marker,
 	}
 	_expect(
-		CityCitizenTaskRuntimeSystem.assign_city_citizen_task(citizen_id, task),
-		"Each City must assign its own local task."
+		CityAssignmentSystem.assign_city_citizen_home(citizen_id, house_id)
+		and CityCitizenTaskRuntimeSystem.assign_city_citizen_task(citizen_id, task),
+		"Each City must assign its own valid local Return Home task."
 	)
 	return {
 		"citizen_id": citizen_id,
+		"house_id": house_id,
 		"task_state": CityCitizenTaskRuntimeSystem.get_current_state(),
 		"task_snapshot": CityCitizenTaskRuntimeSystem.get_city_citizen_current_task(citizen_id),
 	}
