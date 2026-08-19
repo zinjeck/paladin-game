@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import importlib.util
 import re
+import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -164,6 +165,7 @@ def load_locality_guard():
     if spec is None or spec.loader is None:
         raise RuntimeError("Could not load settlement locality guard")
     module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
     spec.loader.exec_module(module)
     return module
 
