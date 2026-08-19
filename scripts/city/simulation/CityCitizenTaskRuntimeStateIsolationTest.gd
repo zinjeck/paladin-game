@@ -43,8 +43,8 @@ func _test_equal_version_city_isolation() -> void:
 
 	var city_a_id := int(city_a["id"])
 	var city_b_id := int(city_b["id"])
-	var state_a := _seed_city(city_a_id, culture_id, 95_101, "A")
-	var state_b := _seed_city(city_b_id, culture_id, 95_202, "B")
+	var state_a := _seed_city(city_a_id, culture_id, 95_101)
+	var state_b := _seed_city(city_b_id, culture_id, 95_202)
 	if state_a.is_empty() or state_b.is_empty():
 		return
 
@@ -73,19 +73,22 @@ func _test_equal_version_city_isolation() -> void:
 	_expect(
 		WorldPoliticalState.set_active_settlement(city_b_id)
 		and _bind_fixture_city(city_a_id)
-		and str(CityCitizenTaskRuntimeSystem.get_city_citizen_current_task(1).get("marker", "")) == "A",
+		and _current_task_matches_house(int(state_a["house_id"])),
 		"Explicit City A task lookup must ignore presentation selection B."
 	)
 	_expect(
 		CityCitizenTaskRuntimeSystem.clear_city_citizen_task(1)
 		and task_state_a.active_task_ids.is_empty()
 		and task_state_b.active_task_ids == [1]
-		and str(state_b["task_snapshot"].get("marker", "")) == "B",
+		and _task_matches_house(
+			state_b["task_snapshot"],
+			int(state_b["house_id"])
+		),
 		"Clearing A's equal local task must not clear B's task."
 	)
 	_expect(
 		_bind_fixture_city(city_b_id)
-		and str(CityCitizenTaskRuntimeSystem.get_city_citizen_current_task(1).get("marker", "")) == "B"
+		and _current_task_matches_house(int(state_b["house_id"]))
 		and task_state_b.active_task_ids == [1],
 		"Binding B must recover its exact task runtime."
 	)
@@ -117,8 +120,7 @@ func _test_equal_version_city_isolation() -> void:
 func _seed_city(
 	city_id: int,
 	culture_id: int,
-	seed_value: int,
-	marker: String
+	seed_value: int
 ) -> Dictionary:
 	_expect(
 		WorldPoliticalState.set_active_settlement(city_id)
@@ -162,7 +164,6 @@ func _seed_city(
 		"source": CityCitizens.CITY_CITIZEN_TASK_SOURCE_SCHEDULE,
 		"priority": 50,
 		"target_object_id": house_id,
-		"marker": marker,
 	}
 	_expect(
 		CityAssignmentSystem.assign_city_citizen_home(citizen_id, house_id)
@@ -175,6 +176,23 @@ func _seed_city(
 		"task_state": CityCitizenTaskRuntimeSystem.get_current_state(),
 		"task_snapshot": CityCitizenTaskRuntimeSystem.get_city_citizen_current_task(citizen_id),
 	}
+
+
+func _current_task_matches_house(house_id: int) -> bool:
+	return _task_matches_house(
+		CityCitizenTaskRuntimeSystem.get_city_citizen_current_task(1),
+		house_id
+	)
+
+
+func _task_matches_house(task: Dictionary, house_id: int) -> bool:
+	return (
+		str(task.get("kind", ""))
+		== CityCitizens.CITY_CITIZEN_TASK_KIND_RETURN_HOME
+		and str(task.get("source", ""))
+		== CityCitizens.CITY_CITIZEN_TASK_SOURCE_SCHEDULE
+		and int(task.get("target_object_id", -1)) == house_id
+	)
 
 
 func _bind_fixture_city(city_id: int) -> bool:
