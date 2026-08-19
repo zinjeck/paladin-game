@@ -1,17 +1,22 @@
 extends RefCounted
 class_name CityCitizenUnboundCompatibility
 
-# Legacy bootstrap and low-level test compatibility only. Production citizen
+# Transitional bootstrap and low-level compatibility only. Production citizen
 # simulation receives a real CitySettlementSimulationState or one of its exact
 # subordinate owners from an explicit settlement context.
 #
-# This view never resolves the active/presented settlement. It only re-exposes
-# WorldPoliticalState's pre-registry unbound owners until PR 9 retires that
-# compatibility backend altogether. A fresh aggregate is built on every call
-# because reset_state() replaces the unbound owner objects.
+# This view never resolves the active/presented settlement. Before the political
+# registry exists it exposes the pre-registry unbound owners. After foundation
+# it targets the fixed player-capital owner, preserving the historical capital
+# adapter without letting presentation selection redirect gameplay. PR 9 will
+# retire this compatibility backend altogether.
 
 
 static func get_city_state() -> CitySettlementSimulationState:
+	var capital_state = WorldPoliticalState.get_player_capital_city_simulation_state()
+	if capital_state is CitySettlementSimulationState:
+		return capital_state
+
 	var city_state := CitySettlementSimulationState.new()
 	city_state.city_world = WorldPoliticalState._unbound_city_world
 	city_state.city_seed = WorldPoliticalState._unbound_city_seed
