@@ -525,6 +525,7 @@ static func _ensure_city_citizen_task_state(
 					CityCitizens.make_city_citizen_haul(
 						raw_current_haul
 					)
+				)
 			else:
 				CityCitizens.reset_city_citizen_haul_runtime_state(
 					citizen
