@@ -86,15 +86,21 @@ func _test_equal_version_city_isolation() -> void:
 	)
 
 	_expect(
-		_bind_fixture_city(city_a_id) and _active_city_matches(state_a),
+		WorldPoliticalState.set_active_settlement(city_a_id)
+		and _bind_fixture_city(city_a_id)
+		and _active_city_matches(state_a),
 		"B -> A must restore City A's exact inventory, cargo, and needs."
 	)
 	_expect(
-		_bind_fixture_city(city_b_id) and _active_city_matches(state_b),
+		WorldPoliticalState.set_active_settlement(city_b_id)
+		and _bind_fixture_city(city_b_id)
+		and _active_city_matches(state_b),
 		"A -> B must restore City B's exact inventory, cargo, and needs."
 	)
 	_expect(
-		_bind_fixture_city(city_a_id) and _active_city_matches(state_a),
+		WorldPoliticalState.set_active_settlement(city_a_id)
+		and _bind_fixture_city(city_a_id)
+		and _active_city_matches(state_a),
 		"A -> B -> A must preserve City A despite equal IDs and versions."
 	)
 
@@ -110,7 +116,11 @@ func _exercise_city(values: Dictionary) -> Dictionary:
 	var hunger_remainder := int(values.get("hunger_remainder", 0))
 	var happiness := int(values.get("happiness", 0))
 
-	_expect(_bind_fixture_city(city_id), "The City under test must become active.")
+	_expect(
+		WorldPoliticalState.set_active_settlement(city_id)
+		and _bind_fixture_city(city_id),
+		"The City under test must become active and bind its citizen owner."
+	)
 	if WorldPoliticalState.active_settlement_id != city_id:
 		return {}
 
@@ -202,7 +212,7 @@ func _bind_fixture_city(city_id: int) -> bool:
 	if not city_state is CitySettlementSimulationState:
 		return false
 	CityCitizenUnboundCompatibility.bind_legacy_fixture_state(city_state)
-	return WorldPoliticalState.set_active_settlement(city_id)
+	return true
 
 
 func _active_city_matches(expected: Dictionary) -> bool:
