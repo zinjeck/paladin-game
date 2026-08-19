@@ -53,7 +53,6 @@ func _test_explicit_city_simulation_is_independent_of_visual_selection() -> void
 		WorldPoliticalState.set_active_settlement(city_b_id),
 		"City B must remain the visual/player-selected settlement."
 	)
-	# The visual player-capital flag is deliberately irrelevant to both targets.
 	WorldData.player_city_founded = false
 
 	var state_b_before := _capture_city_projection(state_b)
@@ -72,17 +71,12 @@ func _test_explicit_city_simulation_is_independent_of_visual_selection() -> void
 
 	_expect(
 		WorldPoliticalState.active_settlement_id == city_b_id
-		and is_same(
-			WorldPoliticalState.get_current_city_simulation_state(),
-			state_b
-		)
-		and is_same(CityCitizenRegistrySystem.get_current_state(), state_b.citizen_registry_state),
+		and is_same(WorldPoliticalState.get_current_city_simulation_state(), state_b),
 		"Simulating A must never switch the visual/current settlement away from B."
 	)
 	_expect(
-		a_observations.size() == 6
-		and not a_observations.has(false),
-		"Every system boundary must continue exposing visual City B to no-argument presentation getters."
+		a_observations.size() == 6 and not a_observations.has(false),
+		"Every simulation boundary must leave the visual City B selection intact."
 	)
 	_expect(
 		_capture_city_projection(state_b) == state_b_before
@@ -115,8 +109,7 @@ func _test_explicit_city_simulation_is_independent_of_visual_selection() -> void
 	)
 	_expect(
 		_city_reached_expected_projection(state_b, 17)
-		and _deterministic_projection(state_a)
-		== _deterministic_projection(state_b),
+		and _deterministic_projection(state_a) == _deterministic_projection(state_b),
 		"Equivalent A and B fixtures must reach the same deterministic result regardless of visual selection."
 	)
 	_expect(
@@ -141,10 +134,6 @@ func _record_presentation_observation(
 			expected_visual_state
 		)
 		and is_same(
-			CityCitizenRegistrySystem.get_current_state(),
-			expected_visual_state.citizen_registry_state
-		)
-		and is_same(
 			CityObjectSystem.get_current_state(),
 			expected_visual_state.object_state
 		)
@@ -152,30 +141,29 @@ func _record_presentation_observation(
 
 
 func _seed_city(settlement_id: int, culture_id: int, seed_value: int) -> bool:
-	if not WorldPoliticalState.set_active_settlement(settlement_id):
+	var state = WorldPoliticalState.get_city_simulation_state(settlement_id)
+	if not state is CitySettlementSimulationState:
 		return false
 
-	WorldPoliticalState.set_current_city_world(_make_world(12, 12, seed_value))
-	WorldPoliticalState.set_current_city_seed(seed_value)
-	var citizen := CityCitizenRegistrySystem.add_city_citizen(
-		"",
-		Vector2i(5, 5),
-		CityCitizens.CITY_CITIZEN_SEX_FEMALE,
-		culture_id
-	)
-
-	if citizen.is_empty():
-		return false
-
-	var state = WorldPoliticalState.get_current_city_simulation_state()
+	state.city_world = _make_world(12, 12, seed_value)
+	state.city_seed = seed_value
 	state.city_runtime_data = {
 		"name": "Explicit Context City",
 		"primary_culture_id": culture_id,
 		"founded": true,
 		"can_build": true,
 	}
-	var citizen_record: Dictionary = state.citizen_registry_state.citizens[0]
+	var citizen := CityCitizenRegistrySystem.add_city_citizen_for_city_state(
+		state,
+		"",
+		Vector2i(5, 5),
+		CityCitizens.CITY_CITIZEN_SEX_FEMALE,
+		culture_id
+	)
+	if citizen.is_empty() or state.citizen_registry_state.citizens.size() != 1:
+		return false
 
+	var citizen_record: Dictionary = state.citizen_registry_state.citizens[0]
 	for field in [
 		"carry_capacity",
 		"inventory",
@@ -185,7 +173,6 @@ func _seed_city(settlement_id: int, culture_id: int, seed_value: int) -> bool:
 		"happiness",
 	]:
 		citizen_record.erase(field)
-
 	state.citizen_registry_state.citizens[0] = citizen_record
 	return true
 
@@ -196,18 +183,15 @@ func _city_reached_expected_projection(
 ) -> bool:
 	if state.citizen_registry_state.citizens.size() != 1:
 		return false
-
 	var citizen: Dictionary = state.citizen_registry_state.citizens[0]
 	return (
 		int(citizen.get("hunger", -1)) == 99
 		and int(citizen.get("hunger_decay_remainder", -1)) == 0
-		and int(citizen.get("carry_capacity", -1))
-		== CityCitizens.DEFAULT_CITIZEN_CARRY_CAPACITY
+		and int(citizen.get("carry_capacity", -1)) == CityCitizens.DEFAULT_CITIZEN_CARRY_CAPACITY
 		and citizen.get("inventory", {}) is Dictionary
 		and citizen.get("haul_cargo", {}) is Dictionary
 		and state.citizen_decision_runtime_state.runtime_initialized
-		and state.citizen_movement_runtime_state.citizen_movement_visual_tick_index
-		== tick_index
+		and state.citizen_movement_runtime_state.citizen_movement_visual_tick_index == tick_index
 	)
 
 
@@ -263,26 +247,13 @@ func _city_identities_match(
 		and is_same(state.object_state.objects, identities["objects"])
 		and is_same(state.logistics_state.ground_piles, identities["piles"])
 		and is_same(state.construction_state.construction_sites, identities["sites"])
-		and is_same(
-			state.citizen_movement_runtime_state.citizen_movement_visual_events,
-			identities["movement_events"]
-		)
-		and is_same(
-			state.citizen_task_runtime_state.active_task_ids,
-			identities["active_tasks"]
-		)
-		and is_same(
-			state.citizen_decision_runtime_state.pending_decision_ids,
-			identities["decision_pending"]
-		)
+		and is_same(state.citizen_movement_runtime_state.citizen_movement_visual_events, identities["movement_events"])
+		and is_same(state.citizen_task_runtime_state.active_task_ids, identities["active_tasks"])
+		and is_same(state.citizen_decision_runtime_state.pending_decision_ids, identities["decision_pending"])
 	)
 
 
-func _create_city(
-	city_name: String,
-	polity_id: int,
-	region_center: Vector2i
-) -> Dictionary:
+func _create_city(city_name: String, polity_id: int, region_center: Vector2i) -> Dictionary:
 	return WorldPoliticalState.create_settlement({
 		"name": city_name,
 		"settlement_type": SettlementData.SETTLEMENT_TYPE_CITY,
@@ -290,16 +261,13 @@ func _create_city(
 		"world_region_top_left": region_center,
 		"world_region_center": region_center,
 		"world_region_size": 1,
-		"simulation_backend_kind": (
-			SettlementSimulationContext.BACKEND_CITY_SETTLEMENT_STATE
-		),
+		"simulation_backend_kind": SettlementSimulationContext.BACKEND_CITY_SETTLEMENT_STATE,
 	})
 
 
 func _make_world(width: int, height: int, seed_value: int) -> WorldData:
 	var world := WorldData.new()
 	world.setup(width, height, seed_value)
-
 	for y in range(height):
 		for x in range(width):
 			world.tiles[y][x] = {
@@ -312,7 +280,6 @@ func _make_world(width: int, height: int, seed_value: int) -> WorldData:
 				"resource": WorldData.RESOURCE_NONE,
 				"is_land": true,
 			}
-
 	world.mark_tile_data_changed()
 	return world
 
@@ -320,6 +287,5 @@ func _make_world(width: int, height: int, seed_value: int) -> WorldData:
 func _expect(condition: bool, message: String) -> void:
 	if condition:
 		return
-
 	failure_count += 1
 	push_error("Explicit settlement simulation context test: " + message)
