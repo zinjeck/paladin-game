@@ -1,15 +1,15 @@
 extends Node
 
-const TEST_CITY_NAME := "Resource Bootstrap City"
-const TEST_CULTURE_NAME := "Resource Bootstrap Culture"
+const CitySettlementTestFixtureScript = preload(
+	"res://scripts/city/simulation/test_support/CitySettlementTestFixture.gd"
+)
 
 var failure_count: int = 0
 
 
 func _ready() -> void:
 	_test_state_defaults()
-	_test_founding_adopts_pre_context_state()
-	WorldPoliticalState.reset_state()
+	_test_registered_context_owns_accounting_state()
 	WorldData.reset_runtime_session_state()
 
 	if failure_count > 0:
@@ -35,117 +35,73 @@ func _test_state_defaults() -> void:
 	)
 
 
-func _test_founding_adopts_pre_context_state() -> void:
-	WorldPoliticalState.reset_state()
-	WorldData.reset_runtime_session_state()
-
-	var world := _make_world(8, 8, 94_001)
-	var locked := WorldData.lock_world_save({
-		"source_world": world,
-		"region_top_left": Vector2i(1, 1),
-		"region_center": Vector2i(2, 2),
-		"region_size": 3,
-		"world_scene_path": "res://scenes/GameSession.tscn",
-		"city_scene_path": "res://scenes/CityScreen.tscn",
-		"city_name": TEST_CITY_NAME,
-		"culture_name": TEST_CULTURE_NAME,
+func _test_registered_context_owns_accounting_state() -> void:
+	var fixture = CitySettlementTestFixtureScript.create({
+		"label": "Resource Bootstrap",
 	})
-	_expect(locked, "Fixture must lock a founding world.")
-	if not locked:
+	_expect(fixture != null, "Fixture must register an explicit City context.")
+	if fixture == null:
 		return
 
 	var bootstrap_cache: Dictionary = {
 		WorldData.RESOURCE_FISH: 12,
 		WorldData.RESOURCE_LUMBER: 4,
 	}
-	var bootstrap_state := (
-		CityResourceAccountingSystem.get_current_state()
+	var city_state: CitySettlementSimulationState = fixture.city_state
+	var accounting_state: CityResourceAccountingState = (
+		city_state.resource_accounting_state
 	)
-	bootstrap_state.owned_resource_amount_cache = bootstrap_cache
-	bootstrap_state.owned_resource_amount_cache_container_version = 7
-	bootstrap_state.container_version = 7
-	bootstrap_state.public_storage_version = 5
+	accounting_state.owned_resource_amount_cache = bootstrap_cache
+	accounting_state.owned_resource_amount_cache_container_version = 7
+	accounting_state.container_version = 7
+	accounting_state.public_storage_version = 5
 	_expect(
-		bootstrap_state is CityResourceAccountingState
+		fixture.is_registered()
 		and is_same(
-			bootstrap_state.owned_resource_amount_cache,
+			accounting_state.owned_resource_amount_cache,
 			bootstrap_cache
 		)
 		and is_same(
-			CityResourceAccountingSystem.get_current_state().owned_resource_amount_cache,
+			CityResourceAccountingSystem.get_state_for_city_state(city_state),
+			accounting_state
+		),
+		"Explicit accounting access must retain the registered cache owner."
+	)
+
+	var rebound_context = WorldPoliticalState.get_settlement_context(
+		fixture.settlement_id
+	)
+	_expect(
+		rebound_context != null
+		and WorldPoliticalState.is_registered_settlement_context(
+			rebound_context
+		)
+		and is_same(rebound_context.get_city_simulation_state(), city_state)
+		and is_same(
+			rebound_context.get_city_resource_accounting_state(),
+			accounting_state
+		)
+		and is_same(
+			accounting_state.owned_resource_amount_cache,
 			bootstrap_cache
 		),
-		"Pre-context accounting values must live in one exact unbound state."
-	)
-
-	_expect(
-		WorldPoliticalState.synchronize_foundation_with_world_data(),
-		"Founding must establish a City settlement context."
-	)
-	var capital_state = WorldPoliticalState.get_active_city_simulation_state()
-	var context = WorldPoliticalState.get_active_settlement_context()
-	_expect(
-		capital_state is CitySettlementSimulationState
-		and is_same(
-			capital_state.resource_accounting_state,
-			bootstrap_state
-		)
-		and is_same(
-			capital_state.resource_accounting_state.owned_resource_amount_cache,
-			bootstrap_cache
-		),
-		"The founding City must adopt the exact pre-context accounting owner."
+		"Settlement lookup must preserve the exact registered accounting owner."
 	)
 	_expect(
-		context != null
-		and is_same(
-			context.get_city_resource_accounting_state(),
-			bootstrap_state
-		)
-		and is_same(
-			CityResourceAccountingSystem.get_current_state(),
-			bootstrap_state
-		)
-		and CityResourceAccountingSystem.get_current_state().owned_resource_amount_cache_container_version == 7
-		and CityResourceAccountingSystem.get_city_container_version() == 7
-		and CityResourceAccountingSystem.get_city_public_storage_version() == 5,
-		"Context and system access must resolve the adopted accounting state."
+		accounting_state.owned_resource_amount_cache_container_version == 7
+		and accounting_state.container_version == 7
+		and accounting_state.public_storage_version == 5,
+		"Accounting versions must remain on the explicit settlement owner."
 	)
 
+	var stale_context: SettlementSimulationContext = fixture.settlement_context
+	var settlement_id: int = fixture.settlement_id
+	fixture.cleanup()
 	_expect(
-		WorldPoliticalState.synchronize_foundation_with_world_data()
-		and is_same(
-			CityResourceAccountingSystem.get_current_state(),
-			bootstrap_state
-		)
-		and is_same(
-			CityResourceAccountingSystem.get_current_state().owned_resource_amount_cache,
-			bootstrap_cache
-		),
-		"Repeated founding synchronization must not replace accounting state."
+		not WorldPoliticalState.is_registered_settlement_context(stale_context)
+		and WorldPoliticalState.get_city_simulation_state(settlement_id) == null,
+		"Registry reset must invalidate every accounting fixture binding."
 	)
-
-
-
-func _make_world(width: int, height: int, seed: int) -> WorldData:
-	var world := WorldData.new()
-	world.setup(width, height, seed)
-
-	for y in range(height):
-		for x in range(width):
-			world.tiles[y][x] = {
-				"fertility": 50.0,
-				"elevation": 0.2,
-				"temperature": 0.5,
-				"precipitation": 0.5,
-				"terrain": WorldData.TERRAIN_LAND,
-				"biome": WorldData.BIOME_PLAIN,
-				"resource": WorldData.RESOURCE_NONE,
-				"is_land": true,
-			}
-
-	world.mark_tile_data_changed()
-	return world
 
 
 func _expect(condition: bool, message: String) -> void:

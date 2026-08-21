@@ -50,6 +50,8 @@ func _test_navigation_cache_is_settlement_owned() -> void:
 
 	var navigation_state_a: CityNavigationState = state_a["navigation_state"]
 	var navigation_state_b: CityNavigationState = state_b["navigation_state"]
+	var city_state_a: CitySettlementSimulationState = state_a["city_state"]
+	var city_state_b: CitySettlementSimulationState = state_b["city_state"]
 	_expect(
 		not is_same(navigation_state_a, navigation_state_b)
 		and not is_same(
@@ -86,10 +88,13 @@ func _test_navigation_cache_is_settlement_owned() -> void:
 
 	_expect(
 		WorldPoliticalState.set_active_settlement(int(city_a["id"]))
-		and is_same(CityNavigationSystem.get_current_state(), navigation_state_a),
+		and is_same(
+			CityNavigationSystem.get_state_for_city_state(city_state_a),
+			navigation_state_a
+		),
 		"Switching to City A must select City A's navigation owner directly."
 	)
-	CityNavigationSystem.reset_city_navigation_state()
+	CityNavigationSystem.reset_city_navigation_state_for_city_state(city_state_a)
 	_expect(
 		navigation_state_a.object_access_tile_cache.is_empty()
 		and navigation_state_a.base_land_component_membership.is_empty()
@@ -100,19 +105,26 @@ func _test_navigation_cache_is_settlement_owned() -> void:
 
 	_expect(
 		WorldPoliticalState.set_active_settlement(int(city_b["id"]))
-		and is_same(CityNavigationSystem.get_current_state(), navigation_state_b)
+		and is_same(
+			CityNavigationSystem.get_state_for_city_state(city_state_b),
+			navigation_state_b
+		)
 		and navigation_state_b.object_access_tile_cache.has(object_id)
 		and not navigation_state_b.base_land_component_membership.is_empty(),
 		"A -> B must restore City B's cache without capture/apply copying."
 	)
 	_expect(
 		WorldPoliticalState.set_active_settlement(int(city_a["id"]))
-		and CityNavigationSystem.get_current_state().object_access_tile_cache.is_empty(),
+		and CityNavigationSystem.get_state_for_city_state(
+			city_state_a
+		).object_access_tile_cache.is_empty(),
 		"B -> A must preserve City A's independent cleared cache."
 	)
 	_expect(
 		WorldPoliticalState.set_active_settlement(int(city_b["id"]))
-		and CityNavigationSystem.get_current_state().object_access_tile_cache.has(object_id),
+		and CityNavigationSystem.get_state_for_city_state(
+			city_state_b
+		).object_access_tile_cache.has(object_id),
 		"A -> B -> A -> B must preserve City B navigation state."
 	)
 
@@ -138,10 +150,24 @@ func _test_base_land_component_guard_and_invalidation() -> void:
 	)
 	if city.is_empty():
 		return
+	var city_state: CitySettlementSimulationState = (
+		WorldPoliticalState.get_city_simulation_state(
+			int(city.get("id", -1))
+		)
+	)
+	_expect(
+		city_state is CitySettlementSimulationState,
+		"The component fixture must expose its settlement-owned City state."
+	)
+	if not city_state is CitySettlementSimulationState:
+		return
+	var navigation_state := CityNavigationSystem.get_state_for_city_state(
+		city_state
+	)
 
 	var direct_world := _make_world(4, 4, 71_201)
-	WorldPoliticalState.set_current_city_world(direct_world)
-	var direct_result := CityNavigationSystem.find_path_to_any_city_tile({
+	WorldData.store_city_world_for_state(city_state, direct_world, 71_201)
+	var direct_result := CityNavigationSystem.find_path_to_any_city_tile_for_city_state(city_state, {
 		"city_world": direct_world,
 		"start_tile": Vector2i(1, 1),
 		"destination_tiles": [Vector2i(2, 2)],
@@ -157,8 +183,8 @@ func _test_base_land_component_guard_and_invalidation() -> void:
 	)
 
 	var disconnected_world := _make_disconnected_world(8, 5, 71_202)
-	WorldPoliticalState.set_current_city_world(disconnected_world)
-	var limited_result := CityNavigationSystem.find_path_to_any_city_tile({
+	WorldData.store_city_world_for_state(city_state, disconnected_world, 71_202)
+	var limited_result := CityNavigationSystem.find_path_to_any_city_tile_for_city_state(city_state, {
 		"city_world": disconnected_world,
 		"start_tile": Vector2i(1, 2),
 		"destination_tiles": [Vector2i(6, 2)],
@@ -172,14 +198,13 @@ func _test_base_land_component_guard_and_invalidation() -> void:
 		"A bounded search must retain its original search-limit result."
 	)
 	var disconnected_result := (
-		CityNavigationSystem.find_path_to_any_city_tile({
+		CityNavigationSystem.find_path_to_any_city_tile_for_city_state(city_state, {
 			"city_world": disconnected_world,
 			"start_tile": Vector2i(1, 2),
 			"destination_tiles": [Vector2i(6, 2)],
 			"max_expanded_nodes": 40,
 		})
 	)
-	var navigation_state := CityNavigationSystem.get_current_state()
 	var disconnected_version := disconnected_world.tile_data_version
 	_expect(
 		not bool(disconnected_result.get("success", true))
@@ -193,8 +218,8 @@ func _test_base_land_component_guard_and_invalidation() -> void:
 	corner_world.setup(3, 3, 71_204)
 	_set_land_tile(corner_world, Vector2i(0, 0))
 	_set_land_tile(corner_world, Vector2i(1, 1))
-	WorldPoliticalState.set_current_city_world(corner_world)
-	var corner_result := CityNavigationSystem.find_path_to_any_city_tile({
+	WorldData.store_city_world_for_state(city_state, corner_world, 71_204)
+	var corner_result := CityNavigationSystem.find_path_to_any_city_tile_for_city_state(city_state, {
 		"city_world": corner_world,
 		"start_tile": Vector2i(0, 0),
 		"destination_tiles": [Vector2i(1, 1)],
@@ -225,19 +250,24 @@ func _test_base_land_component_guard_and_invalidation() -> void:
 		== corner_version_before_bridge + 2,
 		"Each effective terrain mutation must publish exactly once and an identical retry must be a no-op."
 	)
-	var bridged_corner_result := CityNavigationSystem.find_path_to_any_city_tile({
-		"city_world": corner_world,
-		"start_tile": Vector2i(0, 0),
-		"destination_tiles": [Vector2i(1, 1)],
-		"max_expanded_nodes": 9,
-	})
+	var bridged_corner_result := (
+		CityNavigationSystem.find_path_to_any_city_tile_for_city_state(
+			city_state,
+			{
+				"city_world": corner_world,
+				"start_tile": Vector2i(0, 0),
+				"destination_tiles": [Vector2i(1, 1)],
+				"max_expanded_nodes": 9,
+			}
+		)
+	)
 	_expect(
 		bool(bridged_corner_result.get("success", false))
 		and int(bridged_corner_result.get("expanded_node_count", 0)) > 0,
 		"A versioned cardinal bridge must invalidate the corner rejection and run the original A*."
 	)
-	WorldPoliticalState.set_current_city_world(disconnected_world)
-	CityNavigationSystem.find_path_to_any_city_tile({
+	WorldData.store_city_world_for_state(city_state, disconnected_world, 71_202)
+	CityNavigationSystem.find_path_to_any_city_tile_for_city_state(city_state, {
 		"city_world": disconnected_world,
 		"start_tile": Vector2i(1, 2),
 		"destination_tiles": [Vector2i(6, 2)],
@@ -273,7 +303,7 @@ func _test_base_land_component_guard_and_invalidation() -> void:
 		"Opening a bridge must publish one broad tile-data change per effective terrain mutation."
 	)
 	var bridged_result := (
-		CityNavigationSystem.find_path_to_any_city_tile({
+		CityNavigationSystem.find_path_to_any_city_tile_for_city_state(city_state, {
 			"city_world": disconnected_world,
 			"start_tile": Vector2i(1, 2),
 			"destination_tiles": [Vector2i(6, 2)],
@@ -295,7 +325,7 @@ func _test_base_land_component_guard_and_invalidation() -> void:
 	_fill_world_with_land(disconnected_world)
 	while disconnected_world.tile_data_version < retained_version:
 		disconnected_world.mark_tile_data_changed()
-	var resized_result := CityNavigationSystem.find_path_to_any_city_tile({
+	var resized_result := CityNavigationSystem.find_path_to_any_city_tile_for_city_state(city_state, {
 		"city_world": disconnected_world,
 		"start_tile": Vector2i(1, 2),
 		"destination_tiles": [Vector2i(7, 2)],
@@ -321,16 +351,20 @@ func _exercise_city(
 	if WorldPoliticalState.active_settlement_id != city_id:
 		return {}
 
-	var city_world := _make_world(TEST_WORLD_SIZE.x, TEST_WORLD_SIZE.y, world_seed)
-	WorldPoliticalState.set_current_city_world(city_world)
-	WorldPoliticalState.set_current_city_seed(world_seed)
-	var city_state = WorldPoliticalState.get_city_simulation_state(city_id)
+	var city_state: CitySettlementSimulationState = (
+		WorldPoliticalState.get_city_simulation_state(city_id)
+	)
 	_expect(
 		city_state is CitySettlementSimulationState,
 		"The navigation fixture must expose its settlement-owned City state."
 	)
 	if not city_state is CitySettlementSimulationState:
 		return {}
+	var city_world := _make_world(TEST_WORLD_SIZE.x, TEST_WORLD_SIZE.y, world_seed)
+	_expect(
+		WorldData.store_city_world_for_state(city_state, city_world, world_seed),
+		"The navigation fixture must store its world on the exact City owner."
+	)
 	var settlement := WorldPoliticalState.get_settlement(city_id)
 	city_state.city_runtime_data.clear()
 	city_state.city_runtime_data.merge({
@@ -339,24 +373,32 @@ func _exercise_city(
 		"founded": true,
 		"can_build": true,
 	}, true)
-	var city_object := CityObjectSystem.register_completed_city_object({
-		"object_type": CityObjectCatalog.CITY_OBJECT_HOUSE,
-		"top_left": SHARED_OBJECT_TOP_LEFT,
-		"size_tiles": CityObjectCatalog.get_city_object_size_for_type(CityObjectCatalog.CITY_OBJECT_HOUSE),
-		"object_owner": "player",
-		"city_world": city_world,
-	})
+	var city_object := (
+		CityObjectSystem.register_completed_city_object_for_city_state(
+			city_state,
+			{
+				"object_type": CityObjectCatalog.CITY_OBJECT_HOUSE,
+				"top_left": SHARED_OBJECT_TOP_LEFT,
+				"size_tiles": CityObjectCatalog.get_city_object_size_for_type(
+					CityObjectCatalog.CITY_OBJECT_HOUSE
+				),
+				"object_owner": "player",
+				"city_world": city_world,
+			}
+		)
+	)
 	var object_id := int(city_object.get("id", -1))
-	var access_tiles := CityNavigationSystem.get_city_object_access_tiles(
+	var access_tiles := CityNavigationSystem.get_city_object_access_tiles_for_city_state(
+		city_state,
 		city_world,
 		city_object
 	)
-	var path_result := CityNavigationSystem.find_path_to_any_city_tile({
+	var path_result := CityNavigationSystem.find_path_to_any_city_tile_for_city_state(city_state, {
 		"city_world": city_world,
 		"start_tile": Vector2i(1, 1),
 		"destination_tiles": [Vector2i(2, 2)],
 	})
-	var navigation_state := CityNavigationSystem.get_current_state()
+	var navigation_state := CityNavigationSystem.get_state_for_city_state(city_state)
 
 	_expect(
 		object_id > 0
@@ -364,13 +406,14 @@ func _exercise_city(
 		and bool(path_result.get("success", false))
 		and navigation_state.object_access_tile_cache.has(object_id)
 		and not navigation_state.base_land_component_membership.is_empty(),
-		"Access-tile lookup must populate the active City's navigation cache."
+		"Access-tile lookup must populate the target City's navigation cache."
 	)
 	if object_id <= 0 or access_tiles.is_empty():
 		return {}
 
 	return {
 		"city_id": city_id,
+		"city_state": city_state,
 		"object_id": object_id,
 		"world": city_world,
 		"navigation_state": navigation_state,

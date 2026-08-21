@@ -3,8 +3,8 @@ class_name CityCitizens
 
 # This script owns the intrinsic definition of one citizen record.
 # CityCitizenRegistryState owns the population collection and stable-ID index;
-# focused systems own embedded runtime fields. Housing and employment
-# relationships remain deferred to the Pass 10 assignment boundary.
+# focused systems own embedded runtime fields. CityAssignmentState owns housing
+# and employment relationships.
 
 const CITY_CITIZEN_SEX_MALE := "male"
 const CITY_CITIZEN_SEX_FEMALE := "female"
@@ -16,10 +16,6 @@ const DEFAULT_CITIZEN_HAPPINESS := 70
 const CITIZEN_HUNGER_LOSS_PER_DAY := 40
 const CITIZEN_HUNGER_DECAY_DENOMINATOR_MINUTES := 24 * 60
 const CITIZEN_FOOD_SEEK_TRIGGER_HUNGER := 70
-# Compatibility alias retained for callers that still describe the threshold
-# as the point where citizens begin carrying food. Seeking and eating are now
-# intentionally separate concepts.
-const CITIZEN_FOOD_CARRY_TRIGGER_HUNGER := CITIZEN_FOOD_SEEK_TRIGGER_HUNGER
 const CITIZEN_CRITICAL_FOOD_SEEK_TRIGGER_HUNGER := 30
 const CITIZEN_EAT_TARGET_HUNGER := 100
 const CITY_CITIZEN_STATE_IDLE := "idle"
@@ -124,14 +120,10 @@ const CITY_CITIZEN_DIAGONAL_MOVEMENT_COST := 14_142
 const CITY_ROAD_MOVEMENT_SPEED_MULTIPLIER := 2
 const CITY_CITIZEN_ROAD_CARDINAL_MOVEMENT_COST := 5_000
 const CITY_CITIZEN_ROAD_DIAGONAL_MOVEMENT_COST := 7_071
-# Compatibility alias for systems that mean one cardinal tile of distance.
-const CITY_CITIZEN_MOVEMENT_PROGRESS_PER_TILE := (
-	CITY_CITIZEN_CARDINAL_MOVEMENT_COST
-)
 const DEFAULT_CITIZEN_MOVEMENT_SPEED_PER_MINUTE := 5_000
 const MAX_CITIZEN_MOVEMENT_REPATH_ATTEMPTS := 3
 
-static var city_citizen_male_name_pool: Array[String] = [
+const city_citizen_male_name_pool: Array[String] = [
 	"Arlen",
 	"Tovan",
 	"Calen",
@@ -174,7 +166,7 @@ static var city_citizen_male_name_pool: Array[String] = [
 	"Yorick",
 ]
 
-static var city_citizen_female_name_pool: Array[String] = [
+const city_citizen_female_name_pool: Array[String] = [
 	"Mira",
 	"Elia",
 	"Sera",
@@ -216,7 +208,7 @@ static var city_citizen_female_name_pool: Array[String] = [
 	"Thalia",
 	"Ysara",
 ]
-static var city_citizen_unassigned_name_pool: Array[String] = []
+const city_citizen_unassigned_name_pool: Array[String] = []
 
 static func get_city_citizen_task_kind_types() -> Array[String]:
 	return [

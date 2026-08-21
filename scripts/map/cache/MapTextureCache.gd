@@ -19,6 +19,7 @@ var mode_name_provider: Callable
 var has_valid_saved_cache_provider: Callable
 var saved_cache_getter: Callable
 var saved_cache_storer: Callable
+var standard_biome_resource_blend: float = 0.0
 
 
 func setup(values: Dictionary) -> void:
@@ -39,6 +40,60 @@ func setup(values: Dictionary) -> void:
 	)
 	saved_cache_getter = values["saved_cache_getter"]
 	saved_cache_storer = values["saved_cache_storer"]
+
+
+func setup_standard_map_visuals(values: Dictionary) -> void:
+	standard_biome_resource_blend = clampf(
+		float(values.get("biome_resource_blend", 0.0)),
+		0.0,
+		1.0
+	)
+	var setup_values := values.duplicate(false)
+	setup_values.erase("biome_resource_blend")
+	setup_values["color_provider"] = Callable(
+		self,
+		"_get_standard_tile_color"
+	)
+	setup_values["all_colors_provider"] = Callable(
+		self,
+		"_populate_standard_tile_colors"
+	)
+	setup_values["modes_provider"] = Callable(
+		self,
+		"_get_standard_view_modes"
+	)
+	setup_values["mode_name_provider"] = Callable(
+		self,
+		"_get_standard_view_mode_name"
+	)
+	setup(setup_values)
+
+
+func _get_standard_tile_color(tile: Dictionary, mode: int) -> Color:
+	return MapVisuals.get_tile_color_for_mode(
+		tile,
+		mode,
+		standard_biome_resource_blend
+	)
+
+
+func _populate_standard_tile_colors(
+	tile: Dictionary,
+	output_colors: Array[Color]
+) -> void:
+	MapVisuals.populate_all_tile_colors(
+		tile,
+		output_colors,
+		standard_biome_resource_blend
+	)
+
+
+func _get_standard_view_modes() -> Array[int]:
+	return MapVisuals.get_all_view_modes()
+
+
+func _get_standard_view_mode_name(mode: int) -> String:
+	return MapVisuals.get_view_mode_name(mode)
 
 
 func _has_valid_setup_values(values: Dictionary) -> bool:

@@ -1,5 +1,8 @@
 extends Node
 
+const CitySettlementTestFixtureScript = preload(
+	"res://scripts/city/simulation/test_support/CitySettlementTestFixture.gd"
+)
 const CityConstructionSystemScript = preload(
 	"res://scripts/city/simulation/systems/CityConstructionSystem.gd"
 )
@@ -12,6 +15,8 @@ const TEST_WORLD_SEED: int = 92_417
 
 var failure_count: int = 0
 var test_primary_culture_id: int = -1
+var test_fixture = null
+var test_city_state: CitySettlementSimulationState = null
 
 
 func _ready() -> void:
@@ -43,7 +48,7 @@ func _test_low_level_topology_gate_is_generic() -> void:
 		var city_world := _reset_fixture()
 		var top_left := Vector2i(10, 8)
 		var citizen := _add_citizen(top_left)
-		var created_object := CityObjectSystem.add_city_object({
+		var created_object := CityObjectSystem.add_city_object_for_city_state(test_city_state, {
 			"object_type": object_type,
 			"top_left": top_left,
 			"size_tiles": CityObjectCatalog.get_city_object_size_for_type(
@@ -60,7 +65,10 @@ func _test_low_level_topology_gate_is_generic() -> void:
 				+ " while a living citizen occupies its footprint."
 		)
 		_expect(
-			CityObjectSystem.get_city_object_at_tile(top_left).is_empty()
+			CityObjectSystem.get_city_object_at_tile_for_city_state(
+				test_city_state,
+				top_left
+			).is_empty()
 			and citizen.get("city_tile_position") == top_left,
 			"Rejected topology mutations must leave both object and citizen state untouched."
 		)
@@ -68,14 +76,16 @@ func _test_low_level_topology_gate_is_generic() -> void:
 	var road_world := _reset_fixture()
 	var road_tile := Vector2i(10, 8)
 	var road_citizen := _add_citizen(road_tile)
-	var road := CityObjectSystem.add_city_road_object(
+	var road := CityObjectSystem.add_city_road_object_for_city_state(
+		test_city_state,
 		[road_tile],
 		"player",
 		road_world
 	)
 	_expect(
 		not road.is_empty()
-		and CityNavigationSystem.is_city_tile_walkable_for_citizen(
+		and CityNavigationSystem.is_city_tile_walkable_for_citizen_for_city_state(
+			test_city_state,
 			road_world,
 			road_tile,
 			int(road_citizen.get("id", -1))
@@ -91,7 +101,7 @@ func _test_construction_waits_for_footprint_clearance() -> void:
 	var fishery_size := CityObjectCatalog.get_city_object_size_for_type(
 		CityObjectCatalog.CITY_OBJECT_FISHING_GROUNDS
 	)
-	var site := CityConstructionSystemScript.create_rectangular_site({
+	var site := CityConstructionSystemScript.create_rectangular_site_for_city_state(test_city_state, {
 		"object_type": CityObjectCatalog.CITY_OBJECT_FISHING_GROUNDS,
 		"top_left": top_left,
 		"size_tiles": fishery_size,
@@ -105,25 +115,36 @@ func _test_construction_waits_for_footprint_clearance() -> void:
 		return
 
 	_expect(
-		CityConstructionSystemScript.add_resource_to_city_construction_site(
+		CityConstructionSystemScript.add_resource_to_city_construction_site_for_city_state(
+			test_city_state,
 			site_id,
 			WorldData.RESOURCE_LUMBER,
 			10
 		) == 10
-		and CityConstructionSystemScript.add_resource_to_city_construction_site(
+		and CityConstructionSystemScript.add_resource_to_city_construction_site_for_city_state(
+			test_city_state,
 			site_id,
 			WorldData.RESOURCE_STONE,
 			4
 		) == 4,
 		"The finalization fixture must contain the complete physical recipe."
 	)
-	CityConstructionSystemScript.refresh_city_construction_site(site_id)
-	site = CityConstructionSystem.get_city_construction_site_by_id(site_id)
+	CityConstructionSystemScript.refresh_city_construction_site_for_city_state(
+		test_city_state,
+		site_id
+	)
+	site = CityConstructionSystem.get_city_construction_site_by_id_for_city_state(
+		test_city_state,
+		site_id
+	)
 	site["completed_labor_minutes"] = int(
 		site.get("required_labor_minutes", 1)
 	)
 	_expect(
-		CityConstructionSystemScript.update_city_construction_site(site),
+		CityConstructionSystemScript.update_city_construction_site_for_city_state(
+			test_city_state,
+			site
+		),
 		"The fixture must mark labor complete."
 	)
 
@@ -140,22 +161,32 @@ func _test_construction_waits_for_footprint_clearance() -> void:
 		Vector2i(7, 3),
 	]
 	_expect(
-		CityCitizenMovementRuntimeSystem.assign_city_citizen_movement_order(
+		CityCitizenMovementRuntimeSystem.assign_city_citizen_movement_order_for_city_state(
+			test_city_state,
 			unrelated_id,
 			unrelated_path
 		),
 		"The fixture must start an unrelated mover."
 	)
-	var object_state := CityObjectSystem.get_current_state()
+	var object_state := test_city_state.object_state
 	var object_count_before := object_state.objects.size()
 	var next_object_id_before := object_state.next_object_id
 	var object_version_before := object_state.object_version
 
 	var immediate_completion := (
-		CityConstructionSystemScript.complete_city_construction_site(site_id)
+		CityConstructionSystemScript.complete_city_construction_site_for_city_state(
+			test_city_state,
+			site_id
+		)
 	)
-	var pending_site := CityConstructionSystem.get_city_construction_site_by_id(site_id)
-	var trapped_after_request := CityCitizenRegistrySystem.get_city_citizen_by_id(trapped_id)
+	var pending_site := CityConstructionSystem.get_city_construction_site_by_id_for_city_state(
+		test_city_state,
+		site_id
+	)
+	var trapped_after_request := CityCitizenRegistrySystem.get_city_citizen_by_id_for_city_state(
+		test_city_state,
+		trapped_id
+	)
 
 	_expect(
 		immediate_completion.is_empty()
@@ -175,11 +206,13 @@ func _test_construction_waits_for_footprint_clearance() -> void:
 		"Clearance must give the citizen a real route without teleporting them."
 	)
 	_expect(
-		CityConstructionSystem.get_city_construction_site_reserved_resource_amount(
+		CityConstructionSystem.get_city_construction_site_reserved_resource_amount_for_city_state(
+			test_city_state,
 			site_id,
 			WorldData.RESOURCE_LUMBER
 		) == 10
-		and CityConstructionSystem.get_city_construction_site_reserved_resource_amount(
+		and CityConstructionSystem.get_city_construction_site_reserved_resource_amount_for_city_state(
+			test_city_state,
 			site_id,
 			WorldData.RESOURCE_STONE
 		) == 4,
@@ -187,15 +220,31 @@ func _test_construction_waits_for_footprint_clearance() -> void:
 	)
 
 	for tick_index in range(1, 48):
-		CitizenMovementSystemScript.run_tick(tick_index, 2)
-		CityConstructionSystemScript.refresh_all_city_construction_sites()
+		CitizenMovementSystemScript.run_tick_for_city_state(
+			test_city_state,
+			tick_index,
+			2
+		)
+		CityConstructionSystemScript.refresh_all_city_construction_sites_for_city_state(
+			test_city_state
+		)
 
-		if CityConstructionSystem.get_city_construction_site_by_id(site_id).is_empty():
+		if CityConstructionSystem.get_city_construction_site_by_id_for_city_state(
+			test_city_state,
+			site_id
+		).is_empty():
 			break
 
-	var completed_fishery := CityObjectSystem.get_city_object_at_tile(top_left)
-	var trapped_after_completion := CityCitizenRegistrySystem.get_city_citizen_by_id(trapped_id)
-	var unrelated_after_completion := CityCitizenRegistrySystem.get_city_citizen_by_id(
+	var completed_fishery := CityObjectSystem.get_city_object_at_tile_for_city_state(
+		test_city_state,
+		top_left
+	)
+	var trapped_after_completion := CityCitizenRegistrySystem.get_city_citizen_by_id_for_city_state(
+		test_city_state,
+		trapped_id
+	)
+	var unrelated_after_completion := CityCitizenRegistrySystem.get_city_citizen_by_id_for_city_state(
+		test_city_state,
 		unrelated_id
 	)
 	var footprint_tiles := CityObjectSystem.make_rectangle_city_object_footprint_tiles(
@@ -205,19 +254,22 @@ func _test_construction_waits_for_footprint_clearance() -> void:
 	var completed_object_id := int(completed_fishery.get("id", -1))
 
 	_expect(
-		CityConstructionSystem.get_city_construction_site_by_id(site_id).is_empty()
+		CityConstructionSystem.get_city_construction_site_by_id_for_city_state(
+			test_city_state,
+			site_id
+		).is_empty()
 		and str(completed_fishery.get("type", ""))
 		== CityObjectCatalog.CITY_OBJECT_FISHING_GROUNDS,
 		"The Fishing Grounds must finalize once its footprint is physically clear."
 	)
 	_expect(
-		is_same(CityObjectSystem.get_current_state().objects, object_state.objects)
+		is_same(test_city_state.object_state.objects, object_state.objects)
 		and is_same(
-			CityObjectSystem.get_current_state().object_index_by_id,
+			test_city_state.object_state.object_index_by_id,
 			object_state.object_index_by_id
 		)
 		and is_same(
-			CityObjectSystem.get_current_state().occupied_tiles,
+			test_city_state.object_state.occupied_tiles,
 			object_state.occupied_tiles
 		),
 		"Construction finalization must mutate the selected object state by identity."
@@ -235,8 +287,12 @@ func _test_construction_waits_for_footprint_clearance() -> void:
 	var finalized_count := object_state.objects.size()
 	var finalized_next_id := object_state.next_object_id
 	var finalized_version := object_state.object_version
-	CityConstructionSystemScript.refresh_all_city_construction_sites()
-	CityConstructionSystemScript.refresh_all_city_construction_sites()
+	CityConstructionSystemScript.refresh_all_city_construction_sites_for_city_state(
+		test_city_state
+	)
+	CityConstructionSystemScript.refresh_all_city_construction_sites_for_city_state(
+		test_city_state
+	)
 	_expect(
 		object_state.objects.size() == finalized_count
 		and object_state.next_object_id == finalized_next_id
@@ -279,7 +335,8 @@ func _test_one_bad_mover_does_not_freeze_the_batch() -> void:
 	var invalid_id := int(invalid_citizen.get("id", -1))
 	var valid_update: Dictionary = valid_citizen.duplicate(true)
 	var invalid_update: Dictionary = invalid_citizen.duplicate(true)
-	var commit_result := CityCitizenMovementRuntimeSystem.commit_city_citizen_movement_tick(
+	var commit_result := CityCitizenMovementRuntimeSystem.commit_city_citizen_movement_tick_for_city_state(
+		test_city_state,
 		city_world,
 		[
 			{
@@ -305,13 +362,22 @@ func _test_one_bad_mover_does_not_freeze_the_batch() -> void:
 		"The movement transaction must commit valid citizens and quarantine only the bad update."
 	)
 	_expect(
-		CityCitizenSpatialSystem.get_city_citizen_tile_position(valid_id) == Vector2i(5, 4)
-		and CityCitizenSpatialSystem.get_city_citizen_tile_position(invalid_id) == Vector2i(8, 4),
+		CityCitizenSpatialSystem.get_city_citizen_tile_position_for_city_state(
+			test_city_state,
+			valid_id
+		) == Vector2i(5, 4)
+		and CityCitizenSpatialSystem.get_city_citizen_tile_position_for_city_state(
+			test_city_state,
+			invalid_id
+		) == Vector2i(8, 4),
 		"A rejected mover must not roll back a valid mover or move itself illegally."
 	)
 	_expect(
 		str(
-			CityCitizenRegistrySystem.get_city_citizen_by_id(invalid_id).get(
+			CityCitizenRegistrySystem.get_city_citizen_by_id_for_city_state(
+				test_city_state,
+				invalid_id
+			).get(
 				"movement_state",
 				""
 			)
@@ -324,7 +390,7 @@ func _test_legacy_occupant_can_escape_but_not_reenter() -> void:
 	print("Topology test: defensive legacy escape")
 	var city_world := _reset_fixture()
 	var top_left := Vector2i(12, 8)
-	var fishery := CityObjectSystem.add_city_object({
+	var fishery := CityObjectSystem.add_city_object_for_city_state(test_city_state, {
 		"object_type": CityObjectCatalog.CITY_OBJECT_FISHING_GROUNDS,
 		"top_left": top_left,
 		"size_tiles": CityObjectCatalog.get_city_object_size_for_type(
@@ -338,11 +404,14 @@ func _test_legacy_occupant_can_escape_but_not_reenter() -> void:
 	var trapped_id := int(trapped.get("id", -1))
 	var trapped_tile := top_left + Vector2i.ONE
 	trapped["city_tile_position"] = trapped_tile
-	CityCitizenSpatialSystem.rebuild_city_citizen_spatial_index()
+	CityCitizenSpatialSystem.rebuild_city_citizen_spatial_index_for_city_state(
+		test_city_state
+	)
 
 	_expect(
 		not fishery.is_empty()
-		and CityNavigationSystem.is_city_tile_walkable_for_citizen(
+		and CityNavigationSystem.is_city_tile_walkable_for_citizen_for_city_state(
+			test_city_state,
 			city_world,
 			trapped_tile,
 			trapped_id
@@ -350,7 +419,8 @@ func _test_legacy_occupant_can_escape_but_not_reenter() -> void:
 		"A citizen already inside corrupted legacy topology must be allowed to start escaping."
 	)
 	_expect(
-		not CityNavigationSystem.is_city_tile_walkable_for_citizen(
+		not CityNavigationSystem.is_city_tile_walkable_for_citizen_for_city_state(
+			test_city_state,
 			city_world,
 			trapped_tile,
 			int(outsider.get("id", -1))
@@ -375,28 +445,30 @@ func _reset_fixture() -> WorldData:
 			tile.erase("surface_feature")
 
 	city_world.mark_tile_data_changed()
-	WorldData.store_city_world_save(city_world, TEST_WORLD_SEED)
-	var primary_culture := WorldData.create_culture(
-		"Topology Safety Test Culture"
-	)
-	test_primary_culture_id = int(primary_culture.get("id", -1))
-	WorldData.official_city_name = "Topology Safety Test City"
-	WorldData.official_founding_culture_id = test_primary_culture_id
-	WorldData.player_city_founded = true
-	WorldPoliticalState.replace_current_city_runtime_data({
-		"id": 1,
+	test_fixture = CitySettlementTestFixtureScript.create({
+		"label": "Topology Safety Test",
+		"city_world": city_world,
+		"city_seed": TEST_WORLD_SEED,
+	})
+	_expect(test_fixture != null, "The topology fixture must be created.")
+	if test_fixture == null:
+		return null
+	test_city_state = test_fixture.city_state
+	test_primary_culture_id = test_fixture.culture_id
+	test_city_state.city_runtime_data.merge({
 		"name": "Topology Safety Test City",
 		"primary_culture_id": test_primary_culture_id,
 		"city_world_seed": TEST_WORLD_SEED,
 		"city_map_size": TEST_WORLD_SIZE,
 		"can_build": true,
 		"founded": true,
-	})
+	}, true)
 	return city_world
 
 
 func _add_citizen(tile_position: Vector2i) -> Dictionary:
-	return CityCitizenRegistrySystem.add_city_citizen(
+	return CityCitizenRegistrySystem.add_city_citizen_for_city_state(
+		test_city_state,
 		"",
 		tile_position,
 		CityCitizens.CITY_CITIZEN_SEX_FEMALE,

@@ -24,6 +24,7 @@ var critical_hunger_minutes_by_citizen_id: Dictionary = {}
 var reported_stuck_hunger_citizen_ids: Dictionary = {}
 var maximum_observed_hunger_by_citizen_id: Dictionary = {}
 var relocation_completed_world_minute: int = -1
+var test_city_state: CitySettlementSimulationState = null
 
 
 func _ready() -> void:
@@ -79,11 +80,21 @@ func _run_long_run_test() -> void:
 		renderer.queue_free()
 		return
 
+	test_city_state = renderer.bound_city_state
+	_expect(
+		test_city_state != null,
+		"The long-run fixture must retain its exact registered city state."
+	)
+	if test_city_state == null:
+		renderer.queue_free()
+		return
+
 	var fixture := _create_mixed_work_fixture(renderer)
 
 	if fixture.is_empty():
 		renderer.queue_free()
 		await get_tree().process_frame
+		test_city_state = null
 		WorldData.reset_runtime_session_state()
 		return
 
@@ -147,6 +158,7 @@ func _run_long_run_test() -> void:
 
 	renderer.queue_free()
 	await get_tree().process_frame
+	test_city_state = null
 	WorldData.reset_runtime_session_state()
 
 	for _frame_index in range(4):
@@ -214,26 +226,29 @@ func _create_mixed_work_fixture(renderer: CityRenderer) -> Dictionary:
 	if keep_top_left == CityCitizens.INVALID_CITY_TILE_POSITION:
 		return {}
 
-	var keep := CityObjectSystem.add_city_object({
-		"object_type": CityObjectCatalog.CITY_OBJECT_CITY_CENTER,
-		"top_left": keep_top_left,
-		"size_tiles": keep_size,
-		"object_owner": "player",
-		"city_world": city_world,
-	})
-	renderer.after_city_center_placed(keep, renderer.bound_city_state)
+	var keep := CityObjectSystem.place_immediate_settlement_object_for_context(
+		renderer.bound_settlement_context,
+		{
+			"object_type": CityObjectCatalog.CITY_OBJECT_CITY_CENTER,
+			"top_left": keep_top_left,
+			"size_tiles": keep_size,
+			"object_owner": "player",
+			"settlement_world": city_world,
+			"settlement_seed": renderer.city_seed,
+		}
+	)
 
 	_expect(
-		CityCitizenRegistrySystem.get_city_population_count()
+		CityCitizenRegistrySystem.get_city_population_count_for_city_state(test_city_state)
 		== CityCitizenRegistrySystem.STARTING_CITY_POPULATION,
 		"Founding must create the complete starting population."
 	)
 
-	if CityCitizenRegistrySystem.get_current_state().citizens.is_empty():
+	if test_city_state.citizen_registry_state.citizens.is_empty():
 		return {}
 
-	var citizen_id := int(CityCitizenRegistrySystem.get_current_state().citizens[0].get("id", -1))
-	var citizen := CityCitizenRegistrySystem.get_city_citizen_by_id(citizen_id)
+	var citizen_id := int(test_city_state.citizen_registry_state.citizens[0].get("id", -1))
+	var citizen := CityCitizenRegistrySystem.get_city_citizen_by_id_for_city_state(test_city_state, citizen_id)
 	var citizen_tile: Vector2i = citizen.get(
 		"city_tile_position",
 		CityCitizens.INVALID_CITY_TILE_POSITION
@@ -269,7 +284,7 @@ func _create_mixed_work_fixture(renderer: CityRenderer) -> Dictionary:
 		fishery_footprint
 	)
 
-	var fishery := CityObjectSystem.add_city_object({
+	var fishery := CityObjectSystem.add_city_object_for_city_state(test_city_state, {
 		"object_type": CityObjectCatalog.CITY_OBJECT_FISHING_GROUNDS,
 		"top_left": fishery_top_left,
 		"size_tiles": fishery_size,
@@ -277,7 +292,7 @@ func _create_mixed_work_fixture(renderer: CityRenderer) -> Dictionary:
 		"city_world": city_world,
 	})
 	var fishery_id := int(fishery.get("id", -1))
-	var accepted_fish := CityResourceContainerSystem.add_resource_to_city_object_storage(
+	var accepted_fish := CityResourceContainerSystem.add_resource_to_city_object_storage_for_city_state(test_city_state,
 		fishery_id,
 		WorldData.RESOURCE_FISH,
 		WORKPLACE_FISH_FIXTURE_AMOUNT
@@ -287,7 +302,7 @@ func _create_mixed_work_fixture(renderer: CityRenderer) -> Dictionary:
 		"The non-public workplace must hold the fallback fish supply."
 	)
 
-	var fishery_access_tiles := CityNavigationSystem.get_city_object_access_tiles(
+	var fishery_access_tiles := CityNavigationSystem.get_city_object_access_tiles_for_city_state(test_city_state,
 		city_world,
 		fishery
 	)
@@ -298,12 +313,12 @@ func _create_mixed_work_fixture(renderer: CityRenderer) -> Dictionary:
 
 	var keep_id := int(keep.get("id", -1))
 	var keep_capacity := CityResourceContainerSystem.get_city_object_storage_capacity(keep)
-	var accepted_coal := CityResourceContainerSystem.add_resource_to_city_object_storage(
+	var accepted_coal := CityResourceContainerSystem.add_resource_to_city_object_storage_for_city_state(test_city_state,
 		keep_id,
 		WorldData.RESOURCE_COAL,
 		keep_capacity
 	)
-	var filled_keep := CityObjectSystem.get_city_object_by_id(keep_id)
+	var filled_keep := CityObjectSystem.get_city_object_by_id_for_city_state(test_city_state, keep_id)
 	_expect(
 		accepted_coal == keep_capacity
 		and CityResourceContainerSystem.get_city_object_storage_free_space(
@@ -312,13 +327,13 @@ func _create_mixed_work_fixture(renderer: CityRenderer) -> Dictionary:
 		"The public Keep must be completely full for relocation fallback."
 	)
 
-	for raw_citizen in CityCitizenRegistrySystem.get_current_state().citizens:
+	for raw_citizen in test_city_state.citizen_registry_state.citizens:
 		if not raw_citizen is Dictionary:
 			continue
 
 		var current_citizen: Dictionary = raw_citizen
 		var current_citizen_id := int(current_citizen.get("id", -1))
-		CitizenNeedsSystem.set_city_citizen_hunger_state(
+		CitizenNeedsSystem.set_city_citizen_hunger_state_for_city_state(test_city_state,
 			current_citizen_id,
 			45,
 			0
@@ -369,7 +384,7 @@ func _create_mixed_work_fixture(renderer: CityRenderer) -> Dictionary:
 		WorldData.CITY_SURFACE_FEATURE_ROCK
 	)
 
-	var house_site := CityConstructionSystemScript.create_rectangular_site({
+	var house_site := CityConstructionSystemScript.create_rectangular_site_for_city_state(test_city_state, {
 		"object_type": CityObjectCatalog.CITY_OBJECT_HOUSE,
 		"top_left": house_top_left,
 		"size_tiles": house_size,
@@ -383,7 +398,7 @@ func _create_mixed_work_fixture(renderer: CityRenderer) -> Dictionary:
 		return {}
 
 	var cleanup_result := (
-		CityLogisticsSystem.add_resource_to_city_ground_piles_with_result({
+		CityLogisticsSystem.add_resource_to_city_ground_piles_with_result_for_city_state(test_city_state, {
 			"tile_position": cleanup_tile,
 			"resource": WorldData.RESOURCE_COAL,
 			"amount_delta": 1,
@@ -416,7 +431,7 @@ func _create_mixed_work_fixture(renderer: CityRenderer) -> Dictionary:
 		"A reachable source tile must exist for construction lumber."
 	)
 
-	var lumber_result := CityLogisticsSystem.add_resource_to_city_ground_piles_with_result({
+	var lumber_result := CityLogisticsSystem.add_resource_to_city_ground_piles_with_result_for_city_state(test_city_state, {
 		"tile_position": lumber_source_tile,
 		"resource": WorldData.RESOURCE_LUMBER,
 		"amount_delta": 4,
@@ -444,11 +459,11 @@ func _create_mixed_work_fixture(renderer: CityRenderer) -> Dictionary:
 		natural_exclusions,
 		3
 	)
-	var added_trees := CityWorkSystem.add_city_player_command_targets(
+	var added_trees := CityWorkSystem.add_city_player_command_targets_for_city_state(test_city_state,
 		CityWorkSystem.CITY_PLAYER_COMMAND_TYPE_CHOP_TREE,
 		tree_targets
 	)
-	var added_rocks := CityWorkSystem.add_city_player_command_targets(
+	var added_rocks := CityWorkSystem.add_city_player_command_targets_for_city_state(test_city_state,
 		CityWorkSystem.CITY_PLAYER_COMMAND_TYPE_COLLECT_ROCK,
 		rock_targets
 	)
@@ -457,7 +472,7 @@ func _create_mixed_work_fixture(renderer: CityRenderer) -> Dictionary:
 		"At least two independent tree and rock jobs must be designated."
 	)
 
-	for command in CityWorkSystem.get_city_player_command_snapshot():
+	for command in CityWorkSystem.get_city_player_command_snapshot_for_city_state(test_city_state):
 		if not command is Dictionary:
 			continue
 
@@ -466,7 +481,7 @@ func _create_mixed_work_fixture(renderer: CityRenderer) -> Dictionary:
 
 	var command_expectations: Dictionary = {}
 
-	for command in CityWorkSystem.get_city_player_command_snapshot():
+	for command in CityWorkSystem.get_city_player_command_snapshot_for_city_state(test_city_state):
 		if not command is Dictionary:
 			continue
 
@@ -502,7 +517,7 @@ func _create_mixed_work_fixture(renderer: CityRenderer) -> Dictionary:
 
 func _update_food_liveness(fixture: Dictionary) -> void:
 	var fishery_id := int(fixture.get("fishery_id", -1))
-	var fishery := CityObjectSystem.get_city_object_by_id(fishery_id)
+	var fishery := CityObjectSystem.get_city_object_by_id_for_city_state(test_city_state, fishery_id)
 	var fish_available := CityResourceContainerSystem.get_city_object_stored_resource_amount(
 		fishery,
 		WorldData.RESOURCE_FISH
@@ -512,13 +527,13 @@ func _update_food_liveness(fixture: Dictionary) -> void:
 		[]
 	)
 
-	for raw_citizen in CityCitizenRegistrySystem.get_current_state().citizens:
+	for raw_citizen in test_city_state.citizen_registry_state.citizens:
 		if not raw_citizen is Dictionary:
 			continue
 
 		var citizen: Dictionary = raw_citizen
 		var citizen_id := int(citizen.get("id", -1))
-		var hunger := CitizenNeedsSystem.get_city_citizen_hunger(citizen_id)
+		var hunger := CitizenNeedsSystem.get_city_citizen_hunger_for_city_state(test_city_state, citizen_id)
 		maximum_observed_hunger_by_citizen_id[citizen_id] = maxi(
 			int(maximum_observed_hunger_by_citizen_id.get(citizen_id, hunger)),
 			hunger
@@ -587,18 +602,21 @@ func _record_validation(validation: Dictionary, elapsed_minutes: int) -> void:
 func _check_nonnegative_state(elapsed_minutes: int) -> void:
 	for resource in CityResourceCatalog.get_city_resource_types():
 		_expect(
-			CityResourceAccountingSystem.get_total_physical_city_resource_amount(resource) >= 0,
+			CityResourceAccountingSystem.get_total_physical_city_resource_amount_for_city_state(
+				test_city_state,
+				resource
+			) >= 0,
 			"Physical " + resource + " became negative after "
 			+ str(elapsed_minutes) + " minutes."
 		)
 
-	for raw_citizen in CityCitizenRegistrySystem.get_current_state().citizens:
+	for raw_citizen in test_city_state.citizen_registry_state.citizens:
 		if not raw_citizen is Dictionary:
 			continue
 
 		var citizen: Dictionary = raw_citizen
 		var citizen_id := int(citizen.get("id", -1))
-		var hunger := CitizenNeedsSystem.get_city_citizen_hunger(citizen_id)
+		var hunger := CitizenNeedsSystem.get_city_citizen_hunger_for_city_state(test_city_state, citizen_id)
 		_expect(
 			hunger >= 0 and hunger <= CityCitizens.MAX_CITIZEN_HUNGER,
 			"Citizen " + str(citizen_id)
@@ -608,7 +626,7 @@ func _check_nonnegative_state(elapsed_minutes: int) -> void:
 
 		for resource in CityResourceCatalog.get_city_resource_types():
 			_expect(
-				CityCitizenInventorySystem.get_city_citizen_inventory_resource_amount(
+				CityCitizenInventorySystem.get_city_citizen_inventory_resource_amount_for_city_state(test_city_state,
 					citizen_id,
 					resource
 				) >= 0,
@@ -619,7 +637,7 @@ func _check_nonnegative_state(elapsed_minutes: int) -> void:
 
 func _assert_long_run_outcomes(fixture: Dictionary) -> void:
 	var site_id := int(fixture.get("house_site_id", -1))
-	var site_completed := CityConstructionSystem.get_city_construction_site_by_id(
+	var site_completed := CityConstructionSystem.get_city_construction_site_by_id_for_city_state(test_city_state,
 		site_id
 	).is_empty()
 	_expect(
@@ -628,7 +646,7 @@ func _assert_long_run_outcomes(fixture: Dictionary) -> void:
 	)
 	_expect(
 		str(
-			CityObjectSystem.get_city_object_at_tile(
+			CityObjectSystem.get_city_object_at_tile_for_city_state(test_city_state,
 				fixture.get(
 					"house_top_left",
 					CityCitizens.INVALID_CITY_TILE_POSITION
@@ -654,7 +672,7 @@ func _assert_long_run_outcomes(fixture: Dictionary) -> void:
 	for raw_command_id in fixture.get("natural_command_ids", []):
 		var command_id := int(raw_command_id)
 		_expect(
-			CityWorkSystem.get_city_player_command_by_id(command_id).is_empty(),
+			CityWorkSystem.get_city_player_command_by_id_for_city_state(test_city_state, command_id).is_empty(),
 			"Natural command " + str(command_id)
 			+ " must not starve behind construction work."
 		)
@@ -662,8 +680,11 @@ func _assert_long_run_outcomes(fixture: Dictionary) -> void:
 	_assert_material_conservation(fixture, site_completed)
 
 	var initial_fish_total := int(fixture.get("initial_fish_total", 0))
-	var final_fish_total := CityResourceAccountingSystem.get_total_physical_city_resource_amount(
-		WorldData.RESOURCE_FISH
+	var final_fish_total := (
+		CityResourceAccountingSystem.get_total_physical_city_resource_amount_for_city_state(
+			test_city_state,
+			WorldData.RESOURCE_FISH
+		)
 	)
 	var consumed_fish := initial_fish_total - final_fish_total
 	_expect(
@@ -672,7 +693,7 @@ func _assert_long_run_outcomes(fixture: Dictionary) -> void:
 		+ "consumption."
 	)
 
-	for raw_citizen in CityCitizenRegistrySystem.get_current_state().citizens:
+	for raw_citizen in test_city_state.citizen_registry_state.citizens:
 		if not raw_citizen is Dictionary:
 			continue
 
@@ -714,15 +735,18 @@ func _assert_material_conservation(
 
 			if (
 				str(expectation.get("resource", "")) == resource
-				and CityWorkSystem.get_city_player_command_by_id(command_id).is_empty()
+				and CityWorkSystem.get_city_player_command_by_id_for_city_state(test_city_state, command_id).is_empty()
 			):
 				expected_total += int(expectation.get("yield", 0))
 
 		if site_completed:
 			expected_total -= int(recipe.get(resource, 0))
 
-		var actual_total := CityResourceAccountingSystem.get_total_physical_city_resource_amount(
-			resource
+		var actual_total := (
+			CityResourceAccountingSystem.get_total_physical_city_resource_amount_for_city_state(
+				test_city_state,
+				resource
+			)
 		)
 		_expect(
 			actual_total == expected_total,
@@ -735,8 +759,11 @@ func _capture_physical_resource_totals() -> Dictionary:
 	var totals: Dictionary = {}
 
 	for resource in CityResourceCatalog.get_city_resource_types():
-		totals[resource] = CityResourceAccountingSystem.get_total_physical_city_resource_amount(
-			resource
+		totals[resource] = (
+			CityResourceAccountingSystem.get_total_physical_city_resource_amount_for_city_state(
+				test_city_state,
+				resource
+			)
 		)
 
 	return totals
@@ -746,7 +773,7 @@ func _ordinary_resource_exists_inside_footprint(
 	raw_footprint_tiles: Array,
 	resource: String
 ) -> bool:
-	for raw_pile in CityLogisticsSystem.get_city_ground_pile_snapshot():
+	for raw_pile in CityLogisticsSystem.get_city_ground_pile_snapshot_for_city_state(test_city_state):
 		if not raw_pile is Dictionary:
 			continue
 
@@ -768,7 +795,7 @@ func _ordinary_resource_exists_inside_footprint(
 
 
 func _all_citizens_can_reach_tiles(destination_tiles: Array) -> bool:
-	for raw_citizen in CityCitizenRegistrySystem.get_current_state().citizens:
+	for raw_citizen in test_city_state.citizen_registry_state.citizens:
 		if not raw_citizen is Dictionary:
 			continue
 
@@ -785,7 +812,7 @@ func _citizen_can_reach_tiles(
 	citizen_id: int,
 	destination_tiles: Array
 ) -> bool:
-	var citizen := CityCitizenRegistrySystem.get_city_citizen_by_id(citizen_id)
+	var citizen := CityCitizenRegistrySystem.get_city_citizen_by_id_for_city_state(test_city_state, citizen_id)
 	var raw_tile = citizen.get(
 		"city_tile_position",
 		CityCitizens.INVALID_CITY_TILE_POSITION
@@ -794,8 +821,8 @@ func _citizen_can_reach_tiles(
 	if not raw_tile is Vector2i:
 		return false
 
-	var city_world: WorldData = WorldPoliticalState.get_current_city_world()
-	var path_result := CityNavigationSystemScript.find_path_to_any_city_tile({
+	var city_world: WorldData = test_city_state.city_world
+	var path_result := CityNavigationSystemScript.find_path_to_any_city_tile_for_city_state(test_city_state, {
 		"city_world": city_world,
 		"start_tile": raw_tile,
 		"destination_tiles": destination_tiles,
@@ -810,7 +837,7 @@ func _prepare_fixture_access_for_all_citizens(
 	city_world: WorldData,
 	footprint_tiles: Array
 ) -> void:
-	for raw_citizen in CityCitizenRegistrySystem.get_current_state().citizens:
+	for raw_citizen in test_city_state.citizen_registry_state.citizens:
 		if not raw_citizen is Dictionary:
 			continue
 
@@ -860,7 +887,7 @@ func _prepare_deterministic_natural_targets(
 	maximum_count: int
 ) -> Array[Vector2i]:
 	var results: Array[Vector2i] = []
-	var city_world: WorldData = WorldPoliticalState.get_current_city_world()
+	var city_world: WorldData = test_city_state.city_world
 	var feature := WorldData.CITY_SURFACE_FEATURE_TREE
 
 	if command_type == CityWorkSystem.CITY_PLAYER_COMMAND_TYPE_COLLECT_ROCK:
@@ -877,12 +904,12 @@ func _prepare_deterministic_natural_targets(
 				if (
 					not city_world.is_in_bounds(tile_position.x, tile_position.y)
 					or excluded_tiles.has(tile_position)
-					or not CityObjectSystem.get_city_object_at_tile(tile_position).is_empty()
-					or not CityConstructionSystem.get_city_construction_site_at_tile(
+					or not CityObjectSystem.get_city_object_at_tile_for_city_state(test_city_state, tile_position).is_empty()
+					or not CityConstructionSystem.get_city_construction_site_at_tile_for_city_state(test_city_state,
 						tile_position
 					).is_empty()
-					or CityLogisticsSystem.has_city_ground_pile_at_tile(tile_position)
-					or CityCitizenSpatialSystem.has_living_city_citizen_at_tile(tile_position)
+					or CityLogisticsSystem.has_city_ground_pile_at_tile_for_city_state(test_city_state, tile_position)
+					or CityCitizenSpatialSystem.has_living_city_citizen_at_tile_for_city_state(test_city_state, tile_position)
 				):
 					continue
 
@@ -892,16 +919,16 @@ func _prepare_deterministic_natural_targets(
 				)
 				_set_surface_feature(city_world, tile_position, feature)
 
-				if not CityWorkSystem.can_designate_city_player_command_at_tile(
+				if not CityWorkSystem.can_designate_city_player_command_at_tile_for_city_state(test_city_state,
 					command_type,
 					tile_position
 				):
 					continue
 
-				var work_tiles := CityWorkSystem.get_city_player_command_work_tiles({
+				var work_tiles := CityWorkSystem.get_city_player_command_work_tiles_for_city_state(test_city_state, {
 					"tile_position": tile_position,
 				}, -1)
-				var path_result := CityNavigationSystemScript.find_path_to_any_city_tile({
+				var path_result := CityNavigationSystemScript.find_path_to_any_city_tile_for_city_state(test_city_state, {
 					"city_world": city_world,
 					"start_tile": start_tile,
 					"destination_tiles": work_tiles,
@@ -937,7 +964,7 @@ func _find_open_ground_tile_outside_footprint(
 
 				if (
 					footprint_tiles.has(tile_position)
-					or not CityLogisticsSystem.can_city_ground_pile_exist_at_tile(
+					or not CityLogisticsSystem.can_city_ground_pile_exist_at_tile_for_city_state(test_city_state,
 						city_world,
 						tile_position
 					)
@@ -945,7 +972,7 @@ func _find_open_ground_tile_outside_footprint(
 					continue
 
 				var path_result := (
-					CityNavigationSystemScript.find_path_to_any_city_tile({
+					CityNavigationSystemScript.find_path_to_any_city_tile_for_city_state(test_city_state, {
 						"city_world": city_world,
 						"start_tile": start_tile,
 						"destination_tiles": [tile_position],
@@ -968,7 +995,7 @@ func _find_and_prepare_reachable_rectangle(
 	citizen_id: int,
 	for_construction: bool
 ) -> Vector2i:
-	var citizen := CityCitizenRegistrySystem.get_city_citizen_by_id(citizen_id)
+	var citizen := CityCitizenRegistrySystem.get_city_citizen_by_id_for_city_state(test_city_state, citizen_id)
 	var raw_citizen_tile = citizen.get(
 		"city_tile_position",
 		CityCitizens.INVALID_CITY_TILE_POSITION
@@ -1060,7 +1087,7 @@ func _find_and_prepare_reachable_rectangle(
 					footprint_tiles
 				)
 				var path_result := (
-					CityNavigationSystemScript.find_path_to_any_city_tile({
+					CityNavigationSystemScript.find_path_to_any_city_tile_for_city_state(test_city_state, {
 						"city_world": city_world,
 						"start_tile": citizen_tile,
 						"destination_tiles": access_tiles,
@@ -1073,7 +1100,7 @@ func _find_and_prepare_reachable_rectangle(
 				if not bool(path_result.get("success", false)):
 					continue
 
-				var can_place := CityObjectSystem.can_place_city_object(
+				var can_place := CityObjectSystem.can_place_city_object_for_city_state(test_city_state,
 					city_world,
 					top_left,
 					size_tiles,
@@ -1081,7 +1108,7 @@ func _find_and_prepare_reachable_rectangle(
 				)
 
 				if for_construction:
-					can_place = CityConstructionSystem.can_place_city_object_construction(
+					can_place = CityConstructionSystem.can_place_city_object_construction_for_city_state(test_city_state,
 						city_world,
 						top_left,
 						size_tiles,
@@ -1122,11 +1149,11 @@ func _select_external_access_target(
 				footprint_lookup.has(candidate)
 				or candidates.has(candidate)
 				or not city_world.is_in_bounds(candidate.x, candidate.y)
-				or not CityObjectSystem.get_city_object_at_tile(candidate).is_empty()
-				or not CityConstructionSystem.get_city_construction_site_at_tile(
+				or not CityObjectSystem.get_city_object_at_tile_for_city_state(test_city_state, candidate).is_empty()
+				or not CityConstructionSystem.get_city_construction_site_at_tile_for_city_state(test_city_state,
 					candidate
 				).is_empty()
-				or CityLogisticsSystem.has_city_ground_pile_at_tile(candidate)
+				or CityLogisticsSystem.has_city_ground_pile_at_tile_for_city_state(test_city_state, candidate)
 			):
 				continue
 
@@ -1280,11 +1307,11 @@ func _fixture_path_is_clear(path_tiles: Array[Vector2i]) -> bool:
 		var tile_position := path_tiles[path_index]
 
 		if (
-			not CityObjectSystem.get_city_object_at_tile(tile_position).is_empty()
-			or not CityConstructionSystem.get_city_construction_site_at_tile(
+			not CityObjectSystem.get_city_object_at_tile_for_city_state(test_city_state, tile_position).is_empty()
+			or not CityConstructionSystem.get_city_construction_site_at_tile_for_city_state(test_city_state,
 				tile_position
 			).is_empty()
-			or CityLogisticsSystem.has_city_ground_pile_at_tile(tile_position)
+			or CityLogisticsSystem.has_city_ground_pile_at_tile_for_city_state(test_city_state, tile_position)
 		):
 			return false
 
@@ -1317,7 +1344,7 @@ func _make_external_boundary_tiles(
 			if (
 				footprint_lookup.has(candidate)
 				or boundary_tiles.has(candidate)
-				or not CityNavigationSystem.is_city_tile_walkable_for_citizen(
+				or not CityNavigationSystem.is_city_tile_walkable_for_citizen_for_city_state(test_city_state,
 					city_world,
 					candidate
 				)
@@ -1335,12 +1362,12 @@ func _footprint_is_unoccupied(footprint_tiles: Array) -> bool:
 			return false
 
 		if (
-			not CityObjectSystem.get_city_object_at_tile(raw_tile).is_empty()
-			or not CityConstructionSystem.get_city_construction_site_at_tile(
+			not CityObjectSystem.get_city_object_at_tile_for_city_state(test_city_state, raw_tile).is_empty()
+			or not CityConstructionSystem.get_city_construction_site_at_tile_for_city_state(test_city_state,
 				raw_tile
 			).is_empty()
-			or CityLogisticsSystem.has_city_ground_pile_at_tile(raw_tile)
-			or CityCitizenSpatialSystem.has_living_city_citizen_at_tile(raw_tile)
+			or CityLogisticsSystem.has_city_ground_pile_at_tile_for_city_state(test_city_state, raw_tile)
+			or CityCitizenSpatialSystem.has_living_city_citizen_at_tile_for_city_state(test_city_state, raw_tile)
 		):
 			return false
 
@@ -1367,7 +1394,7 @@ func _find_placeable_rectangle(
 		for x in range(city_world.width - size_tiles.x + 1):
 			var top_left := Vector2i(x, y)
 
-			if CityObjectSystem.can_place_city_object(
+			if CityObjectSystem.can_place_city_object_for_city_state(test_city_state,
 				city_world,
 				top_left,
 				size_tiles,

@@ -6,5 +6,5 @@
 [node name="CityScreen" type="Node2D"]
 script = ExtResource("1_avcu0")
 
-[node name="ObjectPanelAnchor" type="Node" parent="."]
+[node name="ObjectPanelAnchor" type="Node2D" parent="."]
 script = ExtResource("2_object_panel_anchor")

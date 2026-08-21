@@ -1,5 +1,8 @@
 extends Node
 
+const CitySettlementTestFixtureScript = preload(
+	"res://scripts/city/simulation/test_support/CitySettlementTestFixture.gd"
+)
 const TEST_CITY_NAME := "Citizen Bootstrap"
 const TEST_CULTURE_NAME := "Registry Culture"
 
@@ -46,9 +49,11 @@ func _test_state_defaults() -> void:
 
 
 func _test_pre_context_state_adoption() -> void:
-	WorldData.reset_runtime_session_state()
-	var world := _make_world(8, 8, 96_001)
-	if not _lock_founding_world(world, "Pre-context"):
+	var fixture = CitySettlementTestFixtureScript.create({
+		"label": "Citizen Registry Bootstrap",
+	})
+	_expect(fixture != null, "The registry fixture must be created.")
+	if fixture == null:
 		return
 
 	var bootstrap_citizens: Array = [{
@@ -57,8 +62,8 @@ func _test_pre_context_state_adoption() -> void:
 		"alive": true,
 	}]
 	var bootstrap_index: Dictionary = {17: 0}
-	var bootstrap_state := (
-		CityCitizenRegistrySystem.get_current_state()
+	var bootstrap_state: CityCitizenRegistryState = (
+		fixture.city_state.citizen_registry_state
 	)
 	bootstrap_state.citizens = bootstrap_citizens
 	bootstrap_state.citizen_index_by_id = bootstrap_index
@@ -66,51 +71,28 @@ func _test_pre_context_state_adoption() -> void:
 	bootstrap_state.citizen_version = 5
 
 	_expect(
-		WorldPoliticalState.synchronize_foundation_with_world_data(),
-		"Founding must establish a City settlement context."
-	)
-	var capital_state = WorldPoliticalState.get_active_city_simulation_state()
-	var context = WorldPoliticalState.get_active_settlement_context()
-	_expect(
-		capital_state is CitySettlementSimulationState
+		is_same(fixture.city_state.citizen_registry_state, bootstrap_state)
 		and is_same(
-			capital_state.citizen_registry_state,
-			bootstrap_state
-		)
-		and is_same(
-			capital_state.citizen_registry_state.citizens,
+			fixture.city_state.citizen_registry_state.citizens,
 			bootstrap_citizens
 		)
 		and is_same(
-			capital_state.citizen_registry_state.citizen_index_by_id,
+			fixture.city_state.citizen_registry_state.citizen_index_by_id,
 			bootstrap_index
 		),
-		"The founding City must adopt the exact pre-context registry owner."
+		"The registered City must retain the exact registry owner."
 	)
 	_expect(
-		context != null
+		fixture.settlement_context != null
 		and is_same(
-			context.get_city_citizen_registry_state(),
+			fixture.settlement_context.get_city_citizen_registry_state(),
 			bootstrap_state
 		)
-		and is_same(CityCitizenRegistrySystem.get_current_state().citizens, bootstrap_citizens)
-		and is_same(
-			CityCitizenRegistrySystem.get_current_state().citizen_index_by_id,
-			bootstrap_index
-		)
-		and CityCitizenRegistrySystem.get_current_state().next_citizen_id == 18
-		and CityCitizenRegistrySystem.get_current_state().citizen_version == 5,
-		"Context and compatibility access must resolve one adopted registry."
+		and bootstrap_state.next_citizen_id == 18
+		and bootstrap_state.citizen_version == 5,
+		"The context must expose the explicit registry owner."
 	)
-	_expect(
-		WorldPoliticalState.synchronize_foundation_with_world_data()
-		and is_same(
-			CityCitizenRegistrySystem.get_current_state(),
-			bootstrap_state
-		)
-		and CityCitizenRegistrySystem.get_current_state().citizens.size() == 1,
-		"Repeated synchronization must not replace or duplicate the registry."
-	)
+	fixture.cleanup()
 
 
 func _test_real_founding_population_bootstrap() -> void:
@@ -122,7 +104,12 @@ func _test_real_founding_population_bootstrap() -> void:
 		WorldPoliticalState.synchronize_foundation_with_world_data(),
 		"The live flow must establish the capital before Keep placement."
 	)
-	var capital_state = WorldPoliticalState.get_active_city_simulation_state()
+	var capital_settlement_id := (
+		WorldPoliticalState.get_player_capital_settlement_id()
+	)
+	var capital_state = WorldPoliticalState.get_city_simulation_state(
+		capital_settlement_id
+	)
 	if not capital_state is CitySettlementSimulationState:
 		_expect(false, "The live founding fixture requires a City state.")
 		return
@@ -133,11 +120,13 @@ func _test_real_founding_population_bootstrap() -> void:
 	var registry_array: Array = registry_state.citizens
 	var registry_index: Dictionary = registry_state.citizen_index_by_id
 	var city_world := _make_world(20, 20, 96_102)
-	WorldData.store_city_world_save(city_world, 96_102)
+	WorldData.store_city_world_for_state(
+		capital_state, city_world, 96_102
+	)
 	var keep_size := CityObjectCatalog.get_city_object_size_for_type(
 		CityObjectCatalog.CITY_OBJECT_CITY_CENTER
 	)
-	var keep := CityObjectSystem.add_city_object({
+	var keep := CityObjectSystem.add_city_object_for_city_state(capital_state, {
 		"object_type": CityObjectCatalog.CITY_OBJECT_CITY_CENTER,
 		"top_left": Vector2i(6, 6),
 		"size_tiles": keep_size,
@@ -179,18 +168,25 @@ func _test_real_founding_population_bootstrap() -> void:
 		"Founding must create IDs 1-8, exact indexes, next ID 9, and version 8."
 	)
 	_expect(
-		is_same(CityCitizenRegistrySystem.get_current_state().citizens, registry_array)
-		and is_same(CityCitizenRegistrySystem.get_current_state().citizen_index_by_id, registry_index)
+		is_same(capital_state.citizen_registry_state.citizens, registry_array)
+		and is_same(
+			capital_state.citizen_registry_state.citizen_index_by_id,
+			registry_index
+		)
 		and is_same(
 			WorldPoliticalState
-			.get_active_settlement_context()
+			.get_settlement_context(capital_settlement_id)
 			.get_city_citizen_registry_state(),
 			registry_state
 		),
 		"The eight founders must land directly in the capital registry."
 	)
 
-	var repeated_count := CityCitizenRegistrySystem.initialize_starting_city_population()
+	var repeated_count := (
+		CityCitizenRegistrySystem.initialize_starting_city_population_for_city_state(
+			capital_state
+		)
+	)
 	WorldData.found_player_city({
 		"city_world_seed": 96_102,
 		"city_map_size": Vector2i(city_world.width, city_world.height),

@@ -482,3 +482,15 @@ static func bool_to_yes_no(value: bool) -> String:
 		return "Yes"
 
 	return "No"
+
+
+static func get_stockpile_resource_for_key(key_event: InputEventKey) -> String:
+	if key_event.keycode == KEY_H or key_event.physical_keycode == KEY_H:
+		return WorldData.RESOURCE_FISH
+	if key_event.keycode == KEY_J or key_event.physical_keycode == KEY_J:
+		return WorldData.RESOURCE_COAL
+	if key_event.keycode == KEY_K or key_event.physical_keycode == KEY_K:
+		return WorldData.RESOURCE_IRON
+	if key_event.keycode == KEY_L or key_event.physical_keycode == KEY_L:
+		return WorldData.RESOURCE_GOLD
+	return ""

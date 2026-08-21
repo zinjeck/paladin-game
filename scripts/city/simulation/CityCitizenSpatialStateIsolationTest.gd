@@ -73,19 +73,28 @@ func _test_equal_version_city_isolation() -> void:
 	_expect(
 		WorldPoliticalState.set_active_settlement(city_b_id)
 		and _bind_fixture_city(city_a_id)
-		and CityCitizenSpatialSystem.get_city_citizen_tile_position(1) == CITY_A_TILE
-		and is_same(CityCitizenSpatialSystem.get_current_state(), spatial_a),
+		and CityCitizenSpatialSystem.get_city_citizen_tile_position_for_city_state(
+			state_a["city_state"],
+			1
+		) == CITY_A_TILE
+		and is_same(state_a["city_state"].citizen_spatial_state, spatial_a),
 		"An explicit City A citizen binding must ignore presentation selection B."
 	)
 	_expect(
 		_bind_fixture_city(city_b_id)
-		and CityCitizenSpatialSystem.get_city_citizen_tile_position(1) == CITY_B_TILE
-		and is_same(CityCitizenSpatialSystem.get_current_state(), spatial_b),
+		and CityCitizenSpatialSystem.get_city_citizen_tile_position_for_city_state(
+			state_b["city_state"],
+			1
+		) == CITY_B_TILE
+		and is_same(state_b["city_state"].citizen_spatial_state, spatial_b),
 		"Binding City B must restore its exact equal-ID spatial state."
 	)
 	_expect(
 		_bind_fixture_city(city_a_id)
-		and CityCitizenSpatialSystem.get_city_citizen_tile_position(1) == CITY_A_TILE
+		and CityCitizenSpatialSystem.get_city_citizen_tile_position_for_city_state(
+			state_a["city_state"],
+			1
+		) == CITY_A_TILE
 		and spatial_a.citizen_spatial_version == 9,
 		"A -> B -> A must preserve City A's spatial continuation."
 	)
@@ -122,9 +131,9 @@ func _seed_city(
 	if not city_state is CitySettlementSimulationState:
 		return {}
 	var city_world := _make_world(16, 16, seed_value)
-	WorldPoliticalState.set_current_city_world(city_world)
-	WorldPoliticalState.set_current_city_seed(seed_value)
-	var citizen := CityCitizenRegistrySystem.add_city_citizen(
+	WorldData.store_city_world_for_state(city_state, city_world, seed_value)
+	var citizen := CityCitizenRegistrySystem.add_city_citizen_for_city_state(
+		city_state,
 		"",
 		SHARED_CITIZEN_TILE,
 		CityCitizens.CITY_CITIZEN_SEX_MALE,
@@ -145,7 +154,8 @@ func _seed_city(
 	)
 	return {
 		"citizen_id": citizen_id,
-		"spatial_state": CityCitizenSpatialSystem.get_current_state(),
+		"city_state": city_state,
+		"spatial_state": city_state.citizen_spatial_state,
 	}
 
 
@@ -153,7 +163,6 @@ func _bind_fixture_city(city_id: int) -> bool:
 	var city_state = WorldPoliticalState.get_city_simulation_state(city_id)
 	if not city_state is CitySettlementSimulationState:
 		return false
-	CityCitizenUnboundCompatibility.bind_legacy_fixture_state(city_state)
 	return true
 
 

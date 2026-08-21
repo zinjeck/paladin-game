@@ -1,95 +1,111 @@
-extends RefCounted
+extends "res://scripts/settlements/presentation/SettlementPresentationBinding.gd"
 class_name CityPresentationBinding
 
-# Non-owning presentation identity shared by CityRenderer and every helper it
-# owns. Authoritative gameplay data remains inside CitySettlementSimulationState.
+# City-detail adapter for the settlement-neutral identity token. Only this
+# adapter validates and exposes CitySettlementSimulationState, WorldData, and
+# the city seed. Generic settlement presenters should type the base and request
+# a named capability instead of assuming every settlement is a city.
 
-var settlement_context: SettlementSimulationContext
-var city_state: CitySettlementSimulationState
-var settlement_id: int = SettlementData.INVALID_SETTLEMENT_ID
-var city_world: WorldData
-var city_seed: int = 0
-var generation: int = 0
+var _city_state: CitySettlementSimulationState
+var _city_world: WorldData
+var _city_seed: int = 0
+
+var settlement_state: CitySettlementSimulationState:
+	get:
+		return _city_state
+	set(_value):
+		pass
+var world: WorldData:
+	get:
+		return _city_world
+	set(_value):
+		pass
+var seed: int:
+	get:
+		return _city_seed
+	set(_value):
+		pass
+
+# Read-only compatibility aliases for existing city-specific presenters.
+var city_state: CitySettlementSimulationState:
+	get:
+		return settlement_state
+var city_world: WorldData:
+	get:
+		return world
+var city_seed: int:
+	get:
+		return seed
 
 
-func configure(
-	context: SettlementSimulationContext,
-	binding_generation: int
+func _can_bind_backend_capabilities(
+	context: SettlementSimulationContext
 ) -> bool:
-	clear()
 	if (
 		context == null
-		or binding_generation <= 0
-		or not context.supports_city_simulation()
-		or not WorldPoliticalState.is_registered_settlement_context(context)
+		or not context.supports_detailed_simulation()
+		or context.settlement_type != SettlementData.SETTLEMENT_TYPE_CITY
+		or context.backend_kind
+		!= SettlementSimulationContext.BACKEND_CITY_SETTLEMENT_STATE
 	):
 		return false
 
-	var target_state: CitySettlementSimulationState = (
-		context.get_city_simulation_state()
-	)
+	var raw_state = context.get_detailed_simulation_state()
 	if (
-		target_state == null
-		or not target_state.city_world is WorldData
-		or target_state.city_world.width <= 0
-		or target_state.city_world.height <= 0
-		or target_state.city_seed <= 0
+		not raw_state is CitySettlementSimulationState
+		or not raw_state.city_world is WorldData
+		or raw_state.city_world.width <= 0
+		or raw_state.city_world.height <= 0
+		or raw_state.city_seed <= 0
 	):
 		return false
-
-	settlement_context = context
-	city_state = target_state
-	settlement_id = context.settlement_id
-	city_world = target_state.city_world
-	city_seed = target_state.city_seed
-	generation = binding_generation
 	return true
 
 
-func clear() -> void:
-	settlement_context = null
-	city_state = null
-	settlement_id = SettlementData.INVALID_SETTLEMENT_ID
-	city_world = null
-	city_seed = 0
-	generation = 0
+func _capture_backend_capabilities(
+	context: SettlementSimulationContext
+) -> void:
+	_city_state = context.get_detailed_simulation_state()
+	_city_world = _city_state.city_world
+	_city_seed = _city_state.city_seed
 
 
-func is_valid() -> bool:
+func _clear_backend_capabilities() -> void:
+	_city_state = null
+	_city_world = null
+	_city_seed = 0
+
+
+func _is_backend_capability_snapshot_valid() -> bool:
 	return (
-		settlement_context != null
-		and city_state != null
-		and settlement_id > 0
-		and generation > 0
-		and city_world != null
-		and city_seed > 0
-		and WorldPoliticalState.is_registered_settlement_context(
-			settlement_context
-		)
-		and settlement_context.settlement_id == settlement_id
+		_city_state != null
+		and _city_world != null
+		and _city_seed > 0
+		and settlement_context != null
+		and settlement_context.supports_detailed_simulation()
 		and is_same(
-			settlement_context.get_city_simulation_state(),
-			city_state
+			settlement_context.get_detailed_simulation_state(),
+			_city_state
 		)
-		and is_same(city_state.city_world, city_world)
-		and city_state.city_seed == city_seed
+		and is_same(_city_state.city_world, _city_world)
+		and _city_state.city_seed == _city_seed
 	)
 
 
-func matches_context(context: SettlementSimulationContext) -> bool:
-	return (
-		is_valid()
-		and context != null
-		and is_same(settlement_context, context)
-		and context.settlement_id == settlement_id
-	)
+func _supports_backend_capability(capability: StringName) -> bool:
+	return capability in [
+		CAPABILITY_CITY_DETAIL,
+		CAPABILITY_SETTLEMENT_WORLD,
+		CAPABILITY_DETERMINISTIC_SEED,
+	]
 
 
-func matches_binding(other: CityPresentationBinding) -> bool:
-	return (
-		is_valid()
-		and other != null
-		and other.is_valid()
-		and is_same(self, other)
-		and generation == other.generation
-	)
+func _get_backend_capability(capability: StringName):
+	match capability:
+		CAPABILITY_CITY_DETAIL:
+			return _city_state
+		CAPABILITY_SETTLEMENT_WORLD:
+			return _city_world
+		CAPABILITY_DETERMINISTIC_SEED:
+			return _city_seed
+	return null

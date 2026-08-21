@@ -1,0 +1,9 @@
+# Settlement infrastructure presentation
+
+`SettlementInfrastructurePresenter` is the settlement-neutral owner of low-level infrastructure drawing. It renders completed non-road objects, completed roads, construction blueprints and phase borders, and loose ground-pile markers. `CityRenderer` retains only layer composition and passes its background-layer `CanvasItem` to this presenter.
+
+The presenter accepts one exact `SettlementPresentationBinding` plus tile size and explicitly requires its `CAPABILITY_CITY_DETAIL` backend view. Its binding preflight is read-only; equal generations are accepted only for the same current binding, older or equal-owner-replacement generations are rejected, and reset preserves the accepted-generation high-water mark. It reads snapshots only from that capability. A valid village or outpost identity with no city-detail capability is rejected without replacing the prior presentation. The presenter never queries the active settlement, receives a renderer reference, branches on settlement type, or mutates gameplay state.
+
+Background order remains: selected workplace zone, completed objects, completed roads, construction sites, debug background, then ground piles. Placement owns only transient previews and commit interaction; it calls the presenter's object visual helper for its ghost, while completed-road presentation no longer belongs to the placement controller.
+
+`SettlementInfrastructurePresenterTest.tscn` covers pure preflight, exact equal-generation idempotence, equal-generation owner rejection, A/B isolation with the opposite settlement globally active, stale-generation rejection, reset high-water behavior, live draw callbacks, and gameplay-version purity. The renderer smoke test also requires the presenter to share the renderer's exact accepted binding.

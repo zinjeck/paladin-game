@@ -1,5 +1,8 @@
 extends Node
 
+const CitySettlementTestFixtureScript = preload(
+	"res://scripts/city/simulation/test_support/CitySettlementTestFixture.gd"
+)
 const CityConstructionSystemScript = preload(
 	"res://scripts/city/simulation/systems/CityConstructionSystem.gd"
 )
@@ -31,6 +34,7 @@ const AUTONOMOUS_CLEANUP_PRIORITY: int = 90
 
 var failure_count: int = 0
 var test_primary_culture_id: int = -1
+var test_fixture = null
 var test_city_state: CitySettlementSimulationState
 
 
@@ -77,16 +81,16 @@ func _test_normal_order_preempts_before_pickup() -> void:
 		not stockpile.is_empty()
 		and source_id > 0
 		and not haul_request.is_empty()
-		and CityCitizenTaskRuntimeSystem.assign_city_citizen_task(citizen_id, haul_request),
+		and CityCitizenTaskRuntimeSystem.assign_city_citizen_task_for_city_state(test_city_state, citizen_id, haul_request),
 		"The pre-pickup fixture must assign a real autonomous haul."
 	)
 
-	var reservation_id := CityLogisticsSystem.get_city_haul_reservation_id_for_citizen(
+	var reservation_id := CityLogisticsSystem.get_city_haul_reservation_id_for_citizen_for_city_state(test_city_state,
 		citizen_id
 	)
 	_expect(
 		reservation_id > 0
-		and CityCitizenInventorySystem.get_city_citizen_haul_cargo_amount(citizen_id) == 0,
+		and CityCitizenInventorySystem.get_city_citizen_haul_cargo_amount_for_city_state(test_city_state, citizen_id) == 0,
 		"The autonomous haul must begin reserved but before pickup."
 	)
 
@@ -95,8 +99,13 @@ func _test_normal_order_preempts_before_pickup() -> void:
 		CityWorkSystem.CITY_PLAYER_COMMAND_TYPE_CHOP_TREE,
 		Vector2i(4, 5)
 	)
-	CitizenDecisionSystemScript.run_tick(1, 2)
-	var assigned_task := CityCitizenTaskRuntimeSystem.get_city_citizen_current_task(citizen_id)
+	CitizenDecisionSystemScript.run_tick_for_city_state(test_city_state, 1, 2)
+	var assigned_task := (
+		CityCitizenTaskRuntimeSystem.get_city_citizen_current_task_for_city_state(
+			test_city_state,
+			citizen_id
+		)
+	)
 
 	_expect(
 		str(assigned_task.get("kind", ""))
@@ -105,21 +114,26 @@ func _test_normal_order_preempts_before_pickup() -> void:
 		"A Normal tree order must replace the autonomous haul before pickup."
 	)
 	_expect(
-		CityLogisticsSystem.get_city_haul_reservation(reservation_id).is_empty(),
+		CityLogisticsSystem.get_city_haul_reservation_for_city_state(test_city_state, reservation_id).is_empty(),
 		"Pre-pickup interruption must release the old haul reservation."
 	)
 	_expect(
 		CityLogisticsSystem.get_city_ground_pile_resource_amount(
-			CityLogisticsSystem.get_city_ground_pile_by_id(source_id),
+			CityLogisticsSystem.get_city_ground_pile_by_id_for_city_state(test_city_state, source_id),
 			WorldData.RESOURCE_LUMBER
 		) == 2
-		and CityCitizenInventorySystem.get_city_citizen_haul_cargo_amount(citizen_id) == 0,
+		and CityCitizenInventorySystem.get_city_citizen_haul_cargo_amount_for_city_state(test_city_state, citizen_id) == 0,
 		"Pre-pickup interruption must leave the physical source untouched."
 	)
 
 	# Run the actual command executor through its visible performing boundary.
-	CitizenTaskSystemScript.run_tick(2, 2)
-	var performing_task := CityCitizenTaskRuntimeSystem.get_city_citizen_current_task(citizen_id)
+	CitizenTaskSystemScript.run_tick_for_city_state(test_city_state, 2, 2)
+	var performing_task := (
+		CityCitizenTaskRuntimeSystem.get_city_citizen_current_task_for_city_state(
+			test_city_state,
+			citizen_id
+		)
+	)
 	_expect(
 		str(performing_task.get("phase", ""))
 		== CityCitizens.CITY_CITIZEN_TASK_PHASE_PERFORMING,
@@ -128,10 +142,14 @@ func _test_normal_order_preempts_before_pickup() -> void:
 	SimulationClock.absolute_world_minutes += (
 		CityWorkSystem.CITY_PLAYER_COMMAND_WORK_DURATION_MINUTES
 	)
-	CitizenTaskSystemScript.run_tick(3, 2)
+	CitizenTaskSystemScript.run_tick_for_city_state(test_city_state, 3, 2)
 	_expect(
-		CityWorkSystem.get_city_player_command_by_id(command_id).is_empty()
-		and CityResourceAccountingSystem.get_total_physical_city_resource_amount(
+		CityWorkSystem.get_city_player_command_by_id_for_city_state(
+			test_city_state,
+			command_id
+		).is_empty()
+		and CityResourceAccountingSystem.get_total_physical_city_resource_amount_for_city_state(
+			test_city_state,
 			WorldData.RESOURCE_LUMBER
 		) == 6,
 		"The representative tree command must complete and create its yield."
@@ -158,15 +176,15 @@ func _test_normal_order_waits_for_picked_up_cargo_delivery() -> void:
 
 	_expect(
 		not haul_request.is_empty()
-		and CityCitizenTaskRuntimeSystem.assign_city_citizen_task(citizen_id, haul_request),
+		and CityCitizenTaskRuntimeSystem.assign_city_citizen_task_for_city_state(test_city_state, citizen_id, haul_request),
 		"The after-pickup fixture must assign a real autonomous haul."
 	)
-	CitizenTaskSystemScript.run_tick(1, 2)
-	CitizenTaskSystemScript.run_tick(2, 2)
+	CitizenTaskSystemScript.run_tick_for_city_state(test_city_state, 1, 2)
+	CitizenTaskSystemScript.run_tick_for_city_state(test_city_state, 2, 2)
 
-	var haul_after_pickup := CityCitizenTaskRuntimeSystem.get_city_citizen_current_haul(citizen_id)
+	var haul_after_pickup := CityCitizenTaskRuntimeSystem.get_city_citizen_current_haul_for_city_state(test_city_state, citizen_id)
 	_expect(
-		CityCitizenInventorySystem.get_city_citizen_haul_cargo_resource_amount(
+		CityCitizenInventorySystem.get_city_citizen_haul_cargo_resource_amount_for_city_state(test_city_state,
 			citizen_id,
 			WorldData.RESOURCE_STONE
 		) == 2
@@ -184,27 +202,27 @@ func _test_normal_order_waits_for_picked_up_cargo_delivery() -> void:
 		Vector2i(4, 5)
 	)
 	var physical_before_order := (
-		CityResourceAccountingSystem.get_total_physical_city_resource_amount(
+		CityResourceAccountingSystem.get_total_physical_city_resource_amount_for_city_state(test_city_state,
 			WorldData.RESOURCE_STONE
 		)
 	)
-	CitizenDecisionSystemScript.run_tick(3, 2)
-	var task_after_order := CityCitizenTaskRuntimeSystem.get_city_citizen_current_task(citizen_id)
+	CitizenDecisionSystemScript.run_tick_for_city_state(test_city_state, 3, 2)
+	var task_after_order := CityCitizenTaskRuntimeSystem.get_city_citizen_current_task_for_city_state(test_city_state, citizen_id)
 
 	_expect(
 		str(task_after_order.get("kind", ""))
 		== CityCitizens.CITY_CITIZEN_TASK_KIND_HAUL
-		and CityCitizenInventorySystem.get_city_citizen_haul_cargo_resource_amount(
+		and CityCitizenInventorySystem.get_city_citizen_haul_cargo_resource_amount_for_city_state(test_city_state,
 			citizen_id,
 			WorldData.RESOURCE_STONE
 		) == 2,
 		"A Normal rock order must wait while already-picked-up cargo is delivered."
 	)
 	_expect(
-		CityLogisticsSystem.get_total_city_ground_pile_resource_amount(
+		CityLogisticsSystem.get_total_city_ground_pile_resource_amount_for_city_state(test_city_state,
 			WorldData.RESOURCE_STONE
 		) == 0
-		and CityResourceAccountingSystem.get_total_physical_city_resource_amount(
+		and CityResourceAccountingSystem.get_total_physical_city_resource_amount_for_city_state(test_city_state,
 			WorldData.RESOURCE_STONE
 		) == physical_before_order,
 		"Issuing the Normal order after pickup must not spill or lose cargo."
@@ -214,11 +232,11 @@ func _test_normal_order_waits_for_picked_up_cargo_delivery() -> void:
 
 	for tick_index in range(4, 28):
 		SimulationClock.absolute_world_minutes += 2
-		CitizenDecisionSystemScript.run_tick(tick_index, 2)
-		CitizenMovementSystemScript.run_tick(tick_index, 2)
-		CitizenTaskSystemScript.run_tick(tick_index, 2)
+		CitizenDecisionSystemScript.run_tick_for_city_state(test_city_state, tick_index, 2)
+		CitizenMovementSystemScript.run_tick_for_city_state(test_city_state, tick_index, 2)
+		CitizenTaskSystemScript.run_tick_for_city_state(test_city_state, tick_index, 2)
 
-		var current_task := CityCitizenTaskRuntimeSystem.get_city_citizen_current_task(citizen_id)
+		var current_task := CityCitizenTaskRuntimeSystem.get_city_citizen_current_task_for_city_state(test_city_state, citizen_id)
 
 		if (
 			str(current_task.get("kind", ""))
@@ -230,10 +248,10 @@ func _test_normal_order_waits_for_picked_up_cargo_delivery() -> void:
 
 	_expect(
 		CityResourceContainerSystem.get_city_object_stored_resource_amount(
-			CityObjectSystem.get_city_object_by_id(stockpile_id),
+			CityObjectSystem.get_city_object_by_id_for_city_state(test_city_state, stockpile_id),
 			WorldData.RESOURCE_STONE
 		) == 2
-		and CityCitizenInventorySystem.get_city_citizen_haul_cargo_amount(citizen_id) == 0,
+		and CityCitizenInventorySystem.get_city_citizen_haul_cargo_amount_for_city_state(test_city_state, citizen_id) == 0,
 		"Picked-up cargo must reach its reserved destination before preemption."
 	)
 	_expect(
@@ -241,7 +259,7 @@ func _test_normal_order_waits_for_picked_up_cargo_delivery() -> void:
 		"The waiting Normal rock order must be assigned after delivery."
 	)
 	_expect(
-		CityLogisticsSystem.get_total_city_ground_pile_resource_amount(
+		CityLogisticsSystem.get_total_city_ground_pile_resource_amount_for_city_state(test_city_state,
 			WorldData.RESOURCE_STONE
 		) == 0,
 		"The completed delivery must not leave an ordinary-command cargo spill."
@@ -259,7 +277,7 @@ func _test_chained_pickup_respects_near_full_destination() -> void:
 	var stockpile_capacity := CityResourceContainerSystem.get_city_object_storage_capacity(
 		stockpile
 	)
-	var stored_amount := CityResourceContainerSystem.add_resource_to_city_object_storage(
+	var stored_amount := CityResourceContainerSystem.add_resource_to_city_object_storage_for_city_state(test_city_state,
 		stockpile_id,
 		WorldData.RESOURCE_LUMBER,
 		stockpile_capacity - 4
@@ -287,19 +305,19 @@ func _test_chained_pickup_respects_near_full_destination() -> void:
 		and first_source_id > 0
 		and second_source_id > 0
 		and not haul_request.is_empty()
-		and CityCitizenTaskRuntimeSystem.assign_city_citizen_task(citizen_id, haul_request),
+		and CityCitizenTaskRuntimeSystem.assign_city_citizen_task_for_city_state(test_city_state, citizen_id, haul_request),
 		"The chained-pickup fixture must assign a near-full storage haul."
 	)
 
-	CitizenTaskSystemScript.run_tick(1, 2)
-	CitizenTaskSystemScript.run_tick(2, 2)
+	CitizenTaskSystemScript.run_tick_for_city_state(test_city_state, 1, 2)
+	CitizenTaskSystemScript.run_tick_for_city_state(test_city_state, 2, 2)
 
 	var reservation_id := (
-		CityLogisticsSystem.get_city_haul_reservation_id_for_citizen(
+		CityLogisticsSystem.get_city_haul_reservation_id_for_citizen_for_city_state(test_city_state,
 			citizen_id
 		)
 	)
-	var reservation := CityLogisticsSystem.get_city_haul_reservation(
+	var reservation := CityLogisticsSystem.get_city_haul_reservation_for_city_state(test_city_state,
 		reservation_id
 	)
 	var destination_reserved_amount := int(
@@ -309,7 +327,7 @@ func _test_chained_pickup_respects_near_full_destination() -> void:
 		reservation.get("source_reserved_amount", 0)
 	)
 	var destination_free_space := CityResourceContainerSystem.get_city_object_storage_free_space(
-		CityObjectSystem.get_city_object_by_id(stockpile_id)
+		CityObjectSystem.get_city_object_by_id_for_city_state(test_city_state, stockpile_id)
 	)
 	var validation_result := _validate_fixture_city(true, false)
 	var has_shared_capacity_error := false
@@ -323,7 +341,7 @@ func _test_chained_pickup_respects_near_full_destination() -> void:
 			break
 
 	_expect(
-		CityCitizenInventorySystem.get_city_citizen_haul_cargo_resource_amount(
+		CityCitizenInventorySystem.get_city_citizen_haul_cargo_resource_amount_for_city_state(test_city_state,
 			citizen_id,
 			WorldData.RESOURCE_LUMBER
 		) == 2
@@ -343,25 +361,25 @@ func _test_chained_pickup_respects_near_full_destination() -> void:
 	)
 
 	var container_version_before_deposit := (
-		CityResourceAccountingSystem.get_city_container_version()
+		CityResourceAccountingSystem.get_city_container_version_for_city_state(test_city_state)
 	)
 	var public_version_before_deposit := (
-		CityResourceAccountingSystem.get_city_public_storage_version()
+		CityResourceAccountingSystem.get_city_public_storage_version_for_city_state(test_city_state)
 	)
 	var physical_lumber_before_deposit := (
-		CityResourceAccountingSystem.get_total_physical_city_resource_amount(
+		CityResourceAccountingSystem.get_total_physical_city_resource_amount_for_city_state(test_city_state,
 			WorldData.RESOURCE_LUMBER
 		)
 	)
 	var unreserved_accepted := (
-		CityResourceContainerSystem.add_resource_to_city_object_storage(
+		CityResourceContainerSystem.add_resource_to_city_object_storage_for_city_state(test_city_state,
 			stockpile_id,
 			WorldData.RESOURCE_LUMBER,
 			1
 		)
 	)
 	var wrong_reservation_accepted := (
-		CityResourceContainerSystem.add_resource_to_city_object_storage(
+		CityResourceContainerSystem.add_resource_to_city_object_storage_for_city_state(test_city_state,
 			stockpile_id,
 			WorldData.RESOURCE_LUMBER,
 			1,
@@ -375,9 +393,9 @@ func _test_chained_pickup_respects_near_full_destination() -> void:
 		"Reserved near-full capacity must reject unreserved and wrong-reservation deposits."
 	)
 	_expect(
-		CityResourceAccountingSystem.get_city_container_version()
+		CityResourceAccountingSystem.get_city_container_version_for_city_state(test_city_state)
 		== container_version_before_deposit
-		and CityResourceAccountingSystem.get_city_public_storage_version()
+		and CityResourceAccountingSystem.get_city_public_storage_version_for_city_state(test_city_state)
 		== public_version_before_deposit,
 		"Rejected deposits must not publish container or public-storage changes."
 	)
@@ -386,22 +404,22 @@ func _test_chained_pickup_respects_near_full_destination() -> void:
 
 	for tick_index in range(3, 48):
 		SimulationClock.absolute_world_minutes += 2
-		CitizenMovementSystemScript.run_tick(tick_index, 2)
-		CitizenTaskSystemScript.run_tick(tick_index, 2)
+		CitizenMovementSystemScript.run_tick_for_city_state(test_city_state, tick_index, 2)
+		CitizenTaskSystemScript.run_tick_for_city_state(test_city_state, tick_index, 2)
 
 		if (
-			CityCitizenInventorySystem.get_city_citizen_haul_cargo_amount(citizen_id) == 0
+			CityCitizenInventorySystem.get_city_citizen_haul_cargo_amount_for_city_state(test_city_state, citizen_id) == 0
 			and CityLogisticsSystem
-			.get_city_haul_reservation(reservation_id).is_empty()
+			.get_city_haul_reservation_for_city_state(test_city_state, reservation_id).is_empty()
 			and CityResourceContainerSystem
 			.get_city_object_storage_free_space(
-				CityObjectSystem.get_city_object_by_id(stockpile_id)
+				CityObjectSystem.get_city_object_by_id_for_city_state(test_city_state, stockpile_id)
 			) == 0
 		):
 			haul_completed = true
 			break
 
-	var final_stockpile := CityObjectSystem.get_city_object_by_id(
+	var final_stockpile := CityObjectSystem.get_city_object_by_id_for_city_state(test_city_state,
 		stockpile_id
 	)
 	var final_validation := _validate_fixture_city(true, true)
@@ -419,15 +437,15 @@ func _test_chained_pickup_respects_near_full_destination() -> void:
 	)
 	_expect(
 		CityLogisticsSystem.get_city_ground_pile_resource_amount(
-			CityLogisticsSystem.get_city_ground_pile_by_id(second_source_id),
+			CityLogisticsSystem.get_city_ground_pile_by_id_for_city_state(test_city_state, second_source_id),
 			WorldData.RESOURCE_LUMBER
 		) == 6,
 		"The chained source must retain the six units that could not fit."
 	)
 	_expect(
-		CityCitizenInventorySystem.get_city_citizen_haul_cargo_amount(citizen_id) == 0
+		CityCitizenInventorySystem.get_city_citizen_haul_cargo_amount_for_city_state(test_city_state, citizen_id) == 0
 		and CityLogisticsSystem
-		.get_city_haul_reservation(reservation_id).is_empty(),
+		.get_city_haul_reservation_for_city_state(test_city_state, reservation_id).is_empty(),
 		"Completed delivery must clear both citizen cargo and its reservation."
 	)
 	_expect(
@@ -436,15 +454,15 @@ func _test_chained_pickup_respects_near_full_destination() -> void:
 		"The completed near-full haul must leave the unified city state valid."
 	)
 	_expect(
-		CityResourceAccountingSystem.get_total_physical_city_resource_amount(
+		CityResourceAccountingSystem.get_total_physical_city_resource_amount_for_city_state(test_city_state,
 			WorldData.RESOURCE_LUMBER
 		) == physical_lumber_before_deposit,
 		"The chained pickup and reserved deposit must conserve physical lumber."
 	)
 	_expect(
-		CityResourceAccountingSystem.get_city_container_version()
+		CityResourceAccountingSystem.get_city_container_version_for_city_state(test_city_state)
 		== container_version_before_deposit + 1
-		and CityResourceAccountingSystem.get_city_public_storage_version()
+		and CityResourceAccountingSystem.get_city_public_storage_version_for_city_state(test_city_state)
 		== public_version_before_deposit + 1,
 		"Only the real Stockpile deposit may advance container and public-storage versions."
 	)
@@ -466,8 +484,8 @@ func _test_public_storage_keep_fallback() -> void:
 		fallback_amount
 	)
 	var versions_before_stockpile_probe := {
-		"container": CityResourceAccountingSystem.get_city_container_version(),
-		"public": CityResourceAccountingSystem.get_city_public_storage_version(),
+		"container": CityResourceAccountingSystem.get_city_container_version_for_city_state(test_city_state),
+		"public": CityResourceAccountingSystem.get_city_public_storage_version_for_city_state(test_city_state),
 	}
 	var stockpile_probe_request := _make_cleanup_haul_request(
 		city_world,
@@ -476,18 +494,18 @@ func _test_public_storage_keep_fallback() -> void:
 	)
 	var stockpile_probe_assigned := (
 		not stockpile_probe_request.is_empty()
-		and CityCitizenTaskRuntimeSystem.assign_city_citizen_task(
+		and CityCitizenTaskRuntimeSystem.assign_city_citizen_task_for_city_state(test_city_state,
 			citizen_id,
 			stockpile_probe_request
 		)
 	)
 	var stockpile_probe_reservation_id := (
-		CityLogisticsSystem.get_city_haul_reservation_id_for_citizen(
+		CityLogisticsSystem.get_city_haul_reservation_id_for_citizen_for_city_state(test_city_state,
 			citizen_id
 		)
 	)
 	var stockpile_probe_reservation := (
-		CityLogisticsSystem.get_city_haul_reservation(
+		CityLogisticsSystem.get_city_haul_reservation_for_city_state(test_city_state,
 			stockpile_probe_reservation_id
 		)
 	)
@@ -504,17 +522,17 @@ func _test_public_storage_keep_fallback() -> void:
 		"Cleanup hauling must prefer a Stockpile while it has unreserved space."
 	)
 	_expect(
-		CityCitizenTaskRuntimeSystem.clear_city_citizen_task(
+		CityCitizenTaskRuntimeSystem.clear_city_citizen_task_for_city_state(test_city_state,
 			citizen_id,
 			CityCitizens.CITY_CITIZEN_TASK_SOURCE_AUTONOMY
 		)
-		and CityLogisticsSystem.get_city_haul_reservation(
+		and CityLogisticsSystem.get_city_haul_reservation_for_city_state(test_city_state,
 			stockpile_probe_reservation_id
 		).is_empty()
-		and CityCitizenInventorySystem.get_city_citizen_haul_cargo_amount(citizen_id) == 0
-		and CityResourceAccountingSystem.get_city_container_version()
+		and CityCitizenInventorySystem.get_city_citizen_haul_cargo_amount_for_city_state(test_city_state, citizen_id) == 0
+		and CityResourceAccountingSystem.get_city_container_version_for_city_state(test_city_state)
 		== int(versions_before_stockpile_probe["container"])
-		and CityResourceAccountingSystem.get_city_public_storage_version()
+		and CityResourceAccountingSystem.get_city_public_storage_version_for_city_state(test_city_state)
 		== int(versions_before_stockpile_probe["public"]),
 		"Routing and canceling the Stockpile probe must release state without publishing storage changes."
 	)
@@ -525,25 +543,25 @@ func _test_public_storage_keep_fallback() -> void:
 		)
 	)
 	var accepted_filler := (
-		CityResourceContainerSystem.add_resource_to_city_object_storage(
+		CityResourceContainerSystem.add_resource_to_city_object_storage_for_city_state(test_city_state,
 			stockpile_id,
 			WorldData.RESOURCE_COAL,
 			stockpile_capacity
 		)
 	)
 	var container_version_before_keep_delivery := (
-		CityResourceAccountingSystem.get_city_container_version()
+		CityResourceAccountingSystem.get_city_container_version_for_city_state(test_city_state)
 	)
 	var public_version_before_keep_delivery := (
-		CityResourceAccountingSystem.get_city_public_storage_version()
+		CityResourceAccountingSystem.get_city_public_storage_version_for_city_state(test_city_state)
 	)
 	var physical_lumber_before_keep_delivery := (
-		CityResourceAccountingSystem.get_total_physical_city_resource_amount(
+		CityResourceAccountingSystem.get_total_physical_city_resource_amount_for_city_state(test_city_state,
 			WorldData.RESOURCE_LUMBER
 		)
 	)
 
-	citizen = CityCitizenRegistrySystem.get_city_citizen_by_id(citizen_id)
+	citizen = CityCitizenRegistrySystem.get_city_citizen_by_id_for_city_state(test_city_state, citizen_id)
 	var keep_request := _make_cleanup_haul_request(
 		city_world,
 		citizen,
@@ -552,17 +570,17 @@ func _test_public_storage_keep_fallback() -> void:
 	var keep_haul_assigned := (
 		accepted_filler == stockpile_capacity
 		and CityResourceContainerSystem.get_city_object_storage_free_space(
-			CityObjectSystem.get_city_object_by_id(stockpile_id)
+			CityObjectSystem.get_city_object_by_id_for_city_state(test_city_state, stockpile_id)
 		) == 0
 		and not keep_request.is_empty()
-		and CityCitizenTaskRuntimeSystem.assign_city_citizen_task(citizen_id, keep_request)
+		and CityCitizenTaskRuntimeSystem.assign_city_citizen_task_for_city_state(test_city_state, citizen_id, keep_request)
 	)
 	var keep_reservation_id := (
-		CityLogisticsSystem.get_city_haul_reservation_id_for_citizen(
+		CityLogisticsSystem.get_city_haul_reservation_id_for_citizen_for_city_state(test_city_state,
 			citizen_id
 		)
 	)
-	var keep_reservation := CityLogisticsSystem.get_city_haul_reservation(
+	var keep_reservation := CityLogisticsSystem.get_city_haul_reservation_for_city_state(test_city_state,
 		keep_reservation_id
 	)
 
@@ -575,9 +593,9 @@ func _test_public_storage_keep_fallback() -> void:
 		"A full Stockpile must route a fresh cleanup haul to the City Keep."
 	)
 	_expect(
-		CityResourceAccountingSystem.get_city_container_version()
+		CityResourceAccountingSystem.get_city_container_version_for_city_state(test_city_state)
 		== container_version_before_keep_delivery
-		and CityResourceAccountingSystem.get_city_public_storage_version()
+		and CityResourceAccountingSystem.get_city_public_storage_version_for_city_state(test_city_state)
 		== public_version_before_keep_delivery,
 		"Fallback matching and reservation must not publish a storage mutation."
 	)
@@ -586,23 +604,23 @@ func _test_public_storage_keep_fallback() -> void:
 
 	for tick_index in range(1, 64):
 		SimulationClock.absolute_world_minutes += 2
-		CitizenMovementSystemScript.run_tick(tick_index, 2)
-		CitizenTaskSystemScript.run_tick(tick_index, 2)
+		CitizenMovementSystemScript.run_tick_for_city_state(test_city_state, tick_index, 2)
+		CitizenTaskSystemScript.run_tick_for_city_state(test_city_state, tick_index, 2)
 
 		if (
-			CityCitizenInventorySystem.get_city_citizen_haul_cargo_amount(citizen_id) == 0
+			CityCitizenInventorySystem.get_city_citizen_haul_cargo_amount_for_city_state(test_city_state, citizen_id) == 0
 			and CityLogisticsSystem
-			.get_city_haul_reservation(keep_reservation_id).is_empty()
+			.get_city_haul_reservation_for_city_state(test_city_state, keep_reservation_id).is_empty()
 			and CityResourceContainerSystem
 			.get_city_object_stored_resource_amount(
-				CityObjectSystem.get_city_object_by_id(keep_id),
+				CityObjectSystem.get_city_object_by_id_for_city_state(test_city_state, keep_id),
 				WorldData.RESOURCE_LUMBER
 			) == fallback_amount
 		):
 			keep_delivery_completed = true
 			break
 
-	var final_keep := CityObjectSystem.get_city_object_by_id(keep_id)
+	var final_keep := CityObjectSystem.get_city_object_by_id_for_city_state(test_city_state, keep_id)
 	var final_validation := _validate_fixture_city(true, true)
 
 	_expect(
@@ -614,16 +632,16 @@ func _test_public_storage_keep_fallback() -> void:
 		"The fallback haul must deliver the exact cleanup amount to the Keep."
 	)
 	_expect(
-		CityLogisticsSystem.get_city_ground_pile_by_id(source_id).is_empty()
-		and CityLogisticsSystem.get_total_city_ground_pile_resource_amount(
+		CityLogisticsSystem.get_city_ground_pile_by_id_for_city_state(test_city_state, source_id).is_empty()
+		and CityLogisticsSystem.get_total_city_ground_pile_resource_amount_for_city_state(test_city_state,
 			WorldData.RESOURCE_LUMBER
 		) == 0,
 		"The completed Keep fallback must empty the cleanup pile."
 	)
 	_expect(
-		CityCitizenInventorySystem.get_city_citizen_haul_cargo_amount(citizen_id) == 0
+		CityCitizenInventorySystem.get_city_citizen_haul_cargo_amount_for_city_state(test_city_state, citizen_id) == 0
 		and CityLogisticsSystem
-		.get_city_haul_reservation(keep_reservation_id).is_empty(),
+		.get_city_haul_reservation_for_city_state(test_city_state, keep_reservation_id).is_empty(),
 		"The completed Keep fallback must clear cargo and its reservation."
 	)
 	_expect(
@@ -632,15 +650,15 @@ func _test_public_storage_keep_fallback() -> void:
 		"The Keep fallback must leave the unified city state valid."
 	)
 	_expect(
-		CityResourceAccountingSystem.get_total_physical_city_resource_amount(
+		CityResourceAccountingSystem.get_total_physical_city_resource_amount_for_city_state(test_city_state,
 			WorldData.RESOURCE_LUMBER
 		) == physical_lumber_before_keep_delivery,
 		"The Keep fallback must conserve physical lumber."
 	)
 	_expect(
-		CityResourceAccountingSystem.get_city_container_version()
+		CityResourceAccountingSystem.get_city_container_version_for_city_state(test_city_state)
 		== container_version_before_keep_delivery + 1
-		and CityResourceAccountingSystem.get_city_public_storage_version()
+		and CityResourceAccountingSystem.get_city_public_storage_version_for_city_state(test_city_state)
 		== public_version_before_keep_delivery + 1,
 		"Only the real Keep deposit may advance container and public-storage versions during fallback."
 	)
@@ -655,7 +673,7 @@ func _test_critical_hunger_interrupts_cargo_safely() -> void:
 	var fishery_size := CityObjectCatalog.get_city_object_size_for_type(
 		CityObjectCatalog.CITY_OBJECT_FISHING_GROUNDS
 	)
-	var fishery := CityObjectSystem.add_city_object({
+	var fishery := CityObjectSystem.add_city_object_for_city_state(test_city_state, {
 		"object_type": CityObjectCatalog.CITY_OBJECT_FISHING_GROUNDS,
 		"top_left": Vector2i(12, 9),
 		"size_tiles": fishery_size,
@@ -664,7 +682,7 @@ func _test_critical_hunger_interrupts_cargo_safely() -> void:
 	})
 	var fishery_id := int(fishery.get("id", -1))
 	_expect(
-		CityResourceContainerSystem.add_resource_to_city_object_storage(
+		CityResourceContainerSystem.add_resource_to_city_object_storage_for_city_state(test_city_state,
 			fishery_id,
 			WorldData.RESOURCE_FISH,
 			2
@@ -675,12 +693,12 @@ func _test_critical_hunger_interrupts_cargo_safely() -> void:
 	# boundary specifically begins from autonomous logistics, so release that
 	# assignment before creating the real haul task.
 	if int(
-		CityCitizenRegistrySystem.get_city_citizen_by_id(citizen_id).get(
+		CityCitizenRegistrySystem.get_city_citizen_by_id_for_city_state(test_city_state, citizen_id).get(
 			"job_object_id",
 			-1
 		)
 	) > 0:
-		CityAssignmentSystem.remove_city_citizen_job(citizen_id)
+		CityAssignmentSystem.remove_city_citizen_job_for_city_state(test_city_state, citizen_id)
 
 	var source_id := _add_ground_resource(
 		Vector2i(5, 5),
@@ -692,7 +710,7 @@ func _test_critical_hunger_interrupts_cargo_safely() -> void:
 		citizen,
 		source_id
 	)
-	var haul_assigned := CityCitizenTaskRuntimeSystem.assign_city_citizen_task(
+	var haul_assigned := CityCitizenTaskRuntimeSystem.assign_city_citizen_task_for_city_state(test_city_state,
 		citizen_id,
 		haul_request
 	)
@@ -700,27 +718,27 @@ func _test_critical_hunger_interrupts_cargo_safely() -> void:
 		not haul_request.is_empty() and haul_assigned,
 		"The critical-hunger fixture must begin with a real haul."
 	)
-	CitizenTaskSystemScript.run_tick(1, 2)
-	CitizenTaskSystemScript.run_tick(2, 2)
+	CitizenTaskSystemScript.run_tick_for_city_state(test_city_state, 1, 2)
+	CitizenTaskSystemScript.run_tick_for_city_state(test_city_state, 2, 2)
 	_expect(
-		CityCitizenInventorySystem.get_city_citizen_haul_cargo_resource_amount(
+		CityCitizenInventorySystem.get_city_citizen_haul_cargo_resource_amount_for_city_state(test_city_state,
 			citizen_id,
 			WorldData.RESOURCE_LUMBER
 		) == 2,
 		"Critical interruption coverage requires already-picked-up cargo."
 	)
 
-	var reservation_id := CityLogisticsSystem.get_city_haul_reservation_id_for_citizen(
+	var reservation_id := CityLogisticsSystem.get_city_haul_reservation_id_for_citizen_for_city_state(test_city_state,
 		citizen_id
 	)
 	var physical_before_interrupt := (
-		CityResourceAccountingSystem.get_total_physical_city_resource_amount(
+		CityResourceAccountingSystem.get_total_physical_city_resource_amount_for_city_state(test_city_state,
 			WorldData.RESOURCE_LUMBER
 		)
 	)
-	CitizenNeedsSystem.set_city_citizen_hunger_state(citizen_id, 20, 0)
-	CitizenDecisionSystemScript.run_tick(3, 2)
-	var food_task := CityCitizenTaskRuntimeSystem.get_city_citizen_current_task(citizen_id)
+	CitizenNeedsSystem.set_city_citizen_hunger_state_for_city_state(test_city_state, citizen_id, 20, 0)
+	CitizenDecisionSystemScript.run_tick_for_city_state(test_city_state, 3, 2)
+	var food_task := CityCitizenTaskRuntimeSystem.get_city_citizen_current_task_for_city_state(test_city_state, citizen_id)
 
 	_expect(
 		str(food_task.get("kind", ""))
@@ -729,15 +747,15 @@ func _test_critical_hunger_interrupts_cargo_safely() -> void:
 		"Critical hunger must replace an in-flight haul with workplace-food acquisition."
 	)
 	_expect(
-		CityCitizenInventorySystem.get_city_citizen_haul_cargo_amount(citizen_id) == 0
-		and CityLogisticsSystem.get_city_haul_reservation(reservation_id).is_empty(),
+		CityCitizenInventorySystem.get_city_citizen_haul_cargo_amount_for_city_state(test_city_state, citizen_id) == 0
+		and CityLogisticsSystem.get_city_haul_reservation_for_city_state(test_city_state, reservation_id).is_empty(),
 		"Critical interruption must release cargo state and its old reservation."
 	)
 	_expect(
-		CityLogisticsSystem.get_total_city_ground_pile_resource_amount(
+		CityLogisticsSystem.get_total_city_ground_pile_resource_amount_for_city_state(test_city_state,
 			WorldData.RESOURCE_LUMBER
 		) == 2
-		and CityResourceAccountingSystem.get_total_physical_city_resource_amount(
+		and CityResourceAccountingSystem.get_total_physical_city_resource_amount_for_city_state(test_city_state,
 			WorldData.RESOURCE_LUMBER
 		) == physical_before_interrupt,
 		"Critical interruption may spill exceptionally, but must do so atomically without loss."
@@ -750,7 +768,7 @@ func _test_construction_labor_releases_at_atomic_boundary() -> void:
 	var house_size := CityObjectCatalog.get_city_object_size_for_type(
 		CityObjectCatalog.CITY_OBJECT_HOUSE
 	)
-	var house_site := CityConstructionSystemScript.create_rectangular_site({
+	var house_site := CityConstructionSystemScript.create_rectangular_site_for_city_state(test_city_state, {
 		"object_type": CityObjectCatalog.CITY_OBJECT_HOUSE,
 		"top_left": Vector2i(10, 8),
 		"size_tiles": house_size,
@@ -764,20 +782,20 @@ func _test_construction_labor_releases_at_atomic_boundary() -> void:
 		return
 
 	_expect(
-		CityConstructionSystem.add_resource_to_city_construction_site(
+		CityConstructionSystem.add_resource_to_city_construction_site_for_city_state(test_city_state,
 			site_id,
 			WorldData.RESOURCE_LUMBER,
 			8
 		) == 8
-		and CityConstructionSystem.add_resource_to_city_construction_site(
+		and CityConstructionSystem.add_resource_to_city_construction_site_for_city_state(test_city_state,
 			site_id,
 			WorldData.RESOURCE_STONE,
 			4
 		) == 4,
 		"The House site must receive its complete physical material recipe."
 	)
-	CityConstructionSystemScript.refresh_city_construction_site(site_id)
-	house_site = CityConstructionSystem.get_city_construction_site_by_id(site_id)
+	CityConstructionSystemScript.refresh_city_construction_site_for_city_state(test_city_state, site_id)
+	house_site = CityConstructionSystem.get_city_construction_site_by_id_for_city_state(test_city_state, site_id)
 	_expect(
 		str(house_site.get("phase", ""))
 		== CityConstructionSystem.CITY_CONSTRUCTION_PHASE_LABOR,
@@ -802,8 +820,8 @@ func _test_construction_labor_releases_at_atomic_boundary() -> void:
 		CityWorkSystem.CITY_PLAYER_COMMAND_TYPE_CHOP_TREE,
 		Vector2i(25, 18)
 	)
-	CitizenDecisionSystemScript.run_tick(1, 2)
-	var assigned_task := CityCitizenTaskRuntimeSystem.get_city_citizen_current_task(citizen_id)
+	CitizenDecisionSystemScript.run_tick_for_city_state(test_city_state, 1, 2)
+	var assigned_task := CityCitizenTaskRuntimeSystem.get_city_citizen_current_task_for_city_state(test_city_state, citizen_id)
 	_expect(
 		str(assigned_task.get("kind", ""))
 		== CityCitizens.CITY_CITIZEN_TASK_KIND_CONSTRUCTION
@@ -811,8 +829,8 @@ func _test_construction_labor_releases_at_atomic_boundary() -> void:
 		"The unified scheduler must assign the nearby construction labor job."
 	)
 
-	CitizenTaskSystemScript.run_tick(2, 2)
-	var performing_task := CityCitizenTaskRuntimeSystem.get_city_citizen_current_task(citizen_id)
+	CitizenTaskSystemScript.run_tick_for_city_state(test_city_state, 2, 2)
+	var performing_task := CityCitizenTaskRuntimeSystem.get_city_citizen_current_task_for_city_state(test_city_state, citizen_id)
 	var boundary_minute := int(
 		performing_task.get(
 			"next_action_world_minute",
@@ -829,15 +847,15 @@ func _test_construction_labor_releases_at_atomic_boundary() -> void:
 	)
 
 	SimulationClock.absolute_world_minutes = boundary_minute - 1
-	CitizenTaskSystemScript.run_tick(3, 29)
-	var before_boundary_task := CityCitizenTaskRuntimeSystem.get_city_citizen_current_task(
+	CitizenTaskSystemScript.run_tick_for_city_state(test_city_state, 3, 29)
+	var before_boundary_task := CityCitizenTaskRuntimeSystem.get_city_citizen_current_task_for_city_state(test_city_state,
 		citizen_id
 	)
 	_expect(
 		str(before_boundary_task.get("kind", ""))
 		== CityCitizens.CITY_CITIZEN_TASK_KIND_CONSTRUCTION
 		and int(
-			CityConstructionSystem.get_city_construction_site_by_id(site_id).get(
+			CityConstructionSystem.get_city_construction_site_by_id_for_city_state(test_city_state, site_id).get(
 				"completed_labor_minutes",
 				-1
 			)
@@ -847,13 +865,13 @@ func _test_construction_labor_releases_at_atomic_boundary() -> void:
 	)
 
 	SimulationClock.absolute_world_minutes = boundary_minute
-	CitizenTaskSystemScript.run_tick(4, 1)
-	var released_task := CityCitizenTaskRuntimeSystem.get_city_citizen_current_task(citizen_id)
+	CitizenTaskSystemScript.run_tick_for_city_state(test_city_state, 4, 1)
+	var released_task := CityCitizenTaskRuntimeSystem.get_city_citizen_current_task_for_city_state(test_city_state, citizen_id)
 	_expect(
 		str(released_task.get("kind", ""))
 		== CityCitizens.CITY_CITIZEN_TASK_KIND_NONE
 		and int(
-			CityConstructionSystem.get_city_construction_site_by_id(site_id).get(
+			CityConstructionSystem.get_city_construction_site_by_id_for_city_state(test_city_state, site_id).get(
 				"completed_labor_minutes",
 				-1
 			)
@@ -862,16 +880,16 @@ func _test_construction_labor_releases_at_atomic_boundary() -> void:
 		"Labor must release exactly at the boundary after preserving progress."
 	)
 
-	CityWorkSystemScript.synchronize_player_work_board()
-	var next_job := CityWorkSystemScript.get_best_player_job_for_citizen(
+	CityWorkSystemScript.synchronize_player_work_board_for_city_state(test_city_state)
+	var next_job := CityWorkSystemScript.get_best_player_job_for_citizen_for_city_state(test_city_state,
 		citizen_id
 	)
 	_expect(
 		not next_job.is_empty(),
 		"A released laborer must be immediately eligible to re-query the scheduler."
 	)
-	CitizenDecisionSystemScript.run_tick(5, 2)
-	var reassigned_task := CityCitizenTaskRuntimeSystem.get_city_citizen_current_task(citizen_id)
+	CitizenDecisionSystemScript.run_tick_for_city_state(test_city_state, 5, 2)
+	var reassigned_task := CityCitizenTaskRuntimeSystem.get_city_citizen_current_task_for_city_state(test_city_state, citizen_id)
 	_expect(
 		str(reassigned_task.get("source", ""))
 		== CityCitizens.CITY_CITIZEN_TASK_SOURCE_PLAYER
@@ -901,7 +919,7 @@ func _test_culture_identity_validation() -> void:
 	var alternate_culture_id := int(
 		alternate_culture.get("id", -1)
 	)
-	var citizen := CityCitizenRegistrySystem.add_city_citizen(
+	var citizen := CityCitizenRegistrySystem.add_city_citizen_for_city_state(test_city_state,
 		"",
 		Vector2i(5, 5),
 		CityCitizens.CITY_CITIZEN_SEX_FEMALE,
@@ -922,7 +940,7 @@ func _test_culture_identity_validation() -> void:
 	CityCitizenStateValidatorScript._validate_city_citizen_culture_state(
 		validation_target,
 		errors,
-		CityCitizenRegistrySystem.get_current_state().citizen_index_by_id
+		test_city_state.citizen_registry_state.citizen_index_by_id
 	)
 	_expect(
 		errors.is_empty(),
@@ -934,7 +952,7 @@ func _test_culture_identity_validation() -> void:
 	CityCitizenStateValidatorScript._validate_city_citizen_culture_state(
 		validation_target,
 		errors,
-		CityCitizenRegistrySystem.get_current_state().citizen_index_by_id
+		test_city_state.citizen_registry_state.citizen_index_by_id
 	)
 	_expect(
 		_culture_errors_contain(errors, "missing culture_id"),
@@ -946,7 +964,7 @@ func _test_culture_identity_validation() -> void:
 	CityCitizenStateValidatorScript._validate_city_citizen_culture_state(
 		validation_target,
 		errors,
-		CityCitizenRegistrySystem.get_current_state().citizen_index_by_id
+		test_city_state.citizen_registry_state.citizen_index_by_id
 	)
 	_expect(
 		_culture_errors_contain(errors, "non-integer culture_id"),
@@ -958,7 +976,7 @@ func _test_culture_identity_validation() -> void:
 	CityCitizenStateValidatorScript._validate_city_citizen_culture_state(
 		validation_target,
 		errors,
-		CityCitizenRegistrySystem.get_current_state().citizen_index_by_id
+		test_city_state.citizen_registry_state.citizen_index_by_id
 	)
 	_expect(
 		_culture_errors_contain(errors, "nonpositive culture_id"),
@@ -975,7 +993,7 @@ func _test_culture_identity_validation() -> void:
 	CityCitizenStateValidatorScript._validate_city_citizen_culture_state(
 		validation_target,
 		errors,
-		CityCitizenRegistrySystem.get_current_state().citizen_index_by_id
+		test_city_state.citizen_registry_state.citizen_index_by_id
 	)
 	_expect(
 		_culture_errors_contain(errors, "references nonexistent culture"),
@@ -987,20 +1005,20 @@ func _test_culture_identity_validation() -> void:
 	CityCitizenStateValidatorScript._validate_city_citizen_culture_state(
 		validation_target,
 		errors,
-		CityCitizenRegistrySystem.get_current_state().citizen_index_by_id
+		test_city_state.citizen_registry_state.citizen_index_by_id
 	)
 	_expect(
 		errors.is_empty(),
 		"Restoring the alternate culture must restore valid culture state."
 	)
 
-	var founding_citizen := CityCitizenRegistrySystem.get_city_citizen_by_id(1)
+	var founding_citizen := CityCitizenRegistrySystem.get_city_citizen_by_id_for_city_state(test_city_state, 1)
 	founding_citizen["culture_id"] = alternate_culture_id
 	errors.clear()
 	CityCitizenStateValidatorScript._validate_city_citizen_culture_state(
 		validation_target,
 		errors,
-		CityCitizenRegistrySystem.get_current_state().citizen_index_by_id
+		test_city_state.citizen_registry_state.citizen_index_by_id
 	)
 	_expect(
 		_culture_errors_contain(
@@ -1111,7 +1129,6 @@ func _culture_errors_contain(
 func _reset_fixture() -> WorldData:
 	WorldData.reset_runtime_session_state()
 	SimulationClock.start_new_game()
-	CitizenDecisionSystemScript.reset_runtime_state()
 	var city_world := WorldData.new()
 	city_world.setup(TEST_WORLD_SIZE.x, TEST_WORLD_SIZE.y, TEST_WORLD_SEED)
 
@@ -1125,24 +1142,29 @@ func _reset_fixture() -> WorldData:
 			tile.erase("surface_feature")
 
 	city_world.mark_tile_data_changed()
-	WorldData.store_city_world_save(city_world, TEST_WORLD_SEED)
-	var primary_culture := WorldData.create_culture(
-		"Boundary Test Culture"
+	test_fixture = CitySettlementTestFixtureScript.create({
+		"label": "Boundary Test",
+		"city_world": city_world,
+		"city_seed": TEST_WORLD_SEED,
+	})
+	_expect(test_fixture != null, "The boundary fixture must be created.")
+	if test_fixture == null:
+		return null
+	test_city_state = test_fixture.city_state
+	test_primary_culture_id = test_fixture.culture_id
+	CitizenDecisionSystemScript._reset_runtime_state_for_city_state(
+		test_city_state,
+		test_city_state.citizen_decision_runtime_state
 	)
-	test_primary_culture_id = int(primary_culture.get("id", -1))
-	WorldData.official_city_name = "Boundary Test City"
-	WorldData.official_founding_culture_id = test_primary_culture_id
-	WorldData.player_city_founded = true
-	WorldPoliticalState.replace_current_city_runtime_data({
-		"id": 1,
+	test_city_state.city_runtime_data.merge({
+		"id": test_fixture.settlement_id,
 		"name": "Boundary Test City",
 		"primary_culture_id": test_primary_culture_id,
 		"city_world_seed": TEST_WORLD_SEED,
 		"city_map_size": TEST_WORLD_SIZE,
 		"can_build": true,
 		"founded": true,
-	})
-	test_city_state = WorldPoliticalState.get_current_city_simulation_state()
+	}, true)
 	return city_world
 
 
@@ -1151,7 +1173,7 @@ func _validate_fixture_city(
 	report_problems: bool
 ) -> Dictionary:
 	return CityStateValidatorScript.validate_for_city_state(
-		1,
+		test_fixture.settlement_id,
 		test_city_state,
 		force_rebuild,
 		report_problems
@@ -1161,13 +1183,13 @@ func _validate_fixture_city(
 func _get_fixture_validation_target() -> Dictionary:
 	return {
 		"settlement_context": null,
-		"settlement_id": 1,
+		"settlement_id": test_fixture.settlement_id,
 		"city_state": test_city_state,
 	}
 
 
 func _add_citizen(tile_position: Vector2i) -> Dictionary:
-	return CityCitizenRegistrySystem.add_city_citizen(
+	return CityCitizenRegistrySystem.add_city_citizen_for_city_state(test_city_state,
 		"",
 		tile_position,
 		CityCitizens.CITY_CITIZEN_SEX_FEMALE,
@@ -1179,8 +1201,8 @@ func _add_keep(
 	city_world: WorldData,
 	top_left: Vector2i
 ) -> Dictionary:
-	var city_state = WorldPoliticalState.get_current_city_simulation_state()
-	if not city_state is CitySettlementSimulationState:
+	var city_state := test_city_state
+	if city_state == null:
 		return {}
 
 	var runtime_data: Dictionary = city_state.city_runtime_data
@@ -1188,7 +1210,7 @@ func _add_keep(
 	var could_build := bool(runtime_data.get("can_build", false))
 	runtime_data["founded"] = false
 	runtime_data["can_build"] = false
-	var keep := CityObjectSystem.add_city_object({
+	var keep := CityObjectSystem.add_city_object_for_city_state(test_city_state, {
 		"object_type": CityObjectCatalog.CITY_OBJECT_CITY_CENTER,
 		"top_left": top_left,
 		"size_tiles": CityObjectCatalog.get_city_object_size_for_type(
@@ -1213,7 +1235,7 @@ func _add_stockpile(
 	city_world: WorldData,
 	top_left: Vector2i
 ) -> Dictionary:
-	return CityObjectSystem.add_city_object({
+	return CityObjectSystem.add_city_object_for_city_state(test_city_state, {
 		"object_type": CityObjectCatalog.CITY_OBJECT_STOCKPILE,
 		"top_left": top_left,
 		"size_tiles": CityObjectCatalog.get_city_object_size_for_type(
@@ -1229,7 +1251,7 @@ func _add_ground_resource(
 	resource: String,
 	amount: int
 ) -> int:
-	var add_result := CityLogisticsSystem.add_resource_to_city_ground_piles_with_result({
+	var add_result := CityLogisticsSystem.add_resource_to_city_ground_piles_with_result_for_city_state(test_city_state, {
 		"tile_position": tile_position,
 		"resource": resource,
 		"amount_delta": amount,
@@ -1248,13 +1270,13 @@ func _make_cleanup_haul_request(
 	source_id: int
 ) -> Dictionary:
 	var source := CityLogisticsSystem.make_city_ground_pile_haul_endpoint(source_id)
-	return CitizenHaulingSystemScript.make_public_storage_haul_task_request({
+	return CitizenHaulingSystemScript.make_public_storage_haul_task_request_for_city_state(test_city_state, {
 		"city_world": city_world,
 		"citizen": citizen,
 		"source": source,
 		"requester": source,
 		"resource_type": str(
-			CityLogisticsSystem.get_city_ground_pile_by_id(source_id).get(
+			CityLogisticsSystem.get_city_ground_pile_by_id_for_city_state(test_city_state, source_id).get(
 				"resource_type",
 				WorldData.RESOURCE_NONE
 			)
@@ -1281,7 +1303,8 @@ func _add_natural_command(
 		tile_position,
 		CityWorkSystem.get_city_player_command_surface_feature(command_type)
 	)
-	var added_count := CityWorkSystem.add_city_player_command_targets(
+	var added_count := CityWorkSystem.add_city_player_command_targets_for_city_state(
+		test_city_state,
 		command_type,
 		[tile_position]
 	)
@@ -1290,7 +1313,10 @@ func _add_natural_command(
 		return -1
 
 	return int(
-		CityWorkSystem.get_city_player_command_at_tile(tile_position).get(
+		CityWorkSystem.get_city_player_command_at_tile_for_city_state(
+			test_city_state,
+			tile_position
+		).get(
 			"id",
 			-1
 		)

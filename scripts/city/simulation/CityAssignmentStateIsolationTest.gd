@@ -92,13 +92,20 @@ func _test_equal_version_assignment_and_workplace_isolation() -> void:
 		WorldPoliticalState.get_settlement_context(city_a_id), true, false
 	)
 	var citizen_id := int(state_a.get("citizen_id", -1))
+	var city_state_a: CitySettlementSimulationState = state_a.get("city_state")
 	_expect(
-		CityAssignmentSystem.remove_city_citizen_home(citizen_id)
-		and CityAssignmentSystem.remove_city_citizen_job(citizen_id),
+		CityAssignmentSystem.remove_city_citizen_home_for_city_state(
+			city_state_a,
+			citizen_id
+		)
+		and CityAssignmentSystem.remove_city_citizen_job_for_city_state(
+			city_state_a,
+			citizen_id
+		),
 		"City A must accept focused home and job removals."
 	)
-	CityAssignmentSystem.get_current_state().assignment_version = 7
-	CityEmploymentSystem.get_current_state().workplace_version = 11
+	city_state_a.assignment_state.assignment_version = 7
+	city_state_a.workplace_state.workplace_version = 11
 
 	_expect(
 		_bind_fixture_city(city_b_id) and _active_city_matches_assigned_state(state_b),
@@ -133,8 +140,6 @@ func _exercise_city(city_id: int, culture_id: int, world_seed: int) -> Dictionar
 		return {}
 
 	var city_world := _make_world(32, 32, world_seed)
-	WorldPoliticalState.set_current_city_world(city_world)
-	WorldPoliticalState.set_current_city_seed(world_seed)
 	var city_state = WorldPoliticalState.get_city_simulation_state(city_id)
 	_expect(
 		city_state is CitySettlementSimulationState,
@@ -142,6 +147,7 @@ func _exercise_city(city_id: int, culture_id: int, world_seed: int) -> Dictionar
 	)
 	if not city_state is CitySettlementSimulationState:
 		return {}
+	WorldData.store_city_world_for_state(city_state, city_world, world_seed)
 	var settlement := WorldPoliticalState.get_settlement(city_id)
 	city_state.city_runtime_data.clear()
 	city_state.city_runtime_data.merge({
@@ -151,13 +157,16 @@ func _exercise_city(city_id: int, culture_id: int, world_seed: int) -> Dictionar
 		"can_build": false,
 	}, true)
 	var keep_top_left := Vector2i(0, 20)
-	var keep := CityObjectSystem.register_completed_city_object({
+	var keep := CityObjectSystem.register_completed_city_object_for_city_state(
+		city_state,
+		{
 		"object_type": CityObjectCatalog.CITY_OBJECT_CITY_CENTER,
 		"top_left": keep_top_left,
 		"size_tiles": CityObjectCatalog.get_city_object_size_for_type(CityObjectCatalog.CITY_OBJECT_CITY_CENTER),
 		"object_owner": "player",
 		"city_world": city_world,
-	})
+		}
+	)
 	_expect(not keep.is_empty(), "Each assignment fixture must register its Keep while unfounded.")
 	if keep.is_empty():
 		return {}
@@ -169,21 +178,28 @@ func _exercise_city(city_id: int, culture_id: int, world_seed: int) -> Dictionar
 		"foundation_object_id": int(keep.get("id", -1)),
 		"foundation_object_owner": str(keep.get("owner", "")),
 	}, true)
-	var house := CityObjectSystem.register_completed_city_object({
+	var house := CityObjectSystem.register_completed_city_object_for_city_state(
+		city_state,
+		{
 		"object_type": CityObjectCatalog.CITY_OBJECT_HOUSE,
 		"top_left": SHARED_HOUSE_TOP_LEFT,
 		"size_tiles": CityObjectCatalog.get_city_object_size_for_type(CityObjectCatalog.CITY_OBJECT_HOUSE),
 		"object_owner": "player",
 		"city_world": city_world,
-	})
-	var fishery := CityObjectSystem.register_completed_city_object({
+		}
+	)
+	var fishery := CityObjectSystem.register_completed_city_object_for_city_state(
+		city_state,
+		{
 		"object_type": CityObjectCatalog.CITY_OBJECT_FISHING_GROUNDS,
 		"top_left": SHARED_FISHERY_TOP_LEFT,
 		"size_tiles": CityObjectCatalog.get_city_object_size_for_type(CityObjectCatalog.CITY_OBJECT_FISHING_GROUNDS),
 		"object_owner": "player",
 		"city_world": city_world,
-	})
-	var citizen := CityCitizenRegistrySystem.add_city_citizen(
+		}
+	)
+	var citizen := CityCitizenRegistrySystem.add_city_citizen_for_city_state(
+		city_state,
 		"", SHARED_CITIZEN_TILE, CityCitizens.CITY_CITIZEN_SEX_FEMALE, culture_id
 	)
 	var citizen_id := int(citizen.get("id", -1))
@@ -194,22 +210,31 @@ func _exercise_city(city_id: int, culture_id: int, world_seed: int) -> Dictionar
 		citizen_id == 1
 		and house_id == 2
 		and fishery_id == 3
-		and CityAssignmentSystem.assign_city_citizen_home(citizen_id, house_id)
-		and CityAssignmentSystem.assign_city_citizen_job(citizen_id, fishery_id),
+		and CityAssignmentSystem.assign_city_citizen_home_for_city_state(
+			city_state,
+			citizen_id,
+			house_id
+		)
+		and CityAssignmentSystem.assign_city_citizen_job_for_city_state(
+			city_state,
+			citizen_id,
+			fishery_id
+		),
 		"Each City must independently establish matching local relationships."
 	)
 	if citizen_id <= 0 or house_id <= 0 or fishery_id <= 0:
 		return {}
 
 	return {
+		"city_state": city_state,
 		"city_id": city_id,
 		"citizen_id": citizen_id,
 		"house_id": house_id,
 		"fishery_id": fishery_id,
-		"assignment_state": CityAssignmentSystem.get_current_state(),
-		"workplace_state": CityEmploymentSystem.get_current_state(),
-		"registry_state": CityCitizenRegistrySystem.get_current_state(),
-		"object_state": CityObjectSystem.get_current_state(),
+		"assignment_state": city_state.assignment_state,
+		"workplace_state": city_state.workplace_state,
+		"registry_state": city_state.citizen_registry_state,
+		"object_state": city_state.object_state,
 	}
 
 
@@ -217,31 +242,50 @@ func _bind_fixture_city(city_id: int) -> bool:
 	var city_state = WorldPoliticalState.get_city_simulation_state(city_id)
 	if not city_state is CitySettlementSimulationState:
 		return false
-	CityCitizenUnboundCompatibility.bind_legacy_fixture_state(city_state)
 	return WorldPoliticalState.set_active_settlement(city_id)
 
 
 func _active_city_matches_assigned_state(expected: Dictionary) -> bool:
+	var city_state: CitySettlementSimulationState = expected.get("city_state")
 	var citizen_id := int(expected.get("citizen_id", -1))
 	var house_id := int(expected.get("house_id", -1))
 	var fishery_id := int(expected.get("fishery_id", -1))
-	var citizen := CityCitizenRegistrySystem.get_city_citizen_by_id(citizen_id)
+	var citizen := CityCitizenRegistrySystem.get_city_citizen_by_id_for_city_state(
+		city_state,
+		citizen_id
+	)
 	return (
-		is_same(CityAssignmentSystem.get_current_state(), expected.get("assignment_state"))
-		and is_same(CityEmploymentSystem.get_current_state(), expected.get("workplace_state"))
+		is_same(city_state.assignment_state, expected.get("assignment_state"))
+		and is_same(city_state.workplace_state, expected.get("workplace_state"))
 		and int(citizen.get("home_object_id", -1)) == house_id
 		and int(citizen.get("job_object_id", -1)) == fishery_id
-		and CityAssignmentSystem.get_city_object_resident_ids(CityObjectSystem.get_city_object_by_id(house_id)).has(citizen_id)
-		and CityEmploymentSystem.get_city_object_worker_ids(CityObjectSystem.get_city_object_by_id(fishery_id)).has(citizen_id)
+		and CityAssignmentSystem.get_city_object_resident_ids_for_city_state(
+			city_state,
+			CityObjectSystem.get_city_object_by_id_for_city_state(
+				city_state,
+				house_id
+			)
+		).has(citizen_id)
+		and CityEmploymentSystem.get_city_object_worker_ids_for_city_state(
+			city_state,
+			CityObjectSystem.get_city_object_by_id_for_city_state(
+				city_state,
+				fishery_id
+			)
+		).has(citizen_id)
 	)
 
 
 func _active_city_matches_unassigned_state(expected: Dictionary) -> bool:
+	var city_state: CitySettlementSimulationState = expected.get("city_state")
 	var citizen_id := int(expected.get("citizen_id", -1))
-	var citizen := CityCitizenRegistrySystem.get_city_citizen_by_id(citizen_id)
+	var citizen := CityCitizenRegistrySystem.get_city_citizen_by_id_for_city_state(
+		city_state,
+		citizen_id
+	)
 	return (
-		is_same(CityAssignmentSystem.get_current_state(), expected.get("assignment_state"))
-		and is_same(CityEmploymentSystem.get_current_state(), expected.get("workplace_state"))
+		is_same(city_state.assignment_state, expected.get("assignment_state"))
+		and is_same(city_state.workplace_state, expected.get("workplace_state"))
 		and int(citizen.get("home_object_id", 0)) == -1
 		and int(citizen.get("job_object_id", 0)) == -1
 	)

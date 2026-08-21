@@ -119,9 +119,17 @@ func _seed_city(
 	)
 	if WorldPoliticalState.active_settlement_id != city_id:
 		return {}
-	WorldPoliticalState.set_current_city_world(_make_world(16, 16, seed_value))
-	WorldPoliticalState.set_current_city_seed(seed_value)
-	var citizen := CityCitizenRegistrySystem.add_city_citizen(
+	var city_state = WorldPoliticalState.get_city_simulation_state(city_id)
+	if not city_state is CitySettlementSimulationState:
+		_expect(false, "The seeded City must expose its exact state.")
+		return {}
+	WorldData.store_city_world_for_state(
+		city_state,
+		_make_world(16, 16, seed_value),
+		seed_value
+	)
+	var citizen := CityCitizenRegistrySystem.add_city_citizen_for_city_state(
+		city_state,
 		"", SHARED_CITIZEN_TILE, sex, culture_id
 	)
 	var citizen_id := int(citizen.get("id", -1))
@@ -129,10 +137,10 @@ func _seed_city(
 		_expect(false, "Each City must create its own local citizen 1.")
 		return {}
 
-	var registry_state := CityCitizenRegistrySystem.get_current_state()
-	var spatial_state := CityCitizenSpatialSystem.get_current_state()
-	var movement_state := CityCitizenMovementRuntimeSystem.get_current_state()
-	var task_state := CityCitizenTaskRuntimeSystem.get_current_state()
+	var registry_state: CityCitizenRegistryState = city_state.citizen_registry_state
+	var spatial_state: CityCitizenSpatialState = city_state.citizen_spatial_state
+	var movement_state: CityCitizenMovementRuntimeState = city_state.citizen_movement_runtime_state
+	var task_state: CityCitizenTaskRuntimeState = city_state.citizen_task_runtime_state
 	movement_state.active_mover_ids = [marker]
 	movement_state.active_mover_id_lookup = {marker: true}
 	movement_state.citizen_movement_visual_events = [{"marker": marker}]
@@ -141,11 +149,12 @@ func _seed_city(
 	task_state.active_task_ids = [marker]
 	task_state.active_task_id_lookup = {marker: true}
 	task_state.citizen_task_version = 13
-	CityAssignmentSystem.get_current_state().assignment_version = 15
-	CityEmploymentSystem.get_current_state().workplace_version = 17
+	city_state.assignment_state.assignment_version = 15
+	city_state.workplace_state.workplace_version = 17
 
 	return {
 		"city_id": city_id,
+		"city_state": city_state,
 		"citizen_id": citizen_id,
 		"registry_state": registry_state,
 		"citizens": registry_state.citizens,
@@ -164,10 +173,11 @@ func _seed_city(
 
 func _matches_seeded_city(expected: Dictionary) -> bool:
 	var marker := int(expected["marker"])
-	var registry_state := CityCitizenRegistrySystem.get_current_state()
-	var spatial_state := CityCitizenSpatialSystem.get_current_state()
-	var movement_state := CityCitizenMovementRuntimeSystem.get_current_state()
-	var task_state := CityCitizenTaskRuntimeSystem.get_current_state()
+	var city_state: CitySettlementSimulationState = expected["city_state"]
+	var registry_state := city_state.citizen_registry_state
+	var spatial_state := city_state.citizen_spatial_state
+	var movement_state := city_state.citizen_movement_runtime_state
+	var task_state := city_state.citizen_task_runtime_state
 	return (
 		is_same(registry_state, expected["registry_state"])
 		and is_same(registry_state.citizens, expected["citizens"])
@@ -183,8 +193,8 @@ func _matches_seeded_city(expected: Dictionary) -> bool:
 		and is_same(task_state.active_task_ids, expected["task_ids"])
 		and task_state.active_task_id_lookup.get(marker, false)
 		and task_state.citizen_task_version == 13
-		and CityAssignmentSystem.get_current_state().assignment_version == 15
-		and CityEmploymentSystem.get_current_state().workplace_version == 17
+		and city_state.assignment_state.assignment_version == 15
+		and city_state.workplace_state.workplace_version == 17
 		and str(registry_state.citizens[0].get("sex", "")) == str(expected["sex"])
 		and spatial_state.citizen_ids_by_tile.get(SHARED_CITIZEN_TILE, []) == [1]
 	)
@@ -194,7 +204,6 @@ func _bind_fixture_city(city_id: int) -> bool:
 	var city_state = WorldPoliticalState.get_city_simulation_state(city_id)
 	if not city_state is CitySettlementSimulationState:
 		return false
-	CityCitizenUnboundCompatibility.bind_legacy_fixture_state(city_state)
 	return true
 
 

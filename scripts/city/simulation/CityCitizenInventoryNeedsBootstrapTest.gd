@@ -47,15 +47,22 @@ func _test_real_founding_records_and_clean_ensures() -> void:
 		WorldPoliticalState.synchronize_foundation_with_world_data(),
 		"Real founding must establish an instance-owned capital before Keep placement."
 	)
-	var capital_state = WorldPoliticalState.get_active_city_simulation_state()
+	var capital_settlement_id := (
+		WorldPoliticalState.get_player_capital_settlement_id()
+	)
+	var capital_state: CitySettlementSimulationState = (
+		WorldPoliticalState.get_city_simulation_state(capital_settlement_id)
+	)
 
 	if not capital_state is CitySettlementSimulationState:
 		_expect(false, "Real founding must expose a City simulation state.")
 		return
 
 	var city_world := _make_world(20, 20, 98_902)
-	WorldData.store_city_world_save(city_world, 98_902)
-	var keep := CityObjectSystem.add_city_object({
+	WorldData.store_city_world_for_state(
+		capital_state, city_world, 98_902
+	)
+	var keep := CityObjectSystem.add_city_object_for_city_state(capital_state, {
 		"object_type": CityObjectCatalog.CITY_OBJECT_CITY_CENTER,
 		"top_left": Vector2i(6, 6),
 		"size_tiles": CityObjectCatalog.get_city_object_size_for_type(
@@ -77,9 +84,11 @@ func _test_real_founding_records_and_clean_ensures() -> void:
 		"foundation_size": keep.get("size", Vector2i.ZERO),
 	})
 
-	var registry_state := CityCitizenRegistrySystem.get_current_state()
+	var registry_state: CityCitizenRegistryState = (
+		capital_state.citizen_registry_state
+	)
 	var registry_array: Array = registry_state.citizens
-	var registry_version_before := registry_state.citizen_version
+	var registry_version_before: int = registry_state.citizen_version
 	var complete_records := true
 
 	for citizen_index in range(registry_array.size()):
@@ -98,18 +107,27 @@ func _test_real_founding_records_and_clean_ensures() -> void:
 			or not CityCitizens.has_complete_city_citizen_haul_cargo_state(
 				citizen
 			)
-			or CityCitizenInventorySystem.get_city_citizen_carry_capacity(
+			or CityCitizenInventorySystem.get_city_citizen_carry_capacity_for_city_state(
+				capital_state,
 				citizen_id
 			) != CityCitizens.DEFAULT_CITIZEN_CARRY_CAPACITY
-			or not CityCitizenInventorySystem.get_city_citizen_inventory(
+			or not CityCitizenInventorySystem.get_city_citizen_inventory_for_city_state(
+				capital_state,
 				citizen_id
 			).is_empty()
-			or CityCitizenInventorySystem.get_city_citizen_haul_cargo_amount(
+			or CityCitizenInventorySystem.get_city_citizen_haul_cargo_amount_for_city_state(
+				capital_state,
 				citizen_id
 			) != 0
-			or CitizenNeedsSystem.get_city_citizen_hunger(citizen_id)
+			or CitizenNeedsSystem.get_city_citizen_hunger_for_city_state(
+				capital_state,
+				citizen_id
+			)
 			!= CityCitizens.DEFAULT_CITIZEN_HUNGER
-			or CitizenNeedsSystem.get_city_citizen_happiness(citizen_id)
+			or CitizenNeedsSystem.get_city_citizen_happiness_for_city_state(
+				capital_state,
+				citizen_id
+			)
 			!= CityCitizens.DEFAULT_CITIZEN_HAPPINESS
 			or int(citizen.get("hunger_decay_remainder", -1)) != 0
 		):
@@ -124,9 +142,15 @@ func _test_real_founding_records_and_clean_ensures() -> void:
 	)
 
 	var inventory_migrated := (
-		CityCitizenInventorySystem.ensure_city_citizen_inventory_state()
+		CityCitizenInventorySystem.ensure_city_citizen_inventory_state_for_city_state(
+			capital_state
+		)
 	)
-	var needs_migrated := CitizenNeedsSystem.ensure_city_citizen_need_state()
+	var needs_migrated := (
+		CitizenNeedsSystem.ensure_city_citizen_need_state_for_city_state(
+			capital_state
+		)
+	)
 
 	_expect(
 		inventory_migrated == 0
@@ -161,9 +185,19 @@ func _test_lossless_legacy_repair_and_identity() -> void:
 	if city.is_empty():
 		return
 
-	WorldPoliticalState.set_current_city_world(_make_world(16, 16, 98_903))
-	WorldPoliticalState.set_current_city_seed(98_903)
-	var created := CityCitizenRegistrySystem.add_city_citizen(
+	var city_state: CitySettlementSimulationState = (
+		WorldPoliticalState.get_city_simulation_state(int(city.get("id", -1)))
+	)
+	if not city_state is CitySettlementSimulationState:
+		_expect(false, "Legacy repair requires the exact City owner.")
+		return
+	WorldData.store_city_world_for_state(
+		city_state,
+		_make_world(16, 16, 98_903),
+		98_903
+	)
+	var created := CityCitizenRegistrySystem.add_city_citizen_for_city_state(
+		city_state,
 		"",
 		Vector2i(5, 5),
 		CityCitizens.CITY_CITIZEN_SEX_MALE,
@@ -176,7 +210,9 @@ func _test_lossless_legacy_repair_and_identity() -> void:
 	if citizen_id <= 0:
 		return
 
-	var registry_state := CityCitizenRegistrySystem.get_current_state()
+	var registry_state: CityCitizenRegistryState = (
+		city_state.citizen_registry_state
+	)
 	var citizen: Dictionary = registry_state.citizens[0]
 	var record_identity: Dictionary = citizen
 	var current_task_identity: Dictionary = citizen.get("current_task", {})
@@ -197,11 +233,13 @@ func _test_lossless_legacy_repair_and_identity() -> void:
 	citizen["happiness"] = -20
 	registry_state.citizens[0] = citizen
 
-	var version_before_repair := registry_state.citizen_version
+	var version_before_repair: int = registry_state.citizen_version
 	var inventory_migrated := (
-		CityCitizenInventorySystem.ensure_city_citizen_inventory_state()
+		CityCitizenInventorySystem.ensure_city_citizen_inventory_state_for_city_state(
+			city_state
+		)
 	)
-	var version_after_inventory := registry_state.citizen_version
+	var version_after_inventory: int = registry_state.citizen_version
 	var repaired_after_inventory: Dictionary = registry_state.citizens[0]
 	var repaired_cargo_identity: Dictionary = repaired_after_inventory.get(
 		"haul_cargo",
@@ -231,33 +269,49 @@ func _test_lossless_legacy_repair_and_identity() -> void:
 		"Inventory repair must publish once while preserving the citizen and unrelated nested identities."
 	)
 	_expect(
-		CityCitizenInventorySystem.get_city_citizen_carry_capacity(citizen_id)
+		CityCitizenInventorySystem.get_city_citizen_carry_capacity_for_city_state(
+			city_state,
+			citizen_id
+		)
 		== 13
-		and CityCitizenInventorySystem.get_city_citizen_inventory_resource_amount(
+		and CityCitizenInventorySystem.get_city_citizen_inventory_resource_amount_for_city_state(
+			city_state,
 			citizen_id,
 			CityResourceCatalog.RESOURCE_FISH
 		) == 8
-		and CityCitizenInventorySystem.get_city_citizen_haul_cargo_resource_amount(
+		and CityCitizenInventorySystem.get_city_citizen_haul_cargo_resource_amount_for_city_state(
+			city_state,
 			citizen_id,
 			CityResourceCatalog.RESOURCE_STONE
 		) == 5
-		and CityCitizenInventorySystem.get_city_citizen_total_carried_amount(
+		and CityCitizenInventorySystem.get_city_citizen_total_carried_amount_for_city_state(
+			city_state,
 			citizen_id
 		) == 13,
 		"Supported legacy normalization must preserve every physical unit and expand missing capacity losslessly."
 	)
 
-	var needs_migrated := CitizenNeedsSystem.ensure_city_citizen_need_state()
+	var needs_migrated := (
+		CitizenNeedsSystem.ensure_city_citizen_need_state_for_city_state(
+			city_state
+		)
+	)
 	var repaired_after_needs: Dictionary = registry_state.citizens[0]
 
 	_expect(
 		needs_migrated == 1
 		and registry_state.citizen_version == version_after_inventory + 1
-		and CitizenNeedsSystem.get_city_citizen_hunger(citizen_id)
+		and CitizenNeedsSystem.get_city_citizen_hunger_for_city_state(
+			city_state,
+			citizen_id
+		)
 		== CityCitizens.MAX_CITIZEN_HUNGER
 		and int(repaired_after_needs.get("hunger_decay_remainder", -1))
 		== CityCitizens.CITIZEN_HUNGER_DECAY_DENOMINATOR_MINUTES - 1
-		and CitizenNeedsSystem.get_city_citizen_happiness(citizen_id) == 0,
+		and CitizenNeedsSystem.get_city_citizen_happiness_for_city_state(
+			city_state,
+			citizen_id
+		) == 0,
 		"Need repair must clamp all malformed scalar fields and publish exactly once."
 	)
 	_expect(
@@ -285,12 +339,17 @@ func _test_lossless_legacy_repair_and_identity() -> void:
 		"Need repair must preserve all unrelated nested inventory, cargo, task, and movement identities."
 	)
 
-	var version_before_repeat := registry_state.citizen_version
+	var version_before_repeat: int = registry_state.citizen_version
 	_expect(
-		CityCitizenInventorySystem.ensure_city_citizen_inventory_state() == 0
-		and CitizenNeedsSystem.ensure_city_citizen_need_state() == 0
+		CityCitizenInventorySystem.ensure_city_citizen_inventory_state_for_city_state(
+			city_state
+		) == 0
+		and CitizenNeedsSystem.ensure_city_citizen_need_state_for_city_state(
+			city_state
+		) == 0
 		and registry_state.citizen_version == version_before_repeat
-		and CityCitizenInventorySystem.get_city_citizen_total_carried_amount(
+		and CityCitizenInventorySystem.get_city_citizen_total_carried_amount_for_city_state(
+			city_state,
 			citizen_id
 		) == 13,
 		"Repeated clean ensures must be no-ops and retain every physical resource."
@@ -323,21 +382,28 @@ func _test_headless_simulation_bootstrap_and_canonical_setters() -> void:
 	if city_a_id <= 0:
 		return
 
-	WorldPoliticalState.set_current_city_world(_make_world(16, 16, 98_904))
-	WorldPoliticalState.set_current_city_seed(98_904)
 	validator_city_id = city_a_id
 	validator_city_state = WorldPoliticalState.get_city_simulation_state(city_a_id)
+	if validator_city_state == null:
+		_expect(false, "Headless bootstrap requires the exact City owner.")
+		return
+	WorldData.store_city_world_for_state(
+		validator_city_state,
+		_make_world(16, 16, 98_904),
+		98_904
+	)
 	validator_settlement_context = (
 		WorldPoliticalState.get_settlement_context(city_a_id)
 	)
-	var created := CityCitizenRegistrySystem.add_city_citizen(
+	var created := CityCitizenRegistrySystem.add_city_citizen_for_city_state(
+		validator_city_state,
 		"",
 		Vector2i(5, 5),
 		CityCitizens.CITY_CITIZEN_SEX_FEMALE,
 		culture_id
 	)
 	var citizen_id := int(created.get("id", -1))
-	var registry_state := CityCitizenRegistrySystem.get_current_state()
+	var registry_state := validator_city_state.citizen_registry_state
 	var citizen: Dictionary = registry_state.citizens[0]
 	var record_identity: Dictionary = citizen
 
@@ -354,35 +420,41 @@ func _test_headless_simulation_bootstrap_and_canonical_setters() -> void:
 	registry_state.citizens[0] = citizen
 	var version_before_adoption := registry_state.citizen_version
 
-	var settlement_context := SettlementSimulationContext.new({
-		"settlement_id": city_a_id,
-		"polity_id": polity_id,
-		"settlement_type": SettlementData.SETTLEMENT_TYPE_CITY,
-		"backend_kind": (
-			SettlementSimulationContext.BACKEND_CITY_SETTLEMENT_STATE
-		),
-		"local_state": WorldPoliticalState.get_city_simulation_state(city_a_id),
-	})
 	SimulationCoordinator.run_settlement_simulation_systems(
-		settlement_context,
+		validator_settlement_context,
 		1,
 		1
 	)
 
-	registry_state = CityCitizenRegistrySystem.get_current_state()
+	registry_state = validator_city_state.citizen_registry_state
 	var adopted: Dictionary = registry_state.citizens[0]
 	_expect(
 		is_same(adopted, record_identity)
 		and registry_state.citizen_version == version_before_adoption + 2
-		and CityCitizenInventorySystem.get_city_citizen_carry_capacity(citizen_id)
+		and CityCitizenInventorySystem.get_city_citizen_carry_capacity_for_city_state(
+			validator_city_state,
+			citizen_id
+		)
 		== CityCitizens.DEFAULT_CITIZEN_CARRY_CAPACITY
-		and CityCitizenInventorySystem.get_city_citizen_inventory(citizen_id).is_empty()
-		and CityCitizenInventorySystem.get_city_citizen_haul_cargo_amount(citizen_id)
+		and CityCitizenInventorySystem.get_city_citizen_inventory_for_city_state(
+			validator_city_state,
+			citizen_id
+		).is_empty()
+		and CityCitizenInventorySystem.get_city_citizen_haul_cargo_amount_for_city_state(
+			validator_city_state,
+			citizen_id
+		)
 		== 0
-		and CitizenNeedsSystem.get_city_citizen_hunger(citizen_id)
+		and CitizenNeedsSystem.get_city_citizen_hunger_for_city_state(
+			validator_city_state,
+			citizen_id
+		)
 		== CityCitizens.DEFAULT_CITIZEN_HUNGER
 		and int(adopted.get("hunger_decay_remainder", -1)) == 0
-		and CitizenNeedsSystem.get_city_citizen_happiness(citizen_id)
+		and CitizenNeedsSystem.get_city_citizen_happiness_for_city_state(
+			validator_city_state,
+			citizen_id
+		)
 		== CityCitizens.DEFAULT_CITIZEN_HAPPINESS,
 		"Renderer-free simulation bootstrap must repair both embedded owners in place and publish once per owner."
 	)
@@ -400,25 +472,30 @@ func _test_headless_simulation_bootstrap_and_canonical_setters() -> void:
 	registry_state.citizens[0] = adopted
 	var version_before_setters := registry_state.citizen_version
 	_expect(
-		CityCitizenInventorySystem.set_city_citizen_carry_capacity(
+		CityCitizenInventorySystem.set_city_citizen_carry_capacity_for_city_state(
+			validator_city_state,
 			citizen_id,
 			CityCitizens.DEFAULT_CITIZEN_CARRY_CAPACITY
 		)
-		and CityCitizenInventorySystem.set_city_citizen_inventory_resource_amount(
+		and CityCitizenInventorySystem.set_city_citizen_inventory_resource_amount_for_city_state(
+			validator_city_state,
 			citizen_id,
 			CityResourceCatalog.RESOURCE_FISH,
 			0
 		) == 0
-		and CityCitizenInventorySystem.set_city_citizen_haul_cargo_resources(
+		and CityCitizenInventorySystem.set_city_citizen_haul_cargo_resources_for_city_state(
+			validator_city_state,
 			citizen_id,
 			{}
 		) == 0
-		and CitizenNeedsSystem.set_city_citizen_hunger_state(
+		and CitizenNeedsSystem.set_city_citizen_hunger_state_for_city_state(
+			validator_city_state,
 			citizen_id,
 			CityCitizens.DEFAULT_CITIZEN_HUNGER,
 			0
 		)
-		and CitizenNeedsSystem.set_city_citizen_happiness(
+		and CitizenNeedsSystem.set_city_citizen_happiness_for_city_state(
+			validator_city_state,
 			citizen_id,
 			CityCitizens.DEFAULT_CITIZEN_HAPPINESS
 		)
@@ -429,7 +506,8 @@ func _test_headless_simulation_bootstrap_and_canonical_setters() -> void:
 
 
 func _test_malformed_carried_state_quarantine() -> void:
-	var registry_state := CityCitizenRegistrySystem.get_current_state()
+	var city_state := validator_city_state
+	var registry_state := city_state.citizen_registry_state
 
 	if registry_state.citizens.is_empty():
 		_expect(false, "Malformed-state coverage requires the headless citizen fixture.")
@@ -442,33 +520,41 @@ func _test_malformed_carried_state_quarantine() -> void:
 	registry_state.citizens[0] = adopted
 	var version_before_ambiguous_ensure := registry_state.citizen_version
 	var ambiguous_migration_count := (
-		CityCitizenInventorySystem.ensure_city_citizen_inventory_state()
+		CityCitizenInventorySystem.ensure_city_citizen_inventory_state_for_city_state(
+			city_state
+		)
 	)
 	var capacity_mutation_succeeded := (
-		CityCitizenInventorySystem.set_city_citizen_carry_capacity(
+		CityCitizenInventorySystem.set_city_citizen_carry_capacity_for_city_state(
+			city_state,
 			citizen_id,
 			20
 		)
 	)
 	var inventory_mutation_result := (
-		CityCitizenInventorySystem.set_city_citizen_inventory_resource_amount(
+		CityCitizenInventorySystem.set_city_citizen_inventory_resource_amount_for_city_state(
+			city_state,
 			citizen_id,
 			CityResourceCatalog.RESOURCE_FISH,
 			1
 		)
 	)
 	var cargo_mutation_result := (
-		CityCitizenInventorySystem.set_city_citizen_haul_cargo_resources(
+		CityCitizenInventorySystem.set_city_citizen_haul_cargo_resources_for_city_state(
+			city_state,
 			citizen_id,
 			{CityResourceCatalog.RESOURCE_STONE: 1}
 		)
 	)
 	var pile_result := (
-		CityLogisticsSystem.add_resource_to_city_ground_piles_with_result({
+		CityLogisticsSystem.add_resource_to_city_ground_piles_with_result_for_city_state(
+			city_state,
+			{
 			"tile_position": Vector2i(5, 5),
 			"resource": CityResourceCatalog.RESOURCE_FISH,
 			"amount_delta": 1,
-		})
+			}
+		)
 	)
 	var placements: Array = pile_result.get("placements", [])
 	var ground_pile_id := -1
@@ -479,9 +565,11 @@ func _test_malformed_carried_state_quarantine() -> void:
 	var food_endpoint := (
 		CityLogisticsSystem.make_city_ground_pile_haul_endpoint(ground_pile_id)
 	)
-	var logistics_state := CityLogisticsSystem.get_current_state()
+	var logistics_state := city_state.logistics_state
 	var ground_piles_before_transfer := (
-		CityLogisticsSystem.get_city_ground_pile_snapshot()
+		CityLogisticsSystem.get_city_ground_pile_snapshot_for_city_state(
+			city_state
+		)
 	)
 	var ground_pile_version_before_transfer := (
 		logistics_state.ground_pile_version
@@ -491,23 +579,27 @@ func _test_malformed_carried_state_quarantine() -> void:
 	)
 	var citizen_version_before_transfer := registry_state.citizen_version
 	var endpoint_was_reachable := (
-		CitizenNeedsSystem.city_citizen_can_withdraw_food_from_endpoint(
+		CitizenNeedsSystem.city_citizen_can_withdraw_food_from_endpoint_for_city_state(
+			city_state,
 			citizen_id,
 			food_endpoint,
 			CityResourceCatalog.RESOURCE_FISH
 		)
-		and CitizenNeedsSystem.get_city_citizen_food_endpoint_target_tiles(
+		and CitizenNeedsSystem.get_city_citizen_food_endpoint_target_tiles_for_city_state(
+			city_state,
 			citizen_id,
 			food_endpoint
 		).has(Vector2i(5, 5))
-		and CitizenNeedsSystem.get_city_food_endpoint_unreserved_amount(
+		and CitizenNeedsSystem.get_city_food_endpoint_unreserved_amount_for_city_state(
+			city_state,
 			citizen_id,
 			food_endpoint,
 			CityResourceCatalog.RESOURCE_FISH
 		) == 1
 	)
 	var rejected_transfer_amount := (
-		CitizenNeedsSystem.transfer_city_food_endpoint_to_citizen_inventory(
+		CitizenNeedsSystem.transfer_city_food_endpoint_to_citizen_inventory_for_city_state(
+			city_state,
 			citizen_id,
 			food_endpoint,
 			CityResourceCatalog.RESOURCE_FISH,
@@ -519,13 +611,16 @@ func _test_malformed_carried_state_quarantine() -> void:
 		and not capacity_mutation_succeeded
 		and inventory_mutation_result == 0
 		and cargo_mutation_result == 0
-		and CityCitizenInventorySystem.get_city_citizen_personal_inventory_free_space(
+		and CityCitizenInventorySystem.get_city_citizen_personal_inventory_free_space_for_city_state(
+			city_state,
 			citizen_id
 		) == 0
-		and CityCitizenInventorySystem.get_city_citizen_inventory_free_space(
+		and CityCitizenInventorySystem.get_city_citizen_inventory_free_space_for_city_state(
+			city_state,
 			citizen_id
 		) == 0
-		and CityCitizenInventorySystem.get_city_citizen_available_haul_capacity(
+		and CityCitizenInventorySystem.get_city_citizen_available_haul_capacity_for_city_state(
+			city_state,
 			citizen_id
 		) == 0
 		and endpoint_was_reachable
@@ -536,7 +631,9 @@ func _test_malformed_carried_state_quarantine() -> void:
 		== ground_pile_version_before_transfer
 		and logistics_state.next_ground_pile_id
 		== next_ground_pile_id_before_transfer
-		and CityLogisticsSystem.get_city_ground_pile_snapshot()
+		and CityLogisticsSystem.get_city_ground_pile_snapshot_for_city_state(
+			city_state
+		)
 		== ground_piles_before_transfer
 		and registry_state.citizens[0].get("inventory")
 		== "opaque legacy inventory"
@@ -560,23 +657,28 @@ func _test_malformed_carried_state_quarantine() -> void:
 	registry_state.citizens[0] = adopted
 	var version_before_nested_malformed_reads := registry_state.citizen_version
 	var nested_migration_count := (
-		CityCitizenInventorySystem.ensure_city_citizen_inventory_state()
+		CityCitizenInventorySystem.ensure_city_citizen_inventory_state_for_city_state(
+			city_state
+		)
 	)
 	var nested_capacity_result := (
-		CityCitizenInventorySystem.set_city_citizen_carry_capacity(
+		CityCitizenInventorySystem.set_city_citizen_carry_capacity_for_city_state(
+			city_state,
 			citizen_id,
 			20
 		)
 	)
 	var nested_inventory_result := (
-		CityCitizenInventorySystem.set_city_citizen_inventory_resource_amount(
+		CityCitizenInventorySystem.set_city_citizen_inventory_resource_amount_for_city_state(
+			city_state,
 			citizen_id,
 			CityResourceCatalog.RESOURCE_FISH,
 			1
 		)
 	)
 	var nested_cargo_result := (
-		CityCitizenInventorySystem.set_city_citizen_haul_cargo_resources(
+		CityCitizenInventorySystem.set_city_citizen_haul_cargo_resources_for_city_state(
+			city_state,
 			citizen_id,
 			{CityResourceCatalog.RESOURCE_STONE: 1}
 		)
@@ -586,13 +688,16 @@ func _test_malformed_carried_state_quarantine() -> void:
 		and not nested_capacity_result
 		and nested_inventory_result == 2
 		and nested_cargo_result == 0
-		and CityCitizenInventorySystem.get_city_citizen_carry_capacity(
+		and CityCitizenInventorySystem.get_city_citizen_carry_capacity_for_city_state(
+			city_state,
 			citizen_id
 		) == 0
-		and CityCitizenInventorySystem.get_city_citizen_total_carried_amount(
+		and CityCitizenInventorySystem.get_city_citizen_total_carried_amount_for_city_state(
+			city_state,
 			citizen_id
 		) == 2
-		and CityCitizenInventorySystem.get_city_citizen_inventory_free_space(
+		and CityCitizenInventorySystem.get_city_citizen_inventory_free_space_for_city_state(
+			city_state,
 			citizen_id
 		) == 0
 		and registry_state.citizen_version

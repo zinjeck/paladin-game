@@ -704,14 +704,65 @@ static func has_active_world_save() -> bool:
 	return save_locked and official_world != null
 
 
-static func has_active_city_save() -> bool:
-	return WorldPoliticalState.get_current_city_world() != null
+static func has_city_world_for_settlement(settlement_id: int) -> bool:
+	return WorldPoliticalState.has_city_world_for_settlement(settlement_id)
 
 
-static func store_city_world_save(city_world: WorldData, city_seed: int) -> void:
+static func has_city_world_for_state(
+	city_state: CitySettlementSimulationState
+) -> bool:
+	return city_state != null and city_state.city_world != null
+
+
+static func has_player_capital_city_save() -> bool:
+	return has_city_world_for_settlement(
+		WorldPoliticalState.get_player_capital_settlement_id()
+	)
+
+
+static func store_city_world_for_settlement(
+	settlement_id: int,
+	city_world: WorldData,
+	city_seed: int
+) -> bool:
+	var city_state: CitySettlementSimulationState = (
+		WorldPoliticalState.get_city_simulation_state(settlement_id)
+	)
+	if not store_city_world_for_state(city_state, city_world, city_seed):
+		return false
+	return true
+
+
+static func store_city_world_for_state(
+	city_state: CitySettlementSimulationState,
+	city_world: WorldData,
+	city_seed: int
+) -> bool:
+	if city_state == null or city_world == null or city_seed < 0:
+		return false
+	city_state.city_world = city_world
+	city_state.city_seed = city_seed
 	WorkplaceProductionSystem.clear_resource_source_evaluation_cache()
-	WorldPoliticalState.store_current_city_world(city_world, city_seed)
 	MapTextureCacheStateScript.clear_city_cache()
+	return true
+
+
+static func clear_city_world_for_settlement(settlement_id: int) -> bool:
+	return clear_city_world_for_state(
+		WorldPoliticalState.get_city_simulation_state(settlement_id)
+	)
+
+
+static func clear_city_world_for_state(
+	city_state: CitySettlementSimulationState
+) -> bool:
+	if city_state == null:
+		return false
+	city_state.city_world = null
+	city_state.city_seed = 0
+	WorkplaceProductionSystem.clear_resource_source_evaluation_cache()
+	MapTextureCacheStateScript.clear_city_cache()
+	return true
 
 
 static func _clear_player_city_mirrors() -> void:
@@ -721,8 +772,11 @@ static func _clear_player_city_mirrors() -> void:
 
 
 static func _synchronize_player_city_mirrors_from_capital_state() -> void:
+	var player_capital_id := (
+		WorldPoliticalState.get_player_capital_settlement_id()
+	)
 	_apply_player_city_mirrors_from_city_state(
-		WorldPoliticalState.get_player_capital_city_simulation_state()
+		WorldPoliticalState.get_city_simulation_state(player_capital_id)
 	)
 
 
@@ -860,8 +914,8 @@ static func found_player_city(values: Dictionary) -> void:
 		push_error("Player-capital foundation failed without committing global state.")
 		return
 
-	var capital_state = (
-		WorldPoliticalState.get_player_capital_city_simulation_state()
+	var capital_state = WorldPoliticalState.get_city_simulation_state(
+		capital_settlement_id
 	)
 	if capital_state == null:
 		push_error("Founded player capital has no city simulation state.")
@@ -871,21 +925,21 @@ static func found_player_city(values: Dictionary) -> void:
 
 static func has_player_city_foundation() -> bool:
 	_synchronize_player_city_mirrors_from_capital_state()
-	var capital_state = (
-		WorldPoliticalState.get_player_capital_city_simulation_state()
+	var capital_state = WorldPoliticalState.get_city_simulation_state(
+		WorldPoliticalState.get_player_capital_settlement_id()
 	)
 	return capital_state != null and capital_state.has_city_foundation_footprint()
 
 static func has_player_city() -> bool:
 	_synchronize_player_city_mirrors_from_capital_state()
-	var capital_state = (
-		WorldPoliticalState.get_player_capital_city_simulation_state()
+	var capital_state = WorldPoliticalState.get_city_simulation_state(
+		WorldPoliticalState.get_player_capital_settlement_id()
 	)
 	return capital_state != null and capital_state.is_city_founded()
 
 
-static func can_build_in_city() -> bool:
-	var city_state = WorldPoliticalState.get_active_city_simulation_state()
+static func can_build_in_city_for_settlement(settlement_id: int) -> bool:
+	var city_state = WorldPoliticalState.get_city_simulation_state(settlement_id)
 	return city_state != null and city_state.can_build_city_objects()
 
 #endregion
@@ -1041,9 +1095,8 @@ static func clear_city_surface_features_at_tiles(
 static func reset_player_city_state() -> void:
 	_clear_player_city_mirrors()
 
-	# Reset the exact player-capital owner without switching presentation to it.
-	# The compatibility subsystem reset entry points resolve the active city and
-	# therefore must not be used here while an NPC settlement may be active.
+	# Reset the exact player-capital owner without switching presentation to it or
+	# touching an NPC settlement that may currently be presented.
 	var player_capital_id := (
 		WorldPoliticalState.get_player_capital_settlement_id()
 	)
@@ -1069,9 +1122,9 @@ static func reset_runtime_session_state(clear_debug: bool = false) -> void:
 	if clear_debug:
 		debug_mode_enabled = false
 
-	# This entry point starts a wholly new runtime session. Clear compatibility
-	# state first while the current settlement still resolves, then discard every
-	# active and inactive settlement-owned state together.
+	# This entry point starts a wholly new runtime session. Discard every active
+	# and inactive registered settlement owner together after clearing the
+	# world/city presentation session state above.
 	WorldPoliticalState.reset_state()
 
 static func reset_world_session_state() -> void:
@@ -1091,8 +1144,6 @@ static func reset_world_session_state() -> void:
 
 
 static func reset_city_session_state() -> void:
-	WorldPoliticalState.clear_current_city_world()
-
 	reset_city_camera_state()
 	MapTextureCacheStateScript.clear_city_cache()
 

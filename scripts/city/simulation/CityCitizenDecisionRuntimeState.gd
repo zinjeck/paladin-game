@@ -5,7 +5,7 @@ class_name CityCitizenDecisionRuntimeState
 #
 # CitizenDecisionSystem owns scheduler behavior and policy. This data-only owner
 # preserves pending work, scan progress, and deterministic idle-choice history
-# when another settlement becomes active.
+# independently for its exact settlement.
 
 var pending_decision_ids: Array[int] = []
 var pending_decision_id_lookup: Dictionary = {}

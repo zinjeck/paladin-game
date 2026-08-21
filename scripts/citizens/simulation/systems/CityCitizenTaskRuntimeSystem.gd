@@ -7,14 +7,7 @@ const CityCitizensScript = preload(
 
 # Authoritative current-task and task-runtime behavior for an explicitly
 # supplied settlement. Task selection/execution remains in the focused behavior
-# systems.
-
-static func _get_compatibility_city_state() -> CitySettlementSimulationState:
-	return CityCitizenUnboundCompatibility.get_city_state()
-
-
-static func get_current_state() -> CityCitizenTaskRuntimeState:
-	return _get_compatibility_city_state().citizen_task_runtime_state
+# systems. No operation resolves a selected/current settlement.
 
 
 static func _get_task_state(
@@ -29,43 +22,10 @@ static func _get_registry_state(
 	return city_state.citizen_registry_state
 
 
-static var city_active_task_ids: Array[int]:
-	get:
-		return get_current_state().active_task_ids
-	set(value):
-		get_current_state().active_task_ids = value
-
-
-static var city_active_task_id_lookup: Dictionary:
-	get:
-		return get_current_state().active_task_id_lookup
-	set(value):
-		get_current_state().active_task_id_lookup = value
-
-
-static var city_citizen_task_version: int:
-	get:
-		return get_current_state().citizen_task_version
-	set(value):
-		get_current_state().citizen_task_version = value
-
-
-static func get_city_citizen_task_version() -> int:
-	return _get_task_state(
-		_get_compatibility_city_state()
-	).citizen_task_version
-
-
 static func get_city_citizen_task_version_for_city_state(
 	city_state: CitySettlementSimulationState
 ) -> int:
 	return _get_task_state(city_state).citizen_task_version
-
-
-static func reset_city_citizen_task_runtime_state() -> void:
-	_reset_city_citizen_task_runtime_state(
-		_get_compatibility_city_state()
-	)
 
 
 static func reset_city_citizen_task_runtime_state_for_city_state(
@@ -81,12 +41,6 @@ static func _reset_city_citizen_task_runtime_state(
 	task_state.active_task_ids.clear()
 	task_state.active_task_id_lookup.clear()
 	_mark_city_citizen_task_changed(city_state)
-
-
-static func mark_city_citizen_task_changed() -> void:
-	_mark_city_citizen_task_changed(
-		_get_compatibility_city_state()
-	)
 
 
 static func mark_city_citizen_task_changed_for_city_state(
@@ -180,12 +134,6 @@ static func _remove_all_city_active_task_array_entries(
 
 	return write_index != original_size
 
-static func rebuild_city_active_task_registry() -> bool:
-	return _rebuild_city_active_task_registry(
-		_get_compatibility_city_state()
-	)
-
-
 static func rebuild_city_active_task_registry_for_city_state(
 	city_state: CitySettlementSimulationState
 ) -> bool:
@@ -250,25 +198,10 @@ static func _rebuild_city_active_task_registry(
 
 	return registry_changed
 
-static func get_city_active_task_ids_snapshot() -> Array[int]:
-	return _get_task_state(
-		_get_compatibility_city_state()
-	).active_task_ids.duplicate()
-
-
 static func get_city_active_task_ids_snapshot_for_city_state(
 	city_state: CitySettlementSimulationState
 ) -> Array[int]:
 	return _get_task_state(city_state).active_task_ids.duplicate()
-
-static func get_city_citizen_current_haul(
-	citizen_id: int
-) -> Dictionary:
-	return _get_city_citizen_current_haul(
-		_get_compatibility_city_state(),
-		citizen_id
-	)
-
 
 static func get_city_citizen_current_haul_for_city_state(
 	city_state: CitySettlementSimulationState,
@@ -301,17 +234,6 @@ static func _get_city_citizen_current_haul(
 	return CityCitizens.make_city_citizen_haul(
 		raw_haul
 	)
-
-static func set_city_citizen_current_haul(
-	citizen_id: int,
-	haul_values: Dictionary
-) -> bool:
-	return _set_city_citizen_current_haul(
-		_get_compatibility_city_state(),
-		citizen_id,
-		haul_values
-	)
-
 
 static func set_city_citizen_current_haul_for_city_state(
 	city_state: CitySettlementSimulationState,
@@ -379,21 +301,6 @@ static func _set_city_citizen_current_haul(
 	registry_state.citizens[citizen_index] = citizen
 	_mark_city_citizen_task_changed(city_state)
 	return true
-
-static func get_city_food_task_reserved_endpoint_amount(
-	endpoint_kind: String,
-	endpoint_id: int,
-	resource: String,
-	excluding_citizen_id: int = -1
-) -> int:
-	return _get_city_food_task_reserved_endpoint_amount(
-		_get_compatibility_city_state(),
-		endpoint_kind,
-		endpoint_id,
-		resource,
-		excluding_citizen_id
-	)
-
 
 static func get_city_food_task_reserved_endpoint_amount_for_city_state(
 	city_state: CitySettlementSimulationState,
@@ -464,12 +371,6 @@ static func _get_city_food_task_reserved_endpoint_amount(
 		)
 
 	return reserved_amount
-
-static func ensure_city_citizen_task_state() -> int:
-	return _ensure_city_citizen_task_state(
-		_get_compatibility_city_state()
-	)
-
 
 static func ensure_city_citizen_task_state_for_city_state(
 	city_state: CitySettlementSimulationState
@@ -549,15 +450,6 @@ static func _ensure_city_citizen_task_state(
 
 	return migrated_count
 
-static func get_city_citizen_current_task(
-	citizen_id: int
-) -> Dictionary:
-	return _get_city_citizen_current_task(
-		_get_compatibility_city_state(),
-		citizen_id
-	)
-
-
 static func get_city_citizen_current_task_for_city_state(
 	city_state: CitySettlementSimulationState,
 	citizen_id: int
@@ -586,17 +478,6 @@ static func _get_city_citizen_current_task(
 		return {}
 
 	return raw_current_task.duplicate(true)
-
-static func assign_city_citizen_task(
-	citizen_id: int,
-	task_values: Dictionary
-) -> bool:
-	return _assign_city_citizen_task(
-		_get_compatibility_city_state(),
-		citizen_id,
-		task_values
-	)
-
 
 static func assign_city_citizen_task_for_city_state(
 	city_state: CitySettlementSimulationState,
@@ -742,13 +623,9 @@ static func _make_city_citizen_task_assignment_context(
 		):
 			return {}
 
-	var current_cargo := (
-		CityCitizenInventorySystem.get_city_citizen_haul_cargo(citizen_id)
-		if city_state == null
-		else CityCitizenInventorySystem.get_city_citizen_haul_cargo_for_city_state(
-			city_state,
-			citizen_id
-		)
+	var current_cargo := CityCitizenInventorySystem.get_city_citizen_haul_cargo_for_city_state(
+		city_state,
+		citizen_id
 	)
 	var haul_cargo_amount := maxi(
 		int(current_cargo.get("amount", 0)),
@@ -797,15 +674,9 @@ static func _prepare_city_citizen_task_assignment(
 			return _prepare_city_player_command_task_assignment(city_state, assignment)
 
 		CityCitizens.CITY_CITIZEN_TASK_KIND_CONSTRUCTION:
-			return (
-				CityConstructionSystem.prepare_city_construction_task_assignment(
-					assignment
-				)
-				if city_state == null
-				else CityConstructionSystem.prepare_city_construction_task_assignment_for_city_state(
-					city_state,
-					assignment
-				)
+			return CityConstructionSystem.prepare_city_construction_task_assignment_for_city_state(
+				city_state,
+				assignment
 			)
 
 		CityCitizens.CITY_CITIZEN_TASK_KIND_HAUL:
@@ -823,13 +694,9 @@ static func _prepare_city_work_task_assignment(
 ) -> bool:
 	var citizen: Dictionary = assignment.get("citizen", {})
 	var target_object_id := int(assignment.get("target_object_id", -1))
-	var workplace := (
-		CityObjectSystem.get_city_object_by_id(target_object_id)
-		if city_state == null
-		else CityObjectSystem.get_city_object_by_id_for_city_state(
-			city_state,
-			target_object_id
-		)
+	var workplace := CityObjectSystem.get_city_object_by_id_for_city_state(
+		city_state,
+		target_object_id
 	)
 
 	if workplace.is_empty() or not CityObjectCatalog.city_object_is_workplace(workplace):
@@ -872,26 +739,18 @@ static func _prepare_city_food_task_assignment(
 		CityCitizens.INVALID_CITY_TILE_POSITION
 	)
 	var hunger_restore := CityResourceCatalog.get_city_food_hunger_restore(food_resource)
-	var citizen_inventory := (
-		CityCitizenInventorySystem.get_city_citizen_inventory(citizen_id)
-		if city_state == null
-		else CityCitizenInventorySystem.get_city_citizen_inventory_for_city_state(
-			city_state,
-			citizen_id
-		)
+	var citizen_inventory := CityCitizenInventorySystem.get_city_citizen_inventory_for_city_state(
+		city_state,
+		citizen_id
 	)
 	var personal_food_nutrition := (
 		CityResourceContainerSystem.get_food_nutrition_in_resource_container(
 			citizen_inventory
 		)
 	)
-	var citizen_hunger := (
-		CitizenNeedsSystem.get_city_citizen_hunger(citizen_id)
-		if city_state == null
-		else CitizenNeedsSystem.get_city_citizen_hunger_for_city_state(
-			city_state,
-			citizen_id
-		)
+	var citizen_hunger := CitizenNeedsSystem.get_city_citizen_hunger_for_city_state(
+		city_state,
+		citizen_id
 	)
 	var desired_nutrition := maxi(
 		CityCitizens.CITIZEN_EAT_TARGET_HUNGER
@@ -899,31 +758,16 @@ static func _prepare_city_food_task_assignment(
 		- personal_food_nutrition,
 		0
 	)
-	var target_tiles := (
-		CitizenNeedsSystem.get_city_citizen_food_endpoint_target_tiles(
-			citizen_id,
-			food_endpoint
-		)
-		if city_state == null
-		else CitizenNeedsSystem.get_city_citizen_food_endpoint_target_tiles_for_city_state(
-			city_state,
-			citizen_id,
-			food_endpoint
-		)
+	var target_tiles := CitizenNeedsSystem.get_city_citizen_food_endpoint_target_tiles_for_city_state(
+		city_state,
+		citizen_id,
+		food_endpoint
 	)
-	var can_withdraw := (
-		CitizenNeedsSystem.city_citizen_can_withdraw_food_from_endpoint(
-			citizen_id,
-			food_endpoint,
-			food_resource
-		)
-		if city_state == null
-		else CitizenNeedsSystem.city_citizen_can_withdraw_food_from_endpoint_for_city_state(
-			city_state,
-			citizen_id,
-			food_endpoint,
-			food_resource
-		)
+	var can_withdraw := CitizenNeedsSystem.city_citizen_can_withdraw_food_from_endpoint_for_city_state(
+		city_state,
+		citizen_id,
+		food_endpoint,
+		food_resource
 	)
 
 	if (
@@ -941,29 +785,16 @@ static func _prepare_city_food_task_assignment(
 	):
 		return false
 
-	var unreserved_amount := (
-		CitizenNeedsSystem.get_city_food_endpoint_unreserved_amount(
-			citizen_id,
-			food_endpoint,
-			food_resource,
-			citizen_id
-		)
-		if city_state == null
-		else CitizenNeedsSystem.get_city_food_endpoint_unreserved_amount_for_city_state(
-			city_state,
-			citizen_id,
-			food_endpoint,
-			food_resource,
-			citizen_id
-		)
+	var unreserved_amount := CitizenNeedsSystem.get_city_food_endpoint_unreserved_amount_for_city_state(
+		city_state,
+		citizen_id,
+		food_endpoint,
+		food_resource,
+		citizen_id
 	)
-	var inventory_free_space := (
-		CityCitizenInventorySystem.get_city_citizen_inventory_free_space(citizen_id)
-		if city_state == null
-		else CityCitizenInventorySystem.get_city_citizen_inventory_free_space_for_city_state(
-			city_state,
-			citizen_id
-		)
+	var inventory_free_space := CityCitizenInventorySystem.get_city_citizen_inventory_free_space_for_city_state(
+		city_state,
+		citizen_id
 	)
 	var assigned_amount := mini(
 		food_requested_amount,
@@ -993,21 +824,13 @@ static func _prepare_city_player_command_task_assignment(
 	var citizen_id := int(assignment.get("citizen_id", -1))
 	var target_object_id := int(assignment.get("target_object_id", -1))
 	var task_source := str(assignment.get("task_source", ""))
-	var command := (
-		CityWorkSystem.get_city_player_command_by_id(target_object_id)
-		if city_state == null
-		else CityWorkSystem.get_city_player_command_by_id_for_city_state(
-			city_state,
-			target_object_id
-		)
+	var command := CityWorkSystem.get_city_player_command_by_id_for_city_state(
+		city_state,
+		target_object_id
 	)
-	var target_is_valid := (
-		CityWorkSystem.is_city_player_command_target_valid(command)
-		if city_state == null
-		else CityWorkSystem.is_city_player_command_target_valid_for_city_state(
-			city_state,
-			command
-		)
+	var target_is_valid := CityWorkSystem.is_city_player_command_target_valid_for_city_state(
+		city_state,
+		command
 	)
 
 	if (
@@ -1110,28 +933,16 @@ static func _prepare_city_haul_task_assignment(
 			"withdrawal_purpose": source_access_purpose,
 			"require_unreserved_amount": true,
 		}
-		var source_can_provide := (
-			CityLogisticsSystem.city_haul_endpoint_can_provide_resource(
-				source_request
-			)
-			if city_state == null
-			else CityLogisticsSystem.city_haul_endpoint_can_provide_resource_for_city_state(
-				city_state,
-				source_request
-			)
+		var source_can_provide := CityLogisticsSystem.city_haul_endpoint_can_provide_resource_for_city_state(
+			city_state,
+			source_request
 		)
 		if not source_can_provide:
 			return false
 	else:
-		var cargo_resources := (
-			CityCitizenInventorySystem.get_city_citizen_haul_cargo_resources(
-				citizen_id
-			)
-			if city_state == null
-			else CityCitizenInventorySystem.get_city_citizen_haul_cargo_resources_for_city_state(
-				city_state,
-				citizen_id
-			)
+		var cargo_resources := CityCitizenInventorySystem.get_city_citizen_haul_cargo_resources_for_city_state(
+			city_state,
+			citizen_id
 		)
 
 		if cargo_resources.is_empty():
@@ -1163,15 +974,9 @@ static func _prepare_city_haul_task_assignment(
 		}
 
 		if haul_cargo_amount > 0:
-			destination_resources = (
-				CityCitizenInventorySystem.get_city_citizen_haul_cargo_resources(
-					citizen_id
-				)
-				if city_state == null
-				else CityCitizenInventorySystem.get_city_citizen_haul_cargo_resources_for_city_state(
-					city_state,
-					citizen_id
-				)
+			destination_resources = CityCitizenInventorySystem.get_city_citizen_haul_cargo_resources_for_city_state(
+				city_state,
+				citizen_id
 			)
 
 		for destination_resource in destination_resources.keys():
@@ -1181,15 +986,9 @@ static func _prepare_city_haul_task_assignment(
 				"deposit_purpose": destination_access_purpose,
 				"require_unreserved_space": true,
 			}
-			var destination_can_accept := (
-				CityLogisticsSystem.city_haul_endpoint_can_accept_resource(
-					destination_request
-				)
-				if city_state == null
-				else CityLogisticsSystem.city_haul_endpoint_can_accept_resource_for_city_state(
-					city_state,
-					destination_request
-				)
+			var destination_can_accept := CityLogisticsSystem.city_haul_endpoint_can_accept_resource_for_city_state(
+				city_state,
+				destination_request
 			)
 			if not destination_can_accept:
 				return false
@@ -1210,15 +1009,9 @@ static func _prepare_city_haul_task_assignment(
 			),
 			"destination_access_purpose": destination_access_purpose,
 		}
-		var reservation := (
-			CityLogisticsSystem.create_city_haul_reservation(
-				reservation_values
-			)
-			if city_state == null
-			else CityLogisticsSystem.create_city_haul_reservation_for_city_state(
-				city_state,
-				reservation_values
-			)
+		var reservation := CityLogisticsSystem.create_city_haul_reservation_for_city_state(
+			city_state,
+			reservation_values
 		)
 
 		if reservation.is_empty():
@@ -1243,13 +1036,9 @@ static func _prepare_city_return_home_task_assignment(
 	var citizen_id := int(assignment.get("citizen_id", -1))
 	var citizen: Dictionary = assignment.get("citizen", {})
 	var target_object_id := int(assignment.get("target_object_id", -1))
-	var home := (
-		CityObjectSystem.get_city_object_by_id(target_object_id)
-		if city_state == null
-		else CityObjectSystem.get_city_object_by_id_for_city_state(
-			city_state,
-			target_object_id
-		)
+	var home := CityObjectSystem.get_city_object_by_id_for_city_state(
+		city_state,
+		target_object_id
 	)
 
 	if (
@@ -1262,28 +1051,17 @@ static func _prepare_city_return_home_task_assignment(
 	if int(citizen.get("home_object_id", -1)) != target_object_id:
 		return false
 
-	var resident_ids := (
-		CityAssignmentSystem.get_city_object_resident_ids(home)
-		if city_state == null
-		else CityAssignmentSystem.get_city_object_resident_ids_for_city_state(
-			city_state,
-			home
-		)
+	var resident_ids := CityAssignmentSystem.get_city_object_resident_ids_for_city_state(
+		city_state,
+		home
 	)
 	if not resident_ids.has(citizen_id):
 		return false
 
-	return (
-		CityNavigationSystem.city_citizen_can_access_object_interior(
-			citizen_id,
-			home
-		)
-		if city_state == null
-		else CityNavigationSystem.city_citizen_can_access_object_interior_for_city_state(
-			city_state,
-			citizen_id,
-			home
-		)
+	return CityNavigationSystem.city_citizen_can_access_object_interior_for_city_state(
+		city_state,
+		citizen_id,
+		home
 	)
 
 static func _commit_city_citizen_task_assignment(
@@ -1343,17 +1121,6 @@ static func _commit_city_citizen_task_assignment(
 	_mark_city_citizen_task_changed(city_state)
 	return true
 
-static func set_city_citizen_task_phase(
-	citizen_id: int,
-	task_phase: String
-) -> bool:
-	return _set_city_citizen_task_phase(
-		_get_compatibility_city_state(),
-		citizen_id,
-		task_phase
-	)
-
-
 static func set_city_citizen_task_phase_for_city_state(
 	city_state: CitySettlementSimulationState,
 	citizen_id: int,
@@ -1412,17 +1179,6 @@ static func _set_city_citizen_task_phase(
 
 	return true
 
-static func set_city_citizen_task_target_object_id(
-	citizen_id: int,
-	target_object_id: int
-) -> bool:
-	return _set_city_citizen_task_target_object_id(
-		_get_compatibility_city_state(),
-		citizen_id,
-		target_object_id
-	)
-
-
 static func set_city_citizen_task_target_object_id_for_city_state(
 	city_state: CitySettlementSimulationState,
 	citizen_id: int,
@@ -1478,15 +1234,6 @@ static func _set_city_citizen_task_target_object_id(
 	registry_state.citizens[citizen_index] = citizen
 	_mark_city_citizen_task_changed(city_state)
 	return true
-
-static func set_city_citizen_task_activity_state(
-	values: Dictionary
-) -> bool:
-	return _set_city_citizen_task_activity_state(
-		_get_compatibility_city_state(),
-		values
-	)
-
 
 static func set_city_citizen_task_activity_state_for_city_state(
 	city_state: CitySettlementSimulationState,
@@ -1610,17 +1357,6 @@ static func _set_city_citizen_task_activity_state(
 
 	return true
 
-static func clear_city_citizen_task(
-	citizen_id: int,
-	requesting_source: String = CityCitizens.CITY_CITIZEN_TASK_SOURCE_NONE
-) -> bool:
-	return _clear_city_citizen_task(
-		_get_compatibility_city_state(),
-		citizen_id,
-		requesting_source
-	)
-
-
 static func clear_city_citizen_task_for_city_state(
 	city_state: CitySettlementSimulationState,
 	citizen_id: int,
@@ -1670,23 +1406,16 @@ static func _clear_city_citizen_task(
 			return false
 
 	var empty_task := CityCitizens.make_city_citizen_task()
-	var active_reservation_id := (
-		CityLogisticsSystem.get_city_haul_reservation_id_for_citizen(citizen_id)
-		if city_state == null
-		else CityLogisticsSystem.get_city_haul_reservation_id_for_citizen_for_city_state(
-			city_state,
-			citizen_id
-		)
+	var active_reservation_id := CityLogisticsSystem.get_city_haul_reservation_id_for_citizen_for_city_state(
+		city_state,
+		citizen_id
 	)
 
 	if active_reservation_id > 0:
-		if city_state == null:
-			CityLogisticsSystem.release_city_haul_reservation(active_reservation_id)
-		else:
-			CityLogisticsSystem.release_city_haul_reservation_for_city_state(
-				city_state,
-				active_reservation_id
-			)
+		CityLogisticsSystem.release_city_haul_reservation_for_city_state(
+			city_state,
+			active_reservation_id
+		)
 
 	if (
 		raw_current_task is Dictionary
@@ -1707,28 +1436,16 @@ static func _clear_city_citizen_task(
 		)
 
 	if current_task_kind == CityCitizens.CITY_CITIZEN_TASK_KIND_PLAYER_COMMAND:
-		if city_state == null:
-			CityWorkSystem.release_city_player_command_claim(
-				int(raw_current_task.get("target_object_id", -1)),
-				citizen_id
-			)
-		else:
-			CityWorkSystem.release_city_player_command_claim_for_city_state(
-				city_state,
-				int(raw_current_task.get("target_object_id", -1)),
-				citizen_id
-			)
+		CityWorkSystem.release_city_player_command_claim_for_city_state(
+			city_state,
+			int(raw_current_task.get("target_object_id", -1)),
+			citizen_id
+		)
 
 	if current_task_kind == CityCitizens.CITY_CITIZEN_TASK_KIND_HAUL:
-		var cargo_amount := (
-			CityCitizenInventorySystem.get_city_citizen_haul_cargo_amount(
-				citizen_id
-			)
-			if city_state == null
-			else CityCitizenInventorySystem.get_city_citizen_haul_cargo_amount_for_city_state(
-				city_state,
-				citizen_id
-			)
+		var cargo_amount := CityCitizenInventorySystem.get_city_citizen_haul_cargo_amount_for_city_state(
+			city_state,
+			citizen_id
 		)
 		if cargo_amount > 0:
 			var raw_haul = citizen.get("current_haul", {})

@@ -17,6 +17,8 @@ var settings: MapSettings = MapSettings.new()
 var map_width_tiles: int = 0
 var map_height_tiles: int = 0
 var map_tile_size: int = 0
+var observed_position: Vector2 = Vector2.ZERO
+var observed_zoom: Vector2 = Vector2.ZERO
 
 
 func _ready() -> void:
@@ -35,6 +37,61 @@ func configure_for_map(width_tiles: int, height_tiles: int, tile_size: int, cent
 		position = get_map_center()
 
 	clamp_camera_to_map_bounds()
+	capture_transform_observation()
+
+
+func configure_for_settlement_presentation(
+	binding: CityPresentationBinding,
+	tile_size: int
+) -> bool:
+	if binding == null or not binding.is_valid() or tile_size <= 0:
+		return false
+
+	var local_world: WorldData = binding.world
+	var stored_camera := MapCameraSessionState.get_settlement_camera_for_binding(
+		binding
+	)
+	configure_for_map(
+		local_world.width,
+		local_world.height,
+		tile_size,
+		stored_camera.is_empty()
+	)
+	if not stored_camera.is_empty():
+		position = stored_camera.get("position", position)
+		zoom = stored_camera.get("zoom", zoom)
+		clamp_camera_to_map_bounds()
+	capture_transform_observation()
+	return true
+
+
+func store_settlement_presentation_transform(
+	binding: CityPresentationBinding
+) -> bool:
+	return MapCameraSessionState.store_settlement_camera_for_binding(
+		binding,
+		position,
+		zoom
+	)
+
+
+func capture_transform_observation() -> void:
+	observed_position = position
+	observed_zoom = zoom
+
+
+func consume_transform_changes() -> Dictionary:
+	var position_changed := position != observed_position
+	var zoom_changed := zoom != observed_zoom
+	if position_changed:
+		observed_position = position
+	if zoom_changed:
+		observed_zoom = zoom
+	return {
+		"changed": position_changed or zoom_changed,
+		"position_changed": position_changed,
+		"zoom_changed": zoom_changed,
+	}
 
 
 func _process(delta: float) -> void:

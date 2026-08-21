@@ -1,46 +1,203 @@
 extends RefCounted
 class_name CityCitizenMovementPresentation
 
-# Cosmetic, centralized movement interpolation. This helper reads WorldData but
-# never mutates authoritative citizen positions or the spatial index. Visual
-# routes retain individual path corners so diagonal-to-cardinal turns cannot cut
-# across blocked geometry.
+const SettlementPresentationBindingScript = preload(
+	"res://scripts/settlements/presentation/SettlementPresentationBinding.gd"
+)
+
+# Cosmetic, centralized movement interpolation for one explicit presentation
+# binding. This helper never mutates authoritative citizen positions or the
+# settlement-owned spatial index. Visual routes retain individual path corners
+# so diagonal-to-cardinal turns cannot cut across blocked geometry.
 
 const POSITION_EPSILON: float = 0.0001
+const CITIZEN_MARKER_COLOR: Color = Color(0.824, 0.706, 0.549, 1.0)
+const CITIZEN_MARKER_TILE_SCALE: float = 0.5
+const HAUL_CARGO_MARKER_CITIZEN_SCALE: float = 0.5
 
-var presentation_binding: CityPresentationBinding
+var presentation_binding: SettlementPresentationBindingScript
 var bound_city_state: CitySettlementSimulationState
+var local_tile_size: int = 1
+var highest_accepted_binding_generation: int = 0
+var synchronized_movement_version: int = -1
 var movement_snapshot_by_citizen_id: Dictionary = {}
 var visual_position_by_citizen_id: Dictionary = {}
 var transition_by_citizen_id: Dictionary = {}
 var tracked_mover_id_lookup: Dictionary = {}
+var _citizen_draw_buffer: Array[Dictionary] = []
+var _citizen_rect_draw_buffer: Array[Rect2] = []
 
 
-func bind_city_presentation(binding: CityPresentationBinding) -> bool:
-	if binding == null or not binding.is_valid():
+func bind_settlement_presentation(
+	binding: SettlementPresentationBindingScript,
+	tile_size: int
+) -> bool:
+	if not can_bind_settlement_presentation(binding, tile_size):
 		return false
+	if (
+		is_bound_to_settlement_presentation(binding)
+		and tile_size == local_tile_size
+	):
+		return true
+
 	presentation_binding = binding
-	initialize(binding.city_state)
+	local_tile_size = tile_size
+	highest_accepted_binding_generation = binding.generation
+	initialize(_get_city_detail_state(binding))
 	return true
 
 
-func is_bound_to_city_presentation(
-	binding: CityPresentationBinding
+func can_bind_settlement_presentation(
+	binding: SettlementPresentationBindingScript,
+	tile_size: int
+) -> bool:
+	if (
+		binding == null
+		or not binding.is_valid()
+		or not binding.supports_backend_capability(
+			SettlementPresentationBindingScript.CAPABILITY_CITY_DETAIL
+		)
+		or tile_size <= 0
+	):
+		return false
+	if binding.generation > highest_accepted_binding_generation:
+		return true
+
+	# Repeating the exact current bind is harmless. Equal-generation source
+	# replacement and every older generation are rejected transactionally.
+	return (
+		binding.generation == highest_accepted_binding_generation
+		and tile_size == local_tile_size
+		and is_bound_to_settlement_presentation(binding)
+	)
+
+
+func is_bound_to_settlement_presentation(
+	binding: SettlementPresentationBindingScript
 ) -> bool:
 	return (
 		presentation_binding != null
 		and presentation_binding.matches_binding(binding)
-		and is_same(bound_city_state, binding.city_state)
+		and is_same(bound_city_state, _get_city_detail_state(binding))
+		and binding.generation == highest_accepted_binding_generation
+		and local_tile_size > 0
+	)
+
+
+func reset_presentation() -> void:
+	presentation_binding = null
+	local_tile_size = 1
+	# initialize() clears only mutable presentation data. The accepted binding
+	# generation is intentionally monotonic across both initialize and reset.
+	initialize(null)
+
+
+static func _get_city_detail_state(
+	binding: SettlementPresentationBindingScript
+) -> CitySettlementSimulationState:
+	if binding == null or not binding.is_valid():
+		return null
+	var capability_state = binding.get_backend_capability(
+		SettlementPresentationBindingScript.CAPABILITY_CITY_DETAIL
+	)
+	return (
+		capability_state
+		if capability_state is CitySettlementSimulationState
+		else null
 	)
 
 
 func initialize(city_state: CitySettlementSimulationState) -> void:
 	bound_city_state = city_state
+	synchronized_movement_version = (
+		city_state.citizen_movement_runtime_state.citizen_movement_version
+		if city_state != null
+		else -1
+	)
 	movement_snapshot_by_citizen_id.clear()
 	visual_position_by_citizen_id.clear()
 	transition_by_citizen_id.clear()
 	tracked_mover_id_lookup.clear()
+	_clear_draw_buffers()
 	refresh_mover_tracking()
+
+
+func synchronize_for_changes(change_flags: Dictionary) -> void:
+	if bound_city_state == null:
+		return
+
+	var current_movement_version := int(
+		bound_city_state.citizen_movement_runtime_state.citizen_movement_version
+	)
+	if (
+		bool(change_flags.get("city_citizen_registry_changed", false))
+		or bool(
+			change_flags.get(
+				"city_citizen_movement_runtime_changed",
+				false
+			)
+		)
+	):
+		# Citizen IDs are settlement-local. Reinitialize cosmetic state whenever
+		# registry or movement-runtime ownership changes so equal local IDs and
+		# equal versions cannot retain another owner's visual position.
+		initialize(bound_city_state)
+		return
+
+	if bool(change_flags.get("city_citizen_movement_changed", false)):
+		if synchronized_movement_version != current_movement_version:
+			# Movement snapshots include partial progress even when the citizen
+			# has not completed its current cardinal or diagonal tile step.
+			synchronize(true)
+			refresh_mover_tracking()
+			synchronized_movement_version = current_movement_version
+		return
+
+	if (
+		bool(change_flags.get("city_citizens_changed", false))
+		or bool(
+			change_flags.get(
+				"city_citizen_spatial_changed",
+				false
+			)
+		)
+	):
+		# Non-movement position edits are teleports. Refresh any tracked mover
+		# without animating from a stale tile.
+		synchronize(false)
+
+
+func consume_committed_tick(
+	tick_index: int,
+	presentation_active: bool
+) -> bool:
+	if bound_city_state == null:
+		return false
+
+	if not presentation_active:
+		discard_pending_visual_events()
+		return false
+
+	var visual_state_changed := synchronize_committed_tick(
+		CityCitizenMovementRuntimeSystem.take_city_citizen_movement_visual_events_for_city_state(
+			bound_city_state,
+			tick_index
+		)
+	)
+	synchronize(true)
+	refresh_mover_tracking()
+	synchronized_movement_version = int(
+		bound_city_state.citizen_movement_runtime_state.citizen_movement_version
+	)
+	return visual_state_changed
+
+
+func discard_pending_visual_events() -> void:
+	if bound_city_state == null:
+		return
+	CityCitizenMovementRuntimeSystem.clear_city_citizen_movement_visual_events_for_city_state(
+		bound_city_state
+	)
 
 
 func synchronize(animate_position_changes: bool) -> void:
@@ -457,6 +614,137 @@ func get_visual_tile_position(citizen: Dictionary) -> Vector2:
 		return fallback_position
 
 	return raw_visual_position
+
+
+func get_citizen_world_rect(citizen: Dictionary) -> Rect2:
+	if citizen.is_empty() or bound_city_state == null or local_tile_size <= 0:
+		return Rect2()
+
+	var raw_position = citizen.get(
+		"city_tile_position",
+		CityCitizens.INVALID_CITY_TILE_POSITION
+	)
+	if not raw_position is Vector2i:
+		return Rect2()
+
+	var local_world: WorldData = bound_city_state.city_world
+	if local_world == null:
+		return Rect2()
+
+	var tile_position: Vector2i = raw_position
+	if not local_world.is_in_bounds(tile_position.x, tile_position.y):
+		return Rect2()
+
+	var visual_tile_position := get_visual_tile_position(citizen)
+	var marker_side_length := (
+		float(local_tile_size) * CITIZEN_MARKER_TILE_SCALE
+	)
+	var marker_size := Vector2.ONE * marker_side_length
+	var tile_center := Vector2(
+		(visual_tile_position.x + 0.5) * float(local_tile_size),
+		(visual_tile_position.y + 0.5) * float(local_tile_size)
+	)
+	return Rect2(tile_center - marker_size * 0.5, marker_size)
+
+
+func draw_citizens(draw_target: CanvasItem) -> void:
+	_clear_draw_buffers()
+	if draw_target == null or bound_city_state == null:
+		return
+
+	for raw_citizen in bound_city_state.citizen_registry_state.citizens:
+		if not raw_citizen is Dictionary:
+			continue
+
+		var citizen: Dictionary = raw_citizen
+		if not bool(citizen.get("alive", false)):
+			continue
+
+		var marker_rect := get_citizen_world_rect(citizen)
+		if marker_rect.size.x <= 0.0 or marker_rect.size.y <= 0.0:
+			continue
+
+		draw_target.draw_rect(marker_rect, CITIZEN_MARKER_COLOR, true)
+		_citizen_draw_buffer.append(citizen)
+		_citizen_rect_draw_buffer.append(marker_rect)
+
+	for citizen_index in range(_citizen_draw_buffer.size()):
+		_draw_citizen_haul_cargo_marker(
+			draw_target,
+			_citizen_draw_buffer[citizen_index],
+			_citizen_rect_draw_buffer[citizen_index]
+		)
+
+
+func _draw_citizen_haul_cargo_marker(
+	draw_target: CanvasItem,
+	citizen: Dictionary,
+	citizen_rect: Rect2
+) -> void:
+	var citizen_id := int(citizen.get("id", -1))
+	var cargo_resources := (
+		CityCitizenInventorySystem.get_city_citizen_haul_cargo_resources_for_city_state(
+			bound_city_state,
+			citizen_id
+		)
+	)
+	var cargo_amount := (
+		CityCitizenInventorySystem.get_city_citizen_haul_cargo_amount_for_city_state(
+			bound_city_state,
+			citizen_id
+		)
+	)
+	if cargo_amount <= 0 or cargo_resources.is_empty():
+		return
+
+	var cargo_size := Vector2(
+		citizen_rect.size.x * HAUL_CARGO_MARKER_CITIZEN_SCALE,
+		citizen_rect.size.y * HAUL_CARGO_MARKER_CITIZEN_SCALE
+	)
+	var upper_right_corner := Vector2(
+		citizen_rect.end.x,
+		citizen_rect.position.y
+	)
+	var cargo_rect := Rect2(
+		upper_right_corner - cargo_size * 0.5,
+		cargo_size
+	)
+	var resource_names: Array = cargo_resources.keys()
+	resource_names.sort()
+	var drawn_amount := 0
+
+	for raw_resource in resource_names:
+		var resource := str(raw_resource)
+		var resource_amount := maxi(
+			int(cargo_resources.get(raw_resource, 0)),
+			0
+		)
+		if resource_amount <= 0:
+			continue
+
+		var start_ratio := float(drawn_amount) / float(cargo_amount)
+		drawn_amount += resource_amount
+		var end_ratio := float(drawn_amount) / float(cargo_amount)
+		var segment_rect := Rect2(
+			Vector2(
+				cargo_rect.position.x + cargo_rect.size.x * start_ratio,
+				cargo_rect.position.y
+			),
+			Vector2(
+				cargo_rect.size.x * (end_ratio - start_ratio),
+				cargo_rect.size.y
+			)
+		)
+		draw_target.draw_rect(
+			segment_rect,
+			MapVisuals.get_resource_color(resource),
+			true
+		)
+
+
+func _clear_draw_buffers() -> void:
+	_citizen_draw_buffer.clear()
+	_citizen_rect_draw_buffer.clear()
 
 
 func get_transitioning_citizen_ids_snapshot() -> Array[int]:

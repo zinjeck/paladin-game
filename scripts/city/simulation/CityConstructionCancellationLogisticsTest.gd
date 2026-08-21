@@ -1,5 +1,8 @@
 extends Node
 
+const CitySettlementTestFixtureScript = preload(
+	"res://scripts/city/simulation/test_support/CitySettlementTestFixture.gd"
+)
 const CityConstructionSystemScript = preload(
 	"res://scripts/city/simulation/systems/CityConstructionSystem.gd"
 )
@@ -8,6 +11,8 @@ const TEST_WORLD_SIZE := Vector2i(32, 24)
 const TEST_WORLD_SEED := 77_007
 
 var failure_count: int = 0
+var test_fixture = null
+var test_city_state: CitySettlementSimulationState = null
 
 
 func _ready() -> void:
@@ -44,14 +49,15 @@ func _test_partial_cancellation_releases_materials_and_reservations_once() -> vo
 		return
 
 	_expect(
-		CityConstructionSystem.add_resource_to_city_construction_site(
+		CityConstructionSystem.add_resource_to_city_construction_site_for_city_state(
+			test_city_state,
 			site_id,
 			WorldData.RESOURCE_LUMBER,
 			3
 		) == 3,
 		"The partial-cancellation fixture must deliver three lumber."
 	)
-	var source_result := CityLogisticsSystem.add_resource_to_city_ground_piles_with_result({
+	var source_result := CityLogisticsSystem.add_resource_to_city_ground_piles_with_result_for_city_state(test_city_state, {
 		"tile_position": Vector2i(20, 10),
 		"resource": WorldData.RESOURCE_STONE,
 		"amount_delta": 7,
@@ -62,7 +68,7 @@ func _test_partial_cancellation_releases_materials_and_reservations_once() -> vo
 	if source_id <= 0:
 		return
 
-	var logistics_state := CityLogisticsSystem.get_current_state()
+	var logistics_state := test_city_state.logistics_state
 	var reservation_id := 41
 	var source_endpoint := CityLogisticsSystem.make_city_ground_pile_haul_endpoint(
 		source_id
@@ -96,11 +102,17 @@ func _test_partial_cancellation_releases_materials_and_reservations_once() -> vo
 	var reservation_version_before := logistics_state.haul_reservation_version
 
 	_expect(
-		CityConstructionSystemScript.cancel_city_construction_site(site_id),
+		CityConstructionSystemScript.cancel_city_construction_site_for_city_state(
+			test_city_state,
+			site_id
+		),
 		"Partial construction cancellation must succeed."
 	)
 	_expect(
-		CityConstructionSystem.get_city_construction_site_by_id(site_id).is_empty(),
+		CityConstructionSystem.get_city_construction_site_by_id_for_city_state(
+			test_city_state,
+			site_id
+		).is_empty(),
 		"Cancellation must remove the construction-site record."
 	)
 	_expect(
@@ -144,8 +156,14 @@ func _test_partial_cancellation_releases_materials_and_reservations_once() -> vo
 	var pile_version_after_first_release := logistics_state.ground_pile_version
 	var reservation_version_after_first_release := logistics_state.haul_reservation_version
 	_expect(
-		not CityConstructionSystemScript.cancel_city_construction_site(site_id)
-		and CityLogisticsSystem.release_city_construction_site_materials(site_id) == 0,
+		not CityConstructionSystemScript.cancel_city_construction_site_for_city_state(
+			test_city_state,
+			site_id
+		)
+		and CityLogisticsSystem.release_city_construction_site_materials_for_city_state(
+			test_city_state,
+			site_id
+		) == 0,
 		"Repeated cancellation and release must report an exact no-op."
 	)
 	_expect(
@@ -175,39 +193,40 @@ func _test_full_cancellation_preserves_radius_capacity_and_local_overflow() -> v
 	if site_id <= 0:
 		return
 
-	var far_lumber_result := CityLogisticsSystem.add_resource_to_city_ground_piles_with_result({
+	var far_lumber_result := CityLogisticsSystem.add_resource_to_city_ground_piles_with_result_for_city_state(test_city_state, {
 		"tile_position": Vector2i(9, 10),
 		"resource": WorldData.RESOURCE_LUMBER,
 		"amount_delta": CityLogisticsSystem.CITY_GROUND_PILE_CAPACITY,
 	})
 	var far_lumber_id := _first_ground_pile_id(far_lumber_result)
-	var full_lumber_result := CityLogisticsSystem.add_resource_to_city_ground_piles_with_result({
+	var full_lumber_result := CityLogisticsSystem.add_resource_to_city_ground_piles_with_result_for_city_state(test_city_state, {
 		"tile_position": Vector2i(10, 10),
 		"resource": WorldData.RESOURCE_LUMBER,
 		"amount_delta": CityLogisticsSystem.CITY_GROUND_PILE_CAPACITY,
 	})
 	var full_lumber_id := _first_ground_pile_id(full_lumber_result)
 	_expect(
-		CityLogisticsSystem.remove_resource_from_city_ground_pile(
+		CityLogisticsSystem.remove_resource_from_city_ground_pile_for_city_state(
+			test_city_state,
 			far_lumber_id,
 			WorldData.RESOURCE_LUMBER,
 			3
 		) == 3,
 		"The radius fixture must leave three free units exactly three tiles away."
 	)
-	var stone_result := CityLogisticsSystem.add_resource_to_city_ground_piles_with_result({
+	var stone_result := CityLogisticsSystem.add_resource_to_city_ground_piles_with_result_for_city_state(test_city_state, {
 		"tile_position": Vector2i(12, 8),
 		"resource": WorldData.RESOURCE_STONE,
 		"amount_delta": 16,
 	})
 	var stone_id := _first_ground_pile_id(stone_result)
-	var first_fish_result := CityLogisticsSystem.add_resource_to_city_ground_piles_with_result({
+	var first_fish_result := CityLogisticsSystem.add_resource_to_city_ground_piles_with_result_for_city_state(test_city_state, {
 		"tile_position": Vector2i(12, 8),
 		"resource": WorldData.RESOURCE_FISH,
 		"amount_delta": 18,
 	})
 	var first_fish_id := _first_ground_pile_id(first_fish_result)
-	var second_fish_result := CityLogisticsSystem.add_resource_to_city_ground_piles_with_result({
+	var second_fish_result := CityLogisticsSystem.add_resource_to_city_ground_piles_with_result_for_city_state(test_city_state, {
 		"tile_position": Vector2i(14, 10),
 		"resource": WorldData.RESOURCE_FISH,
 		"amount_delta": 18,
@@ -222,17 +241,20 @@ func _test_full_cancellation_preserves_radius_capacity_and_local_overflow() -> v
 		"The radius/capacity fixture must create all ordinary anchor piles."
 	)
 	_expect(
-		CityConstructionSystem.add_resource_to_city_construction_site(
+		CityConstructionSystem.add_resource_to_city_construction_site_for_city_state(
+			test_city_state,
 			site_id,
 			WorldData.RESOURCE_LUMBER,
 			28
 		) == 28
-		and CityConstructionSystem.add_resource_to_city_construction_site(
+		and CityConstructionSystem.add_resource_to_city_construction_site_for_city_state(
+			test_city_state,
 			site_id,
 			WorldData.RESOURCE_STONE,
 			4
 		) == 4
-		and CityConstructionSystem.add_resource_to_city_construction_site(
+		and CityConstructionSystem.add_resource_to_city_construction_site_for_city_state(
+			test_city_state,
 			site_id,
 			WorldData.RESOURCE_FISH,
 			5
@@ -243,11 +265,14 @@ func _test_full_cancellation_preserves_radius_capacity_and_local_overflow() -> v
 	var lumber_before := _physical_total(WorldData.RESOURCE_LUMBER)
 	var stone_before := _physical_total(WorldData.RESOURCE_STONE)
 	var fish_before := _physical_total(WorldData.RESOURCE_FISH)
-	var logistics_state := CityLogisticsSystem.get_current_state()
+	var logistics_state := test_city_state.logistics_state
 	var pile_version_before := logistics_state.ground_pile_version
 
 	_expect(
-		CityConstructionSystemScript.cancel_city_construction_site(site_id),
+		CityConstructionSystemScript.cancel_city_construction_site_for_city_state(
+			test_city_state,
+			site_id
+		),
 		"Full construction cancellation must succeed."
 	)
 	_expect(
@@ -287,11 +312,52 @@ func _test_full_cancellation_preserves_radius_capacity_and_local_overflow() -> v
 
 
 func _test_explicit_release_preserves_active_settlement_and_ordinary_ids() -> void:
-	var city_world := _reset_fixture()
-	var active_state = WorldPoliticalState.get_current_city_simulation_state()
-	var target_state := CitySettlementSimulationState.new()
-	target_state.city_world = city_world
-	target_state.city_seed = TEST_WORLD_SEED + 1
+	_reset_fixture()
+	if test_fixture == null or test_city_state == null:
+		return
+	_expect(
+		WorldPoliticalState.set_active_settlement(test_fixture.settlement_id),
+		"The isolation fixture must present its first registered City."
+	)
+	if WorldPoliticalState.active_settlement_id != test_fixture.settlement_id:
+		return
+	var active_state := test_city_state
+	var target_world := _make_city_world(TEST_WORLD_SEED + 1)
+	var target_settlement := WorldPoliticalState.create_settlement({
+		"name": "Pass 7 Logistics Target City",
+		"settlement_type": SettlementData.SETTLEMENT_TYPE_CITY,
+		"polity_id": test_fixture.polity_id,
+		"world_region_top_left": Vector2i(2, 0),
+		"world_region_center": Vector2i(2, 0),
+		"world_region_size": 1,
+		"simulation_backend_kind": (
+			SettlementSimulationContext.BACKEND_CITY_SETTLEMENT_STATE
+		),
+	})
+	var target_settlement_id := int(
+		target_settlement.get("id", SettlementData.INVALID_SETTLEMENT_ID)
+	)
+	var target_context: SettlementSimulationContext = (
+		WorldPoliticalState.get_settlement_context(target_settlement_id)
+	)
+	var target_ready := (
+		target_context != null
+		and WorldPoliticalState.is_registered_settlement_context(target_context)
+		and WorldPoliticalState.store_city_world_for_settlement(
+			target_settlement_id,
+			target_world,
+			TEST_WORLD_SEED + 1
+		)
+	)
+	_expect(
+		target_ready,
+		"The explicit release target must be a second registered City."
+	)
+	if not target_ready:
+		return
+	var target_state: CitySettlementSimulationState = (
+		target_context.get_city_simulation_state()
+	)
 	target_state.logistics_state.ground_piles = [
 		{
 			"id": 1,
@@ -342,7 +408,9 @@ func _test_explicit_release_preserves_active_settlement_and_ordinary_ids() -> vo
 	_expect(
 		active_state.logistics_state.ground_piles == active_piles_before
 		and active_state.logistics_state.ground_pile_index_by_id == active_index_before
-		and active_state.logistics_state.ground_pile_version == active_version_before,
+		and active_state.logistics_state.ground_pile_version == active_version_before
+		and WorldPoliticalState.active_settlement_id
+		== test_fixture.settlement_id,
 		"Explicit release must not mutate the visually active settlement."
 	)
 
@@ -350,8 +418,28 @@ func _test_explicit_release_preserves_active_settlement_and_ordinary_ids() -> vo
 func _reset_fixture() -> WorldData:
 	WorldData.reset_runtime_session_state()
 	SimulationClock.start_new_game()
+	var city_world := _make_city_world(TEST_WORLD_SEED)
+	test_fixture = CitySettlementTestFixtureScript.create({
+		"label": "Pass 7 Logistics",
+		"city_world": city_world,
+		"city_seed": TEST_WORLD_SEED,
+	})
+	_expect(test_fixture != null, "The cancellation fixture must be created.")
+	if test_fixture == null:
+		return null
+	test_city_state = test_fixture.city_state
+	test_city_state.city_runtime_data.merge({
+		"name": "Pass 7 Logistics City",
+		"primary_culture_id": test_fixture.culture_id,
+		"founded": true,
+		"can_build": true,
+	}, true)
+	return city_world
+
+
+func _make_city_world(seed_value: int) -> WorldData:
 	var city_world := WorldData.new()
-	city_world.setup(TEST_WORLD_SIZE.x, TEST_WORLD_SIZE.y, TEST_WORLD_SEED)
+	city_world.setup(TEST_WORLD_SIZE.x, TEST_WORLD_SIZE.y, seed_value)
 
 	for y in range(city_world.height):
 		for x in range(city_world.width):
@@ -362,14 +450,6 @@ func _reset_fixture() -> WorldData:
 			tile["surface_feature"] = WorldData.CITY_SURFACE_FEATURE_NONE
 
 	city_world.mark_tile_data_changed()
-	WorldData.store_city_world_save(city_world, TEST_WORLD_SEED)
-	var culture := WorldData.create_culture("Pass 7 Logistics Culture")
-	WorldPoliticalState.replace_current_city_runtime_data({
-		"name": "Pass 7 Logistics City",
-		"primary_culture_id": int(culture.get("id", -1)),
-		"founded": true,
-		"can_build": true,
-	})
 	return city_world
 
 
@@ -377,7 +457,7 @@ func _create_material_site(
 	tile_position: Vector2i,
 	material_recipe: Dictionary
 ) -> Dictionary:
-	var site := CityConstructionSystemScript.create_city_construction_site({
+	var site := CityConstructionSystemScript.create_city_construction_site_for_city_state(test_city_state, {
 		"target_kind": CityConstructionSystem.CITY_CONSTRUCTION_TARGET_NEW,
 		"object_type": CityObjectCatalog.CITY_OBJECT_ROAD,
 		"shape_mode": CityObjectCatalog.CITY_OBJECT_SHAPE_TILE_AREA,
@@ -395,12 +475,19 @@ func _create_material_site(
 	if site_id <= 0:
 		return {}
 
-	CityConstructionSystemScript.refresh_city_construction_site(site_id)
-	return CityConstructionSystem.get_city_construction_site_by_id(site_id)
+	CityConstructionSystemScript.refresh_city_construction_site_for_city_state(
+		test_city_state,
+		site_id
+	)
+	return CityConstructionSystem.get_city_construction_site_by_id_for_city_state(
+		test_city_state,
+		site_id
+	)
 
 
 func _physical_total(resource: String) -> int:
-	return CityResourceAccountingSystem.get_total_physical_city_resource_amount(
+	return CityResourceAccountingSystem.get_total_physical_city_resource_amount_for_city_state(
+		test_city_state,
 		resource
 	)
 
@@ -412,7 +499,9 @@ func _amount_at_tile(
 ) -> int:
 	var amount := 0
 
-	for raw_ground_pile in CityLogisticsSystem.get_city_ground_pile_snapshot():
+	for raw_ground_pile in CityLogisticsSystem.get_city_ground_pile_snapshot_for_city_state(
+		test_city_state
+	):
 		if not raw_ground_pile is Dictionary:
 			continue
 
@@ -437,7 +526,10 @@ func _amount_at_tile(
 func _amount_for_pile_id(ground_pile_id: int) -> int:
 	return maxi(
 		int(
-			CityLogisticsSystem.get_city_ground_pile_by_id(ground_pile_id).get(
+			CityLogisticsSystem.get_city_ground_pile_by_id_for_city_state(
+				test_city_state,
+				ground_pile_id
+			).get(
 				"amount",
 				0
 			)
@@ -468,7 +560,7 @@ func _haul_source_key(endpoint: Dictionary, resource: String) -> String:
 
 
 func _assert_ground_pile_integrity() -> void:
-	var logistics_state := CityLogisticsSystem.get_current_state()
+	var logistics_state := test_city_state.logistics_state
 	var observed_ids: Dictionary = {}
 
 	for pile_index in range(logistics_state.ground_piles.size()):

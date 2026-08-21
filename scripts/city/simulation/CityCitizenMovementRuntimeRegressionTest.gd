@@ -1,5 +1,8 @@
 extends Node
 
+const CitySettlementTestFixtureScript = preload(
+	"res://scripts/city/simulation/test_support/CitySettlementTestFixture.gd"
+)
 const TILE_A := Vector2i(2, 2)
 const TILE_B := Vector2i(3, 2)
 const TILE_C := Vector2i(5, 2)
@@ -30,24 +33,25 @@ func _ready() -> void:
 
 func _test_assignment_registry_and_repairs() -> void:
 	var fixture := _reset_fixture(93_101)
+	var city_state: CitySettlementSimulationState = fixture["city_state"]
 	var city_world: WorldData = fixture["world"]
 	var culture_id := int(fixture["culture_id"])
-	var first := _add_citizen(culture_id, TILE_A)
-	var second := _add_citizen(culture_id, TILE_C)
-	var third := _add_citizen(culture_id, TILE_E)
+	var first := _add_citizen(city_state, culture_id, TILE_A)
+	var second := _add_citizen(city_state, culture_id, TILE_C)
+	var third := _add_citizen(city_state, culture_id, TILE_E)
 	var first_id := int(first.get("id", -1))
 	var second_id := int(second.get("id", -1))
 	var third_id := int(third.get("id", -1))
-	var state := (
-		CityCitizenMovementRuntimeSystem.get_current_state()
-	)
+	var state := city_state.citizen_movement_runtime_state
 
 	_expect(
-		CityCitizenMovementRuntimeSystem.assign_city_citizen_movement_order(
+		CityCitizenMovementRuntimeSystem.assign_city_citizen_movement_order_for_city_state(
+			city_state,
 			third_id,
 			[TILE_E, TILE_F]
 		)
-		and CityCitizenMovementRuntimeSystem.assign_city_citizen_movement_order(
+		and CityCitizenMovementRuntimeSystem.assign_city_citizen_movement_order_for_city_state(
+			city_state,
 			first_id,
 			[TILE_A, TILE_B]
 		),
@@ -63,7 +67,11 @@ func _test_assignment_registry_and_repairs() -> void:
 		"Assignment must maintain a sorted array, exact lookup, and one version each."
 	)
 
-	var mover_snapshot := CityCitizenMovementRuntimeSystem.get_city_active_mover_ids_snapshot()
+	var mover_snapshot := (
+		CityCitizenMovementRuntimeSystem.get_city_active_mover_ids_snapshot_for_city_state(
+			city_state
+		)
+	)
 	mover_snapshot.append(99)
 	_expect(
 		mover_snapshot == [1, 3, 99]
@@ -76,7 +84,8 @@ func _test_assignment_registry_and_repairs() -> void:
 	var ids_before_rejection := state.active_mover_ids.duplicate()
 	var lookup_before_rejection := state.active_mover_id_lookup.duplicate(true)
 	_expect(
-		not CityCitizenMovementRuntimeSystem.assign_city_citizen_movement_order(
+		not CityCitizenMovementRuntimeSystem.assign_city_citizen_movement_order_for_city_state(
+			city_state,
 			second_id,
 			[TILE_A, TILE_B]
 		)
@@ -92,7 +101,8 @@ func _test_assignment_registry_and_repairs() -> void:
 	state.active_mover_id_lookup = array_only_lookup
 	var version_before_array_only_repair := state.citizen_movement_version
 	_expect(
-		CityCitizenMovementRuntimeSystem.assign_city_citizen_movement_order(
+		CityCitizenMovementRuntimeSystem.assign_city_citizen_movement_order_for_city_state(
+			city_state,
 			second_id,
 			[TILE_C, TILE_D]
 		)
@@ -114,7 +124,10 @@ func _test_assignment_registry_and_repairs() -> void:
 	state.active_mover_id_lookup = duplicate_lookup
 	var version_before_duplicate_cancel := state.citizen_movement_version
 	_expect(
-		CityCitizenMovementRuntimeSystem.cancel_city_citizen_movement(second_id)
+		CityCitizenMovementRuntimeSystem.cancel_city_citizen_movement_for_city_state(
+			city_state,
+			second_id
+		)
 		and is_same(state.active_mover_ids, duplicate_ids)
 		and is_same(state.active_mover_id_lookup, duplicate_lookup)
 		and state.active_mover_ids == [1, 3]
@@ -130,7 +143,8 @@ func _test_assignment_registry_and_repairs() -> void:
 	state.active_mover_id_lookup = lookup_only_lookup
 	var version_before_lookup_only_repair := state.citizen_movement_version
 	_expect(
-		CityCitizenMovementRuntimeSystem.assign_city_citizen_movement_order(
+		CityCitizenMovementRuntimeSystem.assign_city_citizen_movement_order_for_city_state(
+			city_state,
 			second_id,
 			[TILE_C, TILE_D]
 		)
@@ -152,7 +166,9 @@ func _test_assignment_registry_and_repairs() -> void:
 	state.active_mover_id_lookup = corrupt_lookup
 	var version_before_rebuild := state.citizen_movement_version
 	_expect(
-		CityCitizenMovementRuntimeSystem.rebuild_city_active_mover_registry()
+		CityCitizenMovementRuntimeSystem.rebuild_city_active_mover_registry_for_city_state(
+			city_state
+		)
 		and is_same(state.active_mover_ids, corrupt_ids)
 		and is_same(state.active_mover_id_lookup, corrupt_lookup)
 		and state.active_mover_ids == [1, 2, 3]
@@ -165,14 +181,17 @@ func _test_assignment_registry_and_repairs() -> void:
 	)
 	var version_before_clean_rebuild := state.citizen_movement_version
 	_expect(
-		not CityCitizenMovementRuntimeSystem.rebuild_city_active_mover_registry()
+		not CityCitizenMovementRuntimeSystem.rebuild_city_active_mover_registry_for_city_state(
+			city_state
+		)
 		and state.citizen_movement_version == version_before_clean_rebuild,
 		"A clean active-mover rebuild must not publish a false change."
 	)
 
 	state.active_mover_id_lookup.erase(second_id)
 	var version_before_commit_repair := state.citizen_movement_version
-	var commit_repair := CityCitizenMovementRuntimeSystem.commit_city_citizen_movement_tick(
+	var commit_repair := CityCitizenMovementRuntimeSystem.commit_city_citizen_movement_tick_for_city_state(
+		city_state,
 		city_world,
 		[],
 		[1, 2, 3]
@@ -192,13 +211,15 @@ func _test_assignment_registry_and_repairs() -> void:
 
 
 func _test_event_buffer_transfer_and_version_independence() -> void:
-	_reset_fixture(93_202)
-	var state := (
-		CityCitizenMovementRuntimeSystem.get_current_state()
-	)
+	var fixture := _reset_fixture(93_202)
+	var city_state: CitySettlementSimulationState = fixture["city_state"]
+	var state := city_state.citizen_movement_runtime_state
 	var version_before_events := state.citizen_movement_version
-	CityCitizenMovementRuntimeSystem.begin_city_citizen_movement_visual_tick(40)
-	CityCitizenMovementRuntimeSystem.get_current_state().citizen_movement_visual_events.append({"marker": 1})
+	CityCitizenMovementRuntimeSystem.begin_city_citizen_movement_visual_tick_for_city_state(
+		city_state,
+		40
+	)
+	state.citizen_movement_visual_events.append({"marker": 1})
 	_expect(
 		state.citizen_movement_visual_tick_index == 40
 		and state.citizen_movement_visual_events.size() == 1
@@ -206,19 +227,28 @@ func _test_event_buffer_transfer_and_version_independence() -> void:
 		"Beginning and writing a visual tick must not invalidate movement state."
 	)
 	_expect(
-		CityCitizenMovementRuntimeSystem.take_city_citizen_movement_visual_events(39).is_empty()
+		CityCitizenMovementRuntimeSystem.take_city_citizen_movement_visual_events_for_city_state(
+			city_state,
+			39
+		).is_empty()
 		and state.citizen_movement_visual_events.is_empty()
 		and state.citizen_movement_visual_tick_index == -1
 		and state.citizen_movement_version == version_before_events,
 		"A stale take must clear the buffer without changing movement version."
 	)
 
-	CityCitizenMovementRuntimeSystem.begin_city_citizen_movement_visual_tick(41)
-	CityCitizenMovementRuntimeSystem.get_current_state().citizen_movement_visual_events.append({"marker": 2})
-	var transferred_buffer: Array = (
-		CityCitizenMovementRuntimeSystem.get_current_state().citizen_movement_visual_events
+	CityCitizenMovementRuntimeSystem.begin_city_citizen_movement_visual_tick_for_city_state(
+		city_state,
+		41
 	)
-	var taken_events := CityCitizenMovementRuntimeSystem.take_city_citizen_movement_visual_events(41)
+	state.citizen_movement_visual_events.append({"marker": 2})
+	var transferred_buffer: Array = state.citizen_movement_visual_events
+	var taken_events := (
+		CityCitizenMovementRuntimeSystem.take_city_citizen_movement_visual_events_for_city_state(
+			city_state,
+			41
+		)
+	)
 	_expect(
 		is_same(taken_events, transferred_buffer)
 		and taken_events.size() == 1
@@ -230,10 +260,15 @@ func _test_event_buffer_transfer_and_version_independence() -> void:
 		and state.citizen_movement_visual_events.is_empty()
 		and state.citizen_movement_visual_tick_index == -1
 		and state.citizen_movement_version == version_before_events
-		and CityCitizenMovementRuntimeSystem.take_city_citizen_movement_visual_events(41).is_empty(),
+		and CityCitizenMovementRuntimeSystem.take_city_citizen_movement_visual_events_for_city_state(
+			city_state,
+			41
+		).is_empty(),
 		"Matching take must transfer the old buffer exactly once without invalidating."
 	)
-	CityCitizenMovementRuntimeSystem.clear_city_citizen_movement_visual_events()
+	CityCitizenMovementRuntimeSystem.clear_city_citizen_movement_visual_events_for_city_state(
+		city_state
+	)
 	_expect(
 		state.citizen_movement_visual_events.is_empty()
 		and state.citizen_movement_visual_tick_index == -1
@@ -244,27 +279,28 @@ func _test_event_buffer_transfer_and_version_independence() -> void:
 
 func _test_real_tick_completion_and_reset() -> void:
 	var fixture := _reset_fixture(93_303)
+	var city_state: CitySettlementSimulationState = fixture["city_state"]
 	var culture_id := int(fixture["culture_id"])
-	var first := _add_citizen(culture_id, TILE_A)
-	var second := _add_citizen(culture_id, TILE_C)
+	var first := _add_citizen(city_state, culture_id, TILE_A)
+	var second := _add_citizen(city_state, culture_id, TILE_C)
 	var first_id := int(first.get("id", -1))
 	var second_id := int(second.get("id", -1))
-	var state := (
-		CityCitizenMovementRuntimeSystem.get_current_state()
-	)
+	var state := city_state.citizen_movement_runtime_state
 	_expect(
-		CityCitizenMovementRuntimeSystem.assign_city_citizen_movement_order(
+		CityCitizenMovementRuntimeSystem.assign_city_citizen_movement_order_for_city_state(
+			city_state,
 			first_id,
 			[TILE_A, TILE_B]
 		)
-		and CityCitizenMovementRuntimeSystem.assign_city_citizen_movement_order(
+		and CityCitizenMovementRuntimeSystem.assign_city_citizen_movement_order_for_city_state(
+			city_state,
 			second_id,
 			[TILE_C, TILE_D]
 		),
 		"The real-tick fixture must assign two movers."
 	)
 	var version_before_first_tick := state.citizen_movement_version
-	CitizenMovementSystem.run_tick(901, 1)
+	CitizenMovementSystem.run_tick_for_city_state(city_state, 901, 1)
 	_expect(
 		state.active_mover_ids == [1, 2]
 		and _lookup_matches_ids(state.active_mover_id_lookup, [1, 2])
@@ -272,7 +308,10 @@ func _test_real_tick_completion_and_reset() -> void:
 		and state.citizen_movement_visual_tick_index == 901
 		and state.citizen_movement_version == version_before_first_tick + 1
 		and int(
-			CityCitizenRegistrySystem.get_city_citizen_by_id(first_id).get(
+			CityCitizenRegistrySystem.get_city_citizen_by_id_for_city_state(
+				city_state,
+				first_id
+			).get(
 				"movement_progress_basis_points",
 				-1
 			)
@@ -281,17 +320,26 @@ func _test_real_tick_completion_and_reset() -> void:
 	)
 
 	var version_before_completion := state.citizen_movement_version
-	CitizenMovementSystem.run_tick(902, 1)
+	CitizenMovementSystem.run_tick_for_city_state(city_state, 902, 1)
 	_expect(
 		state.active_mover_ids.is_empty()
 		and state.active_mover_id_lookup.is_empty()
 		and state.citizen_movement_visual_events.size() == 2
 		and state.citizen_movement_visual_tick_index == 902
 		and state.citizen_movement_version == version_before_completion + 1
-		and CityCitizenSpatialSystem.get_city_citizen_tile_position(first_id) == TILE_B
-		and CityCitizenSpatialSystem.get_city_citizen_tile_position(second_id) == TILE_D
+		and CityCitizenSpatialSystem.get_city_citizen_tile_position_for_city_state(
+			city_state,
+			first_id
+		) == TILE_B
+		and CityCitizenSpatialSystem.get_city_citizen_tile_position_for_city_state(
+			city_state,
+			second_id
+		) == TILE_D
 		and str(
-			CityCitizenRegistrySystem.get_city_citizen_by_id(first_id).get(
+			CityCitizenRegistrySystem.get_city_citizen_by_id_for_city_state(
+				city_state,
+				first_id
+			).get(
 				"movement_state",
 				""
 			)
@@ -303,12 +351,9 @@ func _test_real_tick_completion_and_reset() -> void:
 	var mover_lookup_ref: Dictionary = state.active_mover_id_lookup
 	var visual_events_ref: Array = state.citizen_movement_visual_events
 	var version_before_reset := state.citizen_movement_version
-	CityCitizenRegistrySystem.reset_city_citizen_state()
+	CityCitizenRegistrySystem.reset_city_citizen_state_for_city_state(city_state)
 	_expect(
-		is_same(
-			CityCitizenMovementRuntimeSystem.get_current_state(),
-			state
-		)
+		is_same(city_state.citizen_movement_runtime_state, state)
 		and is_same(state.active_mover_ids, mover_ids_ref)
 		and is_same(state.active_mover_id_lookup, mover_lookup_ref)
 		and is_same(state.citizen_movement_visual_events, visual_events_ref)
@@ -326,7 +371,9 @@ func _test_real_tick_completion_and_reset() -> void:
 	state.active_mover_id_lookup = stale_lookup
 	var version_before_empty_ensure := state.citizen_movement_version
 	_expect(
-		CityCitizenMovementRuntimeSystem.ensure_city_citizen_movement_state() == 0
+		CityCitizenMovementRuntimeSystem.ensure_city_citizen_movement_state_for_city_state(
+			city_state
+		) == 0
 		and is_same(state.active_mover_ids, stale_ids)
 		and is_same(state.active_mover_id_lookup, stale_lookup)
 		and state.active_mover_ids.is_empty()
@@ -337,15 +384,15 @@ func _test_real_tick_completion_and_reset() -> void:
 	)
 	var version_before_clean_ensure := state.citizen_movement_version
 	_expect(
-		CityCitizenMovementRuntimeSystem.ensure_city_citizen_movement_state() == 0
+		CityCitizenMovementRuntimeSystem.ensure_city_citizen_movement_state_for_city_state(
+			city_state
+		) == 0
 		and state.citizen_movement_version == version_before_clean_ensure,
 		"A second clean empty ensure must not invalidate."
 	)
 
-	WorldData.reset_runtime_session_state()
-	var fresh_state := (
-		CityCitizenMovementRuntimeSystem.get_current_state()
-	)
+	var fresh_fixture := _reset_fixture(93_313)
+	var fresh_state = fresh_fixture["city_state"].citizen_movement_runtime_state
 	_expect(
 		not is_same(fresh_state, state)
 		and fresh_state.active_mover_ids.is_empty()
@@ -368,21 +415,30 @@ func _lookup_matches_ids(lookup: Dictionary, expected_ids: Array) -> bool:
 
 
 func _reset_fixture(seed_value: int) -> Dictionary:
-	WorldData.reset_runtime_session_state()
 	var city_world := _make_world(12, 12, seed_value)
-	WorldPoliticalState.set_current_city_world(city_world)
-	WorldPoliticalState.set_current_city_seed(seed_value)
-	var culture := WorldData.create_culture(
-		"Movement Runtime Regression Culture " + str(seed_value)
-	)
+	var fixture = CitySettlementTestFixtureScript.create({
+		"label": "Movement Runtime Regression " + str(seed_value),
+		"city_world": city_world,
+		"city_seed": seed_value,
+	})
+	_expect(fixture != null, "The movement fixture must be created.")
+	if fixture == null:
+		return {}
 	return {
+		"fixture": fixture,
+		"city_state": fixture.city_state,
 		"world": city_world,
-		"culture_id": int(culture.get("id", -1)),
+		"culture_id": fixture.culture_id,
 	}
 
 
-func _add_citizen(culture_id: int, tile: Vector2i) -> Dictionary:
-	return CityCitizenRegistrySystem.add_city_citizen(
+func _add_citizen(
+	city_state: CitySettlementSimulationState,
+	culture_id: int,
+	tile: Vector2i
+) -> Dictionary:
+	return CityCitizenRegistrySystem.add_city_citizen_for_city_state(
+		city_state,
 		"",
 		tile,
 		CityCitizens.CITY_CITIZEN_SEX_MALE,

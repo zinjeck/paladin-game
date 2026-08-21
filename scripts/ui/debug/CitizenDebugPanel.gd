@@ -1,6 +1,10 @@
 extends RefCounted
 class_name CitizenDebugPanel
 
+const SettlementPresentationBindingScript = preload(
+	"res://scripts/settlements/presentation/SettlementPresentationBinding.gd"
+)
+
 const BUTTON_SIZE: Vector2 = Vector2(145.0, 24.0)
 const LIST_PANEL_MARGIN: float = 10.0
 const LIST_PANEL_SIZE: Vector2 = Vector2(540.0, 300.0)
@@ -15,40 +19,85 @@ var list_panel: Panel
 var title_label: Label
 var body_label: Label
 var is_open: bool = false
-var presentation_binding: CityPresentationBinding
+var presentation_binding: SettlementPresentationBindingScript
+var binding_generation: int = 0
+var highest_accepted_binding_generation: int = 0
 
 #region Setup
 
-func bind_city_presentation(binding: CityPresentationBinding) -> bool:
-	if binding == null or not binding.is_valid():
+func can_bind_settlement_presentation(
+	binding: SettlementPresentationBindingScript
+) -> bool:
+	if (
+		binding == null
+		or not binding.is_valid()
+		or not binding.supports_backend_capability(
+			SettlementPresentationBindingScript.CAPABILITY_CITY_DETAIL
+		)
+	):
 		return false
+	if is_bound_to_settlement_presentation(binding):
+		return true
+	return binding.generation > highest_accepted_binding_generation
 
-	var changed := not is_same(presentation_binding, binding)
+
+func bind_settlement_presentation(
+	binding: SettlementPresentationBindingScript
+) -> bool:
+	if not can_bind_settlement_presentation(binding):
+		return false
+	if is_bound_to_settlement_presentation(binding):
+		return true
+
 	presentation_binding = binding
-	if changed:
-		is_open = false
-		if list_panel != null:
-			list_panel.visible = false
-		if body_label != null:
-			body_label.text = ""
+	binding_generation = binding.generation
+	highest_accepted_binding_generation = binding.generation
+	is_open = false
+	if list_panel != null:
+		list_panel.visible = false
+	if body_label != null:
+		body_label.text = ""
 	refresh()
 	return true
 
 
-func is_bound_to_city_presentation(
-	binding: CityPresentationBinding
+func bind_city_presentation(
+	binding: SettlementPresentationBindingScript
+) -> bool:
+	return bind_settlement_presentation(binding)
+
+
+func is_bound_to_settlement_presentation(
+	binding: SettlementPresentationBindingScript
 ) -> bool:
 	return (
 		presentation_binding != null
 		and presentation_binding.matches_binding(binding)
+		and binding_generation == binding.generation
 	)
+
+
+func is_bound_to_city_presentation(
+	binding: SettlementPresentationBindingScript
+) -> bool:
+	return is_bound_to_settlement_presentation(binding)
+
+
+func reset() -> void:
+	presentation_binding = null
+	binding_generation = 0
+	is_open = false
+	if list_panel != null:
+		list_panel.visible = false
+	if body_label != null:
+		body_label.text = ""
 
 
 func setup(values: Dictionary) -> void:
 	if not _has_valid_setup_values(values):
 		return
 
-	if not bind_city_presentation(values["presentation_binding"]):
+	if not bind_settlement_presentation(values["presentation_binding"]):
 		push_error("CitizenDebugPanel.setup received an invalid presentation binding.")
 		return
 
@@ -89,8 +138,11 @@ func _has_valid_setup_values(values: Dictionary) -> bool:
 		return false
 
 	if (
-		not values["presentation_binding"] is CityPresentationBinding
+		not values["presentation_binding"] is SettlementPresentationBindingScript
 		or not values["presentation_binding"].is_valid()
+		or not values["presentation_binding"].supports_backend_capability(
+			SettlementPresentationBindingScript.CAPABILITY_CITY_DETAIL
+		)
 	):
 		push_error(
 			"CitizenDebugPanel.setup presentation_binding must be valid."
@@ -593,7 +645,14 @@ func format_haul_endpoint(raw_endpoint) -> String:
 func _get_bound_city_state() -> CitySettlementSimulationState:
 	if presentation_binding == null or not presentation_binding.is_valid():
 		return null
-	return presentation_binding.city_state
+	var capability_state = presentation_binding.get_backend_capability(
+		SettlementPresentationBindingScript.CAPABILITY_CITY_DETAIL
+	)
+	return (
+		capability_state
+		if capability_state is CitySettlementSimulationState
+		else null
+	)
 
 
 static func _get_city_object_display_name(city_object: Dictionary) -> String:

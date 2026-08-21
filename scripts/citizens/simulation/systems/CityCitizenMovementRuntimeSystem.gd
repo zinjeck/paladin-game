@@ -7,87 +7,32 @@ const CityCitizensScript = preload(
 
 # Authoritative movement-order, mover-registry, atomic commit, and transient
 # visual-event behavior for an explicitly supplied settlement. Tick/repath
-# computation remains in CitizenMovementSystem.
-
-static func _get_compatibility_city_state() -> CitySettlementSimulationState:
-	return CityCitizenUnboundCompatibility.get_city_state()
-
-
-static func get_current_state() -> CityCitizenMovementRuntimeState:
-	return _get_compatibility_city_state().citizen_movement_runtime_state
+# computation remains in CitizenMovementSystem. No operation resolves a
+# selected/current settlement.
 
 
 static func _get_runtime_state(
-	city_state = null
+	city_state: CitySettlementSimulationState
 ) -> CityCitizenMovementRuntimeState:
-	if city_state is CitySettlementSimulationState:
-		return city_state.citizen_movement_runtime_state
-	return _get_compatibility_city_state().citizen_movement_runtime_state
+	return city_state.citizen_movement_runtime_state
 
 
 static func _get_registry_state(
-	city_state = null
+	city_state: CitySettlementSimulationState
 ) -> CityCitizenRegistryState:
-	if city_state is CitySettlementSimulationState:
-		return city_state.citizen_registry_state
-	return _get_compatibility_city_state().citizen_registry_state
+	return city_state.citizen_registry_state
 
 
-static func _get_city_world(city_state = null):
-	if city_state is CitySettlementSimulationState:
-		return city_state.city_world
-	return _get_compatibility_city_state().city_world
-
-
-static var city_active_mover_ids: Array[int]:
-	get:
-		return get_current_state().active_mover_ids
-	set(value):
-		get_current_state().active_mover_ids = value
-
-
-static var city_active_mover_id_lookup: Dictionary:
-	get:
-		return get_current_state().active_mover_id_lookup
-	set(value):
-		get_current_state().active_mover_id_lookup = value
-
-
-static var city_citizen_movement_visual_events: Array:
-	get:
-		return get_current_state().citizen_movement_visual_events
-	set(value):
-		get_current_state().citizen_movement_visual_events = value
-
-
-static var city_citizen_movement_visual_tick_index: int:
-	get:
-		return get_current_state().citizen_movement_visual_tick_index
-	set(value):
-		get_current_state().citizen_movement_visual_tick_index = value
-
-
-static var city_citizen_movement_version: int:
-	get:
-		return get_current_state().citizen_movement_version
-	set(value):
-		get_current_state().citizen_movement_version = value
-
-
-static func get_city_citizen_movement_version() -> int:
-	return _get_runtime_state().citizen_movement_version
+static func _get_city_world(
+	city_state: CitySettlementSimulationState
+) -> WorldData:
+	return city_state.city_world
 
 
 static func get_city_citizen_movement_version_for_city_state(
 	city_state: CitySettlementSimulationState
 ) -> int:
 	return _get_runtime_state(city_state).citizen_movement_version
-
-
-static func reset_city_citizen_movement_runtime_state() -> void:
-	_reset_city_citizen_movement_runtime_state(
-		_get_compatibility_city_state()
-	)
 
 
 static func reset_city_citizen_movement_runtime_state_for_city_state(
@@ -105,10 +50,6 @@ static func _reset_city_citizen_movement_runtime_state(city_state) -> void:
 	_mark_city_citizen_movement_changed(city_state)
 
 
-static func mark_city_citizen_movement_changed() -> void:
-	_mark_city_citizen_movement_changed(_get_compatibility_city_state())
-
-
 static func mark_city_citizen_movement_changed_for_city_state(
 	city_state: CitySettlementSimulationState
 ) -> void:
@@ -120,7 +61,7 @@ static func _mark_city_citizen_movement_changed(city_state) -> void:
 
 static func _add_city_active_mover_id(
 	citizen_id: int,
-	city_state = null
+	city_state: CitySettlementSimulationState
 ) -> bool:
 	var runtime_state := _get_runtime_state(city_state)
 	var active_ids := runtime_state.active_mover_ids
@@ -168,7 +109,7 @@ static func _add_city_active_mover_id(
 
 static func _remove_city_active_mover_id(
 	citizen_id: int,
-	city_state = null
+	city_state: CitySettlementSimulationState
 ) -> bool:
 	var runtime_state := _get_runtime_state(city_state)
 	var changed := runtime_state.active_mover_id_lookup.erase(citizen_id)
@@ -178,12 +119,6 @@ static func _remove_city_active_mover_id(
 		changed = true
 
 	return changed
-
-static func rebuild_city_active_mover_registry() -> bool:
-	return _rebuild_city_active_mover_registry(
-		_get_compatibility_city_state()
-	)
-
 
 static func rebuild_city_active_mover_registry_for_city_state(
 	city_state: CitySettlementSimulationState
@@ -240,23 +175,10 @@ static func _rebuild_city_active_mover_registry(city_state) -> bool:
 
 	return registry_changed
 
-static func get_city_active_mover_ids_snapshot() -> Array[int]:
-	return _get_runtime_state().active_mover_ids.duplicate()
-
-
 static func get_city_active_mover_ids_snapshot_for_city_state(
 	city_state: CitySettlementSimulationState
 ) -> Array[int]:
 	return _get_runtime_state(city_state).active_mover_ids.duplicate()
-
-static func begin_city_citizen_movement_visual_tick(
-	tick_index: int
-) -> void:
-	_begin_city_citizen_movement_visual_tick(
-		_get_compatibility_city_state(),
-		tick_index
-	)
-
 
 static func begin_city_citizen_movement_visual_tick_for_city_state(
 	city_state: CitySettlementSimulationState,
@@ -266,18 +188,12 @@ static func begin_city_citizen_movement_visual_tick_for_city_state(
 
 
 static func _begin_city_citizen_movement_visual_tick(
-	city_state,
+	city_state: CitySettlementSimulationState,
 	tick_index: int
 ) -> void:
 	var runtime_state := _get_runtime_state(city_state)
 	runtime_state.citizen_movement_visual_events.clear()
 	runtime_state.citizen_movement_visual_tick_index = tick_index
-
-static func clear_city_citizen_movement_visual_events() -> void:
-	_clear_city_citizen_movement_visual_events(
-		_get_compatibility_city_state()
-	)
-
 
 static func clear_city_citizen_movement_visual_events_for_city_state(
 	city_state: CitySettlementSimulationState
@@ -285,19 +201,12 @@ static func clear_city_citizen_movement_visual_events_for_city_state(
 	_clear_city_citizen_movement_visual_events(city_state)
 
 
-static func _clear_city_citizen_movement_visual_events(city_state) -> void:
+static func _clear_city_citizen_movement_visual_events(
+	city_state: CitySettlementSimulationState
+) -> void:
 	var runtime_state := _get_runtime_state(city_state)
 	runtime_state.citizen_movement_visual_events.clear()
 	runtime_state.citizen_movement_visual_tick_index = -1
-
-static func take_city_citizen_movement_visual_events(
-	expected_tick_index: int
-) -> Array:
-	return _take_city_citizen_movement_visual_events(
-		_get_compatibility_city_state(),
-		expected_tick_index
-	)
-
 
 static func take_city_citizen_movement_visual_events_for_city_state(
 	city_state: CitySettlementSimulationState,
@@ -310,7 +219,7 @@ static func take_city_citizen_movement_visual_events_for_city_state(
 
 
 static func _take_city_citizen_movement_visual_events(
-	city_state,
+	city_state: CitySettlementSimulationState,
 	expected_tick_index: int
 ) -> Array:
 	var runtime_state := _get_runtime_state(city_state)
@@ -324,19 +233,15 @@ static func _take_city_citizen_movement_visual_events(
 	runtime_state.citizen_movement_visual_tick_index = -1
 	return events
 
-static func ensure_city_citizen_movement_state() -> int:
-	return _ensure_city_citizen_movement_state(
-		_get_compatibility_city_state()
-	)
-
-
 static func ensure_city_citizen_movement_state_for_city_state(
 	city_state: CitySettlementSimulationState
 ) -> int:
 	return _ensure_city_citizen_movement_state(city_state)
 
 
-static func _ensure_city_citizen_movement_state(city_state) -> int:
+static func _ensure_city_citizen_movement_state(
+	city_state: CitySettlementSimulationState
+) -> int:
 	var registry_state := _get_registry_state(city_state)
 	var runtime_state := _get_runtime_state(city_state)
 	if registry_state.citizens.is_empty():
@@ -380,10 +285,10 @@ static func _ensure_city_citizen_movement_state(city_state) -> int:
 	return migrated_count
 
 static func _get_clean_city_citizen_movement_path(
+	city_state: CitySettlementSimulationState,
 	city_world: WorldData,
 	raw_path: Array,
-	citizen_id: int = -1,
-	city_state = null
+	citizen_id: int = -1
 ) -> Array:
 	var movement_path := []
 
@@ -401,54 +306,30 @@ static func _get_clean_city_citizen_movement_path(
 
 		var path_tile: Vector2i = raw_path_tile
 
-		var tile_is_walkable := (
-			CityNavigationSystem.is_city_tile_walkable_for_citizen(
-				city_world,
-				path_tile,
-				citizen_id
-			)
-			if city_state == null
-			else CityNavigationSystem.is_city_tile_walkable_for_citizen_for_city_state(
-				city_state,
-				city_world,
-				path_tile,
-				citizen_id
-			)
+		var tile_is_walkable := CityNavigationSystem.is_city_tile_walkable_for_citizen_for_city_state(
+			city_state,
+			city_world,
+			path_tile,
+			citizen_id
 		)
 		if not tile_is_walkable:
 			return []
 
 		if previous_tile != CityCitizens.INVALID_CITY_TILE_POSITION:
-			var step_cost := (
-				CityNavigationSystem.get_city_citizen_movement_step_cost(
-					previous_tile,
-					path_tile
-				)
-				if city_state == null
-				else CityNavigationSystem.get_city_citizen_movement_step_cost_for_city_state(
-					city_state,
-					previous_tile,
-					path_tile
-				)
+			var step_cost := CityNavigationSystem.get_city_citizen_movement_step_cost_for_city_state(
+				city_state,
+				previous_tile,
+				path_tile
 			)
 			if step_cost <= 0:
 				return []
 
-			var can_traverse := (
-				CityNavigationSystem.can_city_citizen_traverse_step(
-					city_world,
-					previous_tile,
-					path_tile,
-					citizen_id
-				)
-				if city_state == null
-				else CityNavigationSystem.can_city_citizen_traverse_step_for_city_state(
-					city_state,
-					city_world,
-					previous_tile,
-					path_tile,
-					citizen_id
-				)
+			var can_traverse := CityNavigationSystem.can_city_citizen_traverse_step_for_city_state(
+				city_state,
+				city_world,
+				previous_tile,
+				path_tile,
+				citizen_id
 			)
 			if not can_traverse:
 				return []
@@ -458,15 +339,6 @@ static func _get_clean_city_citizen_movement_path(
 
 	return movement_path
 
-static func cancel_city_citizen_movement(
-	citizen_id: int
-) -> bool:
-	return _cancel_city_citizen_movement(
-		_get_compatibility_city_state(),
-		citizen_id
-	)
-
-
 static func cancel_city_citizen_movement_for_city_state(
 	city_state: CitySettlementSimulationState,
 	citizen_id: int
@@ -475,7 +347,7 @@ static func cancel_city_citizen_movement_for_city_state(
 
 
 static func _cancel_city_citizen_movement(
-	city_state,
+	city_state: CitySettlementSimulationState,
 	citizen_id: int
 ) -> bool:
 	var registry_state := _get_registry_state(city_state)
@@ -503,17 +375,6 @@ static func _cancel_city_citizen_movement(
 	_mark_city_citizen_movement_changed(city_state)
 
 	return true
-
-static func assign_city_citizen_movement_order(
-	citizen_id: int,
-	raw_path: Array
-) -> bool:
-	return _assign_city_citizen_movement_order(
-		_get_compatibility_city_state(),
-		citizen_id,
-		raw_path
-	)
-
 
 static func assign_city_citizen_movement_order_for_city_state(
 	city_state: CitySettlementSimulationState,
@@ -564,10 +425,10 @@ static func _assign_city_citizen_movement_order(
 		return false
 
 	var movement_path := _get_clean_city_citizen_movement_path(
+		city_state,
 		city_world,
 		raw_path,
-		citizen_id,
-		city_state
+		citizen_id
 	)
 
 	if movement_path.is_empty():
@@ -615,19 +476,6 @@ static func _assign_city_citizen_movement_order(
 	_mark_city_citizen_movement_changed(city_state)
 
 	return true
-
-static func commit_city_citizen_movement_tick(
-	city_world: WorldData,
-	raw_citizen_updates: Array,
-	raw_next_active_mover_ids: Array[int]
-) -> Dictionary:
-	return _commit_city_citizen_movement_tick(
-		_get_compatibility_city_state(),
-		city_world,
-		raw_citizen_updates,
-		raw_next_active_mover_ids
-	)
-
 
 static func commit_city_citizen_movement_tick_for_city_state(
 	city_state: CitySettlementSimulationState,
@@ -727,12 +575,9 @@ static func _commit_city_citizen_movement_tick(
 		_mark_city_citizen_movement_changed(city_state)
 
 	if spatial_index_changed:
-		if city_state == null:
-			CityCitizenSpatialSystem.mark_city_citizen_spatial_changed()
-		else:
-			CityCitizenSpatialSystem.mark_city_citizen_spatial_changed_for_city_state(
-				city_state
-			)
+		CityCitizenSpatialSystem.mark_city_citizen_spatial_changed_for_city_state(
+			city_state
+		)
 
 	_get_runtime_state(city_state).citizen_movement_visual_events = application_result.get(
 		"movement_visual_events",
@@ -760,17 +605,12 @@ static func _make_city_citizen_movement_rejection(
 
 	if final_tile is Vector2i:
 		rejection["final_tile"] = final_tile
-		if city_state == null:
-			rejection["occupying_object_id"] = int(
-				CityObjectSystem.get_city_object_id_at_tile(final_tile)
+		rejection["occupying_object_id"] = int(
+			CityObjectSystem.get_city_object_id_at_tile_for_city_state(
+				city_state,
+				final_tile
 			)
-		else:
-			rejection["occupying_object_id"] = int(
-				CityObjectSystem.get_city_object_id_at_tile_for_city_state(
-					city_state,
-					final_tile
-				)
-			)
+		)
 
 	return rejection
 
@@ -946,19 +786,11 @@ static func _normalize_city_citizen_movement_updates(
 			)
 			continue
 
-		var final_tile_is_walkable := (
-			CityNavigationSystem.is_city_tile_walkable_for_citizen(
-				city_world,
-				raw_final_tile,
-				citizen_id
-			)
-			if city_state == null
-			else CityNavigationSystem.is_city_tile_walkable_for_citizen_for_city_state(
-				city_state,
-				city_world,
-				raw_final_tile,
-				citizen_id
-			)
+		var final_tile_is_walkable := CityNavigationSystem.is_city_tile_walkable_for_citizen_for_city_state(
+			city_state,
+			city_world,
+			raw_final_tile,
+			citizen_id
 		)
 		if not is_non_living_same_tile_cleanup and not final_tile_is_walkable:
 			rejected_updates.append(
@@ -1155,33 +987,19 @@ static func _apply_city_citizen_movement_updates(
 			movement_visual_events.append(movement_visual_event)
 
 		if old_tile != final_tile:
-			var removed_from_old_tile := (
-				CityCitizenSpatialSystem.remove_city_citizen_from_spatial_index(
-					citizen_id,
-					old_tile
-				)
-				if city_state == null
-				else CityCitizenSpatialSystem.remove_city_citizen_from_spatial_index_for_city_state(
-					city_state,
-					citizen_id,
-					old_tile
-				)
+			var removed_from_old_tile := CityCitizenSpatialSystem.remove_city_citizen_from_spatial_index_for_city_state(
+				city_state,
+				citizen_id,
+				old_tile
 			)
 			if removed_from_old_tile:
 				spatial_index_changed = true
 			moved_citizen_count += 1
 		elif not bool(updated_citizen.get("alive", false)):
-			var removed_dead_citizen := (
-				CityCitizenSpatialSystem.remove_city_citizen_from_spatial_index(
-					citizen_id,
-					old_tile
-				)
-				if city_state == null
-				else CityCitizenSpatialSystem.remove_city_citizen_from_spatial_index_for_city_state(
-					city_state,
-					citizen_id,
-					old_tile
-				)
+			var removed_dead_citizen := CityCitizenSpatialSystem.remove_city_citizen_from_spatial_index_for_city_state(
+				city_state,
+				citizen_id,
+				old_tile
 			)
 			if removed_dead_citizen:
 				spatial_index_changed = true
@@ -1190,17 +1008,10 @@ static func _apply_city_citizen_movement_updates(
 		registry_state.citizens[citizen_index] = updated_citizen
 		var added_to_final_tile := false
 		if bool(updated_citizen.get("alive", false)):
-			added_to_final_tile = (
-				CityCitizenSpatialSystem.add_city_citizen_to_spatial_index(
-					citizen_id,
-					final_tile
-				)
-				if city_state == null
-				else CityCitizenSpatialSystem.add_city_citizen_to_spatial_index_for_city_state(
-					city_state,
-					citizen_id,
-					final_tile
-				)
+			added_to_final_tile = CityCitizenSpatialSystem.add_city_citizen_to_spatial_index_for_city_state(
+				city_state,
+				citizen_id,
+				final_tile
 			)
 		if added_to_final_tile:
 			spatial_index_changed = true
@@ -1306,17 +1117,10 @@ static func _make_city_citizen_movement_visual_snapshot(
 	):
 		var from_tile: Vector2i = raw_path[movement_path_index - 1]
 		var to_tile: Vector2i = raw_path[movement_path_index]
-		var step_cost := (
-			CityNavigationSystem.get_city_citizen_movement_step_cost(
-				from_tile,
-				to_tile
-			)
-			if city_state == null
-			else CityNavigationSystem.get_city_citizen_movement_step_cost_for_city_state(
-				city_state,
-				from_tile,
-				to_tile
-			)
+		var step_cost := CityNavigationSystem.get_city_citizen_movement_step_cost_for_city_state(
+			city_state,
+			from_tile,
+			to_tile
 		)
 
 		if step_cost > 0:
@@ -1361,34 +1165,20 @@ static func _get_clean_city_citizen_movement_visual_trace(
 			if tile == clean_tiles.back():
 				continue
 
-			var step_cost := (
-				CityNavigationSystem.get_city_citizen_movement_step_cost(
-					clean_tiles.back(),
-					tile
-				)
-				if city_state == null
-				else CityNavigationSystem.get_city_citizen_movement_step_cost_for_city_state(
-					city_state,
-					clean_tiles.back(),
-					tile
-				)
+			var step_cost := CityNavigationSystem.get_city_citizen_movement_step_cost_for_city_state(
+				city_state,
+				clean_tiles.back(),
+				tile
 			)
 			if step_cost <= 0:
 				break
 
 			clean_tiles.append(tile)
 
-	var final_step_cost := (
-		CityNavigationSystem.get_city_citizen_movement_step_cost(
-			clean_tiles.back(),
-			after_tile
-		)
-		if city_state == null
-		else CityNavigationSystem.get_city_citizen_movement_step_cost_for_city_state(
-			city_state,
-			clean_tiles.back(),
-			after_tile
-		)
+	var final_step_cost := CityNavigationSystem.get_city_citizen_movement_step_cost_for_city_state(
+		city_state,
+		clean_tiles.back(),
+		after_tile
 	)
 	if clean_tiles.back() != after_tile and final_step_cost > 0:
 		clean_tiles.append(after_tile)

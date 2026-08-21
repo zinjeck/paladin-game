@@ -8,18 +8,6 @@ const CityNavigationSystemScript = preload(
 const MAX_REPATH_REQUESTS_PER_TICK: int = 4
 const MAX_REPATH_EXPANDED_NODES: int = 10_000
 
-static func run_tick(
-	tick_index: int,
-	minutes_advanced: int
-) -> void:
-	var city_state := CityCitizenUnboundCompatibility.get_city_state()
-	run_tick_for_city_state(city_state, tick_index, minutes_advanced)
-
-
-static func _make_legacy_city_state_view() -> CitySettlementSimulationState:
-	return CityCitizenUnboundCompatibility.get_city_state()
-
-
 static func run_tick_for_city_state(
 	city_state: CitySettlementSimulationState,
 	tick_index: int,

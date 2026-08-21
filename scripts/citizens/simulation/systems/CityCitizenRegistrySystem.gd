@@ -7,10 +7,7 @@ const STARTING_CITY_FEMALE_POPULATION: int = 4
 
 # Authoritative registry behavior for an explicitly supplied settlement. The
 # paired state remains data-only; this system owns lookup, index repair, and
-# registry invalidation without routing production callers through WorldData.
-
-static func get_current_state() -> CityCitizenRegistryState:
-	return CityCitizenUnboundCompatibility.get_city_state().citizen_registry_state
+# registry invalidation without resolving presentation/session selection.
 
 
 static func get_state_for_city_state(
@@ -22,47 +19,11 @@ static func get_state_for_city_state(
 	return city_state.citizen_registry_state
 
 
-static var city_citizens: Array:
-	get:
-		return get_current_state().citizens
-	set(value):
-		get_current_state().citizens = value
-
-
-static var city_citizen_index_by_id: Dictionary:
-	get:
-		return get_current_state().citizen_index_by_id
-	set(value):
-		get_current_state().citizen_index_by_id = value
-
-
-static var next_city_citizen_id: int:
-	get:
-		return get_current_state().next_citizen_id
-	set(value):
-		get_current_state().next_citizen_id = value
-
-
-static var city_citizen_version: int:
-	get:
-		return get_current_state().citizen_version
-	set(value):
-		get_current_state().citizen_version = value
-
-
-static func get_city_citizens() -> Array:
-	return city_citizens
-
-
 static func get_city_citizens_for_city_state(
 	city_state: CitySettlementSimulationState
 ) -> Array:
 	var registry_state := get_state_for_city_state(city_state)
 	return registry_state.citizens if registry_state != null else []
-
-
-static func get_city_citizen_version() -> int:
-	return city_citizen_version
 
 
 static func get_city_citizen_version_for_city_state(
@@ -72,20 +33,24 @@ static func get_city_citizen_version_for_city_state(
 	return registry_state.citizen_version if registry_state != null else 0
 
 
-static func get_next_city_citizen_id() -> int:
-	return next_city_citizen_id
+static func get_next_city_citizen_id_for_city_state(
+	city_state: CitySettlementSimulationState
+) -> int:
+	var registry_state := get_state_for_city_state(city_state)
+	return registry_state.next_citizen_id if registry_state != null else 1
 
 
-static func reset_city_citizen_registry_state() -> void:
-	city_citizens.clear()
-	city_citizen_index_by_id.clear()
-	next_city_citizen_id = 1
-	get_current_state().starting_population_initialized = false
-	mark_city_citizens_changed()
-
-
-static func mark_city_citizens_changed() -> void:
-	city_citizen_version += 1
+static func reset_city_citizen_registry_state_for_city_state(
+	city_state: CitySettlementSimulationState
+) -> void:
+	var registry_state := get_state_for_city_state(city_state)
+	if registry_state == null:
+		return
+	registry_state.citizens.clear()
+	registry_state.citizen_index_by_id.clear()
+	registry_state.next_citizen_id = 1
+	registry_state.starting_population_initialized = false
+	mark_city_citizens_changed_for_city_state(city_state)
 
 
 static func mark_city_citizens_changed_for_city_state(
@@ -96,11 +61,16 @@ static func mark_city_citizens_changed_for_city_state(
 	if registry_state != null:
 		registry_state.citizen_version += 1
 
-static func rebuild_city_citizen_index() -> void:
-	city_citizen_index_by_id.clear()
+static func rebuild_city_citizen_index_for_city_state(
+	city_state: CitySettlementSimulationState
+) -> void:
+	var registry_state := get_state_for_city_state(city_state)
+	if registry_state == null:
+		return
+	registry_state.citizen_index_by_id.clear()
 
-	for citizen_index in range(city_citizens.size()):
-		var raw_citizen = city_citizens[citizen_index]
+	for citizen_index in range(registry_state.citizens.size()):
+		var raw_citizen = registry_state.citizens[citizen_index]
 
 		if not raw_citizen is Dictionary:
 			continue
@@ -111,23 +81,27 @@ static func rebuild_city_citizen_index() -> void:
 		if citizen_id < 0:
 			continue
 
-		if city_citizen_index_by_id.has(citizen_id):
+		if registry_state.citizen_index_by_id.has(citizen_id):
 			push_error(
 				"Duplicate city citizen ID while rebuilding index: "
 				+ str(citizen_id)
 			)
 			continue
 
-		city_citizen_index_by_id[citizen_id] = citizen_index
+		registry_state.citizen_index_by_id[citizen_id] = citizen_index
 
-static func register_city_citizen_index(
+static func register_city_citizen_index_for_city_state(
+	city_state: CitySettlementSimulationState,
 	citizen: Dictionary,
 	citizen_index: int
 ) -> void:
+	var registry_state := get_state_for_city_state(city_state)
+	if registry_state == null:
+		return
 	if citizen.is_empty():
 		return
 
-	if citizen_index < 0 or citizen_index >= city_citizens.size():
+	if citizen_index < 0 or citizen_index >= registry_state.citizens.size():
 		push_error(
 			"Cannot register city citizen index outside the citizen array: "
 			+ str(citizen_index)
@@ -140,8 +114,8 @@ static func register_city_citizen_index(
 		push_error("Cannot register city citizen without a valid ID.")
 		return
 
-	if city_citizen_index_by_id.has(citizen_id):
-		var existing_index := int(city_citizen_index_by_id[citizen_id])
+	if registry_state.citizen_index_by_id.has(citizen_id):
+		var existing_index := int(registry_state.citizen_index_by_id[citizen_id])
 
 		if existing_index != citizen_index:
 			push_error(
@@ -150,52 +124,7 @@ static func register_city_citizen_index(
 			)
 			return
 
-	city_citizen_index_by_id[citizen_id] = citizen_index
-
-static func get_city_citizen_index_by_id(citizen_id: int) -> int:
-	if citizen_id < 0:
-		return -1
-
-	if not city_citizen_index_by_id.has(citizen_id):
-		return -1
-
-	var citizen_index := int(city_citizen_index_by_id[citizen_id])
-
-	if citizen_index < 0 or citizen_index >= city_citizens.size():
-		push_error(
-			"Stale city citizen index for citizen ID "
-			+ str(citizen_id)
-		)
-
-		city_citizen_index_by_id.erase(citizen_id)
-		return -1
-
-	var raw_citizen = city_citizens[citizen_index]
-
-	if not raw_citizen is Dictionary:
-		push_error(
-			"City citizen index points to non-Dictionary data for citizen ID "
-			+ str(citizen_id)
-		)
-
-		city_citizen_index_by_id.erase(citizen_id)
-		return -1
-
-	var citizen: Dictionary = raw_citizen
-	var indexed_citizen_id := int(citizen.get("id", -1))
-
-	if indexed_citizen_id != citizen_id:
-		push_error(
-			"City citizen index mismatch for requested ID "
-			+ str(citizen_id)
-			+ ". Indexed citizen contains ID "
-			+ str(indexed_citizen_id)
-		)
-
-		city_citizen_index_by_id.erase(citizen_id)
-		return -1
-
-	return citizen_index
+	registry_state.citizen_index_by_id[citizen_id] = citizen_index
 
 
 static func get_city_citizen_index_by_id_for_city_state(
@@ -226,30 +155,11 @@ static func get_city_citizen_index_by_id_for_city_state(
 
 	return citizen_index
 
-static func get_city_population_count() -> int:
-	return city_citizens.size()
-
-
 static func get_city_population_count_for_city_state(
 	city_state: CitySettlementSimulationState
 ) -> int:
 	var registry_state := get_state_for_city_state(city_state)
 	return registry_state.citizens.size() if registry_state != null else 0
-
-static func get_city_citizen_by_id(citizen_id: int) -> Dictionary:
-
-	var citizen_index := get_city_citizen_index_by_id(citizen_id)
-
-	if citizen_index < 0:
-		return {}
-
-	var raw_citizen = city_citizens[citizen_index]
-
-	if not raw_citizen is Dictionary:
-		return {}
-
-	return raw_citizen
-
 
 static func get_city_citizen_by_id_for_city_state(
 	city_state: CitySettlementSimulationState,
@@ -268,11 +178,14 @@ static func get_city_citizen_by_id_for_city_state(
 
 	return raw_citizen if raw_citizen is Dictionary else {}
 
-static func get_city_citizen_snapshot() -> Array:
-
+static func get_city_citizen_snapshot_for_city_state(
+	city_state: CitySettlementSimulationState
+) -> Array:
 	var citizen_snapshot := []
-
-	for citizen in city_citizens:
+	var registry_state := get_state_for_city_state(city_state)
+	if registry_state == null:
+		return citizen_snapshot
+	for citizen in registry_state.citizens:
 		if not citizen is Dictionary:
 			continue
 
@@ -280,58 +193,38 @@ static func get_city_citizen_snapshot() -> Array:
 
 	return citizen_snapshot
 
-static func get_city_citizen_display_name(citizen_id: int) -> String:
-	return _get_city_citizen_display_name(null, citizen_id)
-
-
 static func get_city_citizen_display_name_for_city_state(
 	city_state: CitySettlementSimulationState,
 	citizen_id: int
 ) -> String:
-	return _get_city_citizen_display_name(city_state, citizen_id)
-
-
-static func _get_city_citizen_display_name(
-	city_state: CitySettlementSimulationState,
-	citizen_id: int
-) -> String:
-	var citizen := (
-		get_city_citizen_by_id(citizen_id)
-		if city_state == null
-		else get_city_citizen_by_id_for_city_state(city_state, citizen_id)
-	)
+	var citizen := get_city_citizen_by_id_for_city_state(city_state, citizen_id)
 
 	if citizen.is_empty():
 		return "Citizen " + str(citizen_id)
 
 	return str(citizen.get("name", "Citizen " + str(citizen_id)))
 
-static func reset_city_citizen_state() -> void:
-	CityLogisticsSystem.reset_city_haul_reservation_state()
-	CityCitizenRegistrySystem.reset_city_citizen_registry_state()
-	CityCitizenSpatialSystem.reset_city_citizen_spatial_state()
-	CityCitizenMovementRuntimeSystem.reset_city_citizen_movement_runtime_state()
-	CityCitizenTaskRuntimeSystem.reset_city_citizen_task_runtime_state()
-	CitizenDecisionSystem.reset_runtime_state()
-	CityAssignmentSystem.mark_city_assignments_changed()
+static func reset_city_citizen_state_for_city_state(
+	city_state: CitySettlementSimulationState
+) -> void:
+	CityLogisticsSystem.reset_city_haul_reservation_state_for_city_state(city_state)
+	reset_city_citizen_registry_state_for_city_state(city_state)
+	CityCitizenSpatialSystem.reset_city_citizen_spatial_state_for_city_state(city_state)
+	CityCitizenMovementRuntimeSystem.reset_city_citizen_movement_runtime_state_for_city_state(
+		city_state
+	)
+	CityCitizenTaskRuntimeSystem.reset_city_citizen_task_runtime_state_for_city_state(
+		city_state
+	)
+	CitizenDecisionSystem._reset_runtime_state_for_city_state(
+		city_state,
+		city_state.citizen_decision_runtime_state
+	)
+	CityAssignmentSystem.mark_city_assignments_changed_for_city_state(city_state)
 
 #endregion
 
 #region Haul Reservations and Endpoint Accounting
-
-static func get_city_citizen_name_seed() -> int:
-	var name_seed := get_city_citizen_name_seed_for_city_state(
-		CityCitizenUnboundCompatibility.get_city_state()
-	)
-
-	if name_seed == 0:
-		name_seed = int(WorldData.city_start_world_seed)
-
-	if name_seed == 0:
-		name_seed = 12345
-
-	return name_seed
-
 
 static func get_city_citizen_name_seed_for_city_state(
 	city_state: CitySettlementSimulationState
@@ -340,15 +233,6 @@ static func get_city_citizen_name_seed_for_city_state(
 		return 0
 
 	return int(city_state.city_seed)
-
-static func get_city_citizen_count_by_sex(
-	citizen_sex: String
-) -> int:
-	return _get_city_citizen_count_by_sex_for_registry_state(
-		get_current_state(),
-		citizen_sex
-	)
-
 
 static func get_city_citizen_count_by_sex_for_city_state(
 	city_state: CitySettlementSimulationState,
@@ -389,24 +273,6 @@ static func _get_city_citizen_count_by_sex_for_registry_state(
 	return citizen_count
 
 
-static func make_random_city_citizen_first_name(
-	citizen_sex: String,
-	citizen_number: int = -1
-) -> String:
-	var registry_state := get_current_state()
-	var resolved_citizen_number := citizen_number
-
-	if resolved_citizen_number <= 0:
-		resolved_citizen_number = registry_state.next_citizen_id
-
-	return CityCitizens.make_random_city_citizen_first_name(
-		citizen_sex,
-		resolved_citizen_number,
-		get_city_citizen_name_seed(),
-		registry_state.citizens
-	)
-
-
 static func make_random_city_citizen_first_name_for_city_state(
 	city_state: CitySettlementSimulationState,
 	citizen_sex: String,
@@ -430,15 +296,6 @@ static func make_random_city_citizen_first_name_for_city_state(
 		name_seed,
 		registry_state.citizens
 	)
-
-static func resolve_city_citizen_culture_id(
-	requested_culture_id: int = WorldData.INVALID_CULTURE_ID
-) -> int:
-	return resolve_city_citizen_culture_id_for_city_state(
-		CityCitizenUnboundCompatibility.get_city_state(),
-		requested_culture_id
-	)
-
 
 static func resolve_city_citizen_culture_id_for_city_state(
 	city_state: CitySettlementSimulationState,
@@ -469,23 +326,6 @@ static func resolve_city_citizen_culture_id_for_city_state(
 		return WorldData.INVALID_CULTURE_ID
 
 	return primary_culture_id
-
-static func make_city_citizen(
-	display_name: String = "",
-	initial_city_tile_position: Vector2i = (
-		CityCitizens.INVALID_CITY_TILE_POSITION
-	),
-	citizen_sex: String = "",
-	culture_id: int = WorldData.INVALID_CULTURE_ID
-) -> Dictionary:
-	return make_city_citizen_for_city_state(
-		CityCitizenUnboundCompatibility.get_city_state(),
-		display_name,
-		initial_city_tile_position,
-		citizen_sex,
-		culture_id
-	)
-
 
 static func make_city_citizen_for_city_state(
 	city_state: CitySettlementSimulationState,
@@ -531,23 +371,6 @@ static func make_city_citizen_for_city_state(
 
 	registry_state.next_citizen_id += 1
 	return citizen
-
-static func add_city_citizen(
-	display_name: String = "",
-	initial_city_tile_position: Vector2i = (
-		CityCitizens.INVALID_CITY_TILE_POSITION
-	),
-	citizen_sex: String = "",
-	culture_id: int = WorldData.INVALID_CULTURE_ID
-) -> Dictionary:
-	return add_city_citizen_for_city_state(
-		CityCitizenUnboundCompatibility.get_city_state(),
-		display_name,
-		initial_city_tile_position,
-		citizen_sex,
-		culture_id
-	)
-
 
 static func add_city_citizen_for_city_state(
 	city_state: CitySettlementSimulationState,
@@ -595,12 +418,6 @@ static func add_city_citizen_for_city_state(
 	)
 
 	return citizen
-
-static func initialize_starting_city_population() -> int:
-	return initialize_starting_city_population_for_city_state(
-		CityCitizenUnboundCompatibility.get_city_state()
-	)
-
 
 static func initialize_starting_city_population_for_city_state(
 	city_state: CitySettlementSimulationState
@@ -827,13 +644,6 @@ static func _starting_citizen_has_spatial_entry(
 		and raw_citizen_ids.has(int(citizen.get("id", -1)))
 	)
 
-static func ensure_city_citizen_demographic_state() -> int:
-	return _ensure_city_citizen_demographic_state(
-		get_current_state(),
-		get_city_citizen_name_seed()
-	)
-
-
 static func ensure_city_citizen_demographic_state_for_city_state(
 	city_state: CitySettlementSimulationState
 ) -> int:
@@ -928,8 +738,11 @@ static func _ensure_city_citizen_demographic_state(
 
 #region Population, Housing, and Workplace Queries
 
-static func get_city_citizen_culture_id(citizen_id: int) -> int:
-	var citizen := CityCitizenRegistrySystem.get_city_citizen_by_id(citizen_id)
+static func get_city_citizen_culture_id_for_city_state(
+	city_state: CitySettlementSimulationState,
+	citizen_id: int
+) -> int:
+	var citizen := get_city_citizen_by_id_for_city_state(city_state, citizen_id)
 
 	if citizen.is_empty():
 		return WorldData.INVALID_CULTURE_ID
@@ -949,10 +762,18 @@ static func get_city_citizen_culture_id(citizen_id: int) -> int:
 
 	return culture_id
 
-static func get_city_citizen_culture(citizen_id: int) -> Dictionary:
-	return WorldData.get_culture_by_id(get_city_citizen_culture_id(citizen_id))
+static func get_city_citizen_culture_for_city_state(
+	city_state: CitySettlementSimulationState,
+	citizen_id: int
+) -> Dictionary:
+	return WorldData.get_culture_by_id(
+		get_city_citizen_culture_id_for_city_state(city_state, citizen_id)
+	)
 
-static func get_city_citizen_culture_name(citizen_id: int) -> String:
+static func get_city_citizen_culture_name_for_city_state(
+	city_state: CitySettlementSimulationState,
+	citizen_id: int
+) -> String:
 	return WorldData.get_culture_name_by_id(
-		get_city_citizen_culture_id(citizen_id)
+		get_city_citizen_culture_id_for_city_state(city_state, citizen_id)
 	)

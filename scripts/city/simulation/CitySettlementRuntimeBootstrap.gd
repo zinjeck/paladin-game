@@ -1,7 +1,7 @@
 extends RefCounted
 class_name CitySettlementRuntimeBootstrap
 
-# Coordinates compatibility repair and data-shape migrations for one explicit
+# Coordinates runtime repair and data-shape migrations for one explicit
 # settlement. This service never owns gameplay data and never chooses a target
 # through presentation state. Every mutation is routed through the state held
 # by the supplied SettlementSimulationContext.

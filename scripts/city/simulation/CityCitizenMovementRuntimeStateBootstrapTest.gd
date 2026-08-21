@@ -1,5 +1,8 @@
 extends Node
 
+const CitySettlementTestFixtureScript = preload(
+	"res://scripts/city/simulation/test_support/CitySettlementTestFixture.gd"
+)
 const TEST_CITY_NAME := "Movement Bootstrap"
 const TEST_CULTURE_NAME := "Movement Runtime Culture"
 
@@ -48,16 +51,18 @@ func _test_state_defaults() -> void:
 
 
 func _test_pre_context_state_adoption() -> void:
-	WorldData.reset_runtime_session_state()
-	var world := _make_world(8, 8, 95_001)
-	if not _lock_founding_world(world, "Pre-context"):
+	var fixture = CitySettlementTestFixtureScript.create({
+		"label": "Citizen Movement Bootstrap",
+	})
+	_expect(fixture != null, "The movement fixture must be created.")
+	if fixture == null:
 		return
 
 	var bootstrap_ids: Array[int] = [17]
 	var bootstrap_lookup: Dictionary = {17: true}
 	var bootstrap_events: Array = [{"marker": "pre-context"}]
-	var bootstrap_state := (
-		CityCitizenMovementRuntimeSystem.get_current_state()
+	var bootstrap_state: CityCitizenMovementRuntimeState = (
+		fixture.city_state.citizen_movement_runtime_state
 	)
 	bootstrap_state.active_mover_ids = bootstrap_ids
 	bootstrap_state.active_mover_id_lookup = bootstrap_lookup
@@ -66,55 +71,35 @@ func _test_pre_context_state_adoption() -> void:
 	bootstrap_state.citizen_movement_version = 7
 
 	_expect(
-		WorldPoliticalState.synchronize_foundation_with_world_data(),
-		"Founding must establish a City settlement context."
-	)
-	var capital_state = WorldPoliticalState.get_active_city_simulation_state()
-	var context = WorldPoliticalState.get_active_settlement_context()
-	_expect(
-		capital_state is CitySettlementSimulationState
-		and is_same(
-			capital_state.citizen_movement_runtime_state,
+		is_same(
+			fixture.city_state.citizen_movement_runtime_state,
 			bootstrap_state
 		)
 		and is_same(
-			capital_state
+			fixture.city_state
 			.citizen_movement_runtime_state
 			.active_mover_ids,
 			bootstrap_ids
 		)
 		and is_same(
-			capital_state
+			fixture.city_state
 			.citizen_movement_runtime_state
 			.citizen_movement_visual_events,
 			bootstrap_events
 		),
-		"The founding City must adopt the exact pre-context movement owner."
+		"The registered City must retain the exact movement owner."
 	)
 	_expect(
-		context != null
+		fixture.settlement_context != null
 		and is_same(
-			context.get_city_citizen_movement_runtime_state(),
+			fixture.settlement_context.get_city_citizen_movement_runtime_state(),
 			bootstrap_state
 		)
-		and is_same(CityCitizenMovementRuntimeSystem.get_current_state().active_mover_ids, bootstrap_ids)
-		and is_same(CityCitizenMovementRuntimeSystem.get_current_state().active_mover_id_lookup, bootstrap_lookup)
-		and is_same(
-			CityCitizenMovementRuntimeSystem.get_current_state().citizen_movement_visual_events,
-			bootstrap_events
-		)
-		and CityCitizenMovementRuntimeSystem.get_current_state().citizen_movement_visual_tick_index == 51
-		and CityCitizenMovementRuntimeSystem.get_current_state().citizen_movement_version == 7,
-		"Context and compatibility access must resolve one movement owner."
+		and bootstrap_state.citizen_movement_visual_tick_index == 51
+		and bootstrap_state.citizen_movement_version == 7,
+		"The context must expose the explicit movement owner."
 	)
-	_expect(
-		WorldPoliticalState.synchronize_foundation_with_world_data()
-		and is_same(
-			CityCitizenMovementRuntimeSystem.get_current_state(),
-			bootstrap_state
-		),
-		"Repeated synchronization must not replace the movement owner."
-	)
+	fixture.cleanup()
 
 
 func _test_real_founding_bootstrap() -> void:
@@ -126,7 +111,12 @@ func _test_real_founding_bootstrap() -> void:
 		WorldPoliticalState.synchronize_foundation_with_world_data(),
 		"The live flow must establish the capital before Keep placement."
 	)
-	var capital_state = WorldPoliticalState.get_active_city_simulation_state()
+	var capital_settlement_id := (
+		WorldPoliticalState.get_player_capital_settlement_id()
+	)
+	var capital_state = WorldPoliticalState.get_city_simulation_state(
+		capital_settlement_id
+	)
 	if not capital_state is CitySettlementSimulationState:
 		_expect(false, "The live founding fixture requires a City state.")
 		return
@@ -135,11 +125,13 @@ func _test_real_founding_bootstrap() -> void:
 		capital_state.citizen_movement_runtime_state
 	)
 	var city_world := _make_world(20, 20, 95_102)
-	WorldData.store_city_world_save(city_world, 95_102)
+	WorldData.store_city_world_for_state(
+		capital_state, city_world, 95_102
+	)
 	var keep_size := CityObjectCatalog.get_city_object_size_for_type(
 		CityObjectCatalog.CITY_OBJECT_CITY_CENTER
 	)
-	var keep := CityObjectSystem.add_city_object({
+	var keep := CityObjectSystem.add_city_object_for_city_state(capital_state, {
 		"object_type": CityObjectCatalog.CITY_OBJECT_CITY_CENTER,
 		"top_left": Vector2i(6, 6),
 		"size_tiles": keep_size,
@@ -159,15 +151,17 @@ func _test_real_founding_bootstrap() -> void:
 
 	_expect(
 		WorldData.has_player_city()
-		and CityCitizenRegistrySystem.get_current_state().citizens.size()
+		and capital_state.citizen_registry_state.citizens.size()
 		== CityCitizenRegistrySystem.STARTING_CITY_POPULATION
-		and _all_citizens_are_idle()
+		and _all_citizens_are_idle(capital_state)
 		and _state_has_clean_defaults(movement_state),
 		"Founding must leave all eight citizens idle in the capital owner."
 	)
 	var version_before_ensure := movement_state.citizen_movement_version
 	_expect(
-		CityCitizenMovementRuntimeSystem.ensure_city_citizen_movement_state() == 0
+		CityCitizenMovementRuntimeSystem.ensure_city_citizen_movement_state_for_city_state(
+			capital_state
+		) == 0
 		and movement_state.citizen_movement_version
 		== version_before_ensure
 		and _state_has_clean_defaults(movement_state),
@@ -177,10 +171,14 @@ func _test_real_founding_bootstrap() -> void:
 
 
 func _test_city_and_session_reset() -> void:
-	WorldData.reset_runtime_session_state()
-	var state := (
-		CityCitizenMovementRuntimeSystem.get_current_state()
-	)
+	var fixture = CitySettlementTestFixtureScript.create({
+		"label": "Citizen Movement Reset",
+	})
+	_expect(fixture != null, "The movement reset fixture must be created.")
+	if fixture == null:
+		return
+	var city_state: CitySettlementSimulationState = fixture.city_state
+	var state := city_state.citizen_movement_runtime_state
 	var mover_ids: Array[int] = [44]
 	var mover_lookup: Dictionary = {44: true}
 	var visual_events: Array = [{"marker": "reset"}]
@@ -190,12 +188,9 @@ func _test_city_and_session_reset() -> void:
 	state.citizen_movement_visual_tick_index = 144
 	state.citizen_movement_version = 20
 
-	CityCitizenRegistrySystem.reset_city_citizen_state()
+	CityCitizenRegistrySystem.reset_city_citizen_state_for_city_state(city_state)
 	_expect(
-		is_same(
-			CityCitizenMovementRuntimeSystem.get_current_state(),
-			state
-		)
+		is_same(city_state.citizen_movement_runtime_state, state)
 		and is_same(state.active_mover_ids, mover_ids)
 		and is_same(state.active_mover_id_lookup, mover_lookup)
 		and is_same(state.citizen_movement_visual_events, visual_events)
@@ -207,15 +202,22 @@ func _test_city_and_session_reset() -> void:
 		"Citizen reset must clear the exact owner in place and invalidate once."
 	)
 
-	WorldData.reset_runtime_session_state()
-	var fresh_state := (
-		CityCitizenMovementRuntimeSystem.get_current_state()
+	fixture.cleanup()
+	var fresh_fixture = CitySettlementTestFixtureScript.create({
+		"label": "Citizen Movement Reset Fresh",
+	})
+	_expect(fresh_fixture != null, "The fresh movement fixture must be created.")
+	if fresh_fixture == null:
+		return
+	var fresh_state: CityCitizenMovementRuntimeState = (
+		fresh_fixture.city_state.citizen_movement_runtime_state
 	)
 	_expect(
 		not is_same(fresh_state, state)
 		and _state_has_clean_defaults(fresh_state),
 		"A global session reset must replace movement runtime with defaults."
 	)
+	fresh_fixture.cleanup()
 
 
 func _state_has_clean_defaults(
@@ -230,8 +232,10 @@ func _state_has_clean_defaults(
 	)
 
 
-func _all_citizens_are_idle() -> bool:
-	for raw_citizen in CityCitizenRegistrySystem.get_current_state().citizens:
+func _all_citizens_are_idle(
+	city_state: CitySettlementSimulationState
+) -> bool:
+	for raw_citizen in city_state.citizen_registry_state.citizens:
 		if not raw_citizen is Dictionary:
 			return false
 		if (

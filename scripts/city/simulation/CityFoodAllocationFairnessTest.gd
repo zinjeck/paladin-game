@@ -1,5 +1,8 @@
 extends Node
 
+const CitySettlementTestFixtureScript = preload(
+	"res://scripts/city/simulation/test_support/CitySettlementTestFixture.gd"
+)
 # Protects the scarcity rules that distinguish total nutritional deficit from
 # the next one-item allocation and keep pantry stocking behind immediate meals.
 
@@ -18,6 +21,8 @@ const TEST_WORLD_SEED: int = 91_407
 
 var failure_count: int = 0
 var test_culture_id: int = -1
+var test_fixture = null
+var test_city_state: CitySettlementSimulationState
 
 
 func _ready() -> void:
@@ -39,7 +44,7 @@ func _ready() -> void:
 
 func _test_current_source_allocates_one_immediate_meal() -> void:
 	var city_world := _reset_fixture()
-	var house := CityObjectSystem.add_city_object({
+	var house := CityObjectSystem.add_city_object_for_city_state(test_city_state, {
 		"object_type": CityObjectCatalog.CITY_OBJECT_HOUSE,
 		"top_left": Vector2i(8, 8),
 		"size_tiles": CityObjectCatalog.get_city_object_size_for_type(
@@ -55,39 +60,49 @@ func _test_current_source_allocates_one_immediate_meal() -> void:
 	_expect(house_id > 0, "The one-meal fixture must create a House.")
 	_expect(citizen_id > 0, "The one-meal fixture must create a citizen.")
 	_expect(
-		CityAssignmentSystem.assign_city_citizen_home(citizen_id, house_id),
+		CityAssignmentSystem.assign_city_citizen_home_for_city_state(
+			test_city_state, citizen_id, house_id
+		),
 		"The one-meal fixture citizen must own the pantry they are standing in."
 	)
 	_expect(
-		CityResourceContainerSystem.add_resource_to_city_object_storage(
+		CityResourceContainerSystem.add_resource_to_city_object_storage_for_city_state(
+			test_city_state,
 			house_id,
 			WorldData.RESOURCE_FISH,
 			2
 		) == 2,
 		"The one-meal fixture pantry must begin with two fish."
 	)
-	CitizenNeedsSystem.set_city_citizen_hunger_state(citizen_id, 70, 0)
+	CitizenNeedsSystem.set_city_citizen_hunger_state_for_city_state(
+		test_city_state, citizen_id, 70, 0
+	)
 	_expect(
-		CitizenNeedsSystemScript.get_citizen_food_need_nutrition(
+		CitizenNeedsSystemScript.get_citizen_food_need_nutrition_for_city_state(
+			test_city_state,
 			citizen_id
 		) == 30,
 		"Total nutritional deficit must remain distinct from allocation size."
 	)
 	_expect(
-		CitizenNeedsSystemScript.get_citizen_next_food_allocation_nutrition(
+		CitizenNeedsSystemScript.get_citizen_next_food_allocation_nutrition_for_city_state(
+			test_city_state,
 			citizen_id
 		) == 20,
 		"The next allocation must be capped to one ordinary whole food item."
 	)
 
-	CitizenNeedsSystemScript.run_tick(1, 1)
+	CitizenNeedsSystemScript.run_tick_for_city_state(test_city_state, 1, 1)
 
 	_expect(
-		CitizenNeedsSystem.get_city_citizen_hunger(citizen_id) == 90,
+		CitizenNeedsSystem.get_city_citizen_hunger_for_city_state(
+			test_city_state, citizen_id
+		) == 90,
 		"A hungry citizen at a legal source must eat one 20-point fish."
 	)
 	_expect(
-		CityCitizenInventorySystem.get_city_citizen_inventory_resource_amount(
+		CityCitizenInventorySystem.get_city_citizen_inventory_resource_amount_for_city_state(
+			test_city_state,
 			citizen_id,
 			WorldData.RESOURCE_FISH
 		) == 0,
@@ -95,7 +110,9 @@ func _test_current_source_allocates_one_immediate_meal() -> void:
 	)
 	_expect(
 		CityResourceContainerSystem.get_city_object_stored_resource_amount(
-			CityObjectSystem.get_city_object_by_id(house_id),
+			CityObjectSystem.get_city_object_by_id_for_city_state(
+				test_city_state, house_id
+			),
 			WorldData.RESOURCE_FISH
 		) == 1,
 		"One Needs tick must withdraw only one whole food item from any legal source."
@@ -111,11 +128,17 @@ func _test_hungry_citizens_reserve_before_household_stocking() -> void:
 	var hungry_b_id := int(hungry_b.get("id", -1))
 	var provisioner_id := int(provisioner.get("id", -1))
 
-	CitizenNeedsSystem.set_city_citizen_hunger_state(hungry_a_id, 60, 0)
-	CitizenNeedsSystem.set_city_citizen_hunger_state(hungry_b_id, 60, 0)
-	CitizenNeedsSystem.set_city_citizen_hunger_state(provisioner_id, 100, 0)
+	CitizenNeedsSystem.set_city_citizen_hunger_state_for_city_state(
+		test_city_state, hungry_a_id, 60, 0
+	)
+	CitizenNeedsSystem.set_city_citizen_hunger_state_for_city_state(
+		test_city_state, hungry_b_id, 60, 0
+	)
+	CitizenNeedsSystem.set_city_citizen_hunger_state_for_city_state(
+		test_city_state, provisioner_id, 100, 0
+	)
 
-	var stockpile := CityObjectSystem.add_city_object({
+	var stockpile := CityObjectSystem.add_city_object_for_city_state(test_city_state, {
 		"object_type": CityObjectCatalog.CITY_OBJECT_STOCKPILE,
 		"top_left": Vector2i(10, 8),
 		"size_tiles": CityObjectCatalog.get_city_object_size_for_type(
@@ -125,7 +148,7 @@ func _test_hungry_citizens_reserve_before_household_stocking() -> void:
 		"city_world": city_world,
 	})
 	var stockpile_id := int(stockpile.get("id", -1))
-	var house := CityObjectSystem.add_city_object({
+	var house := CityObjectSystem.add_city_object_for_city_state(test_city_state, {
 		"object_type": CityObjectCatalog.CITY_OBJECT_HOUSE,
 		"top_left": Vector2i(22, 8),
 		"size_tiles": CityObjectCatalog.get_city_object_size_for_type(
@@ -139,11 +162,14 @@ func _test_hungry_citizens_reserve_before_household_stocking() -> void:
 	_expect(stockpile_id > 0, "The fairness fixture must create public storage.")
 	_expect(house_id > 0, "The fairness fixture must create a household pantry.")
 	_expect(
-		CityAssignmentSystem.assign_city_citizen_home(provisioner_id, house_id),
+		CityAssignmentSystem.assign_city_citizen_home_for_city_state(
+			test_city_state, provisioner_id, house_id
+		),
 		"The provisioner must be assigned to the household pantry."
 	)
 	_expect(
-		CityResourceContainerSystem.add_resource_to_city_object_storage(
+		CityResourceContainerSystem.add_resource_to_city_object_storage_for_city_state(
+			test_city_state,
 			stockpile_id,
 			WorldData.RESOURCE_FISH,
 			5
@@ -151,14 +177,24 @@ func _test_hungry_citizens_reserve_before_household_stocking() -> void:
 		"The fairness fixture must begin with five shared fish."
 	)
 	_expect(
-		CityResourceMatcherScript.get_city_public_food_surplus_nutrition() == 40,
+		CityResourceMatcherScript.get_city_public_food_surplus_nutrition_for_city_state(
+			test_city_state
+		) == 40,
 		"Before immediate claims, five fish for three citizens must expose two fish of pantry-eligible surplus."
 	)
 
-	CitizenDecisionSystemScript._process_food_needs(false)
+	CitizenDecisionSystemScript._process_food_needs_for_city_state(
+		test_city_state,
+		test_city_state.citizen_decision_runtime_state,
+		false
+	)
 
-	var task_a := CityCitizenTaskRuntimeSystem.get_city_citizen_current_task(hungry_a_id)
-	var task_b := CityCitizenTaskRuntimeSystem.get_city_citizen_current_task(hungry_b_id)
+	var task_a := CityCitizenTaskRuntimeSystem.get_city_citizen_current_task_for_city_state(
+		test_city_state, hungry_a_id
+	)
+	var task_b := CityCitizenTaskRuntimeSystem.get_city_citizen_current_task_for_city_state(
+		test_city_state, hungry_b_id
+	)
 	_expect(
 		str(task_a.get("kind", ""))
 		== CityCitizens.CITY_CITIZEN_TASK_KIND_ACQUIRE_FOOD
@@ -172,14 +208,20 @@ func _test_hungry_citizens_reserve_before_household_stocking() -> void:
 		"Every survival-food task must reserve one whole item, never a private multi-meal bundle."
 	)
 	_expect(
-		CityResourceMatcherScript.get_city_public_food_surplus_nutrition() == 0,
+		CityResourceMatcherScript.get_city_public_food_surplus_nutrition_for_city_state(
+			test_city_state
+		) == 0,
 		"Immediate meal reservations must reduce the pantry-eligible public surplus."
 	)
 
 	var provisioner_request := (
 		CitizenDecisionSystemScript
-		._get_scheduled_home_food_delivery_task_request(
-			CityCitizenRegistrySystem.get_city_citizen_by_id(provisioner_id)
+		._get_scheduled_home_food_delivery_task_request_for_city_state(
+			test_city_state,
+			test_city_state.citizen_decision_runtime_state,
+			CityCitizenRegistrySystem.get_city_citizen_by_id_for_city_state(
+				test_city_state, provisioner_id
+			)
 		)
 	)
 	_expect(
@@ -189,8 +231,6 @@ func _test_hungry_citizens_reserve_before_household_stocking() -> void:
 
 
 func _reset_fixture() -> WorldData:
-	WorldData.reset_runtime_session_state()
-	CitizenDecisionSystemScript.reset_runtime_state()
 	SimulationClock.start_new_game()
 	var city_world := WorldData.new()
 	city_world.setup(TEST_WORLD_SIZE.x, TEST_WORLD_SIZE.y, TEST_WORLD_SEED)
@@ -204,20 +244,32 @@ func _reset_fixture() -> WorldData:
 			tile["fertility"] = 50.0
 
 	city_world.mark_tile_data_changed()
-	WorldData.store_city_world_save(city_world, TEST_WORLD_SEED)
-	var culture := WorldData.create_culture("Food Allocation Test Culture")
-	test_culture_id = int(culture.get("id", -1))
-	WorldPoliticalState.replace_current_city_runtime_data({
+	test_fixture = CitySettlementTestFixtureScript.create({
+		"label": "Food Allocation Test",
+		"city_world": city_world,
+		"city_seed": TEST_WORLD_SEED,
+	})
+	_expect(test_fixture != null, "The food allocation fixture must be created.")
+	if test_fixture == null:
+		return null
+	test_city_state = test_fixture.city_state
+	test_culture_id = test_fixture.culture_id
+	CitizenDecisionSystemScript._reset_runtime_state_for_city_state(
+		test_city_state,
+		test_city_state.citizen_decision_runtime_state
+	)
+	test_city_state.city_runtime_data.merge({
 		"name": "Food Allocation Test City",
 		"primary_culture_id": test_culture_id,
 		"founded": true,
 		"can_build": true,
-	})
+	}, true)
 	return city_world
 
 
 func _add_citizen(tile_position: Vector2i) -> Dictionary:
-	return CityCitizenRegistrySystem.add_city_citizen(
+	return CityCitizenRegistrySystem.add_city_citizen_for_city_state(
+		test_city_state,
 		"",
 		tile_position,
 		CityCitizens.CITY_CITIZEN_SEX_FEMALE,

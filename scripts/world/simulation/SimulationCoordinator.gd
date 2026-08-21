@@ -286,14 +286,16 @@ func run_simulation_systems(
 
 
 func run_settlement_simulation_systems(
-	settlement_context,
+	settlement_context: SettlementSimulationContext,
 	tick_index: int,
 	minutes_advanced: int,
 	duration_recorder: Callable = Callable()
 ) -> void:
 	if (
 		settlement_context == null
-		or not settlement_context.has_method("supports_city_simulation")
+		or not WorldPoliticalState.is_registered_settlement_context(
+			settlement_context
+		)
 		or not settlement_context.supports_city_simulation()
 	):
 		return

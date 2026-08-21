@@ -4,7 +4,9 @@ var failure_count: int = 0
 
 
 func _ready() -> void:
+	_test_detailed_simulation_capability_is_settlement_scoped()
 	_test_explicit_city_simulation_is_independent_of_visual_selection()
+	_test_explicit_city_world_storage_ignores_visual_selection()
 	WorldData.reset_runtime_session_state()
 
 	if failure_count > 0:
@@ -17,6 +19,52 @@ func _ready() -> void:
 
 	print("Explicit settlement simulation context test passed.")
 	get_tree().quit(0)
+
+
+func _test_detailed_simulation_capability_is_settlement_scoped() -> void:
+	var city_state := CitySettlementSimulationState.new()
+	var city_context := SettlementSimulationContext.new({
+		"settlement_id": 1,
+		"polity_id": 1,
+		"settlement_type": SettlementData.SETTLEMENT_TYPE_CITY,
+		"backend_kind": (
+			SettlementSimulationContext.BACKEND_CITY_SETTLEMENT_STATE
+		),
+		"local_state": city_state,
+	})
+	var village_context := SettlementSimulationContext.new({
+		"settlement_id": 2,
+		"polity_id": 1,
+		"settlement_type": SettlementData.SETTLEMENT_TYPE_VILLAGE,
+		"backend_kind": (
+			SettlementSimulationContext.BACKEND_CITY_SETTLEMENT_STATE
+		),
+		"local_state": city_state,
+	})
+	var outpost_context := SettlementSimulationContext.new({
+		"settlement_id": 3,
+		"polity_id": 1,
+		"settlement_type": SettlementData.SETTLEMENT_TYPE_OUTPOST,
+		"backend_kind": SettlementSimulationContext.BACKEND_NONE,
+		"local_state": null,
+	})
+
+	_expect(
+		city_context.supports_detailed_simulation()
+		and city_context.supports_city_simulation()
+		and is_same(
+			city_context.get_detailed_simulation_state(),
+			city_state
+		),
+		"The current city backend must advertise the neutral detailed-simulation capability."
+	)
+	_expect(
+		not village_context.supports_detailed_simulation()
+		and village_context.get_detailed_simulation_state() == null
+		and not outpost_context.supports_detailed_simulation()
+		and outpost_context.get_detailed_simulation_state() == null,
+		"Village and outpost identities must not inherit detailed-city capability from naming or a malformed backend payload."
+	)
 
 
 func _test_explicit_city_simulation_is_independent_of_visual_selection() -> void:
@@ -71,8 +119,11 @@ func _test_explicit_city_simulation_is_independent_of_visual_selection() -> void
 
 	_expect(
 		WorldPoliticalState.active_settlement_id == city_b_id
-		and is_same(WorldPoliticalState.get_current_city_simulation_state(), state_b),
-		"Simulating A must never switch the visual/current settlement away from B."
+		and is_same(
+			WorldPoliticalState.get_city_simulation_state(city_b_id),
+			state_b
+		),
+		"Simulating A must never switch the presented settlement away from B."
 	)
 	_expect(
 		a_observations.size() == 6 and not a_observations.has(false),
@@ -120,6 +171,115 @@ func _test_explicit_city_simulation_is_independent_of_visual_selection() -> void
 	)
 
 
+func _test_explicit_city_world_storage_ignores_visual_selection() -> void:
+	WorldData.reset_runtime_session_state()
+	var culture := WorldData.create_culture("Explicit Storage Culture")
+	var culture_id := int(culture.get("id", -1))
+	var polity := WorldPoliticalState.create_polity({
+		"name": "Explicit Storage Realm",
+		"polity_type": PolityData.POLITY_TYPE_KINGDOM,
+		"primary_culture_id": culture_id,
+	})
+	var polity_id := int(polity.get("id", -1))
+	var city_a := _create_city("Explicit Storage A", polity_id, Vector2i(3, 3))
+	var city_b := _create_city("Explicit Storage B", polity_id, Vector2i(4, 4))
+	var city_a_id := int(city_a.get("id", -1))
+	var city_b_id := int(city_b.get("id", -1))
+	var state_a: CitySettlementSimulationState = (
+		WorldPoliticalState.get_city_simulation_state(city_a_id)
+	)
+	var state_b: CitySettlementSimulationState = (
+		WorldPoliticalState.get_city_simulation_state(city_b_id)
+	)
+	if (
+		culture_id <= 0
+		or polity_id <= 0
+		or state_a == null
+		or state_b == null
+	):
+		_expect(false, "The explicit storage fixture must create two city owners.")
+		return
+
+	var original_a_world := _make_world(8, 8, 51_001)
+	var original_b_world := _make_world(9, 9, 51_002)
+	state_a.city_runtime_data = {
+		"name": "Explicit Storage A",
+		"primary_culture_id": culture_id,
+		"founded": false,
+		"can_build": false,
+	}
+	state_b.city_runtime_data = {
+		"name": "Explicit Storage B",
+		"primary_culture_id": culture_id,
+		"founded": true,
+		"can_build": true,
+	}
+	_expect(
+		WorldData.store_city_world_for_settlement(
+			city_a_id,
+			original_a_world,
+			51_001
+		)
+		and WorldData.store_city_world_for_settlement(
+			city_b_id,
+			original_b_world,
+			51_002
+		)
+		and WorldPoliticalState.set_active_settlement(city_b_id),
+		"The explicit storage fixture must bind both worlds while presenting B."
+	)
+
+	var b_world_before: WorldData = state_b.city_world
+	var b_seed_before := state_b.city_seed
+	var b_runtime_before := state_b.city_runtime_data.duplicate(true)
+	var b_runtime_owner: Dictionary = state_b.city_runtime_data
+	var b_identities := _capture_city_identities(state_b)
+	var replacement_a_world := _make_world(10, 10, 51_003)
+	_expect(
+		WorldData.store_city_world_for_settlement(
+			city_a_id,
+			replacement_a_world,
+			51_003
+		),
+		"An explicit store must accept City A while City B is presented."
+	)
+	_expect(
+		is_same(state_a.city_world, replacement_a_world)
+		and state_a.city_seed == 51_003
+		and WorldData.has_city_world_for_settlement(city_a_id),
+		"The explicit store must update only City A's world and seed."
+	)
+	_expect(
+		WorldPoliticalState.active_settlement_id == city_b_id
+		and is_same(state_b.city_world, b_world_before)
+		and state_b.city_seed == b_seed_before
+		and is_same(state_b.city_runtime_data, b_runtime_owner)
+		and state_b.city_runtime_data == b_runtime_before
+		and _city_identities_match(state_b, b_identities),
+		"Storing City A must preserve every captured City B owner and runtime fact."
+	)
+
+	_expect(
+		WorldData.clear_city_world_for_settlement(city_a_id),
+		"An explicit clear must accept City A while City B is presented."
+	)
+	_expect(
+		state_a.city_world == null
+		and state_a.city_seed == 0
+		and not WorldData.has_city_world_for_settlement(city_a_id),
+		"The explicit clear must remove only City A's world and seed."
+	)
+	_expect(
+		WorldPoliticalState.active_settlement_id == city_b_id
+		and is_same(state_b.city_world, b_world_before)
+		and state_b.city_seed == b_seed_before
+		and is_same(state_b.city_runtime_data, b_runtime_owner)
+		and state_b.city_runtime_data == b_runtime_before
+		and _city_identities_match(state_b, b_identities),
+		"Clearing City A must preserve the presented City B exactly."
+	)
+
+
 func _record_presentation_observation(
 	_system_key: String,
 	_duration_usec: int,
@@ -130,11 +290,11 @@ func _record_presentation_observation(
 	observations.append(
 		WorldPoliticalState.active_settlement_id == expected_active_id
 		and is_same(
-			WorldPoliticalState.get_current_city_simulation_state(),
+			WorldPoliticalState.get_city_simulation_state(expected_active_id),
 			expected_visual_state
 		)
 		and is_same(
-			CityObjectSystem.get_current_state(),
+			CityObjectSystem.get_state_for_city_state(expected_visual_state),
 			expected_visual_state.object_state
 		)
 	)

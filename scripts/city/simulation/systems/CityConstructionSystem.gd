@@ -1,7 +1,7 @@
 extends RefCounted
 class_name CityConstructionSystem
 
-# File responsibility: Authoritative construction behavior/API for one active city settlement. Mutable construction registries live in CityConstructionState.
+# File responsibility: Authoritative construction behavior/API for one explicit city settlement. Mutable construction registries live in CityConstructionState.
 # Navigation regions are organizational only; they do not define runtime ownership.
 
 const CityObjectCatalogScript = preload(
@@ -12,9 +12,6 @@ const CityNavigationSystemScript = preload(
 )
 const CitizenHaulingSystemScript = preload(
 	"res://scripts/citizens/simulation/systems/CitizenHaulingSystem.gd"
-)
-const CitizenNeedsSystemScript = preload(
-	"res://scripts/citizens/simulation/systems/CitizenNeedsSystem.gd"
 )
 const CityResourceMatcherScript = preload(
 	"res://scripts/city/simulation/systems/CityResourceMatcher.gd"
@@ -51,10 +48,6 @@ const CITY_CONSTRUCTION_MAX_FAIRNESS_BONUS: int = 20_000
 const CITY_CONSTRUCTION_LABOR_ATOMIC_MINUTES: int = 30
 
 
-static func get_current_state() -> CityConstructionState:
-	return WorldPoliticalState.get_current_city_construction_state()
-
-
 static func get_state_for_city_state(
 	city_state: CitySettlementSimulationState
 ) -> CityConstructionState:
@@ -65,23 +58,15 @@ static func get_state_for_city_state(
 
 
 static func _get_state(
-	city_state: CitySettlementSimulationState = null
+	city_state: CitySettlementSimulationState
 ) -> CityConstructionState:
-	return (
-		get_current_state()
-		if city_state == null
-		else get_state_for_city_state(city_state)
-	)
+	return get_state_for_city_state(city_state)
 
 
 static func _get_city_world(
-	city_state: CitySettlementSimulationState = null
+	city_state: CitySettlementSimulationState
 ) -> WorldData:
-	return (
-		WorldPoliticalState.get_current_city_world()
-		if city_state == null
-		else city_state.city_world
-	)
+	return city_state.city_world if city_state != null else null
 
 
 static func get_city_object_construction_materials(
@@ -99,11 +84,6 @@ static func city_object_type_uses_construction(
 	)
 
 
-static func can_place_city_road_tile(
-	city_world: WorldData,
-	tile_position: Vector2i
-) -> bool:
-	return _can_place_city_road_tile(null, city_world, tile_position)
 
 
 static func can_place_city_road_tile_for_city_state(
@@ -128,8 +108,6 @@ static func _can_place_city_road_tile(
 		)
 	)
 
-static func mark_city_construction_changed() -> void:
-	get_current_state().construction_version += 1
 
 
 static func mark_city_construction_changed_for_city_state(
@@ -141,10 +119,6 @@ static func mark_city_construction_changed_for_city_state(
 		construction_state.construction_version += 1
 
 
-static func get_city_construction_site_index_by_id(
-	site_id: int
-) -> int:
-	return _get_city_construction_site_index_by_id(null, site_id)
 
 
 static func get_city_construction_site_index_by_id_for_city_state(
@@ -183,10 +157,6 @@ static func _get_city_construction_site_index_by_id(
 
 	return site_index
 
-static func get_city_construction_site_by_id(
-	site_id: int
-) -> Dictionary:
-	return _get_city_construction_site_by_id(null, site_id)
 
 
 static func get_city_construction_site_by_id_for_city_state(
@@ -211,19 +181,6 @@ static func _get_city_construction_site_by_id(
 
 	return construction_state.construction_sites[site_index].duplicate(true)
 
-static func can_place_city_construction_footprint(
-	city_world: WorldData,
-	raw_footprint_tiles: Array,
-	require_external_access: bool = false,
-	allowed_occupied_object_id: int = -1
-) -> bool:
-	return _can_place_city_construction_footprint(
-		null,
-		city_world,
-		raw_footprint_tiles,
-		require_external_access,
-		allowed_occupied_object_id
-	)
 
 
 static func can_place_city_construction_footprint_for_city_state(
@@ -255,11 +212,7 @@ static func _can_place_city_construction_footprint(
 	if city_state != null and not is_same(city_world, city_state.city_world):
 		return false
 
-	var construction_state := (
-		get_current_state()
-		if city_state == null
-		else get_state_for_city_state(city_state)
-	)
+	var construction_state := get_state_for_city_state(city_state)
 	if construction_state == null:
 		return false
 
@@ -281,10 +234,8 @@ static func _can_place_city_construction_footprint(
 		if construction_state.construction_site_id_by_tile.has(tile_position):
 			return false
 
-		var occupied_object_id: int = (
-			CityObjectSystem.get_city_object_id_at_tile(tile_position)
-			if city_state == null
-			else CityObjectSystem.get_city_object_id_at_tile_for_city_state(
+		var occupied_object_id := (
+			CityObjectSystem.get_city_object_id_at_tile_for_city_state(
 				city_state,
 				tile_position
 			)
@@ -322,13 +273,8 @@ static func _can_place_city_construction_footprint(
 			if tile_lookup.has(candidate_tile):
 				continue
 
-			var is_walkable: bool = (
-				CityNavigationSystem.is_city_tile_walkable_for_citizen(
-					city_world,
-					candidate_tile
-				)
-				if city_state == null
-				else CityNavigationSystem
+			var is_walkable := (
+				CityNavigationSystem
 					.is_city_tile_walkable_for_citizen_for_city_state(
 						city_state,
 						city_world,
@@ -340,12 +286,19 @@ static func _can_place_city_construction_footprint(
 
 	return false
 
-static func reset_city_construction_state() -> void:
-	get_current_state().construction_sites.clear()
-	get_current_state().construction_site_index_by_id.clear()
-	get_current_state().construction_site_id_by_tile.clear()
-	get_current_state().next_construction_site_id = 1
-	mark_city_construction_changed()
+static func reset_city_construction_state_for_city_state(
+	city_state: CitySettlementSimulationState
+) -> void:
+	var construction_state := get_state_for_city_state(city_state)
+
+	if construction_state == null:
+		return
+
+	construction_state.construction_sites.clear()
+	construction_state.construction_site_index_by_id.clear()
+	construction_state.construction_site_id_by_tile.clear()
+	construction_state.next_construction_site_id = 1
+	construction_state.construction_version += 1
 
 static func get_city_construction_site_work_positions(
 	site: Dictionary
@@ -362,15 +315,6 @@ static func get_city_construction_site_work_positions(
 
 	return positions
 
-static func get_city_construction_site_reserved_resource_amount(
-	site_id: int,
-	resource: String
-) -> int:
-	return _get_city_construction_site_reserved_resource_amount(
-		null,
-		site_id,
-		resource
-	)
 
 
 static func get_city_construction_site_reserved_resource_amount_for_city_state(
@@ -392,9 +336,7 @@ static func _get_city_construction_site_reserved_resource_amount(
 ) -> int:
 	var total_amount := 0
 	var logistics_state: CityLogisticsState = (
-		CityLogisticsSystem.get_current_state()
-		if city_state == null
-		else city_state.logistics_state
+		CityLogisticsSystem.get_state_for_city_state(city_state)
 	)
 
 	if logistics_state == null:
@@ -419,15 +361,6 @@ static func _get_city_construction_site_reserved_resource_amount(
 
 	return total_amount
 
-static func get_city_construction_site_remaining_resource_amount(
-	site_id: int,
-	resource: String
-) -> int:
-	return _get_city_construction_site_remaining_resource_amount(
-		null,
-		site_id,
-		resource
-	)
 
 
 static func get_city_construction_site_remaining_resource_amount_for_city_state(
@@ -467,19 +400,6 @@ static func _get_city_construction_site_remaining_resource_amount(
 		0
 	)
 
-static func get_city_construction_site_destination_reserved_resource_amount(
-	site_id: int,
-	resource: String,
-	excluding_reservation_id: int = (
-		CityCitizens.INVALID_CITY_CITIZEN_HAUL_RESERVATION_ID
-	)
-) -> int:
-	return _get_city_construction_site_destination_reserved_resource_amount(
-		null,
-		site_id,
-		resource,
-		excluding_reservation_id
-	)
 
 
 static func get_city_construction_site_destination_reserved_resource_amount_for_city_state(
@@ -509,9 +429,7 @@ static func _get_city_construction_site_destination_reserved_resource_amount(
 	)
 	var reserved_amount := 0
 	var logistics_state: CityLogisticsState = (
-		CityLogisticsSystem.get_current_state()
-		if city_state == null
-		else city_state.logistics_state
+		CityLogisticsSystem.get_state_for_city_state(city_state)
 	)
 
 	if logistics_state == null:
@@ -524,9 +442,7 @@ static func _get_city_construction_site_destination_reserved_resource_amount(
 			continue
 
 		var reservation: Dictionary = (
-			CityLogisticsSystem.get_city_haul_reservation(reservation_id)
-			if city_state == null
-			else CityLogisticsSystem.get_city_haul_reservation_for_city_state(
+			CityLogisticsSystem.get_city_haul_reservation_for_city_state(
 				city_state,
 				reservation_id
 			)
@@ -542,11 +458,7 @@ static func _get_city_construction_site_destination_reserved_resource_amount(
 			continue
 
 		var destination_resources: Dictionary = (
-			CityLogisticsSystem.get_city_haul_reservation_destination_resources(
-				reservation_id
-			)
-			if city_state == null
-			else CityLogisticsSystem.get_city_haul_reservation_destination_resources_for_city_state(
+			CityLogisticsSystem.get_city_haul_reservation_destination_resources_for_city_state(
 				city_state,
 				reservation_id
 			)
@@ -558,19 +470,6 @@ static func _get_city_construction_site_destination_reserved_resource_amount(
 
 	return reserved_amount
 
-static func get_city_construction_site_unreserved_resource_space(
-	site_id: int,
-	resource: String,
-	excluding_reservation_id: int = (
-		CityCitizens.INVALID_CITY_CITIZEN_HAUL_RESERVATION_ID
-	)
-) -> int:
-	return _get_city_construction_site_unreserved_resource_space(
-		null,
-		site_id,
-		resource,
-		excluding_reservation_id
-	)
 
 
 static func get_city_construction_site_unreserved_resource_space_for_city_state(
@@ -610,17 +509,6 @@ static func _get_city_construction_site_unreserved_resource_space(
 		0
 	)
 
-static func get_city_construction_site_unreserved_total_space(
-	site_id: int,
-	excluding_reservation_id: int = (
-		CityCitizens.INVALID_CITY_CITIZEN_HAUL_RESERVATION_ID
-	)
-) -> int:
-	return _get_city_construction_site_unreserved_total_space(
-		null,
-		site_id,
-		excluding_reservation_id
-	)
 
 
 static func get_city_construction_site_unreserved_total_space_for_city_state(
@@ -654,10 +542,6 @@ static func _get_city_construction_site_unreserved_total_space(
 
 	return total_space
 
-static func prepare_city_construction_task_assignment(
-	assignment: Dictionary
-) -> bool:
-	return _prepare_city_construction_task_assignment(null, assignment)
 
 
 static func prepare_city_construction_task_assignment_for_city_state(
@@ -699,23 +583,6 @@ static func _prepare_city_construction_task_assignment(
 	assignment["assigned_target_tile"] = raw_target_tile
 	return true
 
-static func can_place_city_object_construction(
-	city_world: WorldData,
-	top_left: Vector2i,
-	size_tiles: Vector2i,
-	object_type: String
-) -> bool:
-	var city_state = WorldPoliticalState.get_current_city_simulation_state()
-	if not city_state is CitySettlementSimulationState:
-		return false
-
-	return _can_place_city_object_construction(
-		city_state,
-		city_world,
-		top_left,
-		size_tiles,
-		object_type
-	)
 
 
 static func can_place_city_object_construction_for_city_state(
@@ -764,8 +631,6 @@ static func _can_place_city_object_construction(
 	)
 #region Construction Site Registry Operations
 
-static func rebuild_city_construction_site_index() -> void:
-	_rebuild_city_construction_site_index(null)
 
 
 static func rebuild_city_construction_site_index_for_city_state(
@@ -805,8 +670,6 @@ static func _rebuild_city_construction_site_index(
 
 
 
-static func get_city_construction_site_snapshot() -> Array:
-	return get_current_state().construction_sites.duplicate(true)
 
 
 static func get_city_construction_site_snapshot_for_city_state(
@@ -820,10 +683,6 @@ static func get_city_construction_site_snapshot_for_city_state(
 	)
 
 
-static func get_city_construction_site_at_tile(
-	tile_position: Vector2i
-) -> Dictionary:
-	return _get_city_construction_site_at_tile(null, tile_position)
 
 
 static func get_city_construction_site_at_tile_for_city_state(
@@ -851,14 +710,6 @@ static func _get_city_construction_site_at_tile(
 	)
 
 
-static func create_city_construction_site(
-	values: Dictionary
-) -> Dictionary:
-	var city_state = WorldPoliticalState.get_current_city_simulation_state()
-	if not city_state is CitySettlementSimulationState:
-		return {}
-
-	return _create_city_construction_site(city_state, values)
 
 
 static func create_city_construction_site_for_city_state(
@@ -1031,10 +882,6 @@ static func _create_city_construction_site(
 	mark_city_construction_changed_for_city_state(resolved_city_state)
 	return site.duplicate(true)
 
-static func update_city_construction_site(
-	site: Dictionary
-) -> bool:
-	return _update_city_construction_site(null, site)
 
 
 static func update_city_construction_site_for_city_state(
@@ -1124,10 +971,7 @@ static func _update_city_construction_site(
 			construction_state.construction_site_id_by_tile[tile_position] = site_id
 
 	construction_state.construction_sites[site_index] = site.duplicate(true)
-	if city_state == null:
-		mark_city_construction_changed()
-	else:
-		mark_city_construction_changed_for_city_state(city_state)
+	mark_city_construction_changed_for_city_state(city_state)
 	return true
 
 static func _can_update_city_construction_site_footprint(
@@ -1139,9 +983,7 @@ static func _can_update_city_construction_site_footprint(
 	var construction_state := _get_state(city_state)
 	var city_world := _get_city_world(city_state)
 	var logistics_state: CityLogisticsState = (
-		CityLogisticsSystem.get_current_state()
-		if city_state == null
-		else city_state.logistics_state
+		CityLogisticsSystem.get_state_for_city_state(city_state)
 	)
 
 	if construction_state == null or city_world == null or logistics_state == null:
@@ -1181,9 +1023,7 @@ static func _can_update_city_construction_site_footprint(
 			return false
 
 		var occupied_object_id := (
-			CityObjectSystem.get_city_object_id_at_tile(tile_position)
-			if city_state == null
-			else CityObjectSystem.get_city_object_id_at_tile_for_city_state(
+			CityObjectSystem.get_city_object_id_at_tile_for_city_state(
 				city_state,
 				tile_position
 			)
@@ -1228,10 +1068,6 @@ static func _can_update_city_construction_site_footprint(
 
 	return true
 
-static func remove_city_construction_site_record(
-	site_id: int
-) -> bool:
-	return _remove_city_construction_site_record(null, site_id)
 
 
 static func remove_city_construction_site_record_for_city_state(
@@ -1259,13 +1095,10 @@ static func _remove_city_construction_site_record(
 	# The site and its parent order are one logical record. Remove the order
 	# in the same operation so completion and direct cancellation leave a
 	# valid state even before the next work-board synchronization.
-	if city_state == null:
-		CityWorkSystem.remove_construction_work_order_for_site(site_id)
-	else:
-		CityWorkSystem.remove_construction_work_order_for_site_for_city_state(
-			city_state,
-			site_id
-		)
+	CityWorkSystem.remove_construction_work_order_for_site_for_city_state(
+		city_state,
+		site_id
+	)
 
 	for raw_tile in site.get("footprint_tiles", []):
 		if (
@@ -1281,26 +1114,12 @@ static func _remove_city_construction_site_record(
 
 	construction_state.construction_sites.remove_at(site_index)
 	_rebuild_city_construction_site_index(city_state)
-	if city_state == null:
-		mark_city_construction_changed()
-	else:
-		mark_city_construction_changed_for_city_state(city_state)
+	mark_city_construction_changed_for_city_state(city_state)
 	return true
 
 
 
 
-static func get_city_construction_site_access_tiles(
-	city_world: WorldData,
-	site: Dictionary,
-	citizen_id: int = -1
-) -> Array[Vector2i]:
-	return _get_city_construction_site_access_tiles(
-		null,
-		city_world,
-		site,
-		citizen_id
-	)
 
 
 static func get_city_construction_site_access_tiles_for_city_state(
@@ -1332,13 +1151,7 @@ static func _get_city_construction_site_access_tiles(
 		if (
 			raw_tile is Vector2i
 			and (
-				CityNavigationSystem.is_city_tile_walkable_for_citizen(
-					city_world,
-					raw_tile,
-					citizen_id
-				)
-				if city_state == null
-				else CityNavigationSystem.is_city_tile_walkable_for_citizen_for_city_state(
+				CityNavigationSystem.is_city_tile_walkable_for_citizen_for_city_state(
 					city_state,
 					city_world,
 					raw_tile,
@@ -1358,10 +1171,6 @@ static func _get_city_construction_site_access_tiles(
 
 
 
-static func city_construction_site_has_all_materials(
-	site_id: int
-) -> bool:
-	return _city_construction_site_has_all_materials(null, site_id)
 
 
 static func city_construction_site_has_all_materials_for_city_state(
@@ -1400,12 +1209,7 @@ static func _get_city_construction_material_deposit_tile(
 		if (
 			raw_tile is Vector2i
 			and (
-				CityLogisticsSystem.can_city_ground_pile_exist_at_tile(
-					_get_city_world(city_state),
-					raw_tile
-				)
-				if city_state == null
-				else CityLogisticsSystem.can_city_ground_pile_exist_at_tile_for_city_state(
+				CityLogisticsSystem.can_city_ground_pile_exist_at_tile_for_city_state(
 					city_state,
 					city_state.city_world,
 					raw_tile
@@ -1416,17 +1220,6 @@ static func _get_city_construction_material_deposit_tile(
 
 	return CityCitizens.INVALID_CITY_TILE_POSITION
 
-static func add_resource_to_city_construction_site(
-	site_id: int,
-	resource: String,
-	requested_amount: int
-) -> int:
-	return _add_resource_to_city_construction_site(
-		null,
-		site_id,
-		resource,
-		requested_amount
-	)
 
 
 static func add_resource_to_city_construction_site_for_city_state(
@@ -1482,28 +1275,13 @@ static func _add_resource_to_city_construction_site(
 		"construction_site_id": site_id,
 	}
 	var add_result: Dictionary = (
-		CityLogisticsSystem.add_resource_to_city_ground_piles_with_result(
-			add_values
-		)
-		if city_state == null
-		else CityLogisticsSystem.add_resource_to_city_ground_piles_with_result_for_city_state(
+		CityLogisticsSystem.add_resource_to_city_ground_piles_with_result_for_city_state(
 			city_state,
 			add_values
 		)
 	)
 	return int(add_result.get("added_amount", 0))
 
-static func remove_resource_from_city_construction_site(
-	site_id: int,
-	resource: String,
-	requested_amount: int
-) -> int:
-	return _remove_resource_from_city_construction_site(
-		null,
-		site_id,
-		resource,
-		requested_amount
-	)
 
 
 static func remove_resource_from_city_construction_site_for_city_state(
@@ -1532,9 +1310,7 @@ static func _remove_resource_from_city_construction_site(
 	var remaining_amount := requested_amount
 	var pile_ids: Array[int] = []
 	var logistics_state: CityLogisticsState = (
-		CityLogisticsSystem.get_current_state()
-		if city_state == null
-		else city_state.logistics_state
+		CityLogisticsSystem.get_state_for_city_state(city_state)
 	)
 
 	if logistics_state == null:
@@ -1565,9 +1341,7 @@ static func _remove_resource_from_city_construction_site(
 			break
 
 		var ground_pile: Dictionary = (
-			CityLogisticsSystem.get_city_ground_pile_by_id(pile_id)
-			if city_state == null
-			else CityLogisticsSystem.get_city_ground_pile_by_id_for_city_state(
+			CityLogisticsSystem.get_city_ground_pile_by_id_for_city_state(
 				city_state,
 				pile_id
 			)
@@ -1580,13 +1354,7 @@ static func _remove_resource_from_city_construction_site(
 			)
 		)
 		var removed_amount: int = (
-			CityLogisticsSystem.remove_resource_from_city_ground_pile(
-				pile_id,
-				resource,
-				removal_amount
-			)
-			if city_state == null
-			else CityLogisticsSystem.remove_resource_from_city_ground_pile_for_city_state(
+			CityLogisticsSystem.remove_resource_from_city_ground_pile_for_city_state(
 				city_state,
 				pile_id,
 				resource,
@@ -1601,12 +1369,6 @@ static func _remove_resource_from_city_construction_site(
 
 #region Construction Site Creation
 
-static func create_rectangular_site(values: Dictionary) -> Dictionary:
-	var city_state = WorldPoliticalState.get_current_city_simulation_state()
-	if not city_state is CitySettlementSimulationState:
-		return {}
-
-	return _create_rectangular_site(city_state, values)
 
 
 static func create_rectangular_site_for_city_state(
@@ -1706,21 +1468,6 @@ static func _create_rectangular_site(
 
 	return site
 
-static func create_road_sites(
-	raw_tile_positions: Array,
-	object_owner: String = "player",
-	city_world: WorldData = null
-) -> Array[Dictionary]:
-	var city_state = WorldPoliticalState.get_current_city_simulation_state()
-	if not city_state is CitySettlementSimulationState:
-		return []
-
-	return _create_road_sites(
-		city_state,
-		raw_tile_positions,
-		object_owner,
-		city_world
-	)
 
 
 static func create_road_sites_for_city_state(
@@ -1979,12 +1726,7 @@ static func _build_external_work_positions(
 				footprint_lookup.has(candidate_tile)
 				or position_lookup.has(candidate_tile)
 				or not (
-					CityNavigationSystem.is_city_tile_walkable_for_citizen(
-						city_world,
-						candidate_tile
-					)
-					if city_state == null
-					else CityNavigationSystem.is_city_tile_walkable_for_citizen_for_city_state(
+					CityNavigationSystem.is_city_tile_walkable_for_citizen_for_city_state(
 						city_state,
 						city_world,
 						candidate_tile
@@ -2004,8 +1746,6 @@ static func _build_external_work_positions(
 
 #region Construction Site Refresh and Progress
 
-static func refresh_all_city_construction_sites() -> void:
-	_refresh_all_city_construction_sites(null)
 
 
 static func refresh_all_city_construction_sites_for_city_state(
@@ -2018,10 +1758,8 @@ static func _refresh_all_city_construction_sites(
 	city_state: CitySettlementSimulationState
 ) -> void:
 	var site_ids: Array[int] = []
-	var site_snapshot: Array = (
-		get_city_construction_site_snapshot()
-		if city_state == null
-		else get_city_construction_site_snapshot_for_city_state(city_state)
+	var site_snapshot := get_city_construction_site_snapshot_for_city_state(
+		city_state
 	)
 
 	for raw_site in site_snapshot:
@@ -2034,10 +1772,6 @@ static func _refresh_all_city_construction_sites(
 		_refresh_city_construction_site(city_state, site_id)
 
 
-static func refresh_city_construction_site(
-	site_id: int
-) -> bool:
-	return _refresh_city_construction_site(null, site_id)
 
 
 static func refresh_city_construction_site_for_city_state(
@@ -2090,15 +1824,19 @@ static func _refresh_city_construction_site(
 	return true
 
 
-static func get_city_construction_site_progress_summary(
+static func get_city_construction_site_progress_summary_for_city_state(
+	city_state: CitySettlementSimulationState,
 	site_id: int
 ) -> Dictionary:
-	var site := get_city_construction_site_by_id(site_id)
+	var site := get_city_construction_site_by_id_for_city_state(
+		city_state,
+		site_id
+	)
 	if site.is_empty():
 		return {}
 
 	var remaining_clearing_work_units := (
-		_get_remaining_clearing_work_units(null, site)
+		_get_remaining_clearing_work_units(city_state, site)
 	)
 	var stored_required_clearing_work_units := maxf(
 		float(
@@ -2136,7 +1874,8 @@ static func get_city_construction_site_progress_summary(
 			required_material_work_units += float(required_amount)
 			completed_material_work_units += float(
 				mini(
-					get_city_construction_site_reserved_resource_amount(
+					get_city_construction_site_reserved_resource_amount_for_city_state(
+						city_state,
 						site_id,
 						resource
 					),
@@ -2283,10 +2022,8 @@ static func _get_remaining_clearing_work_units(
 			+ CityWorkSystem.CITY_PLAYER_COMMAND_RESOURCE_YIELD
 		)
 
-	var ground_pile_snapshot: Array = (
-		CityLogisticsSystem.get_city_ground_pile_snapshot()
-		if city_state == null
-		else CityLogisticsSystem.get_city_ground_pile_snapshot_for_city_state(
+	var ground_pile_snapshot := (
+		CityLogisticsSystem.get_city_ground_pile_snapshot_for_city_state(
 			city_state
 		)
 	)
@@ -2353,10 +2090,8 @@ static func _reserve_needed_footprint_materials(
 		return
 
 	var footprint_tiles: Array = site.get("footprint_tiles", [])
-	var ground_piles: Array = (
-		CityLogisticsSystem.get_city_ground_pile_snapshot()
-		if city_state == null
-		else CityLogisticsSystem.get_city_ground_pile_snapshot_for_city_state(
+	var ground_piles := (
+		CityLogisticsSystem.get_city_ground_pile_snapshot_for_city_state(
 			city_state
 		)
 	)
@@ -2403,19 +2138,12 @@ static func _reserve_needed_footprint_materials(
 		if needed_amount <= 0:
 			continue
 
-		if city_state == null:
-			CityLogisticsSystem.reserve_city_ground_pile_for_construction(
-				int(ground_pile.get("id", -1)),
-				site_id,
-				needed_amount
-			)
-		else:
-			CityLogisticsSystem.reserve_city_ground_pile_for_construction_for_city_state(
-				city_state,
-				int(ground_pile.get("id", -1)),
-				site_id,
-				needed_amount
-			)
+		CityLogisticsSystem.reserve_city_ground_pile_for_construction_for_city_state(
+			city_state,
+			int(ground_pile.get("id", -1)),
+			site_id,
+			needed_amount
+		)
 
 
 static func _ensure_clearing_commands(
@@ -2456,19 +2184,12 @@ static func _ensure_clearing_commands(
 		if command_type == CityWorkSystem.CITY_PLAYER_COMMAND_TYPE_NONE:
 			continue
 
-		if city_state == null:
-			CityWorkSystem.ensure_city_construction_clearing_command(
-				site_id,
-				command_type,
-				tile_position
-			)
-		else:
-			CityWorkSystem.ensure_city_construction_clearing_command_for_city_state(
-				city_state,
-				site_id,
-				command_type,
-				tile_position
-			)
+		CityWorkSystem.ensure_city_construction_clearing_command_for_city_state(
+			city_state,
+			site_id,
+			command_type,
+			tile_position
+		)
 
 
 static func _site_has_surface_obstruction(
@@ -2505,9 +2226,7 @@ static func _site_has_ordinary_ground_pile(
 	var site_id := int(site.get("id", -1))
 	var footprint_tiles: Array = site.get("footprint_tiles", [])
 	var logistics_state: CityLogisticsState = (
-		CityLogisticsSystem.get_current_state()
-		if city_state == null
-		else city_state.logistics_state
+		city_state.logistics_state if city_state != null else null
 	)
 
 	if logistics_state == null:
@@ -2541,10 +2260,16 @@ static func _site_has_ordinary_ground_pile(
 
 #region Construction Work Candidate Selection
 
-static func get_best_assignable_player_work_for_citizen(
+static func get_best_assignable_player_work_for_citizen_for_city_state(
+	city_state: CitySettlementSimulationState,
 	citizen_id: int
 ) -> Dictionary:
-	var citizen := CityCitizenRegistrySystem.get_city_citizen_by_id(citizen_id)
+	var citizen := (
+		CityCitizenRegistrySystem.get_city_citizen_by_id_for_city_state(
+			city_state,
+			citizen_id
+		)
+	)
 
 	if (
 		citizen.is_empty()
@@ -2555,13 +2280,14 @@ static func get_best_assignable_player_work_for_citizen(
 
 	var best_candidate: Dictionary = {}
 
-	for raw_site in get_city_construction_site_snapshot():
+	for raw_site in get_city_construction_site_snapshot_for_city_state(city_state):
 		if not raw_site is Dictionary:
 			continue
 
 		var site: Dictionary = raw_site
 		var candidate := (
-			get_best_assignable_player_work_for_citizen_and_site(
+			get_best_assignable_player_work_for_citizen_and_site_for_city_state(
+				city_state,
 				citizen_id,
 				int(site.get("id", -1))
 			)
@@ -2573,15 +2299,6 @@ static func get_best_assignable_player_work_for_citizen(
 	return best_candidate
 
 
-static func get_best_assignable_player_work_for_citizen_and_site(
-	citizen_id: int,
-	site_id: int
-) -> Dictionary:
-	return _get_best_assignable_player_work_for_citizen_and_site(
-		null,
-		citizen_id,
-		site_id
-	)
 
 
 static func get_best_assignable_player_work_for_citizen_and_site_for_city_state(
@@ -2602,9 +2319,7 @@ static func _get_best_assignable_player_work_for_citizen_and_site(
 	site_id: int
 ) -> Dictionary:
 	var citizen: Dictionary = (
-		CityCitizenRegistrySystem.get_city_citizen_by_id(citizen_id)
-		if city_state == null
-		else CityCitizenRegistrySystem.get_city_citizen_by_id_for_city_state(
+		CityCitizenRegistrySystem.get_city_citizen_by_id_for_city_state(
 			city_state,
 			citizen_id
 		)
@@ -2638,15 +2353,6 @@ static func _get_best_assignable_player_work_for_citizen_and_site(
 # road tile share one exact route search while retaining independent site IDs,
 # claims, progress, and completion. Synthetic/materialized road fixtures fall
 # back to ordinary per-site selection.
-static func get_best_assignable_batchable_road_work_for_citizen(
-	citizen_id: int,
-	raw_site_ids: Array
-) -> Dictionary:
-	return _get_best_assignable_batchable_road_work_for_citizen(
-		null,
-		citizen_id,
-		raw_site_ids
-	)
 
 
 static func get_best_assignable_batchable_road_work_for_citizen_for_city_state(
@@ -2666,10 +2372,9 @@ static func _get_best_assignable_batchable_road_work_for_citizen(
 	citizen_id: int,
 	raw_site_ids: Array
 ) -> Dictionary:
+
 	var citizen: Dictionary = (
-		CityCitizenRegistrySystem.get_city_citizen_by_id(citizen_id)
-		if city_state == null
-		else CityCitizenRegistrySystem.get_city_citizen_by_id_for_city_state(
+		CityCitizenRegistrySystem.get_city_citizen_by_id_for_city_state(
 			city_state,
 			citizen_id
 		)
@@ -2752,19 +2457,11 @@ static func _get_best_assignable_batchable_road_work_for_citizen(
 				):
 					if (
 						claimed_positions.has(position)
-						or not (
-							CityNavigationSystem.is_city_tile_walkable_for_citizen(
-								WorldPoliticalState.get_current_city_world(),
-								position,
-								citizen_id
-							)
-							if city_state == null
-							else CityNavigationSystem.is_city_tile_walkable_for_citizen_for_city_state(
-								city_state,
-								city_state.city_world,
-								position,
-								citizen_id
-							)
+						or not CityNavigationSystem.is_city_tile_walkable_for_citizen_for_city_state(
+							city_state,
+							city_state.city_world,
+							position,
+							citizen_id
 						)
 					):
 						continue
@@ -2789,9 +2486,7 @@ static func _get_best_assignable_batchable_road_work_for_citizen(
 		"heuristic_weight": EXACT_PATH_HEURISTIC_WEIGHT,
 	}
 	var path_result: Dictionary = (
-		CityNavigationSystemScript.find_path_to_any_city_tile(path_values)
-		if city_state == null
-		else CityNavigationSystemScript.find_path_to_any_city_tile_for_city_state(
+		CityNavigationSystemScript.find_path_to_any_city_tile_for_city_state(
 			city_state,
 			path_values
 		)
@@ -2854,9 +2549,7 @@ static func _get_best_clearing_cleanup_candidate(
 	if (
 		citizen_id <= 0
 		or (
-			CityCitizenInventorySystem.get_city_citizen_haul_cargo_amount(citizen_id)
-			if city_state == null
-			else CityCitizenInventorySystem.get_city_citizen_haul_cargo_amount_for_city_state(
+			CityCitizenInventorySystem.get_city_citizen_haul_cargo_amount_for_city_state(
 				city_state,
 				citizen_id
 			)
@@ -2878,10 +2571,8 @@ static func _get_best_clearing_cleanup_candidate(
 	if site_id <= 0 or not raw_citizen_tile is Vector2i:
 		return best_candidate
 
-	var ground_pile_snapshot: Array = (
-		CityLogisticsSystem.get_city_ground_pile_snapshot()
-		if city_state == null
-		else CityLogisticsSystem.get_city_ground_pile_snapshot_for_city_state(
+	var ground_pile_snapshot := (
+		CityLogisticsSystem.get_city_ground_pile_snapshot_for_city_state(
 			city_state
 		)
 	)
@@ -2915,13 +2606,8 @@ static func _get_best_clearing_cleanup_candidate(
 		var source := CityLogisticsSystem.make_city_ground_pile_haul_endpoint(
 			ground_pile_id
 		)
-		var requested_amount: int = (
-			CityLogisticsSystem.get_city_haul_endpoint_unreserved_resource_amount(
-				source,
-				resource
-			)
-			if city_state == null
-			else CityLogisticsSystem.get_city_haul_endpoint_unreserved_resource_amount_for_city_state(
+		var requested_amount := (
+			CityLogisticsSystem.get_city_haul_endpoint_unreserved_resource_amount_for_city_state(
 				city_state,
 				source,
 				resource
@@ -2955,11 +2641,7 @@ static func _get_best_clearing_cleanup_candidate(
 				),
 			}
 		var task_request: Dictionary = (
-			CitizenHaulingSystemScript.make_public_storage_haul_task_request(
-				task_values
-			)
-			if city_state == null
-			else CitizenHaulingSystemScript.make_public_storage_haul_task_request_for_city_state(
+			CitizenHaulingSystemScript.make_public_storage_haul_task_request_for_city_state(
 				city_state,
 				task_values
 			)
@@ -3041,15 +2723,6 @@ static func _get_best_clearing_cleanup_candidate(
 
 #region Ground Pile Relocation
 
-static func can_relocate_ground_pile_outside_site(
-	site_id: int,
-	ground_pile_id: int
-) -> bool:
-	return _can_relocate_ground_pile_outside_site(
-		null,
-		site_id,
-		ground_pile_id
-	)
 
 
 static func can_relocate_ground_pile_outside_site_for_city_state(
@@ -3071,9 +2744,7 @@ static func _can_relocate_ground_pile_outside_site(
 ) -> bool:
 	var site := _get_city_construction_site_by_id(city_state, site_id)
 	var pile: Dictionary = (
-		CityLogisticsSystem.get_city_ground_pile_by_id(ground_pile_id)
-		if city_state == null
-		else CityLogisticsSystem.get_city_ground_pile_by_id_for_city_state(
+		CityLogisticsSystem.get_city_ground_pile_by_id_for_city_state(
 			city_state,
 			ground_pile_id
 		)
@@ -3132,10 +2803,8 @@ static func _make_ground_relocation_task_request(
 	var excluded_pile_ids: Array[int] = []
 	var footprint_tiles: Array = site.get("footprint_tiles", [])
 
-	var ground_pile_snapshot: Array = (
-		CityLogisticsSystem.get_city_ground_pile_snapshot()
-		if city_state == null
-		else CityLogisticsSystem.get_city_ground_pile_snapshot_for_city_state(
+	var ground_pile_snapshot := (
+		CityLogisticsSystem.get_city_ground_pile_snapshot_for_city_state(
 			city_state
 		)
 	)
@@ -3156,20 +2825,13 @@ static func _make_ground_relocation_task_request(
 			excluded_pile_ids.append(int(raw_pile.get("id", -1)))
 
 	excluded_pile_ids.sort()
-	var destination: Dictionary
-
-	if city_state == null:
-		destination = CityLogisticsSystem.make_city_ground_tile_haul_endpoint(
+	var destination := (
+		CityLogisticsSystem.make_city_ground_tile_haul_endpoint_for_city_state(
+			city_state,
 			destination_tile,
 			excluded_pile_ids
 		)
-	else:
-		destination = CityCitizens.make_city_citizen_haul_endpoint({
-			"kind": CityCitizens.CITY_CITIZEN_HAUL_ENDPOINT_KIND_GROUND_TILE,
-			"id": -1,
-			"tile_position": destination_tile,
-			"excluded_ground_pile_ids": excluded_pile_ids,
-		})
+	)
 	var site_endpoint := CityLogisticsSystem.make_city_construction_site_haul_endpoint(
 		int(site.get("id", -1))
 	)
@@ -3195,9 +2857,7 @@ static func _make_ground_relocation_task_request(
 		"task_priority": CITY_CONSTRUCTION_TASK_PRIORITY,
 	}
 	return (
-		CitizenHaulingSystemScript.make_directed_haul_task_request(task_values)
-		if city_state == null
-		else CitizenHaulingSystemScript.make_directed_haul_task_request_for_city_state(
+		CitizenHaulingSystemScript.make_directed_haul_task_request_for_city_state(
 			city_state,
 			task_values
 		)
@@ -3237,12 +2897,7 @@ static func _find_nearest_ground_relocation_tile(
 						candidate_tile
 					).is_empty()
 					or not (
-						CityLogisticsSystem.can_city_ground_pile_exist_at_tile(
-							city_world,
-							candidate_tile
-						)
-						if city_state == null
-						else CityLogisticsSystem.can_city_ground_pile_exist_at_tile_for_city_state(
+						CityLogisticsSystem.can_city_ground_pile_exist_at_tile_for_city_state(
 							city_state,
 							city_world,
 							candidate_tile
@@ -3270,9 +2925,7 @@ static func _find_nearest_ground_relocation_tile(
 				"heuristic_weight": EXACT_PATH_HEURISTIC_WEIGHT,
 			}
 		var path_result: Dictionary = (
-			CityNavigationSystemScript.find_path_to_any_city_tile(path_values)
-			if city_state == null
-			else CityNavigationSystemScript.find_path_to_any_city_tile_for_city_state(
+			CityNavigationSystemScript.find_path_to_any_city_tile_for_city_state(
 				city_state,
 				path_values
 			)
@@ -3332,13 +2985,7 @@ static func _get_best_delivery_candidate(
 			continue
 
 		var supply_candidates: Array = (
-			CityResourceMatcherScript.get_resource_supply_candidates(
-				CityResourceMatcherScript.PURPOSE_CONSTRUCTION_SUPPLY,
-				resource,
-				requested_amount
-			)
-			if city_state == null
-			else CityResourceMatcherScript.get_resource_supply_candidates_for_city_state(
+			CityResourceMatcherScript.get_resource_supply_candidates_for_city_state(
 				city_state,
 				CityResourceMatcherScript.PURPOSE_CONSTRUCTION_SUPPLY,
 				resource,
@@ -3380,11 +3027,7 @@ static func _get_best_delivery_candidate(
 					),
 				}
 			var task_request: Dictionary = (
-				CitizenHaulingSystemScript.make_directed_haul_task_request(
-					task_values
-				)
-				if city_state == null
-				else CitizenHaulingSystemScript.make_directed_haul_task_request_for_city_state(
+				CitizenHaulingSystemScript.make_directed_haul_task_request_for_city_state(
 					city_state,
 					task_values
 				)
@@ -3456,19 +3099,11 @@ static func _get_labor_candidate(
 	):
 		if (
 			claimed_positions.has(position)
-			or not (
-				CityNavigationSystem.is_city_tile_walkable_for_citizen(
-					WorldPoliticalState.get_current_city_world(),
-					position,
-					citizen_id
-				)
-				if city_state == null
-				else CityNavigationSystem.is_city_tile_walkable_for_citizen_for_city_state(
-					city_state,
-					city_state.city_world,
-					position,
-					citizen_id
-				)
+			or not CityNavigationSystem.is_city_tile_walkable_for_citizen_for_city_state(
+				city_state,
+				city_state.city_world,
+				position,
+				citizen_id
 			)
 		):
 			continue
@@ -3490,9 +3125,7 @@ static func _get_labor_candidate(
 			"heuristic_weight": EXACT_PATH_HEURISTIC_WEIGHT,
 		}
 	var path_result: Dictionary = (
-		CityNavigationSystemScript.find_path_to_any_city_tile(path_values)
-		if city_state == null
-		else CityNavigationSystemScript.find_path_to_any_city_tile_for_city_state(
+		CityNavigationSystemScript.find_path_to_any_city_tile_for_city_state(
 			city_state,
 			path_values
 		)
@@ -3531,9 +3164,7 @@ static func _get_active_laborer_count(
 ) -> int:
 	var count := 0
 	var registry_state: CityCitizenRegistryState = (
-		CityCitizenRegistrySystem.get_current_state()
-		if city_state == null
-		else city_state.citizen_registry_state
+		city_state.citizen_registry_state if city_state != null else null
 	)
 
 	if registry_state == null:
@@ -3564,9 +3195,7 @@ static func _get_claimed_labor_positions(
 ) -> Dictionary:
 	var claimed_positions: Dictionary = {}
 	var registry_state: CityCitizenRegistryState = (
-		CityCitizenRegistrySystem.get_current_state()
-		if city_state == null
-		else city_state.citizen_registry_state
+		city_state.citizen_registry_state if city_state != null else null
 	)
 
 	if registry_state == null:
@@ -3664,11 +3293,6 @@ static func _candidate_is_better(
 
 #region Construction Work Assignment
 
-static func assign_player_work_candidate(
-	citizen_id: int,
-	candidate: Dictionary
-) -> bool:
-	return _assign_player_work_candidate(null, citizen_id, candidate)
 
 
 static func assign_player_work_candidate_for_city_state(
@@ -3692,12 +3316,7 @@ static func _assign_player_work_candidate(
 				return false
 
 			return (
-				CityCitizenTaskRuntimeSystem.assign_city_citizen_task(
-					citizen_id,
-					raw_task_request
-				)
-				if city_state == null
-				else CityCitizenTaskRuntimeSystem.assign_city_citizen_task_for_city_state(
+				CityCitizenTaskRuntimeSystem.assign_city_citizen_task_for_city_state(
 					city_state,
 					citizen_id,
 					raw_task_request
@@ -3737,12 +3356,7 @@ static func _assign_player_work_candidate(
 					"job_id": str(candidate.get("job_id", "")),
 				}
 			return (
-				CityCitizenTaskRuntimeSystem.assign_city_citizen_task(
-					citizen_id,
-					task_values
-				)
-				if city_state == null
-				else CityCitizenTaskRuntimeSystem.assign_city_citizen_task_for_city_state(
+				CityCitizenTaskRuntimeSystem.assign_city_citizen_task_for_city_state(
 					city_state,
 					citizen_id,
 					task_values
@@ -3756,11 +3370,6 @@ static func _assign_player_work_candidate(
 
 #region Construction Labor State Machine
 
-static func advance_labor_task(
-	city_world: WorldData,
-	values: Dictionary
-) -> int:
-	return _advance_labor_task(null, city_world, values)
 
 
 static func advance_labor_task_for_city_state(
@@ -3852,9 +3461,7 @@ static func _advance_labor_task(
 				"heuristic_weight": EXACT_PATH_HEURISTIC_WEIGHT,
 			}
 			var path_result: Dictionary = (
-				CityNavigationSystemScript.find_path_to_any_city_tile(path_values)
-				if city_state == null
-				else CityNavigationSystemScript.find_path_to_any_city_tile_for_city_state(
+				CityNavigationSystemScript.find_path_to_any_city_tile_for_city_state(
 					city_state,
 					path_values
 				)
@@ -3863,12 +3470,7 @@ static func _advance_labor_task(
 
 			if bool(path_result.get("success", false)):
 				movement_assigned = (
-					CityCitizenMovementRuntimeSystem.assign_city_citizen_movement_order(
-						citizen_id,
-						path_result.get("path", [])
-					)
-					if city_state == null
-					else CityCitizenMovementRuntimeSystem.assign_city_citizen_movement_order_for_city_state(
+					CityCitizenMovementRuntimeSystem.assign_city_citizen_movement_order_for_city_state(
 						city_state,
 						citizen_id,
 						path_result.get("path", [])
@@ -3941,13 +3543,10 @@ static func _begin_labor(
 	citizen_id: int,
 	target_tile: Vector2i
 ) -> bool:
-	if city_state == null:
-		CityCitizenMovementRuntimeSystem.cancel_city_citizen_movement(citizen_id)
-	else:
-		CityCitizenMovementRuntimeSystem.cancel_city_citizen_movement_for_city_state(
-			city_state,
-			citizen_id
-		)
+	CityCitizenMovementRuntimeSystem.cancel_city_citizen_movement_for_city_state(
+		city_state,
+		citizen_id
+	)
 
 	var activity_values := {
 		"citizen_id": citizen_id,
@@ -3957,12 +3556,8 @@ static func _begin_labor(
 			+ CITY_CONSTRUCTION_LABOR_ATOMIC_MINUTES
 		),
 	}
-	var activity_set: bool = (
-		CityCitizenTaskRuntimeSystem.set_city_citizen_task_activity_state(
-			activity_values
-		)
-		if city_state == null
-		else CityCitizenTaskRuntimeSystem.set_city_citizen_task_activity_state_for_city_state(
+	var activity_set := (
+		CityCitizenTaskRuntimeSystem.set_city_citizen_task_activity_state_for_city_state(
 			city_state,
 			activity_values
 		)
@@ -4013,12 +3608,7 @@ static func _set_labor_task_phase(
 	task_phase: String
 ) -> bool:
 	return (
-		CityCitizenTaskRuntimeSystem.set_city_citizen_task_phase(
-			citizen_id,
-			task_phase
-		)
-		if city_state == null
-		else CityCitizenTaskRuntimeSystem.set_city_citizen_task_phase_for_city_state(
+		CityCitizenTaskRuntimeSystem.set_city_citizen_task_phase_for_city_state(
 			city_state,
 			citizen_id,
 			task_phase
@@ -4030,32 +3620,21 @@ static func _release_labor_task(
 	city_state: CitySettlementSimulationState,
 	citizen_id: int
 ) -> void:
-	if city_state == null:
-		CityCitizenTaskRuntimeSystem.clear_city_citizen_task(
-			citizen_id,
-			CityCitizens.CITY_CITIZEN_TASK_SOURCE_PLAYER
-		)
-		CityCitizenMovementRuntimeSystem.cancel_city_citizen_movement(citizen_id)
-	else:
-		CityCitizenTaskRuntimeSystem.clear_city_citizen_task_for_city_state(
-			city_state,
-			citizen_id,
-			CityCitizens.CITY_CITIZEN_TASK_SOURCE_PLAYER
-		)
-		CityCitizenMovementRuntimeSystem.cancel_city_citizen_movement_for_city_state(
-			city_state,
-			citizen_id
-		)
+	CityCitizenTaskRuntimeSystem.clear_city_citizen_task_for_city_state(
+		city_state,
+		citizen_id,
+		CityCitizens.CITY_CITIZEN_TASK_SOURCE_PLAYER
+	)
+	CityCitizenMovementRuntimeSystem.cancel_city_citizen_movement_for_city_state(
+		city_state,
+		citizen_id
+	)
 
 
 #endregion
 
 #region Construction Completion and Cancellation
 
-static func complete_city_construction_site(
-	site_id: int
-) -> Dictionary:
-	return _complete_city_construction_site(null, site_id)
 
 
 static func complete_city_construction_site_for_city_state(
@@ -4144,12 +3723,7 @@ static func _advance_city_construction_finalization(
 	var object_type := str(site.get("object_type", ""))
 	var footprint_tiles: Array = site.get("footprint_tiles", [])
 	var blocking_citizen_ids: Array[int] = (
-		CityObjectSystem.get_city_object_topology_blocking_citizen_ids(
-			object_type,
-			footprint_tiles
-		)
-		if city_state == null
-		else CityObjectSystem.get_city_object_topology_blocking_citizen_ids_for_city_state(
+		CityObjectSystem.get_city_object_topology_blocking_citizen_ids_for_city_state(
 			city_state,
 			object_type,
 			footprint_tiles
@@ -4189,12 +3763,7 @@ static func _advance_city_construction_finalization(
 		"city_world": city_world,
 	}
 	var completed_object: Dictionary = (
-		CityObjectSystem.register_completed_city_object_from_construction_site(
-			site_id,
-			registration_values
-		)
-		if city_state == null
-		else CityObjectSystem.register_completed_city_object_from_construction_site_for_city_state(
+		CityObjectSystem.register_completed_city_object_from_construction_site_for_city_state(
 			city_state,
 			site_id,
 			registration_values
@@ -4238,9 +3807,7 @@ static func _evacuate_city_construction_footprint(
 
 	for citizen_id in citizen_ids:
 		var citizen: Dictionary = (
-			CityCitizenRegistrySystem.get_city_citizen_by_id(citizen_id)
-			if city_state == null
-			else CityCitizenRegistrySystem.get_city_citizen_by_id_for_city_state(
+			CityCitizenRegistrySystem.get_city_citizen_by_id_for_city_state(
 				city_state,
 				citizen_id
 			)
@@ -4282,9 +3849,7 @@ static func _evacuate_city_construction_footprint(
 			"heuristic_weight": EXACT_PATH_HEURISTIC_WEIGHT,
 		}
 		var path_result: Dictionary = (
-			CityNavigationSystemScript.find_path_to_any_city_tile(path_values)
-			if city_state == null
-			else CityNavigationSystemScript.find_path_to_any_city_tile_for_city_state(
+			CityNavigationSystemScript.find_path_to_any_city_tile_for_city_state(
 				city_state,
 				path_values
 			)
@@ -4299,21 +3864,13 @@ static func _evacuate_city_construction_footprint(
 			)
 			continue
 
-		if city_state == null:
-			CityCitizenMovementRuntimeSystem.cancel_city_citizen_movement(citizen_id)
-		else:
-			CityCitizenMovementRuntimeSystem.cancel_city_citizen_movement_for_city_state(
-				city_state,
-				citizen_id
-			)
+		CityCitizenMovementRuntimeSystem.cancel_city_citizen_movement_for_city_state(
+			city_state,
+			citizen_id
+		)
 
-		var movement_assigned: bool = (
-			CityCitizenMovementRuntimeSystem.assign_city_citizen_movement_order(
-				citizen_id,
-				path_result.get("path", [])
-			)
-			if city_state == null
-			else CityCitizenMovementRuntimeSystem.assign_city_citizen_movement_order_for_city_state(
+		var movement_assigned := (
+			CityCitizenMovementRuntimeSystem.assign_city_citizen_movement_order_for_city_state(
 				city_state,
 				citizen_id,
 				path_result.get("path", [])
@@ -4396,27 +3953,17 @@ static func _restore_site_materials(
 		if amount <= 0:
 			continue
 
-		if city_state == null:
-			CityLogisticsSystem.add_resource_to_city_ground_pile(
-				deposit_tile,
-				str(resource),
-				amount,
-				site_id
-			)
-		else:
-			CityLogisticsSystem.add_resource_to_city_ground_piles_with_result_for_city_state(
-				city_state,
-				{
-					"tile_position": deposit_tile,
-					"resource": str(resource),
-					"amount_delta": amount,
-					"construction_site_id": site_id,
-				}
-			)
+		CityLogisticsSystem.add_resource_to_city_ground_piles_with_result_for_city_state(
+			city_state,
+			{
+				"tile_position": deposit_tile,
+				"resource": str(resource),
+				"amount_delta": amount,
+				"construction_site_id": site_id,
+			}
+		)
 
 
-static func cancel_city_construction_site(site_id: int) -> bool:
-	return _cancel_city_construction_site(null, site_id)
 
 
 static func cancel_city_construction_site_for_city_state(
@@ -4430,10 +3977,9 @@ static func _cancel_city_construction_site(
 	city_state: CitySettlementSimulationState,
 	site_id: int
 ) -> bool:
-	var site := (
-		get_city_construction_site_by_id(site_id)
-		if city_state == null
-		else get_city_construction_site_by_id_for_city_state(city_state, site_id)
+	var site := get_city_construction_site_by_id_for_city_state(
+		city_state,
+		site_id
 	)
 	if site.is_empty():
 		return false
@@ -4447,10 +3993,6 @@ static func _cancel_city_construction_site(
 
 	_release_site_clearing_commands(city_state, site_id)
 	_clear_site_labor_tasks(city_state, site_id)
-	if city_state == null:
-		CityLogisticsSystem.release_city_construction_site_materials(site_id)
-		return remove_city_construction_site_record(site_id)
-
 	CityLogisticsSystem.release_city_construction_site_materials_for_city_state(
 		city_state,
 		site_id
@@ -4463,9 +4005,7 @@ static func _release_site_delivery_tasks(
 	site_id: int
 ) -> bool:
 	var registry_state: CityCitizenRegistryState = (
-		CityCitizenRegistrySystem.get_current_state()
-		if city_state == null
-		else city_state.citizen_registry_state
+		city_state.citizen_registry_state if city_state != null else null
 	)
 
 	if registry_state == null:
@@ -4487,10 +4027,8 @@ static func _release_site_delivery_tasks(
 		):
 			continue
 
-		var cargo_amount: int = (
-			CityCitizenInventorySystem.get_city_citizen_haul_cargo_amount(citizen_id)
-			if city_state == null
-			else CityCitizenInventorySystem.get_city_citizen_haul_cargo_amount_for_city_state(
+		var cargo_amount := (
+			CityCitizenInventorySystem.get_city_citizen_haul_cargo_amount_for_city_state(
 				city_state,
 				citizen_id
 			)
@@ -4498,9 +4036,7 @@ static func _release_site_delivery_tasks(
 
 		if cargo_amount > 0:
 			var haul: Dictionary = (
-				CityCitizenTaskRuntimeSystem.get_city_citizen_current_haul(citizen_id)
-				if city_state == null
-				else CityCitizenTaskRuntimeSystem.get_city_citizen_current_haul_for_city_state(
+				CityCitizenTaskRuntimeSystem.get_city_citizen_current_haul_for_city_state(
 					city_state,
 					citizen_id
 				)
@@ -4518,17 +4054,11 @@ static func _release_site_delivery_tasks(
 			haul["reason"] = (
 				CityCitizens.CITY_CITIZEN_HAUL_REASON_OUTSTANDING_CARGO
 			)
-			if city_state == null:
-				CityCitizenTaskRuntimeSystem.set_city_citizen_current_haul(
-					citizen_id,
-					haul
-				)
-			else:
-				CityCitizenTaskRuntimeSystem.set_city_citizen_current_haul_for_city_state(
-					city_state,
-					citizen_id,
-					haul
-				)
+			CityCitizenTaskRuntimeSystem.set_city_citizen_current_haul_for_city_state(
+				city_state,
+				citizen_id,
+				haul
+			)
 
 		var task_source := str(
 			current_task.get(
@@ -4537,21 +4067,13 @@ static func _release_site_delivery_tasks(
 			)
 		)
 
-		if city_state == null:
-			CityCitizenMovementRuntimeSystem.cancel_city_citizen_movement(citizen_id)
-		else:
-			CityCitizenMovementRuntimeSystem.cancel_city_citizen_movement_for_city_state(
-				city_state,
-				citizen_id
-			)
+		CityCitizenMovementRuntimeSystem.cancel_city_citizen_movement_for_city_state(
+			city_state,
+			citizen_id
+		)
 
-		var task_cleared: bool = (
-			CityCitizenTaskRuntimeSystem.clear_city_citizen_task(
-				citizen_id,
-				task_source
-			)
-			if city_state == null
-			else CityCitizenTaskRuntimeSystem.clear_city_citizen_task_for_city_state(
+		var task_cleared := (
+			CityCitizenTaskRuntimeSystem.clear_city_citizen_task_for_city_state(
 				city_state,
 				citizen_id,
 				task_source
@@ -4568,10 +4090,8 @@ static func _release_site_clearing_commands(
 	city_state: CitySettlementSimulationState,
 	site_id: int
 ) -> void:
-	var command_snapshot: Array = (
-		CityWorkSystem.get_city_player_command_snapshot()
-		if city_state == null
-		else CityWorkSystem.get_city_player_command_snapshot_for_city_state(
+	var command_snapshot := (
+		CityWorkSystem.get_city_player_command_snapshot_for_city_state(
 			city_state
 		)
 	)
@@ -4588,25 +4108,16 @@ static func _release_site_clearing_commands(
 		var command_id := int(command.get("id", -1))
 
 		if bool(command.get("created_by_construction", false)):
-			if city_state == null:
-				CityWorkSystem.cancel_city_player_command(command_id)
-			else:
-				CityWorkSystem.cancel_city_player_command_for_city_state(
-					city_state,
-					command_id
-				)
+			CityWorkSystem.cancel_city_player_command_for_city_state(
+				city_state,
+				command_id
+			)
 		else:
-			if city_state == null:
-				CityWorkSystem.detach_city_player_command_from_construction(
-					command_id,
-					site_id
-				)
-			else:
-				CityWorkSystem.detach_city_player_command_from_construction_for_city_state(
-					city_state,
-					command_id,
-					site_id
-				)
+			CityWorkSystem.detach_city_player_command_from_construction_for_city_state(
+				city_state,
+				command_id,
+				site_id
+			)
 
 
 static func _clear_site_labor_tasks(
@@ -4614,9 +4125,7 @@ static func _clear_site_labor_tasks(
 	site_id: int
 ) -> void:
 	var registry_state: CityCitizenRegistryState = (
-		CityCitizenRegistrySystem.get_current_state()
-		if city_state == null
-		else city_state.citizen_registry_state
+		city_state.citizen_registry_state if city_state != null else null
 	)
 
 	if registry_state == null:
@@ -4648,9 +4157,7 @@ static func _haul_references_site(
 	site_id: int
 ) -> bool:
 	var haul: Dictionary = (
-		CityCitizenTaskRuntimeSystem.get_city_citizen_current_haul(citizen_id)
-		if city_state == null
-		else CityCitizenTaskRuntimeSystem.get_city_citizen_current_haul_for_city_state(
+		CityCitizenTaskRuntimeSystem.get_city_citizen_current_haul_for_city_state(
 			city_state,
 			citizen_id
 		)
@@ -4688,9 +4195,7 @@ static func _get_rebalance_construction_site(
 	site_id: int
 ) -> Dictionary:
 	return (
-		get_city_construction_site_by_id(site_id)
-		if city_state == null
-		else get_city_construction_site_by_id_for_city_state(city_state, site_id)
+		get_city_construction_site_by_id_for_city_state(city_state, site_id)
 	)
 
 
@@ -4699,9 +4204,7 @@ static func _get_rebalance_citizen(
 	citizen_id: int
 ) -> Dictionary:
 	return (
-		CityCitizenRegistrySystem.get_city_citizen_by_id(citizen_id)
-		if city_state == null
-		else CityCitizenRegistrySystem.get_city_citizen_by_id_for_city_state(
+		CityCitizenRegistrySystem.get_city_citizen_by_id_for_city_state(
 			city_state,
 			citizen_id
 		)
@@ -4713,13 +4216,10 @@ static func _get_rebalance_cargo_amount(
 	citizen_id: int
 ) -> int:
 	return (
-		CityCitizenInventorySystem.get_city_citizen_haul_cargo_amount(citizen_id)
-		if city_state == null
-		else CityCitizenInventorySystem
-			.get_city_citizen_haul_cargo_amount_for_city_state(
-				city_state,
-				citizen_id
-			)
+		CityCitizenInventorySystem.get_city_citizen_haul_cargo_amount_for_city_state(
+			city_state,
+			citizen_id
+		)
 	)
 
 
@@ -4728,10 +4228,10 @@ static func _get_rebalance_current_task(
 	citizen_id: int
 ) -> Dictionary:
 	return (
-		CityCitizenTaskRuntimeSystem.get_city_citizen_current_task(citizen_id)
-		if city_state == null
-		else CityCitizenTaskRuntimeSystem
-			.get_city_citizen_current_task_for_city_state(city_state, citizen_id)
+		CityCitizenTaskRuntimeSystem.get_city_citizen_current_task_for_city_state(
+			city_state,
+			citizen_id
+		)
 	)
 
 
@@ -4740,9 +4240,7 @@ static func _get_rebalance_work_order(
 	order_id: int
 ) -> Dictionary:
 	return (
-		CityWorkSystem.get_city_work_order_by_id(order_id)
-		if city_state == null
-		else CityWorkSystem.get_city_work_order_by_id_for_city_state(
+		CityWorkSystem.get_city_work_order_by_id_for_city_state(
 			city_state,
 			order_id
 		)
@@ -4754,9 +4252,7 @@ static func _get_rebalance_player_command(
 	command_id: int
 ) -> Dictionary:
 	return (
-		CityWorkSystem.get_city_player_command_by_id(command_id)
-		if city_state == null
-		else CityWorkSystem.get_city_player_command_by_id_for_city_state(
+		CityWorkSystem.get_city_player_command_by_id_for_city_state(
 			city_state,
 			command_id
 		)
@@ -4768,9 +4264,7 @@ static func _synchronize_rebalance_construction_order(
 	site_id: int
 ) -> Dictionary:
 	return (
-		CityWorkSystem.synchronize_construction_work_order(site_id)
-		if city_state == null
-		else CityWorkSystem.synchronize_construction_work_order_for_city_state(
+		CityWorkSystem.synchronize_construction_work_order_for_city_state(
 			city_state,
 			site_id
 		)
@@ -4783,17 +4277,11 @@ static func _get_rebalance_best_other_construction_job(
 	current_order_id: int
 ) -> Dictionary:
 	return (
-		CityWorkSystem.get_best_construction_job_for_citizen_excluding_order(
+		CityWorkSystem.get_best_construction_job_for_citizen_excluding_order_for_city_state(
+			city_state,
 			citizen_id,
 			current_order_id
 		)
-		if city_state == null
-		else CityWorkSystem
-			.get_best_construction_job_for_citizen_excluding_order_for_city_state(
-				city_state,
-				citizen_id,
-				current_order_id
-			)
 	)
 
 
@@ -4803,17 +4291,11 @@ static func _get_rebalance_best_triggering_job(
 	triggering_order_ids: Array
 ) -> Dictionary:
 	return (
-		CityWorkSystem.get_best_player_job_for_citizen_and_orders(
+		CityWorkSystem.get_best_player_job_for_citizen_and_orders_for_city_state(
+			city_state,
 			citizen_id,
 			triggering_order_ids
 		)
-		if city_state == null
-		else CityWorkSystem
-			.get_best_player_job_for_citizen_and_orders_for_city_state(
-				city_state,
-				citizen_id,
-				triggering_order_ids
-			)
 	)
 
 
@@ -4822,12 +4304,7 @@ static func _clear_rebalance_task(
 	citizen_id: int
 ) -> bool:
 	return (
-		CityCitizenTaskRuntimeSystem.clear_city_citizen_task(
-			citizen_id,
-			CityCitizens.CITY_CITIZEN_TASK_SOURCE_PLAYER
-		)
-		if city_state == null
-		else CityCitizenTaskRuntimeSystem.clear_city_citizen_task_for_city_state(
+		CityCitizenTaskRuntimeSystem.clear_city_citizen_task_for_city_state(
 			city_state,
 			citizen_id,
 			CityCitizens.CITY_CITIZEN_TASK_SOURCE_PLAYER
@@ -4839,13 +4316,10 @@ static func _cancel_rebalance_movement(
 	city_state: CitySettlementSimulationState,
 	citizen_id: int
 ) -> void:
-	if city_state == null:
-		CityCitizenMovementRuntimeSystem.cancel_city_citizen_movement(citizen_id)
-	else:
-		CityCitizenMovementRuntimeSystem.cancel_city_citizen_movement_for_city_state(
-			city_state,
-			citizen_id
-		)
+	CityCitizenMovementRuntimeSystem.cancel_city_citizen_movement_for_city_state(
+		city_state,
+		citizen_id
+	)
 
 
 static func _assign_rebalance_player_job(
@@ -4855,13 +4329,7 @@ static func _assign_rebalance_player_job(
 	start_immediately: bool
 ) -> bool:
 	return (
-		CityWorkSystem.assign_player_job(
-			citizen_id,
-			candidate,
-			start_immediately
-		)
-		if city_state == null
-		else CityWorkSystem.assign_player_job_for_city_state(
+		CityWorkSystem.assign_player_job_for_city_state(
 			city_state,
 			citizen_id,
 			candidate,
@@ -4874,13 +4342,10 @@ static func _refresh_rebalance_work_order_runtimes(
 	city_state: CitySettlementSimulationState,
 	order_ids: Array
 ) -> void:
-	if city_state == null:
-		CityWorkSystem.refresh_work_order_runtimes(order_ids)
-	else:
-		CityWorkSystem.refresh_work_order_runtimes_for_city_state(
-			city_state,
-			order_ids
-		)
+	CityWorkSystem.refresh_work_order_runtimes_for_city_state(
+		city_state,
+		order_ids
+	)
 
 
 static func _set_rebalance_task_activity(
@@ -4888,10 +4353,10 @@ static func _set_rebalance_task_activity(
 	values: Dictionary
 ) -> bool:
 	return (
-		CityCitizenTaskRuntimeSystem.set_city_citizen_task_activity_state(values)
-		if city_state == null
-		else CityCitizenTaskRuntimeSystem
-			.set_city_citizen_task_activity_state_for_city_state(city_state, values)
+		CityCitizenTaskRuntimeSystem.set_city_citizen_task_activity_state_for_city_state(
+			city_state,
+			values
+		)
 	)
 
 
@@ -4901,17 +4366,11 @@ static func _assign_rebalance_movement(
 	path: Array
 ) -> bool:
 	return (
-		CityCitizenMovementRuntimeSystem.assign_city_citizen_movement_order(
+		CityCitizenMovementRuntimeSystem.assign_city_citizen_movement_order_for_city_state(
+			city_state,
 			citizen_id,
 			path
 		)
-		if city_state == null
-		else CityCitizenMovementRuntimeSystem
-			.assign_city_citizen_movement_order_for_city_state(
-				city_state,
-				citizen_id,
-				path
-			)
 	)
 
 
@@ -4921,12 +4380,7 @@ static func _set_rebalance_task_phase(
 	phase: String
 ) -> bool:
 	return (
-		CityCitizenTaskRuntimeSystem.set_city_citizen_task_phase(
-			citizen_id,
-			phase
-		)
-		if city_state == null
-		else CityCitizenTaskRuntimeSystem.set_city_citizen_task_phase_for_city_state(
+		CityCitizenTaskRuntimeSystem.set_city_citizen_task_phase_for_city_state(
 			city_state,
 			citizen_id,
 			phase
@@ -4934,12 +4388,6 @@ static func _set_rebalance_task_phase(
 	)
 
 
-static func rebalance_uncommitted_construction_workers(
-	triggering_site_id: int
-) -> int:
-	return rebalance_uncommitted_construction_workers_for_sites(
-		[triggering_site_id]
-	)
 
 
 static func rebalance_uncommitted_construction_workers_for_city_state(
@@ -4952,16 +4400,6 @@ static func rebalance_uncommitted_construction_workers_for_city_state(
 	)
 
 
-static func rebalance_uncommitted_construction_workers_for_sites(
-	raw_triggering_site_ids: Array
-) -> int:
-	return _rebalance_uncommitted_construction_workers_for_sites(
-		null,
-		get_current_state(),
-		CityCitizenRegistrySystem.get_current_state(),
-		CityWorkSystem.get_current_work_state(),
-		raw_triggering_site_ids
-	)
 
 
 static func rebalance_uncommitted_construction_workers_for_sites_for_city_state(
@@ -5258,9 +4696,7 @@ static func _get_current_construction_path_cost(
 ) -> int:
 	var citizen := _get_rebalance_citizen(city_state, citizen_id)
 	var city_world: WorldData = (
-		WorldPoliticalState.get_current_city_world()
-		if city_state == null
-		else city_state.city_world
+		city_state.city_world if city_state != null else null
 	)
 	var raw_current_tile = citizen.get(
 		"city_tile_position",
@@ -5287,7 +4723,10 @@ static func _get_current_construction_path_cost(
 		and not remaining_movement_path.is_empty()
 		and remaining_movement_path.back() == raw_task_target_tile
 	):
-		return _get_city_movement_path_cost(remaining_movement_path)
+		return _get_city_movement_path_cost(
+			city_state,
+			remaining_movement_path
+		)
 
 	var destination_tiles: Array = []
 	var raw_target_tile = raw_task_target_tile
@@ -5311,17 +4750,11 @@ static func _get_current_construction_path_cost(
 				int(current_task.get("target_object_id", -1))
 			)
 			var work_tiles: Array = (
-				CityWorkSystem.get_city_player_command_work_tiles(
+				CityWorkSystem.get_city_player_command_work_tiles_for_city_state(
+					city_state,
 					command,
 					citizen_id
 				)
-				if city_state == null
-				else CityWorkSystem
-					.get_city_player_command_work_tiles_for_city_state(
-						city_state,
-						command,
-						citizen_id
-					)
 			)
 
 			if raw_target_tile is Vector2i and work_tiles.has(raw_target_tile):
@@ -5345,9 +4778,7 @@ static func _get_current_construction_path_cost(
 		"heuristic_weight": EXACT_PATH_HEURISTIC_WEIGHT,
 	}
 	var path_result: Dictionary = (
-		CityNavigationSystemScript.find_path_to_any_city_tile(path_values)
-		if city_state == null
-		else CityNavigationSystemScript.find_path_to_any_city_tile_for_city_state(
+		CityNavigationSystemScript.find_path_to_any_city_tile_for_city_state(
 			city_state,
 			path_values
 		)
@@ -5396,7 +4827,10 @@ static func _get_remaining_citizen_movement_path(
 	return remaining_path
 
 
-static func _get_city_movement_path_cost(path: Array) -> int:
+static func _get_city_movement_path_cost(
+	city_state: CitySettlementSimulationState,
+	path: Array
+) -> int:
 	if path.is_empty():
 		return -1
 
@@ -5406,9 +4840,12 @@ static func _get_city_movement_path_cost(path: Array) -> int:
 		if not path[index - 1] is Vector2i or not path[index] is Vector2i:
 			return -1
 
-		var step_cost := CityNavigationSystem.get_city_citizen_movement_step_cost(
-			path[index - 1],
-			path[index]
+		var step_cost := (
+			CityNavigationSystem.get_city_citizen_movement_step_cost_for_city_state(
+				city_state,
+				path[index - 1],
+				path[index]
+			)
 		)
 
 		if step_cost <= 0:
@@ -5474,11 +4911,6 @@ static func _construction_reassignment_is_worthwhile(
 # synchronously solve the same city-wide path again on the next tick. Every
 # field is revalidated; a stale witness simply returns false and the normal
 # pending-task fallback retains its established behavior.
-static func start_assigned_player_work_candidate(
-	citizen_id: int,
-	candidate: Dictionary
-) -> bool:
-	return _start_assigned_player_work_candidate(null, citizen_id, candidate)
 
 
 static func start_assigned_player_work_candidate_for_city_state(
@@ -5500,9 +4932,7 @@ static func _start_assigned_player_work_candidate(
 ) -> bool:
 	var raw_assignment_path = candidate.get("assignment_path", [])
 	var citizen: Dictionary = (
-		CityCitizenRegistrySystem.get_city_citizen_by_id(citizen_id)
-		if city_state == null
-		else CityCitizenRegistrySystem.get_city_citizen_by_id_for_city_state(
+		CityCitizenRegistrySystem.get_city_citizen_by_id_for_city_state(
 			city_state,
 			citizen_id
 		)
@@ -5534,9 +4964,7 @@ static func _start_assigned_player_work_candidate(
 
 	if work_kind == PLAYER_WORK_KIND_DELIVERY:
 		haul = (
-			CityCitizenTaskRuntimeSystem.get_city_citizen_current_haul(citizen_id)
-			if city_state == null
-			else CityCitizenTaskRuntimeSystem.get_city_citizen_current_haul_for_city_state(
+			CityCitizenTaskRuntimeSystem.get_city_citizen_current_haul_for_city_state(
 				city_state,
 				citizen_id
 			)
@@ -5553,12 +4981,8 @@ static func _start_assigned_player_work_candidate(
 		"citizen_id": citizen_id,
 		"target_tile": raw_target_tile,
 	}
-	var activity_set: bool = (
-		CityCitizenTaskRuntimeSystem.set_city_citizen_task_activity_state(
-			activity_values
-		)
-		if city_state == null
-		else CityCitizenTaskRuntimeSystem.set_city_citizen_task_activity_state_for_city_state(
+	var activity_set := (
+		CityCitizenTaskRuntimeSystem.set_city_citizen_task_activity_state_for_city_state(
 			city_state,
 			activity_values
 		)
@@ -5568,25 +4992,17 @@ static func _start_assigned_player_work_candidate(
 		return false
 
 	if assignment_path.size() <= 1:
-		if city_state == null:
-			CityCitizenMovementRuntimeSystem.cancel_city_citizen_movement(citizen_id)
-		else:
-			CityCitizenMovementRuntimeSystem.cancel_city_citizen_movement_for_city_state(
-				city_state,
-				citizen_id
-			)
+		CityCitizenMovementRuntimeSystem.cancel_city_citizen_movement_for_city_state(
+			city_state,
+			citizen_id
+		)
 
 		if work_kind == PLAYER_WORK_KIND_DELIVERY:
 			haul["phase"] = CityCitizens.CITY_CITIZEN_HAUL_PHASE_PICKING_UP
 			haul["source_tile"] = raw_target_tile
 
-			var haul_set: bool = (
-				CityCitizenTaskRuntimeSystem.set_city_citizen_current_haul(
-					citizen_id,
-					haul
-				)
-				if city_state == null
-				else CityCitizenTaskRuntimeSystem.set_city_citizen_current_haul_for_city_state(
+			var haul_set := (
+				CityCitizenTaskRuntimeSystem.set_city_citizen_current_haul_for_city_state(
 					city_state,
 					citizen_id,
 					haul
@@ -5605,13 +5021,8 @@ static func _start_assigned_player_work_candidate(
 		# state machine begins the bounded physical action on the next clock tick.
 		return true
 
-	var movement_assigned: bool = (
-		CityCitizenMovementRuntimeSystem.assign_city_citizen_movement_order(
-			citizen_id,
-			assignment_path
-		)
-		if city_state == null
-		else CityCitizenMovementRuntimeSystem.assign_city_citizen_movement_order_for_city_state(
+	var movement_assigned := (
+		CityCitizenMovementRuntimeSystem.assign_city_citizen_movement_order_for_city_state(
 			city_state,
 			citizen_id,
 			assignment_path
@@ -5627,13 +5038,8 @@ static func _start_assigned_player_work_candidate(
 		)
 		haul["source_tile"] = raw_target_tile
 
-		var haul_set: bool = (
-			CityCitizenTaskRuntimeSystem.set_city_citizen_current_haul(
-				citizen_id,
-				haul
-			)
-			if city_state == null
-			else CityCitizenTaskRuntimeSystem.set_city_citizen_current_haul_for_city_state(
+		var haul_set := (
+			CityCitizenTaskRuntimeSystem.set_city_citizen_current_haul_for_city_state(
 				city_state,
 				citizen_id,
 				haul
@@ -5809,10 +5215,6 @@ static func _make_construction_rebalance_restore_candidate(
 			}
 
 	return {}
-static func citizen_task_is_interruptible_construction(
-	citizen_id: int
-) -> bool:
-	return _citizen_task_is_interruptible_construction(null, citizen_id)
 
 
 static func citizen_task_is_interruptible_construction_for_city_state(
@@ -5827,9 +5229,7 @@ static func _citizen_task_is_interruptible_construction(
 	citizen_id: int
 ) -> bool:
 	var current_task: Dictionary = (
-		CityCitizenTaskRuntimeSystem.get_city_citizen_current_task(citizen_id)
-		if city_state == null
-		else CityCitizenTaskRuntimeSystem.get_city_citizen_current_task_for_city_state(
+		CityCitizenTaskRuntimeSystem.get_city_citizen_current_task_for_city_state(
 			city_state,
 			citizen_id
 		)
@@ -5841,23 +5241,15 @@ static func _citizen_task_is_interruptible_construction(
 
 		CityCitizens.CITY_CITIZEN_TASK_KIND_PLAYER_COMMAND:
 			return CityWorkSystem.city_player_command_is_for_construction(
-				(
-					CityWorkSystem.get_city_player_command_by_id(
-						int(current_task.get("target_object_id", -1))
-					)
-					if city_state == null
-					else CityWorkSystem.get_city_player_command_by_id_for_city_state(
-						city_state,
-						int(current_task.get("target_object_id", -1))
-					)
+				CityWorkSystem.get_city_player_command_by_id_for_city_state(
+					city_state,
+					int(current_task.get("target_object_id", -1))
 				)
 			)
 
 		CityCitizens.CITY_CITIZEN_TASK_KIND_HAUL:
 			var haul: Dictionary = (
-				CityCitizenTaskRuntimeSystem.get_city_citizen_current_haul(citizen_id)
-				if city_state == null
-				else CityCitizenTaskRuntimeSystem.get_city_citizen_current_haul_for_city_state(
+				CityCitizenTaskRuntimeSystem.get_city_citizen_current_haul_for_city_state(
 					city_state,
 					citizen_id
 				)
@@ -5884,10 +5276,6 @@ static func _citizen_task_is_interruptible_construction(
 	return false
 
 
-static func interrupt_citizen_construction_for_food(
-	citizen_id: int
-) -> bool:
-	return _interrupt_citizen_construction_for_food(null, citizen_id)
 
 
 static func interrupt_citizen_construction_for_food_for_city_state(
@@ -5905,9 +5293,7 @@ static func _interrupt_citizen_construction_for_food(
 		return false
 
 	var current_task: Dictionary = (
-		CityCitizenTaskRuntimeSystem.get_city_citizen_current_task(citizen_id)
-		if city_state == null
-		else CityCitizenTaskRuntimeSystem.get_city_citizen_current_task_for_city_state(
+		CityCitizenTaskRuntimeSystem.get_city_citizen_current_task_for_city_state(
 			city_state,
 			citizen_id
 		)
@@ -5921,13 +5307,7 @@ static func _interrupt_citizen_construction_for_food(
 		return true
 
 	return (
-		CitizenHaulingSystemScript.drop_citizen_haul_cargo_for_priority_interrupt(
-			WorldPoliticalState.get_current_city_world(),
-			citizen_id,
-			CityCitizens.CITY_CITIZEN_TASK_SOURCE_PLAYER
-		)
-		if city_state == null
-		else CitizenHaulingSystemScript.drop_citizen_haul_cargo_for_priority_interrupt_for_city_state(
+		CitizenHaulingSystemScript.drop_citizen_haul_cargo_for_priority_interrupt_for_city_state(
 			city_state,
 			city_state.city_world,
 			citizen_id,

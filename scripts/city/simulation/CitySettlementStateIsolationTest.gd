@@ -66,7 +66,6 @@ func _run_state_isolation_test() -> void:
 	)
 	if player_state == null:
 		return
-	CityCitizenUnboundCompatibility.bind_legacy_fixture_state(player_state)
 	_seed_city_runtime_data(
 		player_state,
 		player_city_id,
@@ -91,25 +90,36 @@ func _run_state_isolation_test() -> void:
 		"Every city state must own a dedicated logistics-state subsystem."
 	)
 
-	# Give the player city unmistakable local state. WorldData remains a
-	# compatibility workspace while individual city subsystems are extracted.
+	# Give the player city unmistakable state through its explicit local owner.
 	var player_city_world := _make_world(8, 8, 91_101)
-	WorldPoliticalState.set_current_city_world(player_city_world)
-	WorldPoliticalState.set_current_city_seed(91_101)
+	_expect(
+		WorldPoliticalState.store_city_world_for_settlement(
+			player_city_id,
+			player_city_world,
+			91_101
+		),
+		"The player fixture must store its world through the exact settlement owner."
+	)
 	var shared_object_tile := Vector2i(2, 2)
-	var player_keep := _register_keep(player_city_world, Vector2i(4, 0), "player")
+	var player_keep := _register_keep(
+		player_state,
+		player_city_world,
+		Vector2i(4, 0),
+		"player"
+	)
 	_mark_city_founded(player_state, player_keep)
-	CityObjectSystem.get_current_state().next_object_id = 16
-	CityObjectSystem.get_current_state().object_version = 3
-	var player_road := CityObjectSystem.add_city_road_object(
+	player_state.object_state.next_object_id = 16
+	player_state.object_state.object_version = 3
+	var player_road := CityObjectSystem.add_city_road_object_for_city_state(
+		player_state,
 		[shared_object_tile],
 		"player",
 		player_city_world
 	)
 	_expect(
 		int(player_road.get("id", -1)) == 16
-		and CityObjectSystem.get_current_state().next_object_id == 17
-		and CityObjectSystem.get_current_state().object_version == 4,
+		and player_state.object_state.next_object_id == 17
+		and player_state.object_state.object_version == 4,
 		"Player object mutation must route through CityObjectSystem."
 	)
 	var player_objects: Array = player_state.object_state.objects
@@ -128,33 +138,33 @@ func _run_state_isolation_test() -> void:
 		and int(player_validation.get("checked_occupied_tiles", 0)) == 22,
 		"The player City's routed object registry must pass full validation."
 	)
-	CityAssignmentSystem.get_current_state().assignment_version = 9
-	CityWorkSystem.get_current_work_state().player_commands = [
+	player_state.assignment_state.assignment_version = 9
+	player_state.work_state.player_commands = [
 		{"id": 41, "test_owner": "player"},
 	]
-	CityWorkSystem.get_current_work_state().player_command_index_by_id = {41: 0}
-	CityWorkSystem.get_current_work_state().next_player_command_id = 42
-	CityWorkSystem.get_current_work_state().player_command_version = 6
-	CityWorkSystem.get_current_work_state().work_orders = {
+	player_state.work_state.player_command_index_by_id = {41: 0}
+	player_state.work_state.next_player_command_id = 42
+	player_state.work_state.player_command_version = 6
+	player_state.work_state.work_orders = {
 		71: {"id": 71, "source_key": "test:player"},
 	}
-	CityWorkSystem.get_current_work_state().work_order_id_by_source_key = {"test:player": 71}
-	CityWorkSystem.get_current_work_state().next_work_order_id = 72
-	CityWorkSystem.get_current_work_state().work_order_version = 8
-	CityLogisticsSystem.get_current_state().ground_piles = [
+	player_state.work_state.work_order_id_by_source_key = {"test:player": 71}
+	player_state.work_state.next_work_order_id = 72
+	player_state.work_state.work_order_version = 8
+	player_state.logistics_state.ground_piles = [
 		{"id": 81, "test_owner": "player"},
 	]
-	CityLogisticsSystem.get_current_state().ground_pile_index_by_id = {81: 0}
-	CityLogisticsSystem.get_current_state().next_ground_pile_id = 82
-	CityLogisticsSystem.get_current_state().ground_pile_version = 10
-	CityLogisticsSystem.get_current_state().haul_reservations = {
+	player_state.logistics_state.ground_pile_index_by_id = {81: 0}
+	player_state.logistics_state.next_ground_pile_id = 82
+	player_state.logistics_state.ground_pile_version = 10
+	player_state.logistics_state.haul_reservations = {
 		91: {"id": 91, "citizen_id": 1, "test_owner": "player"},
 	}
-	CityLogisticsSystem.get_current_state().haul_reservation_id_by_citizen_id = {1: 91}
-	CityLogisticsSystem.get_current_state().haul_source_reserved_amount_by_key = {"player:source": 3}
-	CityLogisticsSystem.get_current_state().haul_destination_reserved_amount_by_key = {"player:destination": 3}
-	CityLogisticsSystem.get_current_state().next_haul_reservation_id = 92
-	CityLogisticsSystem.get_current_state().haul_reservation_version = 11
+	player_state.logistics_state.haul_reservation_id_by_citizen_id = {1: 91}
+	player_state.logistics_state.haul_source_reserved_amount_by_key = {"player:source": 3}
+	player_state.logistics_state.haul_destination_reserved_amount_by_key = {"player:destination": 3}
+	player_state.logistics_state.next_haul_reservation_id = 92
+	player_state.logistics_state.haul_reservation_version = 11
 
 	var cpu_culture := WorldData.create_culture(CPU_CULTURE_NAME)
 	_expect(
@@ -262,56 +272,58 @@ func _run_state_isolation_test() -> void:
 		WorldPoliticalState.set_active_settlement(cpu_city_id),
 		"The CPU city must become activatable."
 	)
-	CityCitizenUnboundCompatibility.bind_legacy_fixture_state(cpu_state)
 	_expect(
-		WorldPoliticalState.get_current_city_world() == null
-		and WorldPoliticalState.get_current_city_seed() == 0,
+		cpu_state.city_world == null
+		and cpu_state.city_seed == 0,
 		"A fresh city must not inherit the previous city's generated local world."
 	)
 	_expect(
-		CityObjectSystem.get_current_state().objects.is_empty()
+		cpu_state.object_state.objects.is_empty()
 		and cpu_state.resource_accounting_state.owned_resource_amount_cache.is_empty()
 		and cpu_state.resource_accounting_state.owned_resource_amount_cache_container_version == -1,
 		"A fresh city must begin with independent objects and accounting cache."
 	)
 	_expect(
-		CityObjectSystem.get_current_state().next_object_id == 1
-		and CityObjectSystem.get_current_state().object_version == 0
+		cpu_state.object_state.next_object_id == 1
+		and cpu_state.object_state.object_version == 0
 		and cpu_state.resource_accounting_state.container_version == 0
 		and cpu_state.resource_accounting_state.public_storage_version == 0
-		and CityAssignmentSystem.get_current_state().assignment_version == 0,
+		and cpu_state.assignment_state.assignment_version == 0,
 		"A fresh city must begin with independent counters and change versions."
 	)
 	_expect(
-		is_same(CityObjectSystem.get_current_state().objects, cpu_state.object_state.objects)
+		is_same(
+			CityObjectSystem.get_state_for_city_state(cpu_state).objects,
+			cpu_state.object_state.objects
+		)
 		and is_same(
-			CityObjectSystem.get_current_state().object_index_by_id,
+			CityObjectSystem.get_state_for_city_state(cpu_state).object_index_by_id,
 			cpu_state.object_state.object_index_by_id
 		)
 		and is_same(
-			CityObjectSystem.get_current_state().occupied_tiles,
+			CityObjectSystem.get_state_for_city_state(cpu_state).occupied_tiles,
 			cpu_state.object_state.occupied_tiles
 		),
 		"CityObjectSystem must expose the active CPU City's exact object collections."
 	)
 	_expect(
-		CityWorkSystem.get_current_work_state().player_commands.is_empty()
-		and CityWorkSystem.get_current_work_state().work_orders.is_empty()
-		and CityWorkSystem.get_current_work_state().next_player_command_id == 1
-		and CityWorkSystem.get_current_work_state().next_work_order_id == 1,
+		cpu_state.work_state.player_commands.is_empty()
+		and cpu_state.work_state.work_orders.is_empty()
+		and cpu_state.work_state.next_player_command_id == 1
+		and cpu_state.work_state.next_work_order_id == 1,
 		"A fresh city must begin with an independent work-state subsystem."
 	)
 	_expect(
-		CityLogisticsSystem.get_current_state().ground_piles.is_empty()
-		and CityLogisticsSystem.get_current_state().haul_reservations.is_empty()
-		and CityLogisticsSystem.get_current_state().next_ground_pile_id == 1
-		and CityLogisticsSystem.get_current_state().next_haul_reservation_id == 1
-		and CityLogisticsSystem.get_current_state().ground_pile_version == 0
-		and CityLogisticsSystem.get_current_state().haul_reservation_version == 0,
+		cpu_state.logistics_state.ground_piles.is_empty()
+		and cpu_state.logistics_state.haul_reservations.is_empty()
+		and cpu_state.logistics_state.next_ground_pile_id == 1
+		and cpu_state.logistics_state.next_haul_reservation_id == 1
+		and cpu_state.logistics_state.ground_pile_version == 0
+		and cpu_state.logistics_state.haul_reservation_version == 0,
 		"A fresh city must begin with an independent logistics-state subsystem."
 	)
 
-	var cpu_context = WorldPoliticalState.get_active_settlement_context()
+	var cpu_context = WorldPoliticalState.get_settlement_context(cpu_city_id)
 	_expect(
 		cpu_context != null
 		and cpu_context.supports_city_simulation()
@@ -321,21 +333,33 @@ func _run_state_isolation_test() -> void:
 	)
 
 	var cpu_city_world := _make_world(8, 8, 91_202)
-	WorldPoliticalState.set_current_city_world(cpu_city_world)
-	WorldPoliticalState.set_current_city_seed(91_202)
-	var cpu_keep := _register_keep(cpu_city_world, Vector2i(4, 0), "cpu")
+	_expect(
+		WorldPoliticalState.store_city_world_for_settlement(
+			cpu_city_id,
+			cpu_city_world,
+			91_202
+		),
+		"The CPU fixture must store its world through the exact settlement owner."
+	)
+	var cpu_keep := _register_keep(
+		cpu_state,
+		cpu_city_world,
+		Vector2i(4, 0),
+		"cpu"
+	)
 	_mark_city_founded(cpu_state, cpu_keep)
-	CityObjectSystem.get_current_state().next_object_id = 54
-	CityObjectSystem.get_current_state().object_version = 11
-	var cpu_road := CityObjectSystem.add_city_road_object(
+	cpu_state.object_state.next_object_id = 16
+	cpu_state.object_state.object_version = 11
+	var cpu_road := CityObjectSystem.add_city_road_object_for_city_state(
+		cpu_state,
 		[shared_object_tile],
 		"cpu",
 		cpu_city_world
 	)
 	_expect(
-		int(cpu_road.get("id", -1)) == 54
-		and CityObjectSystem.get_current_state().next_object_id == 55
-		and CityObjectSystem.get_current_state().object_version == 12,
+		int(cpu_road.get("id", -1)) == 16
+		and cpu_state.object_state.next_object_id == 17
+		and cpu_state.object_state.object_version == 12,
 		"CPU object mutation must route through CityObjectSystem."
 	)
 	var cpu_objects: Array = cpu_state.object_state.objects
@@ -368,78 +392,77 @@ func _run_state_isolation_test() -> void:
 		and player_state.object_state.object_version == 4,
 		"Mutating the CPU City must not alter the inactive player object state."
 	)
-	CityAssignmentSystem.get_current_state().assignment_version = 21
-	CityWorkSystem.get_current_work_state().player_commands = [
-		{"id": 11, "test_owner": "cpu"},
+	cpu_state.assignment_state.assignment_version = 21
+	cpu_state.work_state.player_commands = [
+		{"id": 41, "test_owner": "cpu"},
 	]
-	CityWorkSystem.get_current_work_state().player_command_index_by_id = {11: 0}
-	CityWorkSystem.get_current_work_state().next_player_command_id = 12
-	CityWorkSystem.get_current_work_state().player_command_version = 14
-	CityWorkSystem.get_current_work_state().work_orders = {
-		21: {"id": 21, "source_key": "test:cpu"},
+	cpu_state.work_state.player_command_index_by_id = {41: 0}
+	cpu_state.work_state.next_player_command_id = 42
+	cpu_state.work_state.player_command_version = 14
+	cpu_state.work_state.work_orders = {
+		71: {"id": 71, "source_key": "test:cpu"},
 	}
-	CityWorkSystem.get_current_work_state().work_order_id_by_source_key = {"test:cpu": 21}
-	CityWorkSystem.get_current_work_state().next_work_order_id = 22
-	CityWorkSystem.get_current_work_state().work_order_version = 16
-	CityLogisticsSystem.get_current_state().ground_piles = [
-		{"id": 31, "test_owner": "cpu"},
+	cpu_state.work_state.work_order_id_by_source_key = {"test:cpu": 71}
+	cpu_state.work_state.next_work_order_id = 72
+	cpu_state.work_state.work_order_version = 16
+	cpu_state.logistics_state.ground_piles = [
+		{"id": 81, "test_owner": "cpu"},
 	]
-	CityLogisticsSystem.get_current_state().ground_pile_index_by_id = {31: 0}
-	CityLogisticsSystem.get_current_state().next_ground_pile_id = 32
-	CityLogisticsSystem.get_current_state().ground_pile_version = 18
-	CityLogisticsSystem.get_current_state().haul_reservations = {
-		41: {"id": 41, "citizen_id": 2, "test_owner": "cpu"},
+	cpu_state.logistics_state.ground_pile_index_by_id = {81: 0}
+	cpu_state.logistics_state.next_ground_pile_id = 82
+	cpu_state.logistics_state.ground_pile_version = 18
+	cpu_state.logistics_state.haul_reservations = {
+		91: {"id": 91, "citizen_id": 2, "test_owner": "cpu"},
 	}
-	CityLogisticsSystem.get_current_state().haul_reservation_id_by_citizen_id = {2: 41}
-	CityLogisticsSystem.get_current_state().haul_source_reserved_amount_by_key = {"cpu:source": 5}
-	CityLogisticsSystem.get_current_state().haul_destination_reserved_amount_by_key = {"cpu:destination": 5}
-	CityLogisticsSystem.get_current_state().next_haul_reservation_id = 42
-	CityLogisticsSystem.get_current_state().haul_reservation_version = 19
+	cpu_state.logistics_state.haul_reservation_id_by_citizen_id = {2: 91}
+	cpu_state.logistics_state.haul_source_reserved_amount_by_key = {"cpu:source": 5}
+	cpu_state.logistics_state.haul_destination_reserved_amount_by_key = {"cpu:destination": 5}
+	cpu_state.logistics_state.next_haul_reservation_id = 92
+	cpu_state.logistics_state.haul_reservation_version = 19
 
 	_expect(
 		WorldPoliticalState.set_active_settlement(player_city_id),
 		"The player city must remain activatable after CPU state mutation."
 	)
-	CityCitizenUnboundCompatibility.bind_legacy_fixture_state(player_state)
 	_expect(
-		WorldPoliticalState.get_current_city_world() == player_city_world
-		and WorldPoliticalState.get_current_city_seed() == 91_101,
+		player_state.city_world == player_city_world
+		and player_state.city_seed == 91_101,
 		"Returning to the player city must restore its local generated world."
 	)
 	_expect(
-		int(CityObjectSystem.get_current_state().objects[1].get("id", -1)) == 16
-		and int(CityObjectSystem.get_current_state().object_index_by_id.get(16, -1)) == 1
-		and int(CityObjectSystem.get_current_state().occupied_tiles.get(shared_object_tile, -1)) == 16,
+		int(player_state.object_state.objects[1].get("id", -1)) == 16
+		and int(player_state.object_state.object_index_by_id.get(16, -1)) == 1
+		and int(player_state.object_state.occupied_tiles.get(shared_object_tile, -1)) == 16,
 		"Returning to the player city must restore its objects."
 	)
 	_expect(
-		is_same(CityObjectSystem.get_current_state().objects, player_objects)
-		and is_same(CityObjectSystem.get_current_state().object_index_by_id, player_object_index)
-		and is_same(CityObjectSystem.get_current_state().occupied_tiles, player_occupancy),
+		is_same(player_state.object_state.objects, player_objects)
+		and is_same(player_state.object_state.object_index_by_id, player_object_index)
+		and is_same(player_state.object_state.occupied_tiles, player_occupancy),
 		"Returning to the player City must restore exact collection identity."
 	)
 	_expect(
-		CityObjectSystem.get_current_state().next_object_id == 17
-		and CityObjectSystem.get_current_state().object_version == 4
-		and CityAssignmentSystem.get_current_state().assignment_version == 9,
+		player_state.object_state.next_object_id == 17
+		and player_state.object_state.object_version == 4
+		and player_state.assignment_state.assignment_version == 9,
 		"Returning to the player city must restore its counters and versions."
 	)
 	_expect(
-		str(CityWorkSystem.get_current_work_state().player_commands[0].get("test_owner", "")) == "player"
-		and CityWorkSystem.get_current_work_state().next_player_command_id == 42
-		and CityWorkSystem.get_current_work_state().player_command_version == 6
-		and CityWorkSystem.get_current_work_state().work_orders.has(71)
-		and CityWorkSystem.get_current_work_state().next_work_order_id == 72
-		and CityWorkSystem.get_current_work_state().work_order_version == 8,
+		str(player_state.work_state.player_commands[0].get("test_owner", "")) == "player"
+		and player_state.work_state.next_player_command_id == 42
+		and player_state.work_state.player_command_version == 6
+		and player_state.work_state.work_orders.has(71)
+		and player_state.work_state.next_work_order_id == 72
+		and player_state.work_state.work_order_version == 8,
 		"Returning to the player city must restore its independent work state."
 	)
 	_expect(
-		str(CityLogisticsSystem.get_current_state().ground_piles[0].get("test_owner", "")) == "player"
-		and CityLogisticsSystem.get_current_state().next_ground_pile_id == 82
-		and CityLogisticsSystem.get_current_state().ground_pile_version == 10
-		and CityLogisticsSystem.get_current_state().haul_reservations.has(91)
-		and CityLogisticsSystem.get_current_state().next_haul_reservation_id == 92
-		and CityLogisticsSystem.get_current_state().haul_reservation_version == 11,
+		str(player_state.logistics_state.ground_piles[0].get("test_owner", "")) == "player"
+		and player_state.logistics_state.next_ground_pile_id == 82
+		and player_state.logistics_state.ground_pile_version == 10
+		and player_state.logistics_state.haul_reservations.has(91)
+		and player_state.logistics_state.next_haul_reservation_id == 92
+		and player_state.logistics_state.haul_reservation_version == 11,
 		"Returning to the player city must restore its independent logistics state."
 	)
 
@@ -447,46 +470,45 @@ func _run_state_isolation_test() -> void:
 		WorldPoliticalState.set_active_settlement(cpu_city_id),
 		"The CPU city must be reactivatable."
 	)
-	CityCitizenUnboundCompatibility.bind_legacy_fixture_state(cpu_state)
 	_expect(
-		WorldPoliticalState.get_current_city_world() == cpu_city_world
-		and WorldPoliticalState.get_current_city_seed() == 91_202,
+		cpu_state.city_world == cpu_city_world
+		and cpu_state.city_seed == 91_202,
 		"Reactivating the CPU city must restore its own generated world."
 	)
 	_expect(
-		int(CityObjectSystem.get_current_state().objects[1].get("id", -1)) == 54
-		and int(CityObjectSystem.get_current_state().object_index_by_id.get(54, -1)) == 1
-		and int(CityObjectSystem.get_current_state().occupied_tiles.get(shared_object_tile, -1)) == 54,
+		int(cpu_state.object_state.objects[1].get("id", -1)) == 16
+		and int(cpu_state.object_state.object_index_by_id.get(16, -1)) == 1
+		and int(cpu_state.object_state.occupied_tiles.get(shared_object_tile, -1)) == 16,
 		"Reactivating the CPU city must restore its own objects."
 	)
 	_expect(
-		is_same(CityObjectSystem.get_current_state().objects, cpu_objects)
-		and is_same(CityObjectSystem.get_current_state().object_index_by_id, cpu_object_index)
-		and is_same(CityObjectSystem.get_current_state().occupied_tiles, cpu_occupancy),
+		is_same(cpu_state.object_state.objects, cpu_objects)
+		and is_same(cpu_state.object_state.object_index_by_id, cpu_object_index)
+		and is_same(cpu_state.object_state.occupied_tiles, cpu_occupancy),
 		"Reactivating the CPU City must restore exact collection identity."
 	)
 	_expect(
-		CityObjectSystem.get_current_state().next_object_id == 55
-		and CityObjectSystem.get_current_state().object_version == 12
-		and CityAssignmentSystem.get_current_state().assignment_version == 21,
+		cpu_state.object_state.next_object_id == 17
+		and cpu_state.object_state.object_version == 12
+		and cpu_state.assignment_state.assignment_version == 21,
 		"Reactivating the CPU city must restore its own counters and versions."
 	)
 	_expect(
-		str(CityWorkSystem.get_current_work_state().player_commands[0].get("test_owner", "")) == "cpu"
-		and CityWorkSystem.get_current_work_state().next_player_command_id == 12
-		and CityWorkSystem.get_current_work_state().player_command_version == 14
-		and CityWorkSystem.get_current_work_state().work_orders.has(21)
-		and CityWorkSystem.get_current_work_state().next_work_order_id == 22
-		and CityWorkSystem.get_current_work_state().work_order_version == 16,
+		str(cpu_state.work_state.player_commands[0].get("test_owner", "")) == "cpu"
+		and cpu_state.work_state.next_player_command_id == 42
+		and cpu_state.work_state.player_command_version == 14
+		and cpu_state.work_state.work_orders.has(71)
+		and cpu_state.work_state.next_work_order_id == 72
+		and cpu_state.work_state.work_order_version == 16,
 		"Reactivating the CPU city must restore its own independent work state."
 	)
 	_expect(
-		str(CityLogisticsSystem.get_current_state().ground_piles[0].get("test_owner", "")) == "cpu"
-		and CityLogisticsSystem.get_current_state().next_ground_pile_id == 32
-		and CityLogisticsSystem.get_current_state().ground_pile_version == 18
-		and CityLogisticsSystem.get_current_state().haul_reservations.has(41)
-		and CityLogisticsSystem.get_current_state().next_haul_reservation_id == 42
-		and CityLogisticsSystem.get_current_state().haul_reservation_version == 19,
+		str(cpu_state.logistics_state.ground_piles[0].get("test_owner", "")) == "cpu"
+		and cpu_state.logistics_state.next_ground_pile_id == 82
+		and cpu_state.logistics_state.ground_pile_version == 18
+		and cpu_state.logistics_state.haul_reservations.has(91)
+		and cpu_state.logistics_state.next_haul_reservation_id == 92
+		and cpu_state.logistics_state.haul_reservation_version == 19,
 		"Reactivating the CPU city must restore its own independent logistics state."
 	)
 	_expect(
@@ -497,13 +519,11 @@ func _run_state_isolation_test() -> void:
 	# Leave the player settlement selected so existing tests and session teardown
 	# see the same player-facing state they expect.
 	WorldPoliticalState.set_active_settlement(player_city_id)
-	CityCitizenUnboundCompatibility.bind_legacy_fixture_state(player_state)
 
 
 func _test_validator_cache_tracks_object_state_identity() -> void:
 	WorldPoliticalState.reset_state()
 	WorldData.reset_runtime_session_state()
-	CityCitizenUnboundCompatibility.clear_legacy_fixture_state()
 	var city_world := _make_world(8, 8, 91_303)
 	var first_city_state := _create_owned_city_fixture(
 		"Validator Identity City A",
@@ -514,15 +534,23 @@ func _test_validator_cache_tracks_object_state_identity() -> void:
 	if first_city_state == null:
 		_expect(false, "The validator-cache fixture must create its first City.")
 		return
-	var first_keep := _register_keep(city_world, Vector2i(4, 0), "first_state")
+	var first_keep := _register_keep(
+		first_city_state,
+		city_world,
+		Vector2i(4, 0),
+		"first_state"
+	)
 	_mark_city_founded(first_city_state, first_keep)
 	var shared_tile := Vector2i(3, 3)
-	var first_road := CityObjectSystem.add_city_road_object(
+	var first_road := CityObjectSystem.add_city_road_object_for_city_state(
+		first_city_state,
 		[shared_tile],
 		"first_state",
 		city_world
 	)
-	var first_state := CityObjectSystem.get_current_state()
+	var first_state := CityObjectSystem.get_state_for_city_state(
+		first_city_state
+	)
 	var first_result := CityStateValidatorScript.validate_for_city_state(
 		int(first_city_state.city_runtime_data.get("id", -1)),
 		first_city_state,
@@ -539,7 +567,6 @@ func _test_validator_cache_tracks_object_state_identity() -> void:
 	# Rotate only the selected object-state owner. Every numeric version used by
 	# the validator remains equal, so identity is the only valid cache boundary.
 	WorldPoliticalState.reset_state()
-	CityCitizenUnboundCompatibility.clear_legacy_fixture_state()
 	var second_city_world := _make_world(8, 8, 91_304)
 	var second_city_state := _create_owned_city_fixture(
 		"Validator Identity City B",
@@ -607,19 +634,23 @@ func _create_owned_city_fixture(
 
 
 func _register_keep(
+	city_state: CitySettlementSimulationState,
 	city_world: WorldData,
 	top_left: Vector2i,
 	object_owner: String
 ) -> Dictionary:
-	return CityObjectSystem.register_completed_city_object({
-		"object_type": CityObjectCatalog.CITY_OBJECT_CITY_CENTER,
-		"top_left": top_left,
-		"size_tiles": CityObjectCatalog.get_city_object_size_for_type(
-			CityObjectCatalog.CITY_OBJECT_CITY_CENTER
-		),
-		"object_owner": object_owner,
-		"city_world": city_world,
-	})
+	return CityObjectSystem.register_completed_city_object_for_city_state(
+		city_state,
+		{
+			"object_type": CityObjectCatalog.CITY_OBJECT_CITY_CENTER,
+			"top_left": top_left,
+			"size_tiles": CityObjectCatalog.get_city_object_size_for_type(
+				CityObjectCatalog.CITY_OBJECT_CITY_CENTER
+			),
+			"object_owner": object_owner,
+			"city_world": city_world,
+		}
+	)
 
 
 func _seed_city_runtime_data(

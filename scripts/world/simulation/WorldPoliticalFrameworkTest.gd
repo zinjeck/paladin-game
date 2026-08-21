@@ -63,24 +63,10 @@ func _test_foundation_synchronization_transaction() -> void:
 		return
 
 	var political_state := RejectFirstSettlementPoliticalState.new()
-	var object_state = political_state.get_current_city_object_state()
-	var citizen_state = (
-		political_state.get_current_city_citizen_registry_state()
+	var reset_signal_count := {"value": 0}
+	political_state.settlement_registry_reset.connect(func() -> void:
+		reset_signal_count["value"] = int(reset_signal_count["value"]) + 1
 	)
-	var resource_state = (
-		political_state.get_current_city_resource_accounting_state()
-	)
-	object_state.objects = [{
-		"id": 41,
-		"type": CityObjectCatalog.CITY_OBJECT_CITY_CENTER,
-		"stored_resources": {CityResourceCatalog.RESOURCE_FISH: 9},
-	}]
-	object_state.next_object_id = 42
-	citizen_state.citizens = [{"id": 17, "display_name": "Founder"}]
-	citizen_state.next_citizen_id = 18
-	resource_state.owned_resource_amount_cache = {
-		CityResourceCatalog.RESOURCE_FISH: 9,
-	}
 
 	_expect(
 		not political_state.synchronize_foundation_with_world_data(),
@@ -91,29 +77,9 @@ func _test_foundation_synchronization_transaction() -> void:
 		and political_state.get_settlement_snapshot().is_empty()
 		and political_state.next_polity_id == 1
 		and political_state.next_settlement_id == 1
-		and is_same(
-			political_state.get_current_city_object_state(),
-			object_state
-		)
-		and is_same(
-			political_state.get_current_city_citizen_registry_state(),
-			citizen_state
-		)
-		and is_same(
-			political_state.get_current_city_resource_accounting_state(),
-			resource_state
-		)
-		and int(
-			object_state.objects[0].get("stored_resources", {}).get(
-				CityResourceCatalog.RESOURCE_FISH,
-				0
-			)
-		) == 9
-		and int(resource_state.owned_resource_amount_cache.get(
-			CityResourceCatalog.RESOURCE_FISH,
-			0
-		)) == 9,
-		"Rejected synchronization must preserve exact pre-context owners."
+		and political_state.settlement_city_state_by_id.is_empty()
+		and int(reset_signal_count["value"]) == 0,
+		"Rejected synchronization must restore an empty registry without publishing a reset."
 	)
 
 	_expect(
@@ -122,26 +88,27 @@ func _test_foundation_synchronization_transaction() -> void:
 	)
 	var capital_id := political_state.active_settlement_id
 	var capital_state = political_state.get_city_simulation_state(capital_id)
+	if capital_state == null:
+		_expect(false, "Successful retry must create a registered capital owner.")
+		political_state.free()
+		WorldData.reset_runtime_session_state()
+		return
+	var object_state: CityObjectState = capital_state.object_state
+	var citizen_state: CityCitizenRegistryState = (
+		capital_state.citizen_registry_state
+	)
+	var resource_state: CityResourceAccountingState = (
+		capital_state.resource_accounting_state
+	)
 	_expect(
 		capital_state != null
-		and is_same(capital_state.object_state, object_state)
-		and is_same(capital_state.citizen_registry_state, citizen_state)
-		and is_same(capital_state.resource_accounting_state, resource_state)
-		and object_state.objects.size() == 1
-		and object_state.next_object_id == 42
-		and citizen_state.citizens.size() == 1
-		and citizen_state.next_citizen_id == 18
-		and int(
-			object_state.objects[0].get("stored_resources", {}).get(
-				CityResourceCatalog.RESOURCE_FISH,
-				0
-			)
-		) == 9
-		and int(resource_state.owned_resource_amount_cache.get(
-			CityResourceCatalog.RESOURCE_FISH,
-			0
-		)) == 9,
-		"Successful retry must adopt each pre-context owner exactly once."
+		and object_state.objects.is_empty()
+		and object_state.next_object_id == 1
+		and citizen_state.citizens.is_empty()
+		and citizen_state.next_citizen_id == 1
+		and resource_state.owned_resource_amount_cache.is_empty()
+		and int(reset_signal_count["value"]) == 1,
+		"Successful retry must publish one fresh registered capital owner."
 	)
 
 	political_state.settlement_city_state_by_id.erase(capital_id)
@@ -161,17 +128,12 @@ func _test_foundation_synchronization_transaction() -> void:
 			political_state.get_city_simulation_state(capital_id),
 			capital_state
 		)
-		and int(
-			object_state.objects[0].get("stored_resources", {}).get(
-				CityResourceCatalog.RESOURCE_FISH,
-				0
-			)
-		) == 9
-		and int(resource_state.owned_resource_amount_cache.get(
-			CityResourceCatalog.RESOURCE_FISH,
-			0
-		)) == 9,
-		"Restoring the exact city owner must recover without duplication."
+		and is_same(capital_state.object_state, object_state)
+		and is_same(capital_state.citizen_registry_state, citizen_state)
+		and is_same(capital_state.resource_accounting_state, resource_state)
+		and object_state.objects.is_empty()
+		and citizen_state.citizens.is_empty(),
+		"Restoring the exact registered owner must recover without duplication."
 	)
 
 	political_state.free()
@@ -281,7 +243,7 @@ func _run_framework_test() -> void:
 		"The founding capital must become the active settlement."
 	)
 
-	var capital_context = WorldPoliticalState.get_active_settlement_context()
+	var capital_context = WorldPoliticalState.get_settlement_context(capital_id)
 	_expect(
 		capital_context != null
 		and capital_context.is_valid()
@@ -397,7 +359,7 @@ func _test_generic_second_polity(player_capital_id: int) -> void:
 		WorldPoliticalState.set_active_settlement(cpu_settlement_id),
 		"Any registered settlement must be selectable as the active identity."
 	)
-	var cpu_context = WorldPoliticalState.get_active_settlement_context()
+	var cpu_context = WorldPoliticalState.get_settlement_context(cpu_settlement_id)
 	_expect(
 		cpu_context != null
 		and cpu_context.is_valid()
@@ -408,14 +370,16 @@ func _test_generic_second_polity(player_capital_id: int) -> void:
 	)
 	_expect(
 		cpu_context != null and not cpu_context.supports_city_simulation(),
-		"An unbound CPU settlement must never reuse the player's legacy city backend."
+		"A non-city CPU settlement must not acquire the player capital's city backend."
 	)
 
 	_expect(
 		WorldPoliticalState.set_active_settlement(player_capital_id),
 		"The player capital must remain independently addressable after CPU setup."
 	)
-	var restored_context = WorldPoliticalState.get_active_settlement_context()
+	var restored_context = WorldPoliticalState.get_settlement_context(
+		player_capital_id
+	)
 	_expect(
 		restored_context != null
 		and restored_context.settlement_id == player_capital_id

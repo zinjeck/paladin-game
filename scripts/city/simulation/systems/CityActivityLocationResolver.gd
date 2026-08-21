@@ -27,13 +27,6 @@ const ACTIVITY_CHOICE_REQUIRED_KEYS := [
 # It does not assign tasks, choose schedules, move citizens, reserve tiles,
 # produce resources, or render anything.
 
-static func get_work_activity_tiles(
-	city_world: WorldData,
-	workplace: Dictionary
-) -> Array[Vector2i]:
-	return _get_work_activity_tiles(null, city_world, workplace)
-
-
 static func get_work_activity_tiles_for_city_state(
 	city_state: CitySettlementSimulationState,
 	city_world: WorldData,
@@ -123,19 +116,6 @@ static func _get_work_activity_tiles(
 	_sort_and_deduplicate_tiles(activity_tiles)
 	return activity_tiles
 
-static func get_object_interior_activity_tiles(
-	city_world: WorldData,
-	city_object: Dictionary,
-	citizen_id: int
-) -> Array[Vector2i]:
-	return _get_object_interior_activity_tiles(
-		null,
-		city_world,
-		city_object,
-		citizen_id
-	)
-
-
 static func get_object_interior_activity_tiles_for_city_state(
 	city_state: CitySettlementSimulationState,
 	city_world: WorldData,
@@ -176,13 +156,7 @@ static func _get_object_interior_activity_tiles(
 		var tile_position: Vector2i = raw_tile
 
 		var tile_is_walkable := (
-			CityNavigationSystem.is_city_tile_walkable_for_citizen(
-				city_world,
-				tile_position,
-				citizen_id
-			)
-			if city_state == null
-			else CityNavigationSystem.is_city_tile_walkable_for_citizen_for_city_state(
+			CityNavigationSystem.is_city_tile_walkable_for_citizen_for_city_state(
 				city_state,
 				city_world,
 				tile_position,
@@ -249,12 +223,7 @@ static func _filter_activity_tiles_by_policy(
 
 	for candidate_tile in candidate_tiles:
 		var tile_is_walkable := (
-			CityNavigationSystem.is_city_tile_walkable_for_citizen(
-				city_world,
-				candidate_tile
-			)
-			if city_state == null
-			else CityNavigationSystem.is_city_tile_walkable_for_citizen_for_city_state(
+			CityNavigationSystem.is_city_tile_walkable_for_citizen_for_city_state(
 				city_state,
 				city_world,
 				candidate_tile
@@ -440,12 +409,7 @@ static func _get_exterior_access_tiles(
 ) -> Array[Vector2i]:
 	var activity_tiles: Array[Vector2i] = []
 	var raw_access_tiles := (
-		CityNavigationSystem.get_city_object_access_tiles(
-			city_world,
-			workplace
-		)
-		if city_state == null
-		else CityNavigationSystem.get_city_object_access_tiles_for_city_state(
+		CityNavigationSystem.get_city_object_access_tiles_for_city_state(
 			city_state,
 			city_world,
 			workplace

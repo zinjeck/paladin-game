@@ -73,11 +73,17 @@ func _test_equal_version_city_isolation() -> void:
 	_expect(
 		WorldPoliticalState.set_active_settlement(city_b_id)
 		and _bind_fixture_city(city_a_id)
-		and _current_task_matches_house(int(state_a["house_id"])),
+		and _current_task_matches_house(
+			state_a["city_state"],
+			int(state_a["house_id"])
+		),
 		"Explicit City A task lookup must ignore presentation selection B."
 	)
 	_expect(
-		CityCitizenTaskRuntimeSystem.clear_city_citizen_task(1)
+		CityCitizenTaskRuntimeSystem.clear_city_citizen_task_for_city_state(
+			state_a["city_state"],
+			1
+		)
 		and task_state_a.active_task_ids.is_empty()
 		and task_state_b.active_task_ids == [1]
 		and _task_matches_house(
@@ -88,13 +94,19 @@ func _test_equal_version_city_isolation() -> void:
 	)
 	_expect(
 		_bind_fixture_city(city_b_id)
-		and _current_task_matches_house(int(state_b["house_id"]))
+		and _current_task_matches_house(
+			state_b["city_state"],
+			int(state_b["house_id"])
+		)
 		and task_state_b.active_task_ids == [1],
 		"Binding B must recover its exact task runtime."
 	)
 	_expect(
 		_bind_fixture_city(city_a_id)
-		and CityCitizenTaskRuntimeSystem.get_city_citizen_current_task(1).get(
+		and CityCitizenTaskRuntimeSystem.get_city_citizen_current_task_for_city_state(
+			state_a["city_state"],
+			1
+		).get(
 			"kind", CityCitizens.CITY_CITIZEN_TASK_KIND_NONE
 		) == CityCitizens.CITY_CITIZEN_TASK_KIND_NONE,
 		"A -> B -> A must preserve A's independent cleared state."
@@ -131,15 +143,16 @@ func _seed_city(
 	if not city_state is CitySettlementSimulationState:
 		return {}
 	var city_world := _make_world(12, 12, seed_value)
-	WorldPoliticalState.set_current_city_world(city_world)
-	WorldPoliticalState.set_current_city_seed(seed_value)
+	WorldData.store_city_world_for_state(city_state, city_world, seed_value)
 	city_state.city_runtime_data.merge({
 		"name": "Task Runtime Isolation City",
 		"primary_culture_id": culture_id,
 		"founded": true,
 		"can_build": true,
 	}, true)
-	var house := CityObjectSystem.register_completed_city_object({
+	var house := CityObjectSystem.register_completed_city_object_for_city_state(
+		city_state,
+		{
 		"object_type": CityObjectCatalog.CITY_OBJECT_HOUSE,
 		"top_left": SHARED_HOUSE_TILE,
 		"size_tiles": CityObjectCatalog.get_city_object_size_for_type(
@@ -147,9 +160,11 @@ func _seed_city(
 		),
 		"object_owner": "player",
 		"city_world": city_world,
-	})
+		}
+	)
 	var house_id := int(house.get("id", -1))
-	var citizen := CityCitizenRegistrySystem.add_city_citizen(
+	var citizen := CityCitizenRegistrySystem.add_city_citizen_for_city_state(
+		city_state,
 		"",
 		SHARED_CITIZEN_TILE,
 		CityCitizens.CITY_CITIZEN_SEX_MALE,
@@ -166,21 +181,41 @@ func _seed_city(
 		"target_object_id": house_id,
 	}
 	_expect(
-		CityAssignmentSystem.assign_city_citizen_home(citizen_id, house_id)
-		and CityCitizenTaskRuntimeSystem.assign_city_citizen_task(citizen_id, task),
+		CityAssignmentSystem.assign_city_citizen_home_for_city_state(
+			city_state,
+			citizen_id,
+			house_id
+		)
+		and CityCitizenTaskRuntimeSystem.assign_city_citizen_task_for_city_state(
+			city_state,
+			citizen_id,
+			task
+		),
 		"Each City must assign its own valid local Return Home task."
 	)
 	return {
+		"city_state": city_state,
 		"citizen_id": citizen_id,
 		"house_id": house_id,
-		"task_state": CityCitizenTaskRuntimeSystem.get_current_state(),
-		"task_snapshot": CityCitizenTaskRuntimeSystem.get_city_citizen_current_task(citizen_id),
+		"task_state": city_state.citizen_task_runtime_state,
+		"task_snapshot": (
+			CityCitizenTaskRuntimeSystem.get_city_citizen_current_task_for_city_state(
+				city_state,
+				citizen_id
+			)
+		),
 	}
 
 
-func _current_task_matches_house(house_id: int) -> bool:
+func _current_task_matches_house(
+	city_state: CitySettlementSimulationState,
+	house_id: int
+) -> bool:
 	return _task_matches_house(
-		CityCitizenTaskRuntimeSystem.get_city_citizen_current_task(1),
+		CityCitizenTaskRuntimeSystem.get_city_citizen_current_task_for_city_state(
+			city_state,
+			1
+		),
 		house_id
 	)
 
@@ -199,7 +234,6 @@ func _bind_fixture_city(city_id: int) -> bool:
 	var city_state = WorldPoliticalState.get_city_simulation_state(city_id)
 	if not city_state is CitySettlementSimulationState:
 		return false
-	CityCitizenUnboundCompatibility.bind_legacy_fixture_state(city_state)
 	return true
 
 

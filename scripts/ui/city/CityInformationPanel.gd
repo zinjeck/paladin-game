@@ -1,6 +1,10 @@
 extends RefCounted
 class_name CityInformationPanel
 
+const SettlementPresentationBindingScript = preload(
+	"res://scripts/settlements/presentation/SettlementPresentationBinding.gd"
+)
+
 # File responsibility: the fixed city-summary panel's presentation, layout,
 # and read-only projection of city identity, time, population, and citizen needs.
 
@@ -98,26 +102,68 @@ var happiness_bar: SlimNeedMeter
 var population_button: Button
 var jobs_button: Button
 var reserved_button: Button
-var presentation_binding: CityPresentationBinding
+var presentation_binding: SettlementPresentationBindingScript
+var highest_accepted_binding_generation: int = 0
 
 
-func bind_city_presentation(binding: CityPresentationBinding) -> bool:
-	if binding == null or not binding.is_valid():
+func can_bind_settlement_presentation(
+	binding: SettlementPresentationBindingScript
+) -> bool:
+	if (
+		binding == null
+		or not binding.is_valid()
+		or not binding.supports_backend_capability(
+			SettlementPresentationBindingScript.CAPABILITY_CITY_DETAIL
+		)
+	):
+		return false
+	if binding.generation > highest_accepted_binding_generation:
+		return true
+	return (
+		binding.generation == highest_accepted_binding_generation
+		and is_bound_to_settlement_presentation(binding)
+	)
+
+
+func bind_settlement_presentation(
+	binding: SettlementPresentationBindingScript
+) -> bool:
+	if not can_bind_settlement_presentation(binding):
 		return false
 
 	presentation_binding = binding
+	highest_accepted_binding_generation = maxi(
+		highest_accepted_binding_generation,
+		binding.generation
+	)
 	if panel != null:
 		refresh_all()
 	return true
 
 
-func is_bound_to_city_presentation(
-	binding: CityPresentationBinding
+func bind_city_presentation(
+	binding: SettlementPresentationBindingScript
+) -> bool:
+	return bind_settlement_presentation(binding)
+
+
+func is_bound_to_settlement_presentation(
+	binding: SettlementPresentationBindingScript
 ) -> bool:
 	return (
 		presentation_binding != null
 		and presentation_binding.matches_binding(binding)
 	)
+
+
+func is_bound_to_city_presentation(
+	binding: SettlementPresentationBindingScript
+) -> bool:
+	return is_bound_to_settlement_presentation(binding)
+
+
+func reset_presentation() -> void:
+	presentation_binding = null
 
 
 func setup(parent: Control) -> void:
@@ -247,8 +293,9 @@ func refresh_identity() -> void:
 
 	var city_name := ""
 	if presentation_binding != null and presentation_binding.is_valid():
+		var city_state := _get_bound_city_state()
 		city_name = str(
-			presentation_binding.city_state.city_runtime_data.get(
+			city_state.city_runtime_data.get(
 				"name",
 				""
 			)
@@ -284,11 +331,7 @@ func refresh_time() -> void:
 
 
 func refresh_citizen_data() -> void:
-	var city_state: CitySettlementSimulationState = (
-		presentation_binding.city_state
-		if presentation_binding != null and presentation_binding.is_valid()
-		else null
-	)
+	var city_state := _get_bound_city_state()
 	var city_is_founded: bool = (
 		city_state != null and city_state.is_city_founded()
 	)
@@ -459,6 +502,19 @@ func _create_action_button(
 	)
 	panel.add_child(button)
 	return button
+
+
+func _get_bound_city_state() -> CitySettlementSimulationState:
+	if presentation_binding == null or not presentation_binding.is_valid():
+		return null
+	var capability_state = presentation_binding.get_backend_capability(
+		SettlementPresentationBindingScript.CAPABILITY_CITY_DETAIL
+	)
+	return (
+		capability_state
+		if capability_state is CitySettlementSimulationState
+		else null
+	)
 
 
 func _make_flat_style(

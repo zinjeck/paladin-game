@@ -8,34 +8,16 @@ class_name CityAssignmentSystem
 # duplicate relationship ledger.
 
 
-static func get_current_state() -> CityAssignmentState:
-	return CityCitizenUnboundCompatibility.get_city_state().assignment_state
-
-
-static func get_city_assignment_version() -> int:
-	return get_current_state().assignment_version
-
-
 static func get_city_assignment_version_for_city_state(
 	city_state: CitySettlementSimulationState
 ) -> int:
 	return city_state.assignment_state.assignment_version
 
 
-static func mark_city_assignments_changed() -> void:
-	get_current_state().assignment_version += 1
-
-
 static func mark_city_assignments_changed_for_city_state(
 	city_state: CitySettlementSimulationState
 ) -> void:
 	city_state.assignment_state.assignment_version += 1
-
-
-static func reset_city_assignment_state() -> void:
-	# Relationship records are reset by their citizen/object owners. Publish one
-	# focused invalidation without manufacturing a second copy here.
-	mark_city_assignments_changed()
 
 
 static func reset_city_assignment_state_for_city_state(
@@ -47,16 +29,12 @@ static func reset_city_assignment_state_for_city_state(
 static func _get_registry_state(
 	city_state: CitySettlementSimulationState
 ) -> CityCitizenRegistryState:
-	if city_state == null:
-		return CityCitizenUnboundCompatibility.get_city_state().citizen_registry_state
 	return city_state.citizen_registry_state
 
 
 static func _get_city_objects(
 	city_state: CitySettlementSimulationState
 ) -> Array:
-	if city_state == null:
-		return CityObjectSystem.get_city_objects()
 	return CityObjectSystem.get_city_objects_for_city_state(city_state)
 
 
@@ -64,8 +42,6 @@ static func _get_city_citizen_index_by_id(
 	city_state: CitySettlementSimulationState,
 	citizen_id: int
 ) -> int:
-	if city_state == null:
-		return CityCitizenRegistrySystem.get_city_citizen_index_by_id(citizen_id)
 	return CityCitizenRegistrySystem.get_city_citizen_index_by_id_for_city_state(
 		city_state,
 		citizen_id
@@ -75,14 +51,7 @@ static func _get_city_citizen_index_by_id(
 static func _mark_assignments_changed(
 	city_state: CitySettlementSimulationState
 ) -> void:
-	if city_state == null:
-		mark_city_assignments_changed()
-	else:
-		mark_city_assignments_changed_for_city_state(city_state)
-
-
-static func get_city_housed_citizen_count() -> int:
-	return _get_city_housed_citizen_count(CityCitizenUnboundCompatibility.get_city_state())
+	mark_city_assignments_changed_for_city_state(city_state)
 
 
 static func get_city_housed_citizen_count_for_city_state(
@@ -107,10 +76,6 @@ static func _get_city_housed_citizen_count(
 	return housed_count
 
 
-static func get_city_unemployed_citizen_count() -> int:
-	return _get_city_unemployed_citizen_count(CityCitizenUnboundCompatibility.get_city_state())
-
-
 static func get_city_unemployed_citizen_count_for_city_state(
 	city_state: CitySettlementSimulationState
 ) -> int:
@@ -133,19 +98,11 @@ static func _get_city_unemployed_citizen_count(
 	return unemployed_count
 
 
-static func get_city_object_resident_count(city_object: Dictionary) -> int:
-	return _get_city_object_resident_ids(CityCitizenUnboundCompatibility.get_city_state(), city_object).size()
-
-
 static func get_city_object_resident_count_for_city_state(
 	city_state: CitySettlementSimulationState,
 	city_object: Dictionary
 ) -> int:
 	return _get_city_object_resident_ids(city_state, city_object).size()
-
-
-static func get_city_object_resident_ids(city_object: Dictionary) -> Array:
-	return _get_city_object_resident_ids(CityCitizenUnboundCompatibility.get_city_state(), city_object)
 
 
 static func get_city_object_resident_ids_for_city_state(
@@ -178,10 +135,6 @@ static func _get_city_object_resident_ids(
 	)
 
 
-static func get_city_object_resident_names(city_object: Dictionary) -> Array:
-	return _get_city_object_resident_names(CityCitizenUnboundCompatibility.get_city_state(), city_object)
-
-
 static func get_city_object_resident_names_for_city_state(
 	city_state: CitySettlementSimulationState,
 	city_object: Dictionary
@@ -200,39 +153,19 @@ static func _get_city_object_resident_names(
 		city_object
 	):
 		resident_names.append(
-			CityCitizenRegistrySystem.get_city_citizen_display_name(
+			CityCitizenRegistrySystem.get_city_citizen_display_name_for_city_state(
+				city_state,
 				int(raw_resident_id)
 			)
-			if city_state == null
-			else CityCitizenRegistrySystem
-				.get_city_citizen_display_name_for_city_state(
-					city_state,
-					int(raw_resident_id)
-				)
 		)
 
 	return resident_names
-
-
-static func get_total_city_resident_capacity() -> int:
-	return _get_total_city_resident_capacity(CityCitizenUnboundCompatibility.get_city_state())
 
 
 static func get_total_city_resident_capacity_for_city_state(
 	city_state: CitySettlementSimulationState
 ) -> int:
 	return _get_total_city_resident_capacity(city_state)
-
-
-static func set_city_object_resident_capacity(
-	object_id: int,
-	resident_capacity: int
-) -> bool:
-	return _set_city_object_resident_capacity(
-		CityCitizenUnboundCompatibility.get_city_state(),
-		object_id,
-		resident_capacity
-	)
 
 
 static func set_city_object_resident_capacity_for_city_state(
@@ -255,13 +188,9 @@ static func _set_city_object_resident_capacity(
 	if object_id <= 0 or resident_capacity < 0:
 		return false
 
-	var city_object := (
-		CityObjectSystem.get_city_object_by_id(object_id)
-		if city_state == null
-		else CityObjectSystem.get_city_object_by_id_for_city_state(
-			city_state,
-			object_id
-		)
+	var city_object := CityObjectSystem.get_city_object_by_id_for_city_state(
+		city_state,
+		object_id
 	)
 
 	if (
@@ -278,17 +207,10 @@ static func _set_city_object_resident_capacity(
 	if int(city_object.get("resident_capacity", 0)) == resident_capacity:
 		return true
 
-	var changed := (
-		CityObjectSystem.patch_city_object_assignment_fields(
-			object_id,
-			{"resident_capacity": resident_capacity}
-		)
-		if city_state == null
-		else CityObjectSystem.patch_city_object_assignment_fields_for_city_state(
-			city_state,
-			object_id,
-			{"resident_capacity": resident_capacity}
-		)
+	var changed := CityObjectSystem.patch_city_object_assignment_fields_for_city_state(
+		city_state,
+		object_id,
+		{"resident_capacity": resident_capacity}
 	)
 
 	if not changed:
@@ -311,10 +233,6 @@ static func _get_total_city_resident_capacity(
 		)
 
 	return total_capacity
-
-
-static func get_city_object_worker_ids(city_object: Dictionary) -> Array:
-	return _get_city_object_worker_ids(CityCitizenUnboundCompatibility.get_city_state(), city_object)
 
 
 static func get_city_object_worker_ids_for_city_state(
@@ -347,19 +265,11 @@ static func _get_city_object_worker_ids(
 	)
 
 
-static func get_city_object_worker_count(city_object: Dictionary) -> int:
-	return _get_city_object_worker_ids(CityCitizenUnboundCompatibility.get_city_state(), city_object).size()
-
-
 static func get_city_object_worker_count_for_city_state(
 	city_state: CitySettlementSimulationState,
 	city_object: Dictionary
 ) -> int:
 	return _get_city_object_worker_ids(city_state, city_object).size()
-
-
-static func get_city_object_worker_names(city_object: Dictionary) -> Array:
-	return _get_city_object_worker_names(CityCitizenUnboundCompatibility.get_city_state(), city_object)
 
 
 static func get_city_object_worker_names_for_city_state(
@@ -377,22 +287,13 @@ static func _get_city_object_worker_names(
 
 	for raw_worker_id in _get_city_object_worker_ids(city_state, city_object):
 		worker_names.append(
-			CityCitizenRegistrySystem.get_city_citizen_display_name(
+			CityCitizenRegistrySystem.get_city_citizen_display_name_for_city_state(
+				city_state,
 				int(raw_worker_id)
 			)
-			if city_state == null
-			else CityCitizenRegistrySystem
-				.get_city_citizen_display_name_for_city_state(
-					city_state,
-					int(raw_worker_id)
-				)
 		)
 
 	return worker_names
-
-
-static func ensure_city_citizen_assignment_state() -> int:
-	return _ensure_city_citizen_assignment_state(CityCitizenUnboundCompatibility.get_city_state())
 
 
 static func ensure_city_citizen_assignment_state_for_city_state(
@@ -626,24 +527,12 @@ static func _patch_city_object_assignment_projection(
 		elif existing.has(field_name):
 			fields_to_erase.append(field_name)
 
-	return (
-		CityObjectSystem.patch_city_object_assignment_fields(
-			object_id,
-			field_values,
-			fields_to_erase
-		)
-		if city_state == null
-		else CityObjectSystem.patch_city_object_assignment_fields_for_city_state(
-			city_state,
-			object_id,
-			field_values,
-			fields_to_erase
-		)
+	return CityObjectSystem.patch_city_object_assignment_fields_for_city_state(
+		city_state,
+		object_id,
+		field_values,
+		fields_to_erase
 	)
-
-
-static func assign_homeless_citizens_to_available_housing() -> int:
-	return _assign_homeless_citizens_to_available_housing(CityCitizenUnboundCompatibility.get_city_state())
 
 
 static func assign_homeless_citizens_to_available_housing_for_city_state(
@@ -671,13 +560,9 @@ static func _assign_homeless_citizens_to_available_housing(
 			continue
 
 		while true:
-			var current_house := (
-				CityObjectSystem.get_city_object_by_id(house_id)
-				if city_state == null
-				else CityObjectSystem.get_city_object_by_id_for_city_state(
-					city_state,
-					house_id
-				)
+			var current_house := CityObjectSystem.get_city_object_by_id_for_city_state(
+				city_state,
+				house_id
 			)
 
 			if (
@@ -710,13 +595,6 @@ static func _assign_homeless_citizens_to_available_housing(
 			assigned_count += 1
 
 	return assigned_count
-
-
-static func assign_city_citizen_home(
-	citizen_id: int,
-	house_id: int
-) -> bool:
-	return _assign_city_citizen_home(CityCitizenUnboundCompatibility.get_city_state(), citizen_id, house_id)
 
 
 static func assign_city_citizen_home_for_city_state(
@@ -752,13 +630,9 @@ static func _assign_city_citizen_home(
 	if not bool(citizen.get("alive", true)):
 		return false
 
-	var house_index := (
-		CityObjectSystem.get_city_object_index_by_id(house_id)
-		if city_state == null
-		else CityObjectSystem.get_city_object_index_by_id_for_city_state(
-			city_state,
-			house_id
-		)
+	var house_index := CityObjectSystem.get_city_object_index_by_id_for_city_state(
+		city_state,
+		house_id
 	)
 
 	if house_index < 0:
@@ -851,10 +725,6 @@ static func _assign_city_citizen_home(
 	return true
 
 
-static func remove_city_citizen_home(citizen_id: int) -> bool:
-	return _remove_city_citizen_home(CityCitizenUnboundCompatibility.get_city_state(), citizen_id)
-
-
 static func remove_city_citizen_home_for_city_state(
 	city_state: CitySettlementSimulationState,
 	citizen_id: int
@@ -903,13 +773,6 @@ static func _remove_city_citizen_home(
 	return true
 
 
-static func assign_city_citizen_job(
-	citizen_id: int,
-	workplace_id: int
-) -> bool:
-	return _assign_city_citizen_job(CityCitizenUnboundCompatibility.get_city_state(), citizen_id, workplace_id)
-
-
 static func assign_city_citizen_job_for_city_state(
 	city_state: CitySettlementSimulationState,
 	citizen_id: int,
@@ -943,13 +806,9 @@ static func _assign_city_citizen_job(
 	if not bool(citizen.get("alive", true)):
 		return false
 
-	var workplace_index := (
-		CityObjectSystem.get_city_object_index_by_id(workplace_id)
-		if city_state == null
-		else CityObjectSystem.get_city_object_index_by_id_for_city_state(
-			city_state,
-			workplace_id
-		)
+	var workplace_index := CityObjectSystem.get_city_object_index_by_id_for_city_state(
+		city_state,
+		workplace_id
 	)
 
 	if workplace_index < 0:
@@ -1019,27 +878,17 @@ static func _assign_city_citizen_job(
 	# action. A rejected assignment must not drop cargo or abandon a valid haul.
 	if (
 		current_job_id <= 0
-		and not (
-			CitizenTaskSystem.prepare_unemployed_citizen_for_priority_interrupt(
-				citizen_id
-			)
-			if city_state == null
-			else CitizenTaskSystem.prepare_unemployed_citizen_for_priority_interrupt_for_city_state(
+		and not CitizenTaskSystem.prepare_unemployed_citizen_for_priority_interrupt_for_city_state(
 				city_state,
 				citizen_id
-			)
 		)
 	):
 		return false
 
 	if current_job_id <= 0:
-		citizen = (
-			CityCitizenRegistrySystem.get_city_citizen_by_id(citizen_id)
-			if city_state == null
-			else CityCitizenRegistrySystem.get_city_citizen_by_id_for_city_state(
-				city_state,
-				citizen_id
-			)
+		citizen = CityCitizenRegistrySystem.get_city_citizen_by_id_for_city_state(
+			city_state,
+			citizen_id
 		).duplicate(false)
 		if citizen.is_empty():
 			return false
@@ -1081,10 +930,6 @@ static func _assign_city_citizen_job(
 		)
 
 	return true
-
-
-static func remove_city_citizen_job(citizen_id: int) -> bool:
-	return _remove_city_citizen_job(CityCitizenUnboundCompatibility.get_city_state(), citizen_id)
 
 
 static func remove_city_citizen_job_for_city_state(
@@ -1217,17 +1062,10 @@ static func _write_city_object_assignment_ids(
 	if existing_assignment_ids is Array and existing_assignment_ids == assignment_ids:
 		return false
 
-	return (
-		CityObjectSystem.patch_city_object_assignment_fields(
-			int(city_object.get("id", -1)),
-			{object_id_list_field: assignment_ids.duplicate()}
-		)
-		if city_state == null
-		else CityObjectSystem.patch_city_object_assignment_fields_for_city_state(
-			city_state,
-			int(city_object.get("id", -1)),
-			{object_id_list_field: assignment_ids.duplicate()}
-		)
+	return CityObjectSystem.patch_city_object_assignment_fields_for_city_state(
+		city_state,
+		int(city_object.get("id", -1)),
+		{object_id_list_field: assignment_ids.duplicate()}
 	)
 
 
@@ -1238,13 +1076,9 @@ static func _remove_citizen_from_city_object_assignment(
 	object_id_list_field: String,
 	citizen_object_id_field: String
 ) -> bool:
-	var object_index := (
-		CityObjectSystem.get_city_object_index_by_id(object_id)
-		if city_state == null
-		else CityObjectSystem.get_city_object_index_by_id_for_city_state(
-			city_state,
-			object_id
-		)
+	var object_index := CityObjectSystem.get_city_object_index_by_id_for_city_state(
+		city_state,
+		object_id
 	)
 
 	if object_index < 0:
@@ -1281,13 +1115,9 @@ static func _clear_city_citizen_return_home_task_after_home_change(
 	city_state: CitySettlementSimulationState,
 	citizen_id: int
 ) -> void:
-	var current_task := (
-		CityCitizenTaskRuntimeSystem.get_city_citizen_current_task(citizen_id)
-		if city_state == null
-		else CityCitizenTaskRuntimeSystem.get_city_citizen_current_task_for_city_state(
-			city_state,
-			citizen_id
-		)
+	var current_task := CityCitizenTaskRuntimeSystem.get_city_citizen_current_task_for_city_state(
+		city_state,
+		citizen_id
 	)
 
 	if (
@@ -1296,35 +1126,24 @@ static func _clear_city_citizen_return_home_task_after_home_change(
 	):
 		return
 
-	if city_state == null:
-		CityCitizenTaskRuntimeSystem.clear_city_citizen_task(
-			citizen_id,
-			CityCitizens.CITY_CITIZEN_TASK_SOURCE_PLAYER
-		)
-		CityCitizenMovementRuntimeSystem.cancel_city_citizen_movement(citizen_id)
-	else:
-		CityCitizenTaskRuntimeSystem.clear_city_citizen_task_for_city_state(
-			city_state,
-			citizen_id,
-			CityCitizens.CITY_CITIZEN_TASK_SOURCE_PLAYER
-		)
-		CityCitizenMovementRuntimeSystem.cancel_city_citizen_movement_for_city_state(
-			city_state,
-			citizen_id
-		)
+	CityCitizenTaskRuntimeSystem.clear_city_citizen_task_for_city_state(
+		city_state,
+		citizen_id,
+		CityCitizens.CITY_CITIZEN_TASK_SOURCE_PLAYER
+	)
+	CityCitizenMovementRuntimeSystem.cancel_city_citizen_movement_for_city_state(
+		city_state,
+		citizen_id
+	)
 
 
 static func _clear_city_citizen_work_task_after_job_change(
 	city_state: CitySettlementSimulationState,
 	citizen_id: int
 ) -> void:
-	var current_task := (
-		CityCitizenTaskRuntimeSystem.get_city_citizen_current_task(citizen_id)
-		if city_state == null
-		else CityCitizenTaskRuntimeSystem.get_city_citizen_current_task_for_city_state(
-			city_state,
-			citizen_id
-		)
+	var current_task := CityCitizenTaskRuntimeSystem.get_city_citizen_current_task_for_city_state(
+		city_state,
+		citizen_id
 	)
 
 	if (
@@ -1333,19 +1152,12 @@ static func _clear_city_citizen_work_task_after_job_change(
 	):
 		return
 
-	if city_state == null:
-		CityCitizenTaskRuntimeSystem.clear_city_citizen_task(
-			citizen_id,
-			CityCitizens.CITY_CITIZEN_TASK_SOURCE_PLAYER
-		)
-		CityCitizenMovementRuntimeSystem.cancel_city_citizen_movement(citizen_id)
-	else:
-		CityCitizenTaskRuntimeSystem.clear_city_citizen_task_for_city_state(
-			city_state,
-			citizen_id,
-			CityCitizens.CITY_CITIZEN_TASK_SOURCE_PLAYER
-		)
-		CityCitizenMovementRuntimeSystem.cancel_city_citizen_movement_for_city_state(
-			city_state,
-			citizen_id
-		)
+	CityCitizenTaskRuntimeSystem.clear_city_citizen_task_for_city_state(
+		city_state,
+		citizen_id,
+		CityCitizens.CITY_CITIZEN_TASK_SOURCE_PLAYER
+	)
+	CityCitizenMovementRuntimeSystem.cancel_city_citizen_movement_for_city_state(
+		city_state,
+		citizen_id
+	)

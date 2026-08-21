@@ -6,8 +6,8 @@ const CityCitizenDecisionRuntimeStateScript = preload(
 )
 
 # Runtime identity passed into settlement-scale simulation. Local mutable city
-# state is carried explicitly so systems can migrate away from WorldData without
-# changing how the world selects or identifies a settlement.
+# state is carried explicitly and remains independent of world/session
+# presentation selection.
 
 const BACKEND_NONE := "none"
 const BACKEND_CITY_SETTLEMENT_STATE := "city_settlement_state"
@@ -41,7 +41,7 @@ func is_valid() -> bool:
 	)
 
 
-func supports_city_simulation() -> bool:
+func supports_detailed_simulation() -> bool:
 	if not is_valid():
 		return false
 	if settlement_type != SettlementData.SETTLEMENT_TYPE_CITY:
@@ -53,11 +53,25 @@ func supports_city_simulation() -> bool:
 	)
 
 
+func supports_city_simulation() -> bool:
+	# Compatibility name for the only detailed backend currently implemented.
+	# Callers choosing a presentation or simulation policy should use the
+	# capability name above so adding another settlement backend does not make
+	# "city" the universal dispatch contract.
+	return supports_detailed_simulation()
+
+
 func has_instance_owned_city_state() -> bool:
 	return (
 		backend_kind == BACKEND_CITY_SETTLEMENT_STATE
 		and local_state is CitySettlementSimulationState
 	)
+
+
+func get_detailed_simulation_state():
+	if not supports_detailed_simulation():
+		return null
+	return local_state
 
 
 func get_city_simulation_state():

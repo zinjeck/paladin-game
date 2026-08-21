@@ -12,6 +12,8 @@ var failure_count: int = 0
 
 func _ready() -> void:
 	_test_explicit_helper_binding_and_rebind()
+	_test_exact_bound_debug_commands()
+	_test_renderer_debug_command_authority_boundary()
 	_test_exact_texture_cache_source_identity()
 	MapCameraSessionStateScript.reset_city_camera()
 	MapTextureCacheStateScript.clear_city_cache()
@@ -57,8 +59,8 @@ func _test_explicit_helper_binding_and_rebind() -> void:
 	var binding_a := CityPresentationBinding.new()
 	var binding_b := CityPresentationBinding.new()
 	_expect(
-		binding_a.configure(context_a, 1)
-		and binding_b.configure(context_b, 2),
+		binding_a.rebind(context_a, 1)
+		and binding_b.rebind(context_b, 2),
 		"Both helpers must receive valid explicit bindings."
 	)
 	if not binding_a.is_valid() or not binding_b.is_valid():
@@ -133,8 +135,18 @@ func _test_explicit_helper_binding_and_rebind() -> void:
 	}
 	var movement_presentation := CityCitizenMovementPresentation.new()
 	_expect(
-		movement_presentation.bind_city_presentation(binding_a),
+		movement_presentation.bind_settlement_presentation(binding_a, 16),
 		"Movement presentation must bind to A explicitly."
+	)
+	var citizen_a_rect := movement_presentation.get_citizen_world_rect(
+		citizen_a
+	)
+	_expect(
+		movement_presentation.local_tile_size == 16
+		and citizen_a_rect.size == Vector2(8.0, 8.0)
+		and movement_presentation.synchronized_movement_version
+		== state_a.citizen_movement_runtime_state.citizen_movement_version,
+		"Movement presentation must own tile geometry and its synchronized version."
 	)
 	movement_presentation.track_mover(citizen_b_only_id)
 	_expect(
@@ -169,6 +181,35 @@ func _test_explicit_helper_binding_and_rebind() -> void:
 		"The A overlay cache must reject B's equal-ID object by exact owner identity."
 	)
 
+	# Every helper retains the binding token itself. Reusing that token for B
+	# used to mutate all helpers from A to B without any helper accepting a
+	# rebind. The token is now one-shot and its public identity is read-only.
+	var rejected_in_place_rebind := not binding_a.rebind(context_b, 3)
+	binding_a.settlement_context = context_b
+	binding_a.settlement_state = state_b
+	binding_a.settlement_id = city_b_id
+	binding_a.world = state_b.city_world
+	binding_a.seed = state_b.city_seed
+	binding_a.generation = 3
+	binding_a.highest_accepted_generation = 3
+	_expect(
+		rejected_in_place_rebind
+		and binding_a.matches_context(context_a)
+		and binding_a.settlement_id == city_a_id
+		and is_same(binding_a.settlement_state, state_a)
+		and binding_a.generation == 1
+		and binding_a.highest_accepted_generation == 1
+		and information_ui.is_bound_to_settlement_presentation(binding_a)
+		and citizen_debug.is_bound_to_settlement_presentation(binding_a)
+		and debug_presentation.is_bound_to_settlement_presentation(binding_a)
+		and movement_presentation.is_bound_to_settlement_presentation(binding_a)
+		and overlay_cache.is_bound_to_settlement_presentation(binding_a),
+		(
+			"Rejected in-place A-to-B mutation must leave the binding token "
+			+ "and every helper exactly A-bound."
+		)
+	)
+
 	_expect(
 		MapCameraSessionStateScript.store_city_camera_for_binding(
 			binding_a,
@@ -195,15 +236,81 @@ func _test_explicit_helper_binding_and_rebind() -> void:
 
 	citizen_debug.is_open = true
 	_expect(
+		not movement_presentation.bind_settlement_presentation(binding_b, 0)
+		and movement_presentation.is_bound_to_settlement_presentation(binding_a),
+		"An invalid tile-size rebind must retain the previous settlement presentation."
+	)
+	_expect(
 		information_ui.bind_city_presentation(binding_b)
 		and citizen_debug.bind_city_presentation(binding_b)
 		and debug_presentation.bind_city_presentation(
 			binding_b,
 			citizen_debug
 		)
-		and movement_presentation.bind_city_presentation(binding_b)
+		and movement_presentation.bind_settlement_presentation(binding_b, 16)
 		and overlay_cache.bind_city_presentation(binding_b),
 		"Every renderer-owned helper must accept the same B rebind generation."
+	)
+	_expect(
+		not information_ui.bind_settlement_presentation(binding_a)
+		and information_ui.is_bound_to_settlement_presentation(binding_b)
+		and not movement_presentation.bind_settlement_presentation(binding_a, 16)
+		and movement_presentation.is_bound_to_settlement_presentation(binding_b)
+		and not overlay_cache.bind_settlement_presentation(binding_a)
+		and overlay_cache.is_bound_to_settlement_presentation(binding_b),
+		(
+			"Settlement-neutral helpers must reject stale A after accepting "
+			+ "newer B and retain B unchanged."
+		)
+	)
+
+	var reset_information_ui := CityInformationPanel.new()
+	_expect(
+		reset_information_ui.bind_settlement_presentation(binding_a),
+		"The information reset fixture must first accept A."
+	)
+	reset_information_ui.reset_presentation()
+	_expect(
+		not reset_information_ui.bind_settlement_presentation(binding_a)
+		and reset_information_ui.presentation_binding == null
+		and reset_information_ui.highest_accepted_binding_generation == 1
+		and reset_information_ui.bind_settlement_presentation(binding_b),
+		"Information reset must preserve its binding generation high-water mark."
+	)
+
+	var reset_overlay_cache := CityWorkplaceZoneOverlayCache.new()
+	_expect(
+		reset_overlay_cache.bind_settlement_presentation(binding_a),
+		"The overlay reset fixture must first accept A."
+	)
+	reset_overlay_cache.reset_presentation()
+	_expect(
+		not reset_overlay_cache.bind_settlement_presentation(binding_a)
+		and reset_overlay_cache.presentation_binding == null
+		and reset_overlay_cache.highest_accepted_binding_generation == 1
+		and reset_overlay_cache.bind_settlement_presentation(binding_b),
+		"Overlay reset must preserve its binding generation high-water mark."
+	)
+
+	var reset_movement_presentation := CityCitizenMovementPresentation.new()
+	_expect(
+		reset_movement_presentation.bind_settlement_presentation(binding_a, 16),
+		"The reset high-water fixture must first accept A."
+	)
+	reset_movement_presentation.reset_presentation()
+	_expect(
+		not reset_movement_presentation.bind_settlement_presentation(
+			binding_a,
+			16
+		)
+		and reset_movement_presentation.presentation_binding == null
+		and reset_movement_presentation.bound_city_state == null
+		and reset_movement_presentation.highest_accepted_binding_generation == 1
+		and reset_movement_presentation.bind_settlement_presentation(binding_b, 16),
+		(
+			"Movement reset must clear mutable state without lowering the binding "
+			+ "generation high-water mark."
+		)
 	)
 	var overlay_b := overlay_cache.prepare({
 		"city_object": fishery_b,
@@ -231,7 +338,46 @@ func _test_explicit_helper_binding_and_rebind() -> void:
 		and int(overlay_b.get("binding_generation", -1)) == 2,
 		"Rebind must replace mover tracking and workplace cache identity with B."
 	)
+	var citizen_stale_rebind_rejected := not citizen_debug.bind_city_presentation(
+		binding_a
+	)
+	var presentation_stale_rebind_rejected := not debug_presentation.bind_city_presentation(
+		binding_a,
+		citizen_debug
+	)
+	_expect(
+		citizen_stale_rebind_rejected
+		and presentation_stale_rebind_rejected
+		and citizen_debug.is_bound_to_city_presentation(binding_b)
+		and debug_presentation.is_bound_to_city_presentation(binding_b),
+		"Debug helpers must reject stale generations without replacing B."
+	)
+	var reset_guard_citizen_debug := CitizenDebugPanel.new()
+	var reset_guard_debug_presentation := CityDebugPresentation.new()
+	_expect(
+		reset_guard_citizen_debug.bind_city_presentation(binding_a)
+		and reset_guard_debug_presentation.bind_city_presentation(
+			binding_a,
+			reset_guard_citizen_debug
+		),
+		"Debug helper reset guards must accept their first generation."
+	)
+	reset_guard_debug_presentation.reset()
+	var citizen_reset_stale_rejected := not reset_guard_citizen_debug.bind_city_presentation(
+		binding_a
+	)
+	var presentation_reset_stale_rejected := not reset_guard_debug_presentation.bind_city_presentation(
+		binding_a,
+		reset_guard_citizen_debug
+	)
+	_expect(
+		citizen_reset_stale_rejected
+		and presentation_reset_stale_rejected,
+		"Debug helper reset must retain the accepted-generation high-water mark."
+	)
 
+	# Deliberately create a fresh aggregate owner, then register it under A's
+	# existing ID. This makes every context/binding for the former owner stale.
 	var replacement_a := CitySettlementSimulationState.new()
 	WorldPoliticalState.settlement_city_state_by_id[city_a_id] = replacement_a
 	_seed_existing_state(
@@ -246,7 +392,7 @@ func _test_explicit_helper_binding_and_rebind() -> void:
 	)
 	var replacement_binding_a := CityPresentationBinding.new()
 	_expect(
-		replacement_binding_a.configure(replacement_context_a, 3),
+		replacement_binding_a.rebind(replacement_context_a, 3),
 		"A replacement state must expose a fresh presentation binding."
 	)
 	_expect(
@@ -258,6 +404,290 @@ func _test_explicit_helper_binding_and_rebind() -> void:
 	)
 
 	information_parent.queue_free()
+
+
+func _test_exact_bound_debug_commands() -> void:
+	WorldData.reset_runtime_session_state()
+	var fixture := _create_two_city_fixture()
+	if fixture.is_empty():
+		_expect(false, "The debug-command A/B fixture must be created.")
+		return
+
+	var city_b_id: int = fixture["city_b_id"]
+	var state_a: CitySettlementSimulationState = fixture["state_a"]
+	var state_b: CitySettlementSimulationState = fixture["state_b"]
+	var context_a: SettlementSimulationContext = fixture["context_a"]
+	var context_b: SettlementSimulationContext = fixture["context_b"]
+	var keep_a: Dictionary = fixture["keep_a"]
+	var keep_b: Dictionary = fixture["keep_b"]
+	var citizen_a: Dictionary = fixture["citizen_a"]
+	var citizen_b: Dictionary = fixture["citizen_b"]
+	var keep_a_id := int(keep_a.get("id", -1))
+	var keep_b_id := int(keep_b.get("id", -1))
+	var citizen_a_id := int(citizen_a.get("id", -1))
+	var citizen_b_id := int(citizen_b.get("id", -1))
+	var resource := CityResourceCatalog.RESOURCE_FISH
+	var binding_a := CityPresentationBinding.new()
+	var binding_b := CityPresentationBinding.new()
+	var debug_presentation := CityDebugPresentation.new()
+	var citizen_debug := CitizenDebugPanel.new()
+	_expect(
+		binding_a.rebind(context_a, 1)
+		and binding_b.rebind(context_b, 2)
+		and debug_presentation.bind_settlement_presentation(
+			binding_a,
+			citizen_debug
+		)
+		and WorldPoliticalState.set_active_settlement(city_b_id),
+		"Debug commands must start exactly A-bound while B is globally active."
+	)
+	if not debug_presentation.is_bound_to_settlement_presentation(binding_a):
+		return
+
+	WorldData.debug_mode_enabled = true
+	var resource_a_before := (
+		CityResourceContainerSystem.get_city_object_stored_resource_amount(
+			CityObjectSystem.get_city_object_by_id_for_city_state(
+				state_a,
+				keep_a_id
+			),
+			resource
+		)
+	)
+	var resource_b_before := (
+		CityResourceContainerSystem.get_city_object_stored_resource_amount(
+			CityObjectSystem.get_city_object_by_id_for_city_state(
+				state_b,
+				keep_b_id
+			),
+			resource
+		)
+	)
+	var no_storage_selection := (
+		debug_presentation.execute_add_resource_to_selected_public_storage(
+			binding_a,
+			-1,
+			resource,
+			10
+		)
+	)
+	var invalid_storage_amount := (
+		debug_presentation.execute_add_resource_to_selected_public_storage(
+			binding_a,
+			keep_a_id,
+			resource,
+			0
+		)
+	)
+	_expect(
+		not bool(no_storage_selection.get("success", true))
+		and no_storage_selection.get("status")
+		== CityDebugPresentation.DEBUG_COMMAND_STATUS_NO_SELECTION
+		and not bool(invalid_storage_amount.get("success", true))
+		and invalid_storage_amount.get("status")
+		== CityDebugPresentation.DEBUG_COMMAND_STATUS_INVALID_AMOUNT
+		and CityResourceContainerSystem.get_city_object_stored_resource_amount(
+			CityObjectSystem.get_city_object_by_id_for_city_state(
+				state_a,
+				keep_a_id
+			),
+			resource
+		) == resource_a_before
+		and CityResourceContainerSystem.get_city_object_stored_resource_amount(
+			CityObjectSystem.get_city_object_by_id_for_city_state(
+				state_b,
+				keep_b_id
+			),
+			resource
+		) == resource_b_before,
+		"No-selection and invalid storage commands must be gameplay no-ops."
+	)
+
+	var storage_success := (
+		debug_presentation.execute_add_resource_to_selected_public_storage(
+			binding_a,
+			keep_a_id,
+			resource,
+			10
+		)
+	)
+	_expect(
+		bool(storage_success.get("success", false))
+		and bool(storage_success.get("changed", false))
+		and int(storage_success.get("settlement_id", -1))
+		== int(fixture["city_a_id"])
+		and int(storage_success.get("binding_generation", -1)) == 1
+		and int(storage_success.get("accepted_amount", 0)) == 10
+		and not str(storage_success.get("message", "")).is_empty()
+		and CityResourceContainerSystem.get_city_object_stored_resource_amount(
+			CityObjectSystem.get_city_object_by_id_for_city_state(
+				state_a,
+				keep_a_id
+			),
+			resource
+		) == resource_a_before + 10
+		and CityResourceContainerSystem.get_city_object_stored_resource_amount(
+			CityObjectSystem.get_city_object_by_id_for_city_state(
+				state_b,
+				keep_b_id
+			),
+			resource
+		) == resource_b_before
+		and WorldPoliticalState.active_settlement_id == city_b_id,
+		"A-bound storage commands must report their owner and mutate only A."
+	)
+
+	var navigation_result := debug_presentation.request_navigation(
+		citizen_a_id,
+		Vector2i(13, 1)
+	)
+	var movement_a_before := state_a.citizen_movement_runtime_state.citizen_movement_version
+	var movement_b_before := state_b.citizen_movement_runtime_state.citizen_movement_version
+	var citizen_b_before := (
+		CityCitizenRegistrySystem.get_city_citizen_by_id_for_city_state(
+			state_b,
+			citizen_b_id
+		).duplicate(true)
+	)
+	var no_citizen_selection := (
+		debug_presentation.execute_assign_navigation_path_to_selected_citizen(
+			binding_a,
+			-1
+		)
+	)
+	var saved_navigation_start := debug_presentation.navigation_start_tile
+	debug_presentation.navigation_start_tile = Vector2i.ZERO
+	var stale_path := (
+		debug_presentation.execute_assign_navigation_path_to_selected_citizen(
+			binding_a,
+			citizen_a_id
+		)
+	)
+	debug_presentation.navigation_start_tile = saved_navigation_start
+	_expect(
+		str(navigation_result.get("status", ""))
+		== CityNavigationSystem.PATH_STATUS_SUCCESS
+		and no_citizen_selection.get("status")
+		== CityDebugPresentation.DEBUG_COMMAND_STATUS_NO_SELECTION
+		and stale_path.get("status")
+		== CityDebugPresentation.DEBUG_COMMAND_STATUS_STALE_PATH
+		and state_a.citizen_movement_runtime_state.citizen_movement_version
+		== movement_a_before
+		and state_b.citizen_movement_runtime_state.citizen_movement_version
+		== movement_b_before,
+		"No-selection and stale-path movement commands must be gameplay no-ops."
+	)
+
+	var movement_success := (
+		debug_presentation.execute_assign_navigation_path_to_selected_citizen(
+			binding_a,
+			citizen_a_id
+		)
+	)
+	var citizen_a_after := (
+		CityCitizenRegistrySystem.get_city_citizen_by_id_for_city_state(
+			state_a,
+			citizen_a_id
+		)
+	)
+	_expect(
+		bool(movement_success.get("success", false))
+		and int(movement_success.get("citizen_id", -1)) == citizen_a_id
+		and int(movement_success.get("settlement_id", -1))
+		== int(fixture["city_a_id"])
+		and not str(movement_success.get("message", "")).is_empty()
+		and str(citizen_a_after.get("movement_state", ""))
+		== CityCitizens.CITY_CITIZEN_MOVEMENT_STATE_MOVING
+		and state_a.citizen_movement_runtime_state.citizen_movement_version
+		> movement_a_before
+		and state_b.citizen_movement_runtime_state.citizen_movement_version
+		== movement_b_before
+		and CityCitizenRegistrySystem.get_city_citizen_by_id_for_city_state(
+			state_b,
+			citizen_b_id
+		) == citizen_b_before,
+		"A-bound movement commands must mutate only A despite globally active B."
+	)
+
+	_expect(
+		debug_presentation.bind_settlement_presentation(binding_b, citizen_debug),
+		"The debug-command owner must accept the newer exact B binding."
+	)
+	var resource_a_before_stale_call := (
+		CityResourceContainerSystem.get_city_object_stored_resource_amount(
+			CityObjectSystem.get_city_object_by_id_for_city_state(
+				state_a,
+				keep_a_id
+			),
+			resource
+		)
+	)
+	var resource_b_before_stale_call := (
+		CityResourceContainerSystem.get_city_object_stored_resource_amount(
+			CityObjectSystem.get_city_object_by_id_for_city_state(
+				state_b,
+				keep_b_id
+			),
+			resource
+		)
+	)
+	var movement_a_before_stale_call := (
+		state_a.citizen_movement_runtime_state.citizen_movement_version
+	)
+	var stale_storage_binding := (
+		debug_presentation.execute_add_resource_to_selected_public_storage(
+			binding_a,
+			keep_a_id,
+			resource,
+			10
+		)
+	)
+	var stale_movement_binding := (
+		debug_presentation.execute_assign_navigation_path_to_selected_citizen(
+			binding_a,
+			citizen_a_id
+		)
+	)
+	_expect(
+		stale_storage_binding.get("status")
+		== CityDebugPresentation.DEBUG_COMMAND_STATUS_INVALID_BINDING
+		and stale_movement_binding.get("status")
+		== CityDebugPresentation.DEBUG_COMMAND_STATUS_INVALID_BINDING
+		and CityResourceContainerSystem.get_city_object_stored_resource_amount(
+			CityObjectSystem.get_city_object_by_id_for_city_state(
+				state_a,
+				keep_a_id
+			),
+			resource
+		) == resource_a_before_stale_call
+		and CityResourceContainerSystem.get_city_object_stored_resource_amount(
+			CityObjectSystem.get_city_object_by_id_for_city_state(
+				state_b,
+				keep_b_id
+			),
+			resource
+		) == resource_b_before_stale_call
+		and state_a.citizen_movement_runtime_state.citizen_movement_version
+		== movement_a_before_stale_call
+		and state_b.citizen_movement_runtime_state.citizen_movement_version
+		== movement_b_before,
+		"Stale A command tokens must not target newly bound B, even for equal IDs."
+	)
+	WorldData.debug_mode_enabled = false
+
+
+func _test_renderer_debug_command_authority_boundary() -> void:
+	var renderer_source := FileAccess.get_file_as_string(
+		"res://scripts/city/rendering/CityRenderer.gd"
+	)
+	_expect(
+		not renderer_source.is_empty()
+		and "CityResourceContainerSystem" not in renderer_source
+		and "CityCitizenMovementRuntimeSystem" not in renderer_source
+		and "add_resource_to_city_object_storage_for_city_state" not in renderer_source
+		and "assign_city_citizen_movement_order_for_city_state" not in renderer_source,
+		"CityRenderer must contain no direct debug gameplay-system mutation calls."
+	)
 
 
 func _test_exact_texture_cache_source_identity() -> void:
@@ -400,6 +830,8 @@ func _create_two_city_fixture() -> Dictionary:
 		"state_b": typed_state_b,
 		"context_a": context_a,
 		"context_b": context_b,
+		"keep_a": fixture_a["keep"],
+		"keep_b": fixture_b["keep"],
 		"fishery_a": fixture_a["fishery"],
 		"fishery_b": fixture_b["fishery"],
 		"citizen_a": citizen_a,

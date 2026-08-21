@@ -5,7 +5,7 @@ class_name CityLogisticsState
 #
 # This object owns only the physical ground-pile registry and atomic hauling
 # reservation registries/counters. CityLogisticsSystem owns the behavior and
-# resolves this state through the active settlement context.
+# receives this state through an explicit registered settlement owner.
 #
 # Keep this class a small state container rather than a second simulation brain.
 

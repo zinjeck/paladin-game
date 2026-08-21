@@ -26,25 +26,58 @@ const SELECTED_BORDER_COLOR: Color = (
 var _preview_cache: Dictionary = {}
 var _selected_cache: Dictionary = {}
 var presentation_binding: CityPresentationBinding
+var highest_accepted_binding_generation: int = 0
 
 #region Public cache API
 
-func bind_city_presentation(binding: CityPresentationBinding) -> bool:
+func can_bind_settlement_presentation(
+	binding: CityPresentationBinding
+) -> bool:
 	if binding == null or not binding.is_valid():
+		return false
+	if binding.generation > highest_accepted_binding_generation:
+		return true
+	return (
+		binding.generation == highest_accepted_binding_generation
+		and is_bound_to_settlement_presentation(binding)
+	)
+
+
+func bind_settlement_presentation(binding: CityPresentationBinding) -> bool:
+	if not can_bind_settlement_presentation(binding):
 		return false
 	if not is_same(presentation_binding, binding):
 		presentation_binding = binding
+		highest_accepted_binding_generation = maxi(
+			highest_accepted_binding_generation,
+			binding.generation
+		)
 		invalidate_all()
 	return true
 
 
-func is_bound_to_city_presentation(
+func bind_city_presentation(binding: CityPresentationBinding) -> bool:
+	return bind_settlement_presentation(binding)
+
+
+func is_bound_to_settlement_presentation(
 	binding: CityPresentationBinding
 ) -> bool:
 	return (
 		presentation_binding != null
 		and presentation_binding.matches_binding(binding)
 	)
+
+
+func is_bound_to_city_presentation(
+	binding: CityPresentationBinding
+) -> bool:
+	return is_bound_to_settlement_presentation(binding)
+
+
+func reset_presentation() -> void:
+	presentation_binding = null
+	invalidate_all()
 
 
 func invalidate_all() -> void:

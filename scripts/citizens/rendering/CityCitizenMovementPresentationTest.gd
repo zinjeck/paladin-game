@@ -13,7 +13,7 @@ func _ready() -> void:
 	var culture := WorldData.create_culture(
 		"Movement Presentation Unit Culture"
 	)
-	var initial_city_state = _create_active_city_fixture(
+	var initial_city_state = _create_registered_city_fixture(
 		"Movement Presentation Unit City",
 		int(culture.get("id", -1))
 	)
@@ -35,6 +35,7 @@ func _ready() -> void:
 	_test_partial_completion_does_not_backtrack()
 	_test_repath_after_old_corner_keeps_that_corner_first()
 	_test_completed_replacement_route_returns_to_repath_origin()
+	_test_change_flag_synchronization_owns_version_and_buffers()
 	_test_visual_event_buffer_is_tick_scoped_and_take_once()
 	_test_completed_road_doubles_visual_travel_speed()
 
@@ -71,7 +72,7 @@ func _test_late_cardinal_observer_starts_at_current_segment() -> void:
 		2,
 		0
 	)
-	CityCitizenMovementRuntimeSystem.get_current_state().active_mover_id_lookup = {1: true}
+	presentation_city_state.citizen_movement_runtime_state.active_mover_id_lookup = {1: true}
 	presentation._synchronize_citizen_position(citizen, true)
 
 	_expect_vector_close(
@@ -101,7 +102,7 @@ func _test_late_diagonal_observer_starts_at_current_progress() -> void:
 		1,
 		10_000
 	)
-	CityCitizenMovementRuntimeSystem.get_current_state().active_mover_id_lookup = {2: true}
+	presentation_city_state.citizen_movement_runtime_state.active_mover_id_lookup = {2: true}
 	presentation._synchronize_citizen_position(citizen, true)
 
 	_expect_vector_close(
@@ -140,7 +141,7 @@ func _test_committed_trace_preserves_mixed_corners() -> void:
 		3,
 		5_858
 	)
-	CityCitizenMovementRuntimeSystem.get_current_state().active_mover_id_lookup = {3: true}
+	presentation_city_state.citizen_movement_runtime_state.active_mover_id_lookup = {3: true}
 
 	var changed: bool = presentation.synchronize_committed_tick([
 		{
@@ -201,7 +202,7 @@ func _test_completed_route_remains_visualized() -> void:
 		0
 	)
 	var after := _make_idle_citizen(4, Vector2i(1, 0))
-	CityCitizenMovementRuntimeSystem.get_current_state().active_mover_id_lookup.clear()
+	presentation_city_state.citizen_movement_runtime_state.active_mover_id_lookup.clear()
 
 	presentation.synchronize_committed_tick([
 		{
@@ -237,7 +238,7 @@ func _test_zero_progress_route_waits_without_snapping() -> void:
 		1,
 		0
 	)
-	CityCitizenMovementRuntimeSystem.get_current_state().active_mover_id_lookup = {5: true}
+	presentation_city_state.citizen_movement_runtime_state.active_mover_id_lookup = {5: true}
 	presentation._synchronize_citizen_position(starting_citizen, true)
 	presentation.update(1.0 / 60.0)
 
@@ -264,7 +265,7 @@ func _test_immediate_partial_repath_returns_to_origin() -> void:
 		1,
 		5_000
 	)
-	CityCitizenMovementRuntimeSystem.get_current_state().active_mover_id_lookup = {6: true}
+	presentation_city_state.citizen_movement_runtime_state.active_mover_id_lookup = {6: true}
 
 	presentation.synchronize_committed_tick([{
 		"citizen_id": 6,
@@ -299,7 +300,7 @@ func _test_partial_completion_does_not_backtrack() -> void:
 		5_000
 	)
 	var after := _make_idle_citizen(7, Vector2i(1, 0))
-	CityCitizenMovementRuntimeSystem.get_current_state().active_mover_id_lookup.clear()
+	presentation_city_state.citizen_movement_runtime_state.active_mover_id_lookup.clear()
 
 	presentation.synchronize_committed_tick([{
 		"citizen_id": 7,
@@ -344,7 +345,7 @@ func _test_repath_after_old_corner_keeps_that_corner_first() -> void:
 		1,
 		5_000
 	)
-	CityCitizenMovementRuntimeSystem.get_current_state().active_mover_id_lookup = {8: true}
+	presentation_city_state.citizen_movement_runtime_state.active_mover_id_lookup = {8: true}
 
 	presentation.synchronize_committed_tick([{
 		"citizen_id": 8,
@@ -379,7 +380,7 @@ func _test_completed_replacement_route_returns_to_repath_origin() -> void:
 		5_000
 	)
 	var after := _make_idle_citizen(9, Vector2i(0, 1))
-	CityCitizenMovementRuntimeSystem.get_current_state().active_mover_id_lookup.clear()
+	presentation_city_state.citizen_movement_runtime_state.active_mover_id_lookup.clear()
 
 	presentation.synchronize_committed_tick([{
 		"citizen_id": 9,
@@ -409,19 +410,61 @@ func _test_completed_replacement_route_returns_to_repath_origin() -> void:
 		)
 
 
-func _test_visual_event_buffer_is_tick_scoped_and_take_once() -> void:
-	CityCitizenMovementRuntimeSystem.clear_city_citizen_movement_visual_events()
-	CityCitizenMovementRuntimeSystem.begin_city_citizen_movement_visual_tick(40)
-	CityCitizenMovementRuntimeSystem.get_current_state().citizen_movement_visual_events.append({"marker": 1})
+func _test_change_flag_synchronization_owns_version_and_buffers() -> void:
+	var presentation := _make_presentation()
+	presentation.synchronized_movement_version = -1
+	presentation.synchronize_for_changes({
+		"city_citizen_movement_changed": true,
+	})
 	_expect(
-		CityCitizenMovementRuntimeSystem.take_city_citizen_movement_visual_events(39).is_empty(),
+		presentation.synchronized_movement_version
+		== presentation_city_state.citizen_movement_runtime_state.citizen_movement_version,
+		"Movement presentation must synchronize and own its observed visual version."
+	)
+
+	presentation._citizen_draw_buffer.append({"id": 1})
+	presentation._citizen_rect_draw_buffer.append(Rect2(Vector2.ZERO, Vector2.ONE))
+	presentation.synchronize_for_changes({
+		"city_citizen_registry_changed": true,
+	})
+	_expect(
+		presentation._citizen_draw_buffer.is_empty()
+		and presentation._citizen_rect_draw_buffer.is_empty(),
+		"Registry-owner replacement must retire presenter-owned draw buffers."
+	)
+
+
+func _test_visual_event_buffer_is_tick_scoped_and_take_once() -> void:
+	CityCitizenMovementRuntimeSystem.clear_city_citizen_movement_visual_events_for_city_state(
+		presentation_city_state
+	)
+	CityCitizenMovementRuntimeSystem.begin_city_citizen_movement_visual_tick_for_city_state(
+		presentation_city_state,
+		40
+	)
+	presentation_city_state.citizen_movement_runtime_state.citizen_movement_visual_events.append(
+		{"marker": 1}
+	)
+	_expect(
+		CityCitizenMovementRuntimeSystem.take_city_citizen_movement_visual_events_for_city_state(
+			presentation_city_state,
+			39
+		).is_empty(),
 		"A stale tick must not expose movement visual events."
 	)
 
-	CityCitizenMovementRuntimeSystem.begin_city_citizen_movement_visual_tick(41)
-	CityCitizenMovementRuntimeSystem.get_current_state().citizen_movement_visual_events.append({"marker": 2})
+	CityCitizenMovementRuntimeSystem.begin_city_citizen_movement_visual_tick_for_city_state(
+		presentation_city_state,
+		41
+	)
+	presentation_city_state.citizen_movement_runtime_state.citizen_movement_visual_events.append(
+		{"marker": 2}
+	)
 	var events := (
-		CityCitizenMovementRuntimeSystem.take_city_citizen_movement_visual_events(41)
+		CityCitizenMovementRuntimeSystem.take_city_citizen_movement_visual_events_for_city_state(
+			presentation_city_state,
+			41
+		)
 	)
 	_expect(
 		events.size() == 1
@@ -429,10 +472,15 @@ func _test_visual_event_buffer_is_tick_scoped_and_take_once() -> void:
 		"The matching tick must transfer its movement visual events."
 	)
 	_expect(
-		CityCitizenMovementRuntimeSystem.take_city_citizen_movement_visual_events(41).is_empty(),
+		CityCitizenMovementRuntimeSystem.take_city_citizen_movement_visual_events_for_city_state(
+			presentation_city_state,
+			41
+		).is_empty(),
 		"Movement visual events must be consumable only once."
 	)
-	CityCitizenMovementRuntimeSystem.clear_city_citizen_movement_visual_events()
+	CityCitizenMovementRuntimeSystem.clear_city_citizen_movement_visual_events_for_city_state(
+		presentation_city_state
+	)
 
 
 func _test_completed_road_doubles_visual_travel_speed() -> void:
@@ -441,13 +489,13 @@ func _test_completed_road_doubles_visual_travel_speed() -> void:
 		"Movement Presentation Test Culture"
 	)
 	var culture_id := int(culture.get("id", -1))
-	var city_state = _create_active_city_fixture(
+	var city_state = _create_registered_city_fixture(
 		"Movement Presentation Test City",
 		culture_id
 	)
 	_expect(
 		city_state is CitySettlementSimulationState,
-		"The visual-speed fixture must own an active City simulation state."
+		"The visual-speed fixture must own a registered City simulation state."
 	)
 	if not city_state is CitySettlementSimulationState:
 		return
@@ -469,9 +517,12 @@ func _test_completed_road_doubles_visual_travel_speed() -> void:
 			tile["biome"] = WorldData.BIOME_PLAIN
 			tile["is_land"] = true
 
-	WorldData.store_city_world_save(city_world, 91_733)
+	WorldData.store_city_world_for_state(
+		city_state, city_world, 91_733
+	)
 	_expect(
-		not CityObjectSystem.add_city_road_object(
+		not CityObjectSystem.add_city_road_object_for_city_state(
+			city_state,
 			[Vector2i(1, 0)],
 			"player",
 			city_world
@@ -497,7 +548,7 @@ func _test_completed_road_doubles_visual_travel_speed() -> void:
 		0
 	)
 	var normal_after := _make_idle_citizen(21, Vector2i(1, 1))
-	CityCitizenMovementRuntimeSystem.get_current_state().active_mover_id_lookup.clear()
+	city_state.citizen_movement_runtime_state.active_mover_id_lookup.clear()
 
 	road_presentation.synchronize_committed_tick([{
 		"citizen_id": 20,
@@ -548,7 +599,7 @@ func _make_presentation(
 	return presentation
 
 
-func _create_active_city_fixture(
+func _create_registered_city_fixture(
 	city_name: String,
 	culture_id: int
 ) -> CitySettlementSimulationState:
@@ -572,7 +623,7 @@ func _create_active_city_fixture(
 		),
 	})
 	var city_id := int(city.get("id", -1))
-	if city_id <= 0 or not WorldPoliticalState.set_active_settlement(city_id):
+	if city_id <= 0:
 		return null
 	return WorldPoliticalState.get_city_simulation_state(city_id)
 

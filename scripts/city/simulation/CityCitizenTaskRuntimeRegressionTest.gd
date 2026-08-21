@@ -1,5 +1,8 @@
 extends Node
 
+const CitySettlementTestFixtureScript = preload(
+	"res://scripts/city/simulation/test_support/CitySettlementTestFixture.gd"
+)
 const TILE_A := Vector2i(2, 2)
 const TILE_B := Vector2i(3, 2)
 const TILE_C := Vector2i(4, 2)
@@ -26,21 +29,20 @@ func _ready() -> void:
 
 func _test_assignment_registry_and_repairs() -> void:
 	var fixture := _reset_fixture(90_101)
+	var city_state: CitySettlementSimulationState = fixture["city_state"]
 	var culture_id := int(fixture["culture_id"])
 	var house_id := int(fixture["house_id"])
-	var first := _add_resident(culture_id, house_id, TILE_A)
-	var second := _add_resident(culture_id, house_id, TILE_B)
-	var third := _add_resident(culture_id, house_id, TILE_C)
+	var first := _add_resident(city_state, culture_id, house_id, TILE_A)
+	var second := _add_resident(city_state, culture_id, house_id, TILE_B)
+	var third := _add_resident(city_state, culture_id, house_id, TILE_C)
 	var first_id := int(first.get("id", -1))
 	var second_id := int(second.get("id", -1))
 	var third_id := int(third.get("id", -1))
-	var state := (
-		CityCitizenTaskRuntimeSystem.get_current_state()
-	)
+	var state := city_state.citizen_task_runtime_state
 
 	_expect(
-		_assign_return_home(third_id, house_id)
-		and _assign_return_home(first_id, house_id),
+		_assign_return_home(city_state, third_id, house_id)
+		and _assign_return_home(city_state, first_id, house_id),
 		"The fixture must assign tasks in reverse ID order."
 	)
 	_expect(
@@ -54,7 +56,11 @@ func _test_assignment_registry_and_repairs() -> void:
 		+ "invalidation per clean assignment."
 	)
 
-	var task_snapshot := CityCitizenTaskRuntimeSystem.get_city_active_task_ids_snapshot()
+	var task_snapshot := (
+		CityCitizenTaskRuntimeSystem.get_city_active_task_ids_snapshot_for_city_state(
+			city_state
+		)
+	)
 	task_snapshot.append(99)
 	_expect(
 		task_snapshot == [1, 3, 99]
@@ -65,17 +71,21 @@ func _test_assignment_registry_and_repairs() -> void:
 
 	var version_before_task_updates := state.citizen_task_version
 	_expect(
-		CityCitizenTaskRuntimeSystem.set_city_citizen_task_phase(
+		CityCitizenTaskRuntimeSystem.set_city_citizen_task_phase_for_city_state(
+			city_state,
 			first_id,
 			CityCitizens.CITY_CITIZEN_TASK_PHASE_TRAVELING
 		)
-		and CityCitizenTaskRuntimeSystem.set_city_citizen_task_activity_state({
+		and CityCitizenTaskRuntimeSystem.set_city_citizen_task_activity_state_for_city_state(
+			city_state,
+			{
 			"citizen_id": first_id,
 			"target_tile": Vector2i(8, 8),
 			"previous_target_tile": TILE_A,
 			"next_action_world_minute": 20,
 			"relocation_count": 1,
-		})
+			}
+		)
 		and state.active_task_ids == [1, 3]
 		and state.citizen_task_version == version_before_task_updates + 2,
 		"Real phase and activity updates must invalidate the same owner without "
@@ -86,12 +96,16 @@ func _test_assignment_registry_and_repairs() -> void:
 	var ids_before_rejection := state.active_task_ids.duplicate()
 	var lookup_before_rejection := state.active_task_id_lookup.duplicate(true)
 	_expect(
-		not CityCitizenTaskRuntimeSystem.assign_city_citizen_task(second_id, {
+		not CityCitizenTaskRuntimeSystem.assign_city_citizen_task_for_city_state(
+			city_state,
+			second_id,
+			{
 			"kind": CityCitizens.CITY_CITIZEN_TASK_KIND_RETURN_HOME,
 			"source": CityCitizens.CITY_CITIZEN_TASK_SOURCE_SCHEDULE,
 			"priority": 50,
 			"target_object_id": 999,
-		})
+			}
+		)
 		and state.active_task_ids == ids_before_rejection
 		and state.active_task_id_lookup == lookup_before_rejection
 		and state.citizen_task_version == version_before_rejection,
@@ -104,7 +118,7 @@ func _test_assignment_registry_and_repairs() -> void:
 	state.active_task_id_lookup = array_only_lookup
 	var version_before_array_only_repair := state.citizen_task_version
 	_expect(
-		_assign_return_home(second_id, house_id)
+		_assign_return_home(city_state, second_id, house_id)
 		and is_same(state.active_task_ids, array_only_ids)
 		and is_same(state.active_task_id_lookup, array_only_lookup)
 		and state.active_task_ids == [1, 2, 3]
@@ -120,7 +134,8 @@ func _test_assignment_registry_and_repairs() -> void:
 	state.active_task_id_lookup = duplicate_lookup
 	var version_before_duplicate_clear := state.citizen_task_version
 	_expect(
-		CityCitizenTaskRuntimeSystem.clear_city_citizen_task(
+		CityCitizenTaskRuntimeSystem.clear_city_citizen_task_for_city_state(
+			city_state,
 			second_id,
 			CityCitizens.CITY_CITIZEN_TASK_SOURCE_SCHEDULE
 		)
@@ -139,7 +154,7 @@ func _test_assignment_registry_and_repairs() -> void:
 	state.active_task_id_lookup = duplicate_add_lookup
 	var version_before_duplicate_add := state.citizen_task_version
 	_expect(
-		_assign_return_home(second_id, house_id)
+		_assign_return_home(city_state, second_id, house_id)
 		and is_same(state.active_task_ids, duplicate_add_ids)
 		and is_same(state.active_task_id_lookup, duplicate_add_lookup)
 		and state.active_task_ids == [1, 2, 3]
@@ -148,7 +163,8 @@ func _test_assignment_registry_and_repairs() -> void:
 		"Assignment must compact duplicate target entries in place."
 	)
 	_expect(
-		CityCitizenTaskRuntimeSystem.clear_city_citizen_task(
+		CityCitizenTaskRuntimeSystem.clear_city_citizen_task_for_city_state(
+			city_state,
 			second_id,
 			CityCitizens.CITY_CITIZEN_TASK_SOURCE_SCHEDULE
 		),
@@ -161,7 +177,7 @@ func _test_assignment_registry_and_repairs() -> void:
 	state.active_task_id_lookup = lookup_only_lookup
 	var version_before_lookup_only_repair := state.citizen_task_version
 	_expect(
-		_assign_return_home(second_id, house_id)
+		_assign_return_home(city_state, second_id, house_id)
 		and is_same(state.active_task_ids, lookup_only_ids)
 		and is_same(state.active_task_id_lookup, lookup_only_lookup)
 		and state.active_task_ids == [1, 2, 3]
@@ -177,7 +193,9 @@ func _test_assignment_registry_and_repairs() -> void:
 	state.active_task_id_lookup = corrupt_lookup
 	var version_before_rebuild := state.citizen_task_version
 	_expect(
-		CityCitizenTaskRuntimeSystem.rebuild_city_active_task_registry()
+		CityCitizenTaskRuntimeSystem.rebuild_city_active_task_registry_for_city_state(
+			city_state
+		)
 		and is_same(state.active_task_ids, corrupt_ids)
 		and is_same(state.active_task_id_lookup, corrupt_lookup)
 		and state.active_task_ids == [1, 2, 3]
@@ -188,25 +206,32 @@ func _test_assignment_registry_and_repairs() -> void:
 	)
 	var version_before_clean_rebuild := state.citizen_task_version
 	_expect(
-		not CityCitizenTaskRuntimeSystem.rebuild_city_active_task_registry()
+		not CityCitizenTaskRuntimeSystem.rebuild_city_active_task_registry_for_city_state(
+			city_state
+		)
 		and state.citizen_task_version == version_before_clean_rebuild,
 		"A clean active-task rebuild must not publish a false change."
 	)
 
-	_set_citizen_alive(third_id, false)
+	_set_citizen_alive(city_state, third_id, false)
 	var version_before_dead_cleanup := state.citizen_task_version
 	_expect(
-		CityCitizenTaskRuntimeSystem.rebuild_city_active_task_registry()
+		CityCitizenTaskRuntimeSystem.rebuild_city_active_task_registry_for_city_state(
+			city_state
+		)
 		and state.active_task_ids == [1, 2]
 		and _lookup_matches_ids(state.active_task_id_lookup, [1, 2])
 		and state.citizen_task_version == version_before_dead_cleanup + 1,
 		"Rebuild must exclude a non-living citizen exactly once."
 	)
-	_set_citizen_alive(third_id, true)
-	CityCitizenTaskRuntimeSystem.rebuild_city_active_task_registry()
+	_set_citizen_alive(city_state, third_id, true)
+	CityCitizenTaskRuntimeSystem.rebuild_city_active_task_registry_for_city_state(
+		city_state
+	)
 
 	_expect(
-		CityCitizenTaskRuntimeSystem.clear_city_citizen_task(
+		CityCitizenTaskRuntimeSystem.clear_city_citizen_task_for_city_state(
+			city_state,
 			first_id,
 			CityCitizens.CITY_CITIZEN_TASK_SOURCE_SCHEDULE
 		),
@@ -218,7 +243,8 @@ func _test_assignment_registry_and_repairs() -> void:
 	state.active_task_id_lookup = stale_lookup
 	var version_before_idempotent_repair := state.citizen_task_version
 	_expect(
-		CityCitizenTaskRuntimeSystem.clear_city_citizen_task(
+		CityCitizenTaskRuntimeSystem.clear_city_citizen_task_for_city_state(
+			city_state,
 			first_id,
 			CityCitizens.CITY_CITIZEN_TASK_SOURCE_SCHEDULE
 		)
@@ -233,17 +259,25 @@ func _test_assignment_registry_and_repairs() -> void:
 
 
 func _test_empty_ensure_and_schema_migration() -> void:
-	WorldData.reset_runtime_session_state()
-	var empty_state := (
-		CityCitizenTaskRuntimeSystem.get_current_state()
+	var empty_fixture = CitySettlementTestFixtureScript.create({
+		"label": "Task Runtime Empty",
+	})
+	_expect(empty_fixture != null, "The empty task fixture must be created.")
+	if empty_fixture == null:
+		return
+	var empty_city_state: CitySettlementSimulationState = (
+		empty_fixture.city_state
 	)
+	var empty_state := empty_city_state.citizen_task_runtime_state
 	var stale_ids: Array[int] = [99]
 	var stale_lookup: Dictionary = {99: true}
 	empty_state.active_task_ids = stale_ids
 	empty_state.active_task_id_lookup = stale_lookup
 	empty_state.citizen_task_version = 10
 	_expect(
-		CityCitizenTaskRuntimeSystem.ensure_city_citizen_task_state() == 0
+		CityCitizenTaskRuntimeSystem.ensure_city_citizen_task_state_for_city_state(
+			empty_city_state
+		) == 0
 		and is_same(empty_state.active_task_ids, stale_ids)
 		and is_same(empty_state.active_task_id_lookup, stale_lookup)
 		and empty_state.active_task_ids.is_empty()
@@ -253,35 +287,46 @@ func _test_empty_ensure_and_schema_migration() -> void:
 	)
 	var version_before_clean_empty_ensure := empty_state.citizen_task_version
 	_expect(
-		CityCitizenTaskRuntimeSystem.ensure_city_citizen_task_state() == 0
+		CityCitizenTaskRuntimeSystem.ensure_city_citizen_task_state_for_city_state(
+			empty_city_state
+		) == 0
 		and empty_state.citizen_task_version
 		== version_before_clean_empty_ensure,
 		"A second clean empty ensure must not invalidate."
 	)
 
 	var fixture := _reset_fixture(90_202)
+	var city_state: CitySettlementSimulationState = fixture["city_state"]
 	var citizen := _add_resident(
+		city_state,
 		int(fixture["culture_id"]),
 		int(fixture["house_id"]),
 		TILE_A
 	)
 	var citizen_id := int(citizen.get("id", -1))
-	var citizen_index := CityCitizenRegistrySystem.get_city_citizen_index_by_id(citizen_id)
-	var stored_citizen: Dictionary = CityCitizenRegistrySystem.get_current_state().citizens[citizen_index]
+	var citizen_index := (
+		CityCitizenRegistrySystem.get_city_citizen_index_by_id_for_city_state(
+			city_state,
+			citizen_id
+		)
+	)
+	var stored_citizen: Dictionary = (
+		city_state.citizen_registry_state.citizens[citizen_index]
+	)
 	stored_citizen["current_task"] = {
 		"kind": CityCitizens.CITY_CITIZEN_TASK_KIND_NONE,
 	}
-	CityCitizenRegistrySystem.get_current_state().citizens[citizen_index] = stored_citizen
-	var task_state := (
-		CityCitizenTaskRuntimeSystem.get_current_state()
-	)
+	city_state.citizen_registry_state.citizens[citizen_index] = stored_citizen
+	var task_state := city_state.citizen_task_runtime_state
 	var migration_ids: Array[int] = [citizen_id]
 	var migration_lookup: Dictionary = {}
 	task_state.active_task_ids = migration_ids
 	task_state.active_task_id_lookup = migration_lookup
 	task_state.citizen_task_version = 40
 	_expect(
-		CityCitizenTaskRuntimeSystem.ensure_city_citizen_task_state() == 1
+		CityCitizenTaskRuntimeSystem.ensure_city_citizen_task_state_for_city_state(
+			city_state
+		) == 1
 		and is_same(task_state.active_task_ids, migration_ids)
 		and is_same(task_state.active_task_id_lookup, migration_lookup)
 		and task_state.active_task_ids.is_empty()
@@ -291,7 +336,8 @@ func _test_empty_ensure_and_schema_migration() -> void:
 	)
 	var version_before_missing_clear := task_state.citizen_task_version
 	_expect(
-		not CityCitizenTaskRuntimeSystem.clear_city_citizen_task(
+		not CityCitizenTaskRuntimeSystem.clear_city_citizen_task_for_city_state(
+			city_state,
 			999,
 			CityCitizens.CITY_CITIZEN_TASK_SOURCE_SCHEDULE
 		)
@@ -300,23 +346,40 @@ func _test_empty_ensure_and_schema_migration() -> void:
 	)
 
 
-func _assign_return_home(citizen_id: int, house_id: int) -> bool:
-	return CityCitizenTaskRuntimeSystem.assign_city_citizen_task(citizen_id, {
+func _assign_return_home(
+	city_state: CitySettlementSimulationState,
+	citizen_id: int,
+	house_id: int
+) -> bool:
+	return CityCitizenTaskRuntimeSystem.assign_city_citizen_task_for_city_state(
+		city_state,
+		citizen_id,
+		{
 		"kind": CityCitizens.CITY_CITIZEN_TASK_KIND_RETURN_HOME,
 		"source": CityCitizens.CITY_CITIZEN_TASK_SOURCE_SCHEDULE,
 		"priority": 50,
 		"target_object_id": house_id,
-	})
+		}
+	)
 
 
-func _set_citizen_alive(citizen_id: int, alive: bool) -> void:
-	var citizen_index := CityCitizenRegistrySystem.get_city_citizen_index_by_id(citizen_id)
+func _set_citizen_alive(
+	city_state: CitySettlementSimulationState,
+	citizen_id: int,
+	alive: bool
+) -> void:
+	var citizen_index := (
+		CityCitizenRegistrySystem.get_city_citizen_index_by_id_for_city_state(
+			city_state,
+			citizen_id
+		)
+	)
 	if citizen_index < 0:
 		_expect(false, "The alive-state fixture requires an indexed citizen.")
 		return
-	var citizen: Dictionary = CityCitizenRegistrySystem.get_current_state().citizens[citizen_index]
+	var citizen: Dictionary = city_state.citizen_registry_state.citizens[citizen_index]
 	citizen["alive"] = alive
-	CityCitizenRegistrySystem.get_current_state().citizens[citizen_index] = citizen
+	city_state.citizen_registry_state.citizens[citizen_index] = citizen
 
 
 func _lookup_matches_ids(lookup: Dictionary, expected_ids: Array) -> bool:
@@ -330,19 +393,21 @@ func _lookup_matches_ids(lookup: Dictionary, expected_ids: Array) -> bool:
 
 
 func _reset_fixture(seed_value: int) -> Dictionary:
-	WorldData.reset_runtime_session_state()
-	var culture := WorldData.create_culture(
-		"Task Runtime Regression Culture " + str(seed_value)
-	)
-	var culture_id := int(culture.get("id", -1))
 	var city_name := "Task Runtime Regression City " + str(seed_value)
-	var city_state = _create_active_city_fixture(city_name, culture_id)
+	var city_world := _make_world(16, 16, seed_value)
+	var fixture = CitySettlementTestFixtureScript.create({
+		"label": city_name,
+		"city_world": city_world,
+		"city_seed": seed_value,
+	})
 	_expect(
-		city_state is CitySettlementSimulationState,
-		"The task fixture must own an active City simulation state."
+		fixture != null,
+		"The task fixture must own a registered City simulation state."
 	)
-	if not city_state is CitySettlementSimulationState:
+	if fixture == null:
 		return {}
+	var city_state: CitySettlementSimulationState = fixture.city_state
+	var culture_id: int = fixture.culture_id
 	city_state.city_runtime_data.clear()
 	city_state.city_runtime_data.merge({
 		"name": city_name,
@@ -350,10 +415,7 @@ func _reset_fixture(seed_value: int) -> Dictionary:
 		"founded": true,
 		"can_build": true,
 	}, true)
-	var city_world := _make_world(16, 16, seed_value)
-	WorldPoliticalState.set_current_city_world(city_world)
-	WorldPoliticalState.set_current_city_seed(seed_value)
-	var house := CityObjectSystem.add_city_object({
+	var house := CityObjectSystem.add_city_object_for_city_state(city_state, {
 		"object_type": CityObjectCatalog.CITY_OBJECT_HOUSE,
 		"top_left": Vector2i(8, 8),
 		"size_tiles": CityObjectCatalog.get_city_object_size_for_type(
@@ -363,43 +425,21 @@ func _reset_fixture(seed_value: int) -> Dictionary:
 		"city_world": city_world,
 	})
 	return {
+		"fixture": fixture,
+		"city_state": city_state,
 		"culture_id": culture_id,
 		"house_id": int(house.get("id", -1)),
 	}
 
 
-func _create_active_city_fixture(city_name: String, culture_id: int):
-	if culture_id <= 0:
-		return null
-	var polity := WorldPoliticalState.create_polity({
-		"name": city_name + " Realm",
-		"polity_type": PolityData.POLITY_TYPE_KINGDOM,
-		"primary_culture_id": culture_id,
-	})
-	var polity_id := int(polity.get("id", -1))
-	var city := WorldPoliticalState.create_settlement({
-		"name": city_name,
-		"settlement_type": SettlementData.SETTLEMENT_TYPE_CITY,
-		"polity_id": polity_id,
-		"world_region_top_left": Vector2i.ZERO,
-		"world_region_center": Vector2i.ZERO,
-		"world_region_size": 1,
-		"simulation_backend_kind": (
-			SettlementSimulationContext.BACKEND_CITY_SETTLEMENT_STATE
-		),
-	})
-	var city_id := int(city.get("id", -1))
-	if city_id <= 0 or not WorldPoliticalState.set_active_settlement(city_id):
-		return null
-	return WorldPoliticalState.get_city_simulation_state(city_id)
-
-
 func _add_resident(
+	city_state: CitySettlementSimulationState,
 	culture_id: int,
 	house_id: int,
 	tile: Vector2i
 ) -> Dictionary:
-	var citizen := CityCitizenRegistrySystem.add_city_citizen(
+	var citizen := CityCitizenRegistrySystem.add_city_citizen_for_city_state(
+		city_state,
 		"",
 		tile,
 		CityCitizens.CITY_CITIZEN_SEX_FEMALE,
@@ -408,7 +448,11 @@ func _add_resident(
 	var citizen_id := int(citizen.get("id", -1))
 	_expect(
 		citizen_id > 0
-		and CityAssignmentSystem.assign_city_citizen_home(citizen_id, house_id),
+		and CityAssignmentSystem.assign_city_citizen_home_for_city_state(
+			city_state,
+			citizen_id,
+			house_id
+		),
 		"The task fixture must add one assigned resident."
 	)
 	return citizen

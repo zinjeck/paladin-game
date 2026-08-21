@@ -1,5 +1,8 @@
 extends Node
 
+const CitySettlementTestFixtureScript = preload(
+	"res://scripts/city/simulation/test_support/CitySettlementTestFixture.gd"
+)
 const TEST_CITY_NAME := "Task Bootstrap"
 const TEST_CULTURE_NAME := "Task Runtime Culture"
 
@@ -44,58 +47,44 @@ func _test_state_defaults() -> void:
 
 
 func _test_pre_context_state_adoption() -> void:
-	WorldData.reset_runtime_session_state()
-	var world := _make_world(8, 8, 92_001)
-	if not _lock_founding_world(world, "Pre-context"):
+	var fixture = CitySettlementTestFixtureScript.create({
+		"label": "Citizen Task Bootstrap",
+	})
+	_expect(fixture != null, "The task fixture must be created.")
+	if fixture == null:
 		return
 
 	var bootstrap_ids: Array[int] = [17]
 	var bootstrap_lookup: Dictionary = {17: true}
-	var bootstrap_state := (
-		CityCitizenTaskRuntimeSystem.get_current_state()
+	var bootstrap_state: CityCitizenTaskRuntimeState = (
+		fixture.city_state.citizen_task_runtime_state
 	)
 	bootstrap_state.active_task_ids = bootstrap_ids
 	bootstrap_state.active_task_id_lookup = bootstrap_lookup
 	bootstrap_state.citizen_task_version = 7
 
 	_expect(
-		WorldPoliticalState.synchronize_foundation_with_world_data(),
-		"Founding must establish a City settlement context."
-	)
-	var capital_state = WorldPoliticalState.get_active_city_simulation_state()
-	var context = WorldPoliticalState.get_active_settlement_context()
-	_expect(
-		capital_state is CitySettlementSimulationState
-		and is_same(capital_state.citizen_task_runtime_state, bootstrap_state)
+		is_same(fixture.city_state.citizen_task_runtime_state, bootstrap_state)
 		and is_same(
-			capital_state.citizen_task_runtime_state.active_task_ids,
+			fixture.city_state.citizen_task_runtime_state.active_task_ids,
 			bootstrap_ids
 		)
 		and is_same(
-			capital_state.citizen_task_runtime_state.active_task_id_lookup,
+			fixture.city_state.citizen_task_runtime_state.active_task_id_lookup,
 			bootstrap_lookup
 		),
-		"The founding City must adopt the exact pre-context task owner."
+		"The registered City must retain the exact task owner."
 	)
 	_expect(
-		context != null
+		fixture.settlement_context != null
 		and is_same(
-			context.get_city_citizen_task_runtime_state(),
+			fixture.settlement_context.get_city_citizen_task_runtime_state(),
 			bootstrap_state
 		)
-		and is_same(CityCitizenTaskRuntimeSystem.get_current_state().active_task_ids, bootstrap_ids)
-		and is_same(CityCitizenTaskRuntimeSystem.get_current_state().active_task_id_lookup, bootstrap_lookup)
-		and CityCitizenTaskRuntimeSystem.get_current_state().citizen_task_version == 7,
-		"Context and compatibility access must resolve one task owner."
+		and bootstrap_state.citizen_task_version == 7,
+		"The context must expose the explicit task owner."
 	)
-	_expect(
-		WorldPoliticalState.synchronize_foundation_with_world_data()
-		and is_same(
-			CityCitizenTaskRuntimeSystem.get_current_state(),
-			bootstrap_state
-		),
-		"Repeated synchronization must not replace the task owner."
-	)
+	fixture.cleanup()
 
 
 func _test_real_founding_bootstrap() -> void:
@@ -107,7 +96,12 @@ func _test_real_founding_bootstrap() -> void:
 		WorldPoliticalState.synchronize_foundation_with_world_data(),
 		"The live flow must establish the capital before Keep placement."
 	)
-	var capital_state = WorldPoliticalState.get_active_city_simulation_state()
+	var capital_settlement_id := (
+		WorldPoliticalState.get_player_capital_settlement_id()
+	)
+	var capital_state = WorldPoliticalState.get_city_simulation_state(
+		capital_settlement_id
+	)
 	if not capital_state is CitySettlementSimulationState:
 		_expect(false, "The live founding fixture requires a City state.")
 		return
@@ -116,11 +110,13 @@ func _test_real_founding_bootstrap() -> void:
 		capital_state.citizen_task_runtime_state
 	)
 	var city_world := _make_world(20, 20, 92_102)
-	WorldData.store_city_world_save(city_world, 92_102)
+	WorldData.store_city_world_for_state(
+		capital_state, city_world, 92_102
+	)
 	var keep_size := CityObjectCatalog.get_city_object_size_for_type(
 		CityObjectCatalog.CITY_OBJECT_CITY_CENTER
 	)
-	var keep := CityObjectSystem.add_city_object({
+	var keep := CityObjectSystem.add_city_object_for_city_state(capital_state, {
 		"object_type": CityObjectCatalog.CITY_OBJECT_CITY_CENTER,
 		"top_left": Vector2i(6, 6),
 		"size_tiles": keep_size,
@@ -140,15 +136,17 @@ func _test_real_founding_bootstrap() -> void:
 
 	_expect(
 		WorldData.has_player_city()
-		and CityCitizenRegistrySystem.get_current_state().citizens.size()
+		and capital_state.citizen_registry_state.citizens.size()
 		== CityCitizenRegistrySystem.STARTING_CITY_POPULATION
-		and _all_citizens_have_no_task()
+		and _all_citizens_have_no_task(capital_state)
 		and _state_has_clean_defaults(task_state),
 		"Founding must leave all eight citizens without active tasks."
 	)
 	var version_before_ensure := task_state.citizen_task_version
 	_expect(
-		CityCitizenTaskRuntimeSystem.ensure_city_citizen_task_state() == 0
+		CityCitizenTaskRuntimeSystem.ensure_city_citizen_task_state_for_city_state(
+			capital_state
+		) == 0
 		and task_state.citizen_task_version == version_before_ensure
 		and _state_has_clean_defaults(task_state),
 		"A clean founding ensure must neither replace nor invalidate runtime."
@@ -157,22 +155,23 @@ func _test_real_founding_bootstrap() -> void:
 
 
 func _test_city_and_session_reset() -> void:
-	WorldData.reset_runtime_session_state()
-	var state := (
-		CityCitizenTaskRuntimeSystem.get_current_state()
-	)
+	var fixture = CitySettlementTestFixtureScript.create({
+		"label": "Citizen Task Reset",
+	})
+	_expect(fixture != null, "The task reset fixture must be created.")
+	if fixture == null:
+		return
+	var city_state: CitySettlementSimulationState = fixture.city_state
+	var state := city_state.citizen_task_runtime_state
 	var task_ids: Array[int] = [44]
 	var task_lookup: Dictionary = {44: true}
 	state.active_task_ids = task_ids
 	state.active_task_id_lookup = task_lookup
 	state.citizen_task_version = 20
 
-	CityCitizenRegistrySystem.reset_city_citizen_state()
+	CityCitizenRegistrySystem.reset_city_citizen_state_for_city_state(city_state)
 	_expect(
-		is_same(
-			CityCitizenTaskRuntimeSystem.get_current_state(),
-			state
-		)
+		is_same(city_state.citizen_task_runtime_state, state)
 		and is_same(state.active_task_ids, task_ids)
 		and is_same(state.active_task_id_lookup, task_lookup)
 		and state.active_task_ids.is_empty()
@@ -182,15 +181,22 @@ func _test_city_and_session_reset() -> void:
 		+ "haul-reservation and task invalidations."
 	)
 
-	WorldData.reset_runtime_session_state()
-	var fresh_state := (
-		CityCitizenTaskRuntimeSystem.get_current_state()
+	fixture.cleanup()
+	var fresh_fixture = CitySettlementTestFixtureScript.create({
+		"label": "Citizen Task Reset Fresh",
+	})
+	_expect(fresh_fixture != null, "The fresh task fixture must be created.")
+	if fresh_fixture == null:
+		return
+	var fresh_state: CityCitizenTaskRuntimeState = (
+		fresh_fixture.city_state.citizen_task_runtime_state
 	)
 	_expect(
 		not is_same(fresh_state, state)
 		and _state_has_clean_defaults(fresh_state),
 		"A global session reset must replace task runtime with defaults."
 	)
+	fresh_fixture.cleanup()
 
 
 func _state_has_clean_defaults(state: CityCitizenTaskRuntimeState) -> bool:
@@ -201,8 +207,10 @@ func _state_has_clean_defaults(state: CityCitizenTaskRuntimeState) -> bool:
 	)
 
 
-func _all_citizens_have_no_task() -> bool:
-	for raw_citizen in CityCitizenRegistrySystem.get_current_state().citizens:
+func _all_citizens_have_no_task(
+	city_state: CitySettlementSimulationState
+) -> bool:
+	for raw_citizen in city_state.citizen_registry_state.citizens:
 		if not raw_citizen is Dictionary:
 			return false
 		var raw_task = raw_citizen.get("current_task", {})

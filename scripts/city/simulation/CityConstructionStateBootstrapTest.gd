@@ -42,29 +42,12 @@ func _run_bootstrap_test() -> void:
 	if not locked:
 		return
 
-	CityConstructionSystem.get_current_state().construction_sites = [
-		{
-			"id": 17,
-			"test_owner": "bootstrap",
-		},
-	]
-	CityConstructionSystem.get_current_state().construction_site_index_by_id = {17: 0}
-	CityConstructionSystem.get_current_state().construction_site_id_by_tile = {Vector2i(3, 3): 17}
-	CityConstructionSystem.get_current_state().next_construction_site_id = 18
-	CityConstructionSystem.get_current_state().construction_version = 5
-
-	var bootstrap_state = WorldPoliticalState.get_current_city_construction_state()
-	_expect(
-		bootstrap_state is CityConstructionState,
-		"Pre-context construction must live in the unbound CityConstructionState."
-	)
-
 	_expect(
 		WorldPoliticalState.synchronize_foundation_with_world_data(),
 		"Founding must establish a city settlement context."
 	)
-
-	var capital_state = WorldPoliticalState.get_active_city_simulation_state()
+	var capital_id := WorldPoliticalState.get_player_capital_settlement_id()
+	var capital_state: CitySettlementSimulationState = WorldPoliticalState.get_city_simulation_state(capital_id)
 	_expect(
 		capital_state is CitySettlementSimulationState,
 		"Founding capital must own city simulation state."
@@ -72,22 +55,31 @@ func _run_bootstrap_test() -> void:
 	if capital_state == null:
 		return
 
+	var construction_state: CityConstructionState = capital_state.construction_state
+	construction_state.construction_sites = [
+		{
+			"id": 17,
+			"test_owner": "bootstrap",
+		},
+	]
+	construction_state.construction_site_index_by_id = {17: 0}
+	construction_state.construction_site_id_by_tile = {Vector2i(3, 3): 17}
+	construction_state.next_construction_site_id = 18
+	construction_state.construction_version = 5
+
 	_expect(
-		capital_state.construction_state == bootstrap_state,
-		"Founding City must adopt the exact pre-context construction-state object."
+		str(construction_state.construction_sites[0].get("test_owner", ""))
+		== "bootstrap"
+		and construction_state.next_construction_site_id == 18
+		and construction_state.construction_version == 5,
+		"The registered capital must retain exact construction-state mutations."
 	)
 	_expect(
-		str(capital_state.construction_state.construction_sites[0].get("test_owner", ""))
-		== "bootstrap"
+		CityConstructionSystem.get_state_for_city_state(capital_state)
+		== capital_state.construction_state
 		and capital_state.construction_state.next_construction_site_id == 18
 		and capital_state.construction_state.construction_version == 5,
-		"Bootstrap construction state must survive context establishment."
-	)
-	_expect(
-		CityConstructionSystem.get_current_state().construction_sites == capital_state.construction_state.construction_sites
-		and CityConstructionSystem.get_current_state().next_construction_site_id == 18
-		and CityConstructionSystem.get_current_state().construction_version == 5,
-		"WorldData compatibility properties must resolve to the active City's construction state."
+		"The exact city-state API must resolve the adopted capital construction owner."
 	)
 
 

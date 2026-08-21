@@ -54,8 +54,12 @@ func _test_equal_version_city_isolation() -> void:
 	var city_a_id := int(city_a["id"])
 	var city_b_id := int(city_b["id"])
 	var culture_id := int(culture.get("id", -1))
-	var city_a_state = WorldPoliticalState.get_city_simulation_state(city_a_id)
-	var city_b_state = WorldPoliticalState.get_city_simulation_state(city_b_id)
+	var city_a_state: CitySettlementSimulationState = (
+		WorldPoliticalState.get_city_simulation_state(city_a_id)
+	)
+	var city_b_state: CitySettlementSimulationState = (
+		WorldPoliticalState.get_city_simulation_state(city_b_id)
+	)
 	_seed_city_runtime_data(
 		city_a_state,
 		city_a_id,
@@ -73,26 +77,30 @@ func _test_equal_version_city_isolation() -> void:
 		"City A must become active."
 	)
 	var world_a := _make_world(24, 20, 95_101)
-	WorldPoliticalState.set_current_city_world(world_a)
-	WorldPoliticalState.set_current_city_seed(95_101)
-	var keep_a := _register_keep(world_a)
+	_expect(
+		WorldData.store_city_world_for_state(city_a_state, world_a, 95_101),
+		"City A world storage must target its exact simulation owner."
+	)
+	var keep_a := _register_keep(city_a_state, world_a)
 	_mark_city_founded(city_a_state, keep_a)
-	var stockpile_a := _register_stockpile(world_a)
+	var stockpile_a := _register_stockpile(city_a_state, world_a)
 	var stockpile_a_id := int(stockpile_a.get("id", -1))
 	_expect(
 		stockpile_a_id == 2
-		and CityResourceContainerSystem.add_resource_to_city_object_storage(
+		and CityResourceContainerSystem.add_resource_to_city_object_storage_for_city_state(
+			city_a_state,
 			stockpile_a_id,
 			WorldData.RESOURCE_FISH,
 			7
 		) == 7,
 		"City A must create local Stockpile 2 with seven fish."
 	)
-	var city_a_total := CityResourceAccountingSystem.get_total_owned_city_resource_amount(
+	var city_a_total := _get_total_owned_city_resource_amount(
+		city_a_state,
 		WorldData.RESOURCE_FISH
 	)
-	var state_a := (
-		CityResourceAccountingSystem.get_current_state()
+	var state_a: CityResourceAccountingState = (
+		CityResourceAccountingSystem.get_state_for_city_state(city_a_state)
 	)
 	var cache_a: Dictionary = state_a.owned_resource_amount_cache
 	var state_a_container_version := state_a.container_version
@@ -115,26 +123,30 @@ func _test_equal_version_city_isolation() -> void:
 		"City B must become active."
 	)
 	var world_b := _make_world(24, 20, 95_202)
-	WorldPoliticalState.set_current_city_world(world_b)
-	WorldPoliticalState.set_current_city_seed(95_202)
-	var keep_b := _register_keep(world_b)
+	_expect(
+		WorldData.store_city_world_for_state(city_b_state, world_b, 95_202),
+		"City B world storage must target its exact simulation owner."
+	)
+	var keep_b := _register_keep(city_b_state, world_b)
 	_mark_city_founded(city_b_state, keep_b)
-	var stockpile_b := _register_stockpile(world_b)
+	var stockpile_b := _register_stockpile(city_b_state, world_b)
 	var stockpile_b_id := int(stockpile_b.get("id", -1))
 	_expect(
 		stockpile_b_id == 2
-		and CityResourceContainerSystem.add_resource_to_city_object_storage(
+		and CityResourceContainerSystem.add_resource_to_city_object_storage_for_city_state(
+			city_b_state,
 			stockpile_b_id,
 			WorldData.RESOURCE_FISH,
 			31
 		) == 31,
 		"City B must independently create local Stockpile 2 with 31 fish."
 	)
-	var city_b_total := CityResourceAccountingSystem.get_total_owned_city_resource_amount(
+	var city_b_total := _get_total_owned_city_resource_amount(
+		city_b_state,
 		WorldData.RESOURCE_FISH
 	)
-	var state_b := (
-		CityResourceAccountingSystem.get_current_state()
+	var state_b: CityResourceAccountingState = (
+		CityResourceAccountingSystem.get_state_for_city_state(city_b_state)
 	)
 	var cache_b: Dictionary = state_b.owned_resource_amount_cache
 
@@ -167,21 +179,28 @@ func _test_equal_version_city_isolation() -> void:
 	_expect(
 		WorldPoliticalState.set_active_settlement(city_a_id)
 		and is_same(
-			CityResourceAccountingSystem.get_current_state(),
+			CityResourceAccountingSystem.get_state_for_city_state(city_a_state),
 			state_a
 		)
-		and is_same(CityResourceAccountingSystem.get_current_state().owned_resource_amount_cache, cache_a)
-		and CityResourceAccountingSystem.get_total_owned_city_resource_amount(
+		and is_same(state_a.owned_resource_amount_cache, cache_a)
+		and _get_total_owned_city_resource_amount(
+			city_a_state,
 			WorldData.RESOURCE_FISH
 		) == 7,
 		"A -> B -> A must restore City A's exact accounting owner and total."
 	)
 
 	var renderer := _make_resource_renderer(city_a_id, state_a)
-	var fish_index := renderer.get_city_resource_order().find(WorldData.RESOURCE_FISH)
+	var fish_index := (
+		renderer.settlement_ui_controller.get_resource_order().find(
+			WorldData.RESOURCE_FISH
+		)
+	)
 	_expect(
 		fish_index >= 0
-		and renderer.resource_amount_labels[fish_index].text == "7",
+		and renderer.settlement_ui_controller.resource_amount_labels[
+			fish_index
+		].text == "7",
 		"The resource bar must initially render City A's owned fish total."
 	)
 
@@ -209,10 +228,12 @@ func _test_equal_version_city_isolation() -> void:
 			)
 		)
 		and is_same(
-			renderer.observed_city_resource_accounting_state,
+			renderer.city_presentation_invalidation_tracker.observed_city_resource_accounting_state,
 			state_a
 		)
-		and renderer.resource_amount_labels[fish_index].text == "7",
+		and renderer.settlement_ui_controller.resource_amount_labels[
+			fish_index
+		].text == "7",
 		"Changing global selection must not redirect City A's bound resource UI."
 	)
 	renderer.free()
@@ -220,22 +241,29 @@ func _test_equal_version_city_isolation() -> void:
 	_expect(
 		renderer.bound_city_settlement_id == city_b_id
 		and is_same(
-			renderer.observed_city_resource_accounting_state,
+			renderer.city_presentation_invalidation_tracker.observed_city_resource_accounting_state,
 			state_b
 		)
-		and renderer.resource_amount_labels[fish_index].text == "31",
+		and renderer.settlement_ui_controller.resource_amount_labels[
+			fish_index
+		].text == "31",
 		"An explicit City B binding must render B even when numeric versions match A."
 	)
 
-	var fishery_b := CityObjectSystem.register_completed_city_object({
-		"object_type": CityObjectCatalog.CITY_OBJECT_FISHING_GROUNDS,
-		"top_left": Vector2i(12, 4),
-		"size_tiles": CityObjectCatalog.get_city_object_size_for_type(
-			CityObjectCatalog.CITY_OBJECT_FISHING_GROUNDS
-		),
-		"object_owner": "player",
-		"city_world": world_b,
-	})
+	var fishery_b := (
+		CityObjectSystem.register_completed_city_object_for_city_state(
+			city_b_state,
+			{
+				"object_type": CityObjectCatalog.CITY_OBJECT_FISHING_GROUNDS,
+				"top_left": Vector2i(12, 4),
+				"size_tiles": CityObjectCatalog.get_city_object_size_for_type(
+					CityObjectCatalog.CITY_OBJECT_FISHING_GROUNDS
+				),
+				"object_owner": "player",
+				"city_world": world_b,
+			}
+		)
+	)
 	var fishery_b_id := int(fishery_b.get("id", -1))
 	var fishery_registration_flags: Dictionary = {}
 	renderer._collect_world_data_change_flags(
@@ -260,17 +288,20 @@ func _test_equal_version_city_isolation() -> void:
 			)
 		)
 		and is_same(
-			renderer.observed_city_resource_accounting_state,
+			renderer.city_presentation_invalidation_tracker.observed_city_resource_accounting_state,
 			state_b
 		)
-		and renderer.resource_amount_labels[fish_index].text == "31",
+		and renderer.settlement_ui_controller.resource_amount_labels[
+			fish_index
+		].text == "31",
 		"Registering empty private workplace storage must establish the same-city renderer baseline."
 	)
 
 	var container_before_fishery_mutation := state_b.container_version
 	var public_before_fishery_mutation := state_b.public_storage_version
 	_expect(
-		CityResourceContainerSystem.add_resource_to_city_object_storage(
+		CityResourceContainerSystem.add_resource_to_city_object_storage_for_city_state(
+			city_b_state,
 			fishery_b_id,
 			WorldData.RESOURCE_FISH,
 			1
@@ -296,17 +327,20 @@ func _test_equal_version_city_isolation() -> void:
 			)
 		)
 		and is_same(
-			renderer.observed_city_resource_accounting_state,
+			renderer.city_presentation_invalidation_tracker.observed_city_resource_accounting_state,
 			state_b
 		)
-		and renderer.resource_amount_labels[fish_index].text == "32",
+		and renderer.settlement_ui_controller.resource_amount_labels[
+			fish_index
+		].text == "32",
 		"A Fishery mutation must refresh same-city owned UI through only the container version."
 	)
 
 	var container_before_stockpile_mutation := state_b.container_version
 	var public_before_stockpile_mutation := state_b.public_storage_version
 	_expect(
-		CityResourceContainerSystem.add_resource_to_city_object_storage(
+		CityResourceContainerSystem.add_resource_to_city_object_storage_for_city_state(
+			city_b_state,
 			stockpile_b_id,
 			WorldData.RESOURCE_FISH,
 			1
@@ -332,10 +366,12 @@ func _test_equal_version_city_isolation() -> void:
 			)
 		)
 		and is_same(
-			renderer.observed_city_resource_accounting_state,
+			renderer.city_presentation_invalidation_tracker.observed_city_resource_accounting_state,
 			state_b
 		)
-		and renderer.resource_amount_labels[fish_index].text == "33",
+		and renderer.settlement_ui_controller.resource_amount_labels[
+			fish_index
+		].text == "33",
 		"A Stockpile mutation must refresh same-city owned UI through container and public versions."
 	)
 	cache_b = state_b.owned_resource_amount_cache
@@ -343,6 +379,9 @@ func _test_equal_version_city_isolation() -> void:
 		"renderer": renderer,
 		"city_a_id": city_a_id,
 		"city_b_id": city_b_id,
+		"city_a_state": city_a_state,
+		"city_b_state": city_b_state,
+		"state_a": state_a,
 		"state_b": state_b,
 		"cache_a": cache_a,
 		"cache_b": cache_b,
@@ -364,16 +403,18 @@ func _make_resource_renderer(
 		renderer.configure_initial_city_presentation(renderer_context),
 		"Resource UI coverage requires an explicit renderer settlement binding."
 	)
-	renderer.observed_city_resource_accounting_state = state
-	renderer.observed_city_container_version = state.container_version
-	renderer.observed_city_public_storage_version = state.public_storage_version
+	renderer.city_presentation_invalidation_tracker.observed_city_resource_accounting_state = state
+	renderer.city_presentation_invalidation_tracker.observed_city_container_version = state.container_version
+	renderer.city_presentation_invalidation_tracker.observed_city_public_storage_version = state.public_storage_version
 
-	for _resource in renderer.get_city_resource_order():
+	for _resource in renderer.settlement_ui_controller.get_resource_order():
 		var amount_label := Label.new()
 		renderer.add_child(amount_label)
-		renderer.resource_amount_labels.append(amount_label)
+		renderer.settlement_ui_controller.resource_amount_labels.append(
+			amount_label
+		)
 
-	renderer.update_resource_bar_values()
+	renderer.settlement_ui_controller.update_resource_bar_values()
 	return renderer
 
 
@@ -383,6 +424,9 @@ func _assert_validator_and_final_city_isolation(
 	var renderer: CityRenderer = values["renderer"]
 	var city_a_id: int = values["city_a_id"]
 	var city_b_id: int = values["city_b_id"]
+	var city_a_state: CitySettlementSimulationState = values["city_a_state"]
+	var city_b_state: CitySettlementSimulationState = values["city_b_state"]
+	var state_a: CityResourceAccountingState = values["state_a"]
 	var state_b: CityResourceAccountingState = values["state_b"]
 	var cache_a: Dictionary = values["cache_a"]
 	var cache_b: Dictionary = values["cache_b"]
@@ -437,17 +481,15 @@ func _assert_validator_and_final_city_isolation(
 	_expect(
 		WorldPoliticalState.set_active_settlement(city_a_id)
 		and is_same(
-			CityResourceAccountingSystem.get_current_state().owned_resource_amount_cache,
+			state_a.owned_resource_amount_cache,
 			cache_a
 		)
-		and CityResourceAccountingSystem
-		.get_current_state().owned_resource_amount_cache_container_version
+		and state_a.owned_resource_amount_cache_container_version
 		== state_a_cache_version
-		and CityResourceAccountingSystem.get_city_container_version()
-		== state_a_container_version
-		and CityResourceAccountingSystem.get_city_public_storage_version()
-		== state_a_public_version
-		and CityResourceAccountingSystem.get_total_owned_city_resource_amount(
+		and state_a.container_version == state_a_container_version
+		and state_a.public_storage_version == state_a_public_version
+		and _get_total_owned_city_resource_amount(
+			city_a_state,
 			WorldData.RESOURCE_FISH
 		) == 7,
 		"City A accounting must remain exact after rendering and validation checks."
@@ -455,14 +497,15 @@ func _assert_validator_and_final_city_isolation(
 	_expect(
 		WorldPoliticalState.set_active_settlement(city_b_id)
 		and is_same(
-			CityResourceAccountingSystem.get_current_state().owned_resource_amount_cache,
+			state_b.owned_resource_amount_cache,
 			cache_b
 		)
-		and CityResourceAccountingSystem.get_city_container_version()
-		== state_b.container_version
-		and CityResourceAccountingSystem.get_city_public_storage_version()
-		== state_b.public_storage_version
-		and CityResourceAccountingSystem.get_total_owned_city_resource_amount(
+		and is_same(
+			CityResourceAccountingSystem.get_state_for_city_state(city_b_state),
+			state_b
+		)
+		and _get_total_owned_city_resource_amount(
+			city_b_state,
 			WorldData.RESOURCE_FISH
 		) == 33,
 		"City B accounting must remain exact after the final A -> B switch."
@@ -487,28 +530,40 @@ func _create_city(
 	})
 
 
-func _register_stockpile(city_world: WorldData) -> Dictionary:
-	return CityObjectSystem.register_completed_city_object({
-		"object_type": CityObjectCatalog.CITY_OBJECT_STOCKPILE,
-		"top_left": SHARED_STOCKPILE_TOP_LEFT,
-		"size_tiles": CityObjectCatalog.get_city_object_size_for_type(
-			CityObjectCatalog.CITY_OBJECT_STOCKPILE
-		),
-		"object_owner": "player",
-		"city_world": city_world,
-	})
+func _register_stockpile(
+	city_state: CitySettlementSimulationState,
+	city_world: WorldData
+) -> Dictionary:
+	return CityObjectSystem.register_completed_city_object_for_city_state(
+		city_state,
+		{
+			"object_type": CityObjectCatalog.CITY_OBJECT_STOCKPILE,
+			"top_left": SHARED_STOCKPILE_TOP_LEFT,
+			"size_tiles": CityObjectCatalog.get_city_object_size_for_type(
+				CityObjectCatalog.CITY_OBJECT_STOCKPILE
+			),
+			"object_owner": "player",
+			"city_world": city_world,
+		}
+	)
 
 
-func _register_keep(city_world: WorldData) -> Dictionary:
-	return CityObjectSystem.register_completed_city_object({
-		"object_type": CityObjectCatalog.CITY_OBJECT_CITY_CENTER,
-		"top_left": Vector2i.ZERO,
-		"size_tiles": CityObjectCatalog.get_city_object_size_for_type(
-			CityObjectCatalog.CITY_OBJECT_CITY_CENTER
-		),
-		"object_owner": "player",
-		"city_world": city_world,
-	})
+func _register_keep(
+	city_state: CitySettlementSimulationState,
+	city_world: WorldData
+) -> Dictionary:
+	return CityObjectSystem.register_completed_city_object_for_city_state(
+		city_state,
+		{
+			"object_type": CityObjectCatalog.CITY_OBJECT_CITY_CENTER,
+			"top_left": Vector2i.ZERO,
+			"size_tiles": CityObjectCatalog.get_city_object_size_for_type(
+				CityObjectCatalog.CITY_OBJECT_CITY_CENTER
+			),
+			"object_owner": "player",
+			"city_world": city_world,
+		}
+	)
 
 
 func _seed_city_runtime_data(
@@ -566,6 +621,20 @@ func _make_world(width: int, height: int, seed: int) -> WorldData:
 
 	world.mark_tile_data_changed()
 	return world
+
+
+func _get_total_owned_city_resource_amount(
+	city_state: CitySettlementSimulationState,
+	resource: String
+) -> int:
+	return maxi(
+		int(
+			CityResourceAccountingSystem.get_total_owned_city_resource_amounts_for_city_state(
+				city_state
+			).get(resource, 0)
+		),
+		0
+	)
 
 
 func _expect(condition: bool, message: String) -> void:

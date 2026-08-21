@@ -202,8 +202,8 @@ func _test_explicit_target_and_cache_isolation() -> void:
 		false
 	)
 
-	# Replace A's aggregate state under the same settlement ID. Settlement ID
-	# alone is insufficient, so the old cache must be rejected.
+	# Deliberately create a fresh aggregate owner, then register it under A's
+	# existing settlement ID. The former context is now a required stale input.
 	var replacement_a := CitySettlementSimulationState.new()
 	WorldPoliticalState.settlement_city_state_by_id[city_a_id] = replacement_a
 	_seed_existing_state(
@@ -275,20 +275,36 @@ func _test_explicit_target_and_cache_isolation() -> void:
 	)
 
 	CityStateValidatorScript.clear_all_validation_caches()
-	var first_bounded_cache_id := 500
+	var first_bounded_cache_id := SettlementData.INVALID_SETTLEMENT_ID
 	for cache_index in range(
 		CityStateValidatorScript.MAX_CACHED_SETTLEMENTS + 3
 	):
-		var cache_state := CitySettlementSimulationState.new()
-		var cache_result := CityStateValidatorScript.validate_for_city_state(
-			first_bounded_cache_id + cache_index,
-			cache_state,
-			true,
-			false
+		var cache_city := _create_city(
+			"Validator Cache City " + str(cache_index + 1),
+			polity_id
+		)
+		var cache_city_id := int(
+			cache_city.get("id", SettlementData.INVALID_SETTLEMENT_ID)
+		)
+		var cache_context: SettlementSimulationContext = (
+			WorldPoliticalState.get_settlement_context(cache_city_id)
+		)
+		if first_bounded_cache_id <= 0:
+			first_bounded_cache_id = cache_city_id
+		var cache_result := (
+			CityStateValidatorScript.validate_for_settlement(
+				cache_context,
+				true,
+				false
+			)
 		)
 		_expect(
-			bool(cache_result.get("valid", false)),
-			"A default headless City state must remain valid for cache bounds coverage."
+			cache_context != null
+			and WorldPoliticalState.is_registered_settlement_context(
+				cache_context
+			)
+			and bool(cache_result.get("valid", false)),
+			"Every cache-bounds target must be a valid registered City."
 		)
 	_expect(
 		CityStateValidatorScript._cache_by_settlement_id.size()

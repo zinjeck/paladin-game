@@ -1,5 +1,8 @@
 extends Node
 
+const CitySettlementTestFixtureScript = preload(
+	"res://scripts/city/simulation/test_support/CitySettlementTestFixture.gd"
+)
 const CityConstructionSystemScript = preload(
 	"res://scripts/city/simulation/systems/CityConstructionSystem.gd"
 )
@@ -31,6 +34,8 @@ const NORMAL_FOOD_TASK_PRIORITY: int = 85
 
 var failure_count: int = 0
 var test_culture_id: int = -1
+var test_fixture = null
+var test_city_state: CitySettlementSimulationState = null
 
 
 func _ready() -> void:
@@ -58,7 +63,7 @@ func _ready() -> void:
 	_test_construction_labor_balance()
 	_test_safe_boundary_and_cancellation_preserve_physical_cargo()
 	_test_cargo_ready_demand_preempts_soft_claim()
-	_test_resource_demand_priorities_are_adjustable()
+	_test_resource_demand_priorities_are_immutable()
 	_test_off_shift_homeless_idle_wander()
 	WorldData.reset_runtime_session_state()
 
@@ -83,7 +88,7 @@ func _test_roads_optimize_travel_time() -> void:
 		var road_tile := Vector2i(x, 3)
 		road_tiles.append(road_tile)
 		_expect(
-			not CityObjectSystem.add_city_road_object(
+			not CityObjectSystem.add_city_road_object_for_city_state(test_city_state,
 				[road_tile],
 				"player",
 				city_world
@@ -91,7 +96,7 @@ func _test_roads_optimize_travel_time() -> void:
 			"The travel-time fixture must create each completed road tile independently."
 		)
 
-	var result := CityNavigationSystemScript.find_path_to_any_city_tile({
+	var result := CityNavigationSystemScript.find_path_to_any_city_tile_for_city_state(test_city_state, {
 		"city_world": city_world,
 		"start_tile": start_tile,
 		"destination_tiles": [destination_tile],
@@ -116,7 +121,7 @@ func _test_roads_optimize_travel_time() -> void:
 		"Pathfinding must prefer a longer road route when its travel time is lower."
 	)
 	_expect(
-		CityNavigationSystem.get_city_citizen_movement_step_cost(
+		CityNavigationSystem.get_city_citizen_movement_step_cost_for_city_state(test_city_state,
 			start_tile,
 			Vector2i(2, 3)
 		) == CityCitizens.CITY_CITIZEN_ROAD_CARDINAL_MOVEMENT_COST,
@@ -164,7 +169,7 @@ func _test_large_destination_heuristic_is_admissible() -> void:
 			"The large-set heuristic must remain admissible for optimal road routing."
 		)
 
-	var result := CityNavigationSystemScript.find_path_to_any_city_tile({
+	var result := CityNavigationSystemScript.find_path_to_any_city_tile_for_city_state(test_city_state, {
 		"city_world": city_world,
 		"start_tile": Vector2i(2, 2),
 		"destination_tiles": destination_tiles,
@@ -195,7 +200,7 @@ func _test_independent_road_tiles_batch_scheduling() -> void:
 		Vector2i(3, 2),
 		Vector2i(6, 2),
 	]
-	var road_sites := CityConstructionSystemScript.create_road_sites(
+	var road_sites := CityConstructionSystemScript.create_road_sites_for_city_state(test_city_state,
 		road_tiles,
 		"player",
 		city_world
@@ -220,7 +225,7 @@ func _test_independent_road_tiles_batch_scheduling() -> void:
 
 	var first_citizen_id := int(first_citizen.get("id", -1))
 	var first_candidate := (
-		CityWorkSystemScript.get_best_player_job_for_citizen(
+		CityWorkSystemScript.get_best_player_job_for_citizen_for_city_state(test_city_state,
 			first_citizen_id
 		)
 	)
@@ -235,13 +240,13 @@ func _test_independent_road_tiles_batch_scheduling() -> void:
 		"Batched road routing must return the nearest actionable tile with that tile's own site and order IDs."
 	)
 	_expect(
-		CityWorkSystemScript.assign_player_job(
+		CityWorkSystemScript.assign_player_job_for_city_state(test_city_state,
 			first_citizen_id,
 			first_candidate
 		),
 		"The first road worker must claim exactly one independent road tile."
 	)
-	var first_task := CityCitizenTaskRuntimeSystem.get_city_citizen_current_task(
+	var first_task := CityCitizenTaskRuntimeSystem.get_city_citizen_current_task_for_city_state(test_city_state,
 		first_citizen_id
 	)
 	_expect(
@@ -250,7 +255,7 @@ func _test_independent_road_tiles_batch_scheduling() -> void:
 	)
 
 	var second_candidate := (
-		CityWorkSystemScript.get_best_player_job_for_citizen(
+		CityWorkSystemScript.get_best_player_job_for_citizen_for_city_state(test_city_state,
 			int(second_citizen.get("id", -1))
 		)
 	)
@@ -266,7 +271,7 @@ func _test_road_placement_refreshes_only_new_orders() -> void:
 	var city_world := _reset_fixture()
 	var unrelated_site := _create_ready_labor_site([Vector2i(20, 12)], 1)
 	var unrelated_site_id := int(unrelated_site.get("id", -1))
-	CityWorkSystemScript.synchronize_player_work_board()
+	CityWorkSystemScript.synchronize_player_work_board_for_city_state(test_city_state)
 	var unrelated_order := _find_order(
 		CityWorkSystemScript.ORDER_TYPE_CONSTRUCTION_SITE,
 		unrelated_site_id
@@ -279,19 +284,19 @@ func _test_road_placement_refreshes_only_new_orders() -> void:
 	var sentinel_order := unrelated_order.duplicate(true)
 	sentinel_order["phase"] = "focused_road_sync_sentinel"
 	sentinel_order["progress_signature"] = "focused_road_sync_sentinel"
-	CityWorkSystemScript.get_current_work_state().work_orders[
+	test_city_state.work_state.work_orders[
 		unrelated_order_id
 	] = sentinel_order
 	var road_tiles: Array[Vector2i] = [
 		Vector2i(4, 4),
 		Vector2i(5, 4),
 	]
-	var road_sites := CityConstructionSystemScript.create_road_sites(
+	var road_sites := CityConstructionSystemScript.create_road_sites_for_city_state(test_city_state,
 		road_tiles,
 		"player",
 		city_world
 	)
-	var unrelated_after := CityWorkSystemScript.get_city_work_order_by_id(
+	var unrelated_after := CityWorkSystemScript.get_city_work_order_by_id_for_city_state(test_city_state,
 		unrelated_order_id
 	)
 	var road_orders_immediately_available := (
@@ -329,7 +334,7 @@ func _test_board_sync_reuses_runtime_reachability_candidate() -> void:
 		WorldData.CITY_SURFACE_FEATURE_TREE
 	)
 	_expect(
-		CityWorkSystem.add_city_player_command_targets(
+		CityWorkSystem.add_city_player_command_targets_for_city_state(test_city_state,
 			CityWorkSystem.CITY_PLAYER_COMMAND_TYPE_CHOP_TREE,
 			[target_tile]
 		) == 1,
@@ -337,9 +342,9 @@ func _test_board_sync_reuses_runtime_reachability_candidate() -> void:
 	)
 
 	var candidate_by_order_by_citizen_id := (
-		CityWorkSystemScript.synchronize_player_work_board()
+		CityWorkSystemScript.synchronize_player_work_board_for_city_state(test_city_state)
 	)
-	var orders := CityWorkSystem.get_city_work_order_snapshot()
+	var orders := CityWorkSystem.get_city_work_order_snapshot_for_city_state(test_city_state)
 	var order: Dictionary = orders[0] if orders.size() == 1 else {}
 	var order_id := int(order.get("id", -1))
 	var raw_candidate_by_order = candidate_by_order_by_citizen_id.get(
@@ -363,7 +368,7 @@ func _test_board_sync_reuses_runtime_reachability_candidate() -> void:
 		"Board diagnostics must retain their exact positive reachability witness for immediate assignment."
 	)
 	var selected_candidate := (
-		CityWorkSystemScript.get_best_player_job_for_citizen(
+		CityWorkSystemScript.get_best_player_job_for_citizen_for_city_state(test_city_state,
 			citizen_id,
 			candidate_by_order
 		)
@@ -387,17 +392,17 @@ func _test_board_sync_reuses_runtime_reachability_candidate() -> void:
 	)
 	var selected_path: Array = selected_candidate.get("assignment_path", [])
 	_expect(
-		CityWorkSystemScript.assign_player_job(
+		CityWorkSystemScript.assign_player_job_for_city_state(test_city_state,
 			citizen_id,
 			selected_candidate
 		),
 		"The exact cached candidate must remain assignable."
 	)
 	var assigned_task := (
-		CityCitizenTaskRuntimeSystem.get_city_citizen_current_task(citizen_id)
+		CityCitizenTaskRuntimeSystem.get_city_citizen_current_task_for_city_state(test_city_state, citizen_id)
 	)
 	var assigned_citizen := (
-		CityCitizenRegistrySystem.get_city_citizen_by_id(citizen_id)
+		CityCitizenRegistrySystem.get_city_citizen_by_id_for_city_state(test_city_state, citizen_id)
 	)
 	_expect(
 		selected_path.size() > 1
@@ -408,17 +413,17 @@ func _test_board_sync_reuses_runtime_reachability_candidate() -> void:
 		and assigned_citizen.get("movement_path", []) == selected_path,
 		"Assignment must immediately install the already selected exact route instead of leaving Tasks to search again."
 	)
-	CityCitizenTaskRuntimeSystem.clear_city_citizen_task(
+	CityCitizenTaskRuntimeSystem.clear_city_citizen_task_for_city_state(test_city_state,
 		citizen_id,
 		CityCitizens.CITY_CITIZEN_TASK_SOURCE_PLAYER
 	)
-	CityCitizenMovementRuntimeSystem.cancel_city_citizen_movement(citizen_id)
-	CityWorkSystem.release_city_player_command_claim(
+	CityCitizenMovementRuntimeSystem.cancel_city_citizen_movement_for_city_state(test_city_state, citizen_id)
+	CityWorkSystem.release_city_player_command_claim_for_city_state(test_city_state,
 		int(selected_candidate.get("id", -1)),
 		citizen_id
 	)
 	var fallback_candidate := (
-		CityWorkSystemScript.get_best_player_job_for_citizen(
+		CityWorkSystemScript.get_best_player_job_for_citizen_for_city_state(test_city_state,
 			citizen_id,
 			candidate_by_order
 		)
@@ -434,14 +439,14 @@ func _test_board_sync_reuses_runtime_reachability_candidate() -> void:
 	stale_path[0] = Vector2i(0, 0)
 	stale_candidate["assignment_path"] = stale_path
 	_expect(
-		CityWorkSystemScript.assign_player_job(citizen_id, stale_candidate),
+		CityWorkSystemScript.assign_player_job_for_city_state(test_city_state, citizen_id, stale_candidate),
 		"A stale route witness must not invalidate the otherwise valid assignment."
 	)
 	var stale_task := (
-		CityCitizenTaskRuntimeSystem.get_city_citizen_current_task(citizen_id)
+		CityCitizenTaskRuntimeSystem.get_city_citizen_current_task_for_city_state(test_city_state, citizen_id)
 	)
 	var stale_citizen := (
-		CityCitizenRegistrySystem.get_city_citizen_by_id(citizen_id)
+		CityCitizenRegistrySystem.get_city_citizen_by_id_for_city_state(test_city_state, citizen_id)
 	)
 	_expect(
 		str(stale_task.get("phase", ""))
@@ -451,11 +456,11 @@ func _test_board_sync_reuses_runtime_reachability_candidate() -> void:
 		and stale_citizen.get("movement_path", []).is_empty(),
 		"A stale route witness must fall back to the pending task state without installing movement."
 	)
-	CityCitizenTaskRuntimeSystem.clear_city_citizen_task(
+	CityCitizenTaskRuntimeSystem.clear_city_citizen_task_for_city_state(test_city_state,
 		citizen_id,
 		CityCitizens.CITY_CITIZEN_TASK_SOURCE_PLAYER
 	)
-	CityWorkSystem.release_city_player_command_claim(
+	CityWorkSystem.release_city_player_command_claim_for_city_state(test_city_state,
 		int(stale_candidate.get("id", -1)),
 		citizen_id
 	)
@@ -483,16 +488,16 @@ func _test_unreachable_order_runtime_diagnostics() -> void:
 		WorldData.CITY_SURFACE_FEATURE_TREE
 	)
 	_expect(
-		CityWorkSystem.add_city_player_command_targets(
+		CityWorkSystem.add_city_player_command_targets_for_city_state(test_city_state,
 			CityWorkSystem.CITY_PLAYER_COMMAND_TYPE_CHOP_TREE,
 			[target_tile]
 		) == 1,
 		"The reachability fixture must create one valid command."
 	)
 	var negative_candidate_cache := (
-		CityWorkSystemScript.synchronize_player_work_board()
+		CityWorkSystemScript.synchronize_player_work_board_for_city_state(test_city_state)
 	)
-	var orders := CityWorkSystem.get_city_work_order_snapshot()
+	var orders := CityWorkSystem.get_city_work_order_snapshot_for_city_state(test_city_state)
 	var blocked_order: Dictionary = orders[0] if orders.size() == 1 else {}
 	var blocked_order_id := int(blocked_order.get("id", -1))
 	var raw_negative_candidate_by_order = negative_candidate_cache.get(
@@ -533,7 +538,7 @@ func _test_unreachable_order_runtime_diagnostics() -> void:
 		"Board diagnostics must retain an exact negative reachability witness."
 	)
 	_expect(
-		CityWorkSystemScript.get_best_player_job_for_citizen(
+		CityWorkSystemScript.get_best_player_job_for_citizen_for_city_state(test_city_state,
 			citizen_id,
 			negative_candidate_by_order
 		).is_empty()
@@ -548,9 +553,9 @@ func _test_unreachable_order_runtime_diagnostics() -> void:
 	gate_tile["biome"] = WorldData.BIOME_PLAIN
 	gate_tile["is_land"] = true
 	city_world.set_tile(10, 4, gate_tile)
-	CityWorkSystemScript.synchronize_player_work_board()
+	CityWorkSystemScript.synchronize_player_work_board_for_city_state(test_city_state)
 	var recovered_order: Dictionary = (
-		CityWorkSystem.get_city_work_order_snapshot()[0]
+		CityWorkSystem.get_city_work_order_snapshot_for_city_state(test_city_state)[0]
 	)
 	var recovered_jobs: Array = recovered_order.get("jobs", [])
 	var recovered_job: Dictionary = (
@@ -567,7 +572,7 @@ func _test_unreachable_order_runtime_diagnostics() -> void:
 		"Opening a route must deterministically restore ACTIVE/actionable diagnostics."
 	)
 	_expect(
-		not CityWorkSystemScript.get_best_player_job_for_citizen(
+		not CityWorkSystemScript.get_best_player_job_for_citizen_for_city_state(test_city_state,
 			citizen_id
 		).is_empty(),
 		"Opening a route must restore citizen-specific scheduling without changing it."
@@ -588,7 +593,7 @@ func _test_parent_orders_and_two_level_fairness() -> void:
 		)
 		command_tiles.append(tile_position)
 
-	var designated_count := CityWorkSystem.add_city_player_command_targets(
+	var designated_count := CityWorkSystem.add_city_player_command_targets_for_city_state(test_city_state,
 		CityWorkSystem.CITY_PLAYER_COMMAND_TYPE_CHOP_TREE,
 		command_tiles
 	)
@@ -597,9 +602,7 @@ func _test_parent_orders_and_two_level_fairness() -> void:
 		"The large natural-work fixture must remain one complete command group."
 	)
 
-	var fairness_city_state: CitySettlementSimulationState = (
-		WorldPoliticalState.get_current_city_simulation_state()
-	)
+	var fairness_city_state: CitySettlementSimulationState = test_city_state
 	var road_site: Dictionary = (
 		CityConstructionSystemScript.create_road_site_for_city_state(
 			fairness_city_state,
@@ -614,10 +617,10 @@ func _test_parent_orders_and_two_level_fairness() -> void:
 	if site_id <= 0:
 		return
 
-	CityConstructionSystemScript.refresh_city_construction_site(site_id)
-	CityWorkSystemScript.synchronize_player_work_board()
+	CityConstructionSystemScript.refresh_city_construction_site_for_city_state(test_city_state, site_id)
+	CityWorkSystemScript.synchronize_player_work_board_for_city_state(test_city_state)
 
-	var orders := CityWorkSystem.get_city_work_order_snapshot()
+	var orders := CityWorkSystem.get_city_work_order_snapshot_for_city_state(test_city_state)
 	var group_order: Dictionary = {}
 	var site_order: Dictionary = {}
 
@@ -650,7 +653,7 @@ func _test_parent_orders_and_two_level_fairness() -> void:
 	)
 
 	var nearby_choice := (
-		CityWorkSystemScript.get_best_player_job_for_citizen(citizen_id)
+		CityWorkSystemScript.get_best_player_job_for_citizen_for_city_state(test_city_state, citizen_id)
 	)
 	_expect(
 		int(nearby_choice.get("work_order_id", -1))
@@ -659,22 +662,22 @@ func _test_parent_orders_and_two_level_fairness() -> void:
 	)
 	_expect(
 		nearby_choice
-		== CityWorkSystemScript.get_best_player_job_for_citizen(citizen_id),
+		== CityWorkSystemScript.get_best_player_job_for_citizen_for_city_state(test_city_state, citizen_id),
 		"Unchanged work state must produce a deterministic parent and job choice."
 	)
 
 	# Establish progress signatures, then make only the large group old and
 	# neglected. Its bounded neglect bonus must eventually overcome locality.
 	var group_order_id := int(group_order.get("id", -1))
-	var neglected_order := CityWorkSystem.get_city_work_order_by_id(group_order_id)
+	var neglected_order := CityWorkSystem.get_city_work_order_by_id_for_city_state(test_city_state, group_order_id)
 	SimulationClock.absolute_world_minutes = 240
 	neglected_order["created_world_minute"] = 0
 	neglected_order["last_progress_world_minute"] = 0
-	CityWorkSystem.get_current_work_state().work_orders[group_order_id] = neglected_order
-	CityWorkSystemScript.synchronize_player_work_board()
+	test_city_state.work_state.work_orders[group_order_id] = neglected_order
+	CityWorkSystemScript.synchronize_player_work_board_for_city_state(test_city_state)
 	var debug_group_order: Dictionary = {}
 
-	for raw_debug_order in CityWorkSystemScript.get_order_debug_snapshot():
+	for raw_debug_order in CityWorkSystemScript.get_order_debug_snapshot_for_city_state(test_city_state):
 		if (
 			raw_debug_order is Dictionary
 			and int(raw_debug_order.get("id", -1)) == group_order_id
@@ -688,7 +691,7 @@ func _test_parent_orders_and_two_level_fairness() -> void:
 	)
 
 	var aged_choice := (
-		CityWorkSystemScript.get_best_player_job_for_citizen(citizen_id)
+		CityWorkSystemScript.get_best_player_job_for_citizen_for_city_state(test_city_state, citizen_id)
 	)
 	_expect(
 		int(aged_choice.get("work_order_id", -1)) == group_order_id,
@@ -725,7 +728,7 @@ func _test_new_blueprint_rebalances_uncommitted_construction_travel() -> void:
 	if far_site_id <= 0:
 		return
 
-	CityWorkSystemScript.synchronize_player_work_board()
+	CityWorkSystemScript.synchronize_player_work_board_for_city_state(test_city_state)
 	var far_order := _find_order(
 		CityWorkSystemScript.ORDER_TYPE_CONSTRUCTION_SITE,
 		far_site_id
@@ -734,19 +737,19 @@ func _test_new_blueprint_rebalances_uncommitted_construction_travel() -> void:
 	for citizen in citizens:
 		var citizen_id := int(citizen.get("id", -1))
 		var far_candidate := (
-			CityWorkSystemScript.get_best_player_job_for_citizen(citizen_id)
+			CityWorkSystemScript.get_best_player_job_for_citizen_for_city_state(test_city_state, citizen_id)
 		)
 		_expect(
 			int(far_candidate.get("work_order_id", -1))
 			== int(far_order.get("id", -2))
-			and CityWorkSystemScript.assign_player_job(
+			and CityWorkSystemScript.assign_player_job_for_city_state(test_city_state,
 				citizen_id,
 				far_candidate
 			),
 			"Every builder must initially accept the only available far site."
 		)
 
-	CitizenTaskSystemScript.run_tick(0, 1)
+	CitizenTaskSystemScript.run_tick_for_city_state(test_city_state, 0, 1)
 	var left_builder_id := int(left_builder.get("id", -1))
 	var second_left_builder_id := int(second_left_builder.get("id", -1))
 	var right_builder_id := int(right_builder.get("id", -1))
@@ -769,10 +772,10 @@ func _test_new_blueprint_rebalances_uncommitted_construction_travel() -> void:
 		blocked_road_id > 0,
 		"The rebalance fixture must create a material-blocked road."
 	)
-	CityWorkSystemScript.synchronize_player_work_board()
+	CityWorkSystemScript.synchronize_player_work_board_for_city_state(test_city_state)
 	var blocked_blueprint_switch_count := (
 		CityConstructionSystemScript
-		.rebalance_uncommitted_construction_workers(blocked_road_id)
+		.rebalance_uncommitted_construction_workers_for_city_state(test_city_state, blocked_road_id)
 	)
 	_expect(
 		blocked_blueprint_switch_count == 0
@@ -785,7 +788,7 @@ func _test_new_blueprint_rebalances_uncommitted_construction_travel() -> void:
 		"A material-blocked blueprint must not stop or restart existing trips."
 	)
 
-	var stone_result := CityLogisticsSystem.add_resource_to_city_ground_piles_with_result({
+	var stone_result := CityLogisticsSystem.add_resource_to_city_ground_piles_with_result_for_city_state(test_city_state, {
 		"tile_position": Vector2i(4, 7),
 		"resource": WorldData.RESOURCE_STONE,
 		"amount_delta": 1,
@@ -811,23 +814,23 @@ func _test_new_blueprint_rebalances_uncommitted_construction_travel() -> void:
 	# This synthetic material-requiring road bypasses the production road
 	# placement API, so the test must explicitly invoke the same scheduling
 	# boundary that production placement invokes.
-	CityWorkSystemScript.synchronize_player_work_board()
+	CityWorkSystemScript.synchronize_player_work_board_for_city_state(test_city_state)
 	var switched_to_near := (
 		CityConstructionSystemScript
-		.rebalance_uncommitted_construction_workers(near_site_id)
+		.rebalance_uncommitted_construction_workers_for_city_state(test_city_state, near_site_id)
 	)
 
 	var near_order := _find_order(
 		CityWorkSystemScript.ORDER_TYPE_CONSTRUCTION_SITE,
 		near_site_id
 	)
-	var left_after_near_blueprint := CityCitizenTaskRuntimeSystem.get_city_citizen_current_task(
+	var left_after_near_blueprint := CityCitizenTaskRuntimeSystem.get_city_citizen_current_task_for_city_state(test_city_state,
 		left_builder_id
 	)
-	var left_after_near_citizen := CityCitizenRegistrySystem.get_city_citizen_by_id(
+	var left_after_near_citizen := CityCitizenRegistrySystem.get_city_citizen_by_id_for_city_state(test_city_state,
 		left_builder_id
 	)
-	var left_after_near_haul := CityCitizenTaskRuntimeSystem.get_city_citizen_current_haul(
+	var left_after_near_haul := CityCitizenTaskRuntimeSystem.get_city_citizen_current_haul_for_city_state(test_city_state,
 		left_builder_id
 	)
 
@@ -873,7 +876,7 @@ func _test_new_blueprint_rebalances_uncommitted_construction_travel() -> void:
 	var stable_right_assignment := _get_assignment_snapshot(right_builder_id)
 
 	for _repeat in range(3):
-		CityConstructionSystemScript.rebalance_uncommitted_construction_workers(
+		CityConstructionSystemScript.rebalance_uncommitted_construction_workers_for_city_state(test_city_state,
 			near_site_id
 		)
 
@@ -893,7 +896,7 @@ func _test_new_blueprint_rebalances_uncommitted_construction_travel() -> void:
 	var marginal_site_id := int(marginal_site.get("id", -1))
 	var switched_to_marginal := (
 		CityConstructionSystemScript
-		.rebalance_uncommitted_construction_workers(marginal_site_id)
+		.rebalance_uncommitted_construction_workers_for_city_state(test_city_state, marginal_site_id)
 	)
 	_expect(
 		switched_to_marginal == 0
@@ -902,16 +905,16 @@ func _test_new_blueprint_rebalances_uncommitted_construction_travel() -> void:
 		"A roughly one-tile saving must remain inside the equal-priority hysteresis dead band."
 	)
 
-	CityCitizenTaskRuntimeSystem.set_city_citizen_task_phase(
+	CityCitizenTaskRuntimeSystem.set_city_citizen_task_phase_for_city_state(test_city_state,
 		right_builder_id,
 		CityCitizens.CITY_CITIZEN_TASK_PHASE_BLOCKED
 	)
 	var blocked_switch_count := (
 		CityConstructionSystemScript
-		.rebalance_uncommitted_construction_workers(marginal_site_id)
+		.rebalance_uncommitted_construction_workers_for_city_state(test_city_state, marginal_site_id)
 	)
 	var right_after_blocked_switch := (
-		CityCitizenTaskRuntimeSystem.get_city_citizen_current_task(right_builder_id)
+		CityCitizenTaskRuntimeSystem.get_city_citizen_current_task_for_city_state(test_city_state, right_builder_id)
 	)
 	var marginal_order := _find_order(
 		CityWorkSystemScript.ORDER_TYPE_CONSTRUCTION_SITE,
@@ -929,7 +932,7 @@ func _test_new_blueprint_rebalances_uncommitted_construction_travel() -> void:
 	var right_after_switch := _get_assignment_snapshot(right_builder_id)
 
 	for _repeat in range(3):
-		CityConstructionSystemScript.rebalance_uncommitted_construction_workers(
+		CityConstructionSystemScript.rebalance_uncommitted_construction_workers_for_city_state(test_city_state,
 			far_site_id
 		)
 
@@ -938,11 +941,11 @@ func _test_new_blueprint_rebalances_uncommitted_construction_travel() -> void:
 		"Equal-priority placement must not reverse a completed switch through age or neglect weighting."
 	)
 
-	CityCitizenTaskRuntimeSystem.set_city_citizen_task_phase(
+	CityCitizenTaskRuntimeSystem.set_city_citizen_task_phase_for_city_state(test_city_state,
 		right_builder_id,
 		CityCitizens.CITY_CITIZEN_TASK_PHASE_PERFORMING
 	)
-	CityCitizenTaskRuntimeSystem.set_city_citizen_task_phase(
+	CityCitizenTaskRuntimeSystem.set_city_citizen_task_phase_for_city_state(test_city_state,
 		second_left_builder_id,
 		CityCitizens.CITY_CITIZEN_TASK_PHASE_PERFORMING
 	)
@@ -951,24 +954,24 @@ func _test_new_blueprint_rebalances_uncommitted_construction_travel() -> void:
 		second_left_builder_id
 	)
 	var protected_delivery := _get_assignment_snapshot(left_builder_id)
-	var protected_haul := CityCitizenTaskRuntimeSystem.get_city_citizen_current_haul(
+	var protected_haul := CityCitizenTaskRuntimeSystem.get_city_citizen_current_haul_for_city_state(test_city_state,
 		left_builder_id
 	)
 	var protected_reservation_id := int(
 		protected_haul.get("reservation_id", -1)
 	)
-	var protected_reservation := CityLogisticsSystem.get_city_haul_reservation(
+	var protected_reservation := CityLogisticsSystem.get_city_haul_reservation_for_city_state(test_city_state,
 		protected_reservation_id
 	)
 	var urgent_site := _create_ready_labor_site([Vector2i(22, 7)], 1)
 	var urgent_site_id := int(urgent_site.get("id", -1))
-	CityWorkSystemScript.synchronize_player_work_board()
+	CityWorkSystemScript.synchronize_player_work_board_for_city_state(test_city_state)
 	var urgent_order := _find_order(
 		CityWorkSystemScript.ORDER_TYPE_CONSTRUCTION_SITE,
 		urgent_site_id
 	)
 	_expect(
-		CityWorkSystemScript.set_order_priority(
+		CityWorkSystemScript.set_order_priority_for_city_state(test_city_state,
 			int(urgent_order.get("id", -1)),
 			CityWorkSystemScript.PRIORITY_HIGH
 		),
@@ -976,7 +979,7 @@ func _test_new_blueprint_rebalances_uncommitted_construction_travel() -> void:
 	)
 	var protected_switch_count := (
 		CityConstructionSystemScript
-		.rebalance_uncommitted_construction_workers(urgent_site_id)
+		.rebalance_uncommitted_construction_workers_for_city_state(test_city_state, urgent_site_id)
 	)
 	_expect(
 		protected_switch_count == 0
@@ -988,7 +991,7 @@ func _test_new_blueprint_rebalances_uncommitted_construction_travel() -> void:
 	_expect(
 		_get_assignment_snapshot(left_builder_id) == protected_delivery
 		and protected_reservation_id > 0
-		and CityLogisticsSystem.get_city_haul_reservation(
+		and CityLogisticsSystem.get_city_haul_reservation_for_city_state(test_city_state,
 			protected_reservation_id
 		) == protected_reservation,
 		"Rebalancing must preserve an empty-handed construction delivery and its reservation."
@@ -1003,7 +1006,7 @@ func _test_blocked_construction_worker_uses_reachable_existing_alternative() -> 
 	var alternative_site := _create_ready_labor_site([Vector2i(4, 8)], 1)
 	var current_site_id := int(current_site.get("id", -1))
 	var alternative_site_id := int(alternative_site.get("id", -1))
-	CityWorkSystemScript.synchronize_player_work_board()
+	CityWorkSystemScript.synchronize_player_work_board_for_city_state(test_city_state)
 	var current_order := _find_order(
 		CityWorkSystemScript.ORDER_TYPE_CONSTRUCTION_SITE,
 		current_site_id
@@ -1013,7 +1016,7 @@ func _test_blocked_construction_worker_uses_reachable_existing_alternative() -> 
 		alternative_site_id
 	)
 	var current_candidate := (
-		CityWorkSystemScript.get_player_job_for_citizen_and_order(
+		CityWorkSystemScript.get_player_job_for_citizen_and_order_for_city_state(test_city_state,
 			citizen_id,
 			int(current_order.get("id", -1))
 		)
@@ -1022,15 +1025,15 @@ func _test_blocked_construction_worker_uses_reachable_existing_alternative() -> 
 	_expect(
 		current_site_id > 0
 		and alternative_site_id > 0
-		and CityWorkSystemScript.assign_player_job(
+		and CityWorkSystemScript.assign_player_job_for_city_state(test_city_state,
 			citizen_id,
 			current_candidate
 		),
 		"The blocked-rebalance fixture must assign its original construction site."
 	)
-	CitizenTaskSystemScript.run_tick(0, 1)
-	CityCitizenMovementRuntimeSystem.cancel_city_citizen_movement(citizen_id)
-	CityCitizenTaskRuntimeSystem.set_city_citizen_task_phase(
+	CitizenTaskSystemScript.run_tick_for_city_state(test_city_state, 0, 1)
+	CityCitizenMovementRuntimeSystem.cancel_city_citizen_movement_for_city_state(test_city_state, citizen_id)
+	CityCitizenTaskRuntimeSystem.set_city_citizen_task_phase_for_city_state(test_city_state,
 		citizen_id,
 		CityCitizens.CITY_CITIZEN_TASK_PHASE_BLOCKED
 	)
@@ -1040,15 +1043,16 @@ func _test_blocked_construction_worker_uses_reachable_existing_alternative() -> 
 	)
 	# The helper intentionally creates a low-level synthetic site; mirror the
 	# production placement boundary before checking blocked reassignment.
-	CityWorkSystemScript.synchronize_player_work_board()
+	CityWorkSystemScript.synchronize_player_work_board_for_city_state(test_city_state)
 	var blocked_reassignment_count := (
 		CityConstructionSystemScript
-		.rebalance_uncommitted_construction_workers(
+		.rebalance_uncommitted_construction_workers_for_city_state(
+			test_city_state,
 			int(material_blocked_site.get("id", -1))
 		)
 	)
-	var reassigned_task := CityCitizenTaskRuntimeSystem.get_city_citizen_current_task(citizen_id)
-	var reassigned_citizen := CityCitizenRegistrySystem.get_city_citizen_by_id(citizen_id)
+	var reassigned_task := CityCitizenTaskRuntimeSystem.get_city_citizen_current_task_for_city_state(test_city_state, citizen_id)
+	var reassigned_citizen := CityCitizenRegistrySystem.get_city_citizen_by_id_for_city_state(test_city_state, citizen_id)
 
 	_expect(
 		int(material_blocked_site.get("id", -1)) > 0
@@ -1072,9 +1076,7 @@ func _test_rebalance_preserves_active_construction_clearing() -> void:
 		tree_tile,
 		WorldData.CITY_SURFACE_FEATURE_TREE
 	)
-	var clearing_city_state: CitySettlementSimulationState = (
-		WorldPoliticalState.get_current_city_simulation_state()
-	)
+	var clearing_city_state: CitySettlementSimulationState = test_city_state
 	var clearing_site: Dictionary = (
 		CityConstructionSystemScript.create_road_site_for_city_state(
 			clearing_city_state,
@@ -1084,49 +1086,49 @@ func _test_rebalance_preserves_active_construction_clearing() -> void:
 		)
 	)
 	var clearing_site_id := int(clearing_site.get("id", -1))
-	CityWorkSystemScript.synchronize_player_work_board()
+	CityWorkSystemScript.synchronize_player_work_board_for_city_state(test_city_state)
 	var clearing_candidate := (
-		CityWorkSystemScript.get_best_player_job_for_citizen(citizen_id)
+		CityWorkSystemScript.get_best_player_job_for_citizen_for_city_state(test_city_state, citizen_id)
 	)
 	_expect(
 		clearing_site_id > 0
 		and str(clearing_candidate.get("player_work_kind", "")) == "command"
-		and CityWorkSystemScript.assign_player_job(
+		and CityWorkSystemScript.assign_player_job_for_city_state(test_city_state,
 			citizen_id,
 			clearing_candidate
 		),
 		"The active-clearing fixture must assign its construction obstruction command."
 	)
-	CitizenTaskSystemScript.run_tick(0, 1)
-	var performing_task := CityCitizenTaskRuntimeSystem.get_city_citizen_current_task(citizen_id)
+	CitizenTaskSystemScript.run_tick_for_city_state(test_city_state, 0, 1)
+	var performing_task := CityCitizenTaskRuntimeSystem.get_city_citizen_current_task_for_city_state(test_city_state, citizen_id)
 	_expect(
 		str(performing_task.get("phase", ""))
 		== CityCitizens.CITY_CITIZEN_TASK_PHASE_PERFORMING,
 		"The construction clearer must cross the physical performing boundary."
 	)
 	var performing_snapshot := _get_assignment_snapshot(citizen_id)
-	var command_before := CityWorkSystem.get_city_player_command_by_id(
+	var command_before := CityWorkSystem.get_city_player_command_by_id_for_city_state(test_city_state,
 		int(performing_task.get("target_object_id", -1))
 	)
 	var urgent_site := _create_ready_labor_site([Vector2i(9, 10)], 1)
 	var urgent_site_id := int(urgent_site.get("id", -1))
-	CityWorkSystemScript.synchronize_player_work_board()
+	CityWorkSystemScript.synchronize_player_work_board_for_city_state(test_city_state)
 	var urgent_order := _find_order(
 		CityWorkSystemScript.ORDER_TYPE_CONSTRUCTION_SITE,
 		urgent_site_id
 	)
-	CityWorkSystemScript.set_order_priority(
+	CityWorkSystemScript.set_order_priority_for_city_state(test_city_state,
 		int(urgent_order.get("id", -1)),
 		CityWorkSystemScript.PRIORITY_HIGH
 	)
 	var switched_count := (
 		CityConstructionSystemScript
-		.rebalance_uncommitted_construction_workers(urgent_site_id)
+		.rebalance_uncommitted_construction_workers_for_city_state(test_city_state, urgent_site_id)
 	)
 	_expect(
 		switched_count == 0
 		and _get_assignment_snapshot(citizen_id) == performing_snapshot
-		and CityWorkSystem.get_city_player_command_by_id(
+		and CityWorkSystem.get_city_player_command_by_id_for_city_state(test_city_state,
 			int(performing_task.get("target_object_id", -1))
 		) == command_before,
 		"Rebalancing must preserve active construction clearing and its command claim."
@@ -1139,19 +1141,19 @@ func _test_unreachable_blueprint_does_not_churn_construction_travel() -> void:
 	var citizen_id := int(citizen.get("id", -1))
 	var current_site := _create_ready_labor_site([Vector2i(6, 4)], 1)
 	var current_site_id := int(current_site.get("id", -1))
-	CityWorkSystemScript.synchronize_player_work_board()
+	CityWorkSystemScript.synchronize_player_work_board_for_city_state(test_city_state)
 	var current_candidate := (
-		CityWorkSystemScript.get_best_player_job_for_citizen(citizen_id)
+		CityWorkSystemScript.get_best_player_job_for_citizen_for_city_state(test_city_state, citizen_id)
 	)
 	_expect(
 		current_site_id > 0
-		and CityWorkSystemScript.assign_player_job(
+		and CityWorkSystemScript.assign_player_job_for_city_state(test_city_state,
 			citizen_id,
 			current_candidate
 		),
 		"The unreachable-blueprint fixture must assign its reachable current site."
 	)
-	CitizenTaskSystemScript.run_tick(0, 1)
+	CitizenTaskSystemScript.run_tick_for_city_state(test_city_state, 0, 1)
 	var assignment_before := _get_assignment_snapshot(citizen_id)
 
 	for y in range(city_world.height):
@@ -1169,7 +1171,7 @@ func _test_unreachable_blueprint_does_not_churn_construction_travel() -> void:
 	var unreachable_site_id := int(unreachable_site.get("id", -1))
 	var switched_count := (
 		CityConstructionSystemScript
-		.rebalance_uncommitted_construction_workers(unreachable_site_id)
+		.rebalance_uncommitted_construction_workers_for_city_state(test_city_state, unreachable_site_id)
 	)
 	_expect(
 		unreachable_site_id > 0
@@ -1184,18 +1186,18 @@ func _test_blueprint_placement_skips_rebalance_without_interruptible_worker() ->
 	var idle_citizen := _add_citizen("Idle Builder", Vector2i(2, 2))
 	var existing_site := _create_ready_labor_site([Vector2i(6, 4)], 1)
 	var existing_site_id := int(existing_site.get("id", -1))
-	CityWorkSystemScript.synchronize_player_work_board()
+	CityWorkSystemScript.synchronize_player_work_board_for_city_state(test_city_state)
 	var existing_order := _find_order(
 		CityWorkSystemScript.ORDER_TYPE_CONSTRUCTION_SITE,
 		existing_site_id
 	)
-	var work_state := CityWorkSystemScript.get_current_work_state()
+	var work_state := test_city_state.work_state
 	var board_version_before_placement := work_state.work_order_version
 	var order_count_before_placement := work_state.work_orders.size()
 	var house_size := CityObjectCatalog.get_city_object_size_for_type(
 		CityObjectCatalog.CITY_OBJECT_HOUSE
 	)
-	var house_site := CityConstructionSystemScript.create_rectangular_site({
+	var house_site := CityConstructionSystemScript.create_rectangular_site_for_city_state(test_city_state, {
 		"object_type": CityObjectCatalog.CITY_OBJECT_HOUSE,
 		"top_left": Vector2i(14, 10),
 		"size_tiles": house_size,
@@ -1203,7 +1205,7 @@ func _test_blueprint_placement_skips_rebalance_without_interruptible_worker() ->
 		"city_world": city_world,
 	})
 	var house_site_id := int(house_site.get("id", -1))
-	var idle_task := CityCitizenTaskRuntimeSystem.get_city_citizen_current_task(
+	var idle_task := CityCitizenTaskRuntimeSystem.get_city_citizen_current_task_for_city_state(test_city_state,
 		int(idle_citizen.get("id", -1))
 	)
 
@@ -1243,81 +1245,81 @@ func _test_food_replenishment_cycle_and_whole_item_consumption() -> void:
 		"Food seeking must begin at 70 while the eating target remains 100."
 	)
 
-	CitizenNeedsSystem.set_city_citizen_hunger_state(citizen_id, 90, 0)
+	CitizenNeedsSystem.set_city_citizen_hunger_state_for_city_state(test_city_state, citizen_id, 90, 0)
 	_expect(
-		CityCitizenInventorySystem.add_resource_to_city_citizen_inventory(
+		CityCitizenInventorySystem.add_resource_to_city_citizen_inventory_for_city_state(test_city_state,
 			citizen_id,
 			WorldData.RESOURCE_FISH,
 			1
 		) == 1,
 		"The food-cycle fixture must add one carried fish."
 	)
-	CitizenNeedsSystemScript.eat_personal_food_if_hungry(citizen_id)
+	CitizenNeedsSystemScript.eat_personal_food_if_hungry_for_city_state(test_city_state, citizen_id)
 	_expect(
-		CitizenNeedsSystem.get_city_citizen_hunger(citizen_id) == 90
-		and CityCitizenInventorySystem.get_city_citizen_inventory_resource_amount(
+		CitizenNeedsSystem.get_city_citizen_hunger_for_city_state(test_city_state, citizen_id) == 90
+		and CityCitizenInventorySystem.get_city_citizen_inventory_resource_amount_for_city_state(test_city_state,
 			citizen_id,
 			WorldData.RESOURCE_FISH
 		) == 1,
 		"A citizen at 90 must keep a 20-point food item instead of wasting half."
 	)
 
-	CitizenNeedsSystem.set_city_citizen_hunger_state(citizen_id, 80, 0)
-	CitizenNeedsSystemScript.eat_personal_food_if_hungry(citizen_id)
+	CitizenNeedsSystem.set_city_citizen_hunger_state_for_city_state(test_city_state, citizen_id, 80, 0)
+	CitizenNeedsSystemScript.eat_personal_food_if_hungry_for_city_state(test_city_state, citizen_id)
 	_expect(
-		CitizenNeedsSystem.get_city_citizen_hunger(citizen_id) == 100
-		and CityCitizenInventorySystem.get_city_citizen_inventory_resource_amount(
+		CitizenNeedsSystem.get_city_citizen_hunger_for_city_state(test_city_state, citizen_id) == 100
+		and CityCitizenInventorySystem.get_city_citizen_inventory_resource_amount_for_city_state(test_city_state,
 			citizen_id,
 			WorldData.RESOURCE_FISH
 		) == 0,
 		"The retained item must be eaten at 80 to reach exactly 100."
 	)
 
-	CitizenNeedsSystem.set_city_citizen_hunger_state(citizen_id, 70, 0)
+	CitizenNeedsSystem.set_city_citizen_hunger_state_for_city_state(test_city_state, citizen_id, 70, 0)
 	_expect(
-		CitizenNeedsSystemScript.citizen_should_seek_food(citizen_id)
-		and CitizenNeedsSystemScript.get_citizen_food_need_nutrition(citizen_id)
+		CitizenNeedsSystemScript.citizen_should_seek_food_for_city_state(test_city_state, citizen_id)
+		and CitizenNeedsSystemScript.get_citizen_food_need_nutrition_for_city_state(test_city_state, citizen_id)
 		== 30,
 		"A citizen reaching 70 without food must seek 30 nutrition toward 100."
 	)
 	_expect(
-		CityCitizenInventorySystem.add_resource_to_city_citizen_inventory(
+		CityCitizenInventorySystem.add_resource_to_city_citizen_inventory_for_city_state(test_city_state,
 			citizen_id,
 			WorldData.RESOURCE_FISH,
 			2
 		) == 2,
 		"A 30-point deficit must be coverable by two whole 20-point items."
 	)
-	CitizenNeedsSystemScript.eat_personal_food_if_hungry(citizen_id)
+	CitizenNeedsSystemScript.eat_personal_food_if_hungry_for_city_state(test_city_state, citizen_id)
 	_expect(
-		CitizenNeedsSystem.get_city_citizen_hunger(citizen_id) == 90
-		and CityCitizenInventorySystem.get_city_citizen_inventory_resource_amount(
+		CitizenNeedsSystem.get_city_citizen_hunger_for_city_state(test_city_state, citizen_id) == 90
+		and CityCitizenInventorySystem.get_city_citizen_inventory_resource_amount_for_city_state(test_city_state,
 			citizen_id,
 			WorldData.RESOURCE_FISH
 		) == 1
-		and not CitizenNeedsSystemScript.citizen_should_seek_food(citizen_id),
+		and not CitizenNeedsSystemScript.citizen_should_seek_food_for_city_state(test_city_state, citizen_id),
 		"At 70, one item must raise hunger to 90 while the second remains carried."
 	)
 
-	CitizenNeedsSystem.set_city_citizen_hunger_state(citizen_id, 80, 0)
-	CitizenNeedsSystemScript.eat_personal_food_if_hungry(citizen_id)
+	CitizenNeedsSystem.set_city_citizen_hunger_state_for_city_state(test_city_state, citizen_id, 80, 0)
+	CitizenNeedsSystemScript.eat_personal_food_if_hungry_for_city_state(test_city_state, citizen_id)
 	_expect(
-		CitizenNeedsSystem.get_city_citizen_hunger(citizen_id) == 100
-		and CityCitizenInventorySystem.get_city_citizen_inventory_resource_amount(
+		CitizenNeedsSystem.get_city_citizen_hunger_for_city_state(test_city_state, citizen_id) == 100
+		and CityCitizenInventorySystem.get_city_citizen_inventory_resource_amount_for_city_state(test_city_state,
 			citizen_id,
 			WorldData.RESOURCE_FISH
 		) == 0,
 		"The carried second item must complete the daily 70-to-100 cycle."
 	)
 
-	CitizenNeedsSystem.set_city_citizen_hunger_state(citizen_id, 31, 0)
+	CitizenNeedsSystem.set_city_citizen_hunger_state_for_city_state(test_city_state, citizen_id, 31, 0)
 	_expect(
-		not CitizenNeedsSystemScript.citizen_has_critical_food_need(citizen_id),
+		not CitizenNeedsSystemScript.citizen_has_critical_food_need_for_city_state(test_city_state, citizen_id),
 		"Hunger 31 must remain above the critical interruption boundary."
 	)
-	CitizenNeedsSystem.set_city_citizen_hunger_state(citizen_id, 30, 0)
+	CitizenNeedsSystem.set_city_citizen_hunger_state_for_city_state(test_city_state, citizen_id, 30, 0)
 	_expect(
-		CitizenNeedsSystemScript.citizen_has_critical_food_need(citizen_id),
+		CitizenNeedsSystemScript.citizen_has_critical_food_need_for_city_state(test_city_state, citizen_id),
 		"Hunger 30 must enter the critical interruption boundary exactly."
 	)
 
@@ -1333,7 +1335,7 @@ func _test_workplace_fish_production_accounting() -> void:
 				WorldData.RESOURCE_FISH
 			)
 
-	var fishery := CityObjectSystem.add_city_object({
+	var fishery := CityObjectSystem.add_city_object_for_city_state(test_city_state, {
 		"object_type": CityObjectCatalog.CITY_OBJECT_FISHING_GROUNDS,
 		"top_left": Vector2i(12, 8),
 		"size_tiles": CityObjectCatalog.get_city_object_size_for_type(
@@ -1343,7 +1345,7 @@ func _test_workplace_fish_production_accounting() -> void:
 		"city_world": city_world,
 	})
 	var fishery_id := int(fishery.get("id", -1))
-	var access_tiles := CityNavigationSystem.get_city_object_access_tiles(
+	var access_tiles := CityNavigationSystem.get_city_object_access_tiles_for_city_state(test_city_state,
 		city_world,
 		fishery
 	)
@@ -1365,18 +1367,18 @@ func _test_workplace_fish_production_accounting() -> void:
 	}
 	_expect(
 		worker_id > 0
-		and CityAssignmentSystem.assign_city_citizen_job(worker_id, fishery_id)
-		and CityCitizenTaskRuntimeSystem.assign_city_citizen_task(worker_id, work_task)
-		and CityCitizenTaskRuntimeSystem.set_city_citizen_task_phase(
+		and CityAssignmentSystem.assign_city_citizen_job_for_city_state(test_city_state, worker_id, fishery_id)
+		and CityCitizenTaskRuntimeSystem.assign_city_citizen_task_for_city_state(test_city_state, worker_id, work_task)
+		and CityCitizenTaskRuntimeSystem.set_city_citizen_task_phase_for_city_state(test_city_state,
 			worker_id,
 			CityCitizens.CITY_CITIZEN_TASK_PHASE_PERFORMING
 		),
 		"One assigned worker must be physically attending the Fishery."
 	)
 
-	var accounting_state := CityResourceAccountingSystem.get_current_state()
+	var accounting_state := test_city_state.resource_accounting_state
 	var initial_owned_totals := (
-		CityResourceAccountingSystem.get_total_owned_city_resource_amounts()
+		CityResourceAccountingSystem.get_total_owned_city_resource_amounts_for_city_state(test_city_state)
 	)
 	var initial_cache: Dictionary = (
 		accounting_state.owned_resource_amount_cache
@@ -1392,9 +1394,9 @@ func _test_workplace_fish_production_accounting() -> void:
 		"The production fixture must begin with a valid zero-fish cache."
 	)
 
-	WorkplaceProductionSystem.run_tick(1, 120)
+	WorkplaceProductionSystem.run_tick_for_city_state(test_city_state, 1, 120)
 
-	fishery = CityObjectSystem.get_city_object_by_id(fishery_id)
+	fishery = CityObjectSystem.get_city_object_by_id_for_city_state(test_city_state, fishery_id)
 	var production_status := CityObjectCatalog.get_city_object_production_status(
 		fishery
 	)
@@ -1405,15 +1407,19 @@ func _test_workplace_fish_production_accounting() -> void:
 		== initial_container_version + 1
 	)
 	var public_fish := (
-		CityResourceAccountingSystem.get_total_public_city_resource_amount(
+		CityResourceAccountingSystem.get_total_public_city_resource_amount_for_city_state(test_city_state,
 			WorldData.RESOURCE_FISH
 		)
 	)
-	var physical_fish := CityResourceAccountingSystem.get_total_physical_city_resource_amount(
-		WorldData.RESOURCE_FISH
+	var physical_fish := (
+		CityResourceAccountingSystem
+		.get_total_physical_city_resource_amount_for_city_state(
+			test_city_state,
+			WorldData.RESOURCE_FISH
+		)
 	)
 	var owned_fish := (
-		CityResourceAccountingSystem.get_total_owned_city_resource_amount(
+		CityResourceAccountingSystem.get_total_owned_city_resource_amount_for_city_state(test_city_state,
 			WorldData.RESOURCE_FISH
 		)
 	)
@@ -1459,7 +1465,7 @@ func _test_household_and_public_food_reserve_targets() -> void:
 	var city_world := _reset_fixture()
 	var first := _add_citizen("Pantry first", Vector2i(8, 8))
 	var second := _add_citizen("Pantry second", Vector2i(9, 8))
-	var house := CityObjectSystem.add_city_object({
+	var house := CityObjectSystem.add_city_object_for_city_state(test_city_state, {
 		"object_type": CityObjectCatalog.CITY_OBJECT_HOUSE,
 		"top_left": Vector2i(4, 4),
 		"size_tiles": CityObjectCatalog.get_city_object_size_for_type(
@@ -1470,30 +1476,30 @@ func _test_household_and_public_food_reserve_targets() -> void:
 	})
 	var house_id := int(house.get("id", -1))
 	_expect(
-		CityAssignmentSystem.assign_city_citizen_home(int(first.get("id", -1)), house_id)
-		and CityAssignmentSystem.assign_city_citizen_home(
+		CityAssignmentSystem.assign_city_citizen_home_for_city_state(test_city_state, int(first.get("id", -1)), house_id)
+		and CityAssignmentSystem.assign_city_citizen_home_for_city_state(test_city_state,
 			int(second.get("id", -1)),
 			house_id
 		),
 		"Both pantry-test citizens must reside in the same house."
 	)
-	house = CityObjectSystem.get_city_object_by_id(house_id)
+	house = CityObjectSystem.get_city_object_by_id_for_city_state(test_city_state, house_id)
 	_expect(
-		CityResourceMatcherScript.get_city_home_food_target_nutrition(house)
+		CityResourceMatcherScript.get_city_home_food_target_nutrition_for_city_state(test_city_state, house)
 		== 80
-		and CityResourceMatcherScript.get_city_home_requested_food_units(
+		and CityResourceMatcherScript.get_city_home_requested_food_units_for_city_state(test_city_state,
 			house,
 			WorldData.RESOURCE_FISH
 		) == 4,
 		"A two-resident home must target one full day: 80 nutrition or four fish."
 	)
 	_expect(
-		CityResourceMatcherScript.get_city_public_food_reserve_target_nutrition()
+		CityResourceMatcherScript.get_city_public_food_reserve_target_nutrition_for_city_state(test_city_state, )
 		== 40,
 		"Two living citizens must protect a half-day public reserve of 40 nutrition."
 	)
 
-	var stockpile := CityObjectSystem.add_city_object({
+	var stockpile := CityObjectSystem.add_city_object_for_city_state(test_city_state, {
 		"object_type": CityObjectCatalog.CITY_OBJECT_STOCKPILE,
 		"top_left": Vector2i(12, 6),
 		"size_tiles": CityObjectCatalog.get_city_object_size_for_type(
@@ -1504,15 +1510,15 @@ func _test_household_and_public_food_reserve_targets() -> void:
 	})
 	var stockpile_id := int(stockpile.get("id", -1))
 	_expect(
-		CityResourceContainerSystem.add_resource_to_city_object_storage(
+		CityResourceContainerSystem.add_resource_to_city_object_storage_for_city_state(test_city_state,
 			stockpile_id,
 			WorldData.RESOURCE_FISH,
 			2
 		) == 2,
 		"The public reserve fixture must store exactly two fish."
 	)
-	first = CityCitizenRegistrySystem.get_city_citizen_by_id(int(first.get("id", -1)))
-	var protected_match := CityResourceMatcherScript.find_best_household_food_source(
+	first = CityCitizenRegistrySystem.get_city_citizen_by_id_for_city_state(test_city_state, int(first.get("id", -1)))
+	var protected_match := CityResourceMatcherScript.find_best_household_food_source_for_city_state(test_city_state,
 		first,
 		WorldData.RESOURCE_FISH,
 		4
@@ -1523,14 +1529,14 @@ func _test_household_and_public_food_reserve_targets() -> void:
 	)
 
 	_expect(
-		CityResourceContainerSystem.add_resource_to_city_object_storage(
+		CityResourceContainerSystem.add_resource_to_city_object_storage_for_city_state(test_city_state,
 			stockpile_id,
 			WorldData.RESOURCE_FISH,
 			1
 		) == 1,
 		"The pantry fixture must add one fish above the protected reserve."
 	)
-	var surplus_match := CityResourceMatcherScript.find_best_household_food_source(
+	var surplus_match := CityResourceMatcherScript.find_best_household_food_source_for_city_state(test_city_state,
 		first,
 		WorldData.RESOURCE_FISH,
 		4
@@ -1581,7 +1587,7 @@ func _test_survival_food_fallback_and_reservation_accounting() -> void:
 	var fishery_size := CityObjectCatalog.get_city_object_size_for_type(
 		CityObjectCatalog.CITY_OBJECT_FISHING_GROUNDS
 	)
-	var fishery := CityObjectSystem.add_city_object({
+	var fishery := CityObjectSystem.add_city_object_for_city_state(test_city_state, {
 		"object_type": CityObjectCatalog.CITY_OBJECT_FISHING_GROUNDS,
 		"top_left": Vector2i(10, 9),
 		"size_tiles": fishery_size,
@@ -1590,7 +1596,7 @@ func _test_survival_food_fallback_and_reservation_accounting() -> void:
 	})
 	var fishery_id := int(fishery.get("id", -1))
 	_expect(
-		CityResourceContainerSystem.add_resource_to_city_object_storage(
+		CityResourceContainerSystem.add_resource_to_city_object_storage_for_city_state(test_city_state,
 			fishery_id,
 			WorldData.RESOURCE_FISH,
 			1
@@ -1598,7 +1604,7 @@ func _test_survival_food_fallback_and_reservation_accounting() -> void:
 		"The fishery fixture must expose one unit of workplace output."
 	)
 
-	var pile_result := CityLogisticsSystem.add_resource_to_city_ground_piles_with_result({
+	var pile_result := CityLogisticsSystem.add_resource_to_city_ground_piles_with_result_for_city_state(test_city_state, {
 		"tile_position": Vector2i(7, 12),
 		"resource": WorldData.RESOURCE_FISH,
 		"amount_delta": 2,
@@ -1606,7 +1612,7 @@ func _test_survival_food_fallback_and_reservation_accounting() -> void:
 	var pile_id := _first_ground_pile_id(pile_result)
 	_expect(pile_id > 0, "The food fixture must create an ordinary fish pile.")
 
-	var first_match := CityResourceMatcherScript.find_best_survival_food_source(
+	var first_match := CityResourceMatcherScript.find_best_survival_food_source_for_city_state(test_city_state,
 		first,
 		100,
 		10,
@@ -1623,7 +1629,7 @@ func _test_survival_food_fallback_and_reservation_accounting() -> void:
 		"Assigning the first workplace-food request must reserve its unit."
 	)
 
-	var second_match := CityResourceMatcherScript.find_best_survival_food_source(
+	var second_match := CityResourceMatcherScript.find_best_survival_food_source_for_city_state(test_city_state,
 		second,
 		100,
 		10,
@@ -1640,7 +1646,7 @@ func _test_survival_food_fallback_and_reservation_accounting() -> void:
 		"Assigning the second food request must reserve the ordinary pile."
 	)
 
-	var third_match := CityResourceMatcherScript.find_best_survival_food_source(
+	var third_match := CityResourceMatcherScript.find_best_survival_food_source_for_city_state(test_city_state,
 		third,
 		100,
 		10,
@@ -1657,7 +1663,7 @@ func _test_survival_food_fallback_and_reservation_accounting() -> void:
 		"Assigning the third food request must reserve the pile's final fish."
 	)
 
-	var fourth_match := CityResourceMatcherScript.find_best_survival_food_source(
+	var fourth_match := CityResourceMatcherScript.find_best_survival_food_source_for_city_state(test_city_state,
 		fourth,
 		100,
 		10,
@@ -1668,7 +1674,7 @@ func _test_survival_food_fallback_and_reservation_accounting() -> void:
 		"Three fully reserved fish must not be promised to a fourth citizen."
 	)
 	_expect(
-		CitizenNeedsSystem.get_city_food_endpoint_unreserved_amount(
+		CitizenNeedsSystem.get_city_food_endpoint_unreserved_amount_for_city_state(test_city_state,
 			int(fourth.get("id", -1)),
 			CityLogisticsSystem.make_city_ground_pile_haul_endpoint(pile_id),
 			WorldData.RESOURCE_FISH
@@ -1695,7 +1701,7 @@ func _test_unreachable_food_tier_does_not_hide_fallbacks() -> void:
 	]
 
 	for top_left in stockpile_positions:
-		var stockpile := CityObjectSystem.add_city_object({
+		var stockpile := CityObjectSystem.add_city_object_for_city_state(test_city_state, {
 			"object_type": CityObjectCatalog.CITY_OBJECT_STOCKPILE,
 			"top_left": top_left,
 			"size_tiles": stockpile_size,
@@ -1703,7 +1709,7 @@ func _test_unreachable_food_tier_does_not_hide_fallbacks() -> void:
 			"city_world": city_world,
 		})
 		_expect(
-			CityResourceContainerSystem.add_resource_to_city_object_storage(
+			CityResourceContainerSystem.add_resource_to_city_object_storage_for_city_state(test_city_state,
 				int(stockpile.get("id", -1)),
 				WorldData.RESOURCE_FISH,
 				1
@@ -1714,7 +1720,7 @@ func _test_unreachable_food_tier_does_not_hide_fallbacks() -> void:
 	var fishery_size := CityObjectCatalog.get_city_object_size_for_type(
 		CityObjectCatalog.CITY_OBJECT_FISHING_GROUNDS
 	)
-	var fishery := CityObjectSystem.add_city_object({
+	var fishery := CityObjectSystem.add_city_object_for_city_state(test_city_state, {
 		"object_type": CityObjectCatalog.CITY_OBJECT_FISHING_GROUNDS,
 		"top_left": Vector2i(23, 8),
 		"size_tiles": fishery_size,
@@ -1723,7 +1729,7 @@ func _test_unreachable_food_tier_does_not_hide_fallbacks() -> void:
 	})
 	var fishery_id := int(fishery.get("id", -1))
 	_expect(
-		CityResourceContainerSystem.add_resource_to_city_object_storage(
+		CityResourceContainerSystem.add_resource_to_city_object_storage_for_city_state(test_city_state,
 			fishery_id,
 			WorldData.RESOURCE_FISH,
 			1
@@ -1731,7 +1737,7 @@ func _test_unreachable_food_tier_does_not_hide_fallbacks() -> void:
 		"The reachable fallback workplace must contain fish."
 	)
 
-	var pile_result := CityLogisticsSystem.add_resource_to_city_ground_piles_with_result({
+	var pile_result := CityLogisticsSystem.add_resource_to_city_ground_piles_with_result_for_city_state(test_city_state, {
 		"tile_position": Vector2i(20, 13),
 		"resource": WorldData.RESOURCE_FISH,
 		"amount_delta": 1,
@@ -1748,7 +1754,7 @@ func _test_unreachable_food_tier_does_not_hide_fallbacks() -> void:
 			WorldData.TERRAIN_MOUNTAIN
 		)
 	var survival_workplace_match := (
-		CityResourceMatcherScript.find_best_survival_food_source(
+		CityResourceMatcherScript.find_best_survival_food_source_for_city_state(test_city_state,
 			citizen,
 			100,
 			10,
@@ -1765,7 +1771,7 @@ func _test_unreachable_food_tier_does_not_hide_fallbacks() -> void:
 	)
 
 	var household_workplace_match := (
-		CityResourceMatcherScript.find_best_household_food_source(
+		CityResourceMatcherScript.find_best_household_food_source_for_city_state(test_city_state,
 			citizen,
 			WorldData.RESOURCE_FISH,
 			1,
@@ -1780,7 +1786,7 @@ func _test_unreachable_food_tier_does_not_hide_fallbacks() -> void:
 	)
 
 	_expect(
-		CityResourceContainerSystem.remove_resource_from_city_object_storage(
+		CityResourceContainerSystem.remove_resource_from_city_object_storage_for_city_state(test_city_state,
 			fishery_id,
 			WorldData.RESOURCE_FISH,
 			1
@@ -1788,7 +1794,7 @@ func _test_unreachable_food_tier_does_not_hide_fallbacks() -> void:
 		"The fixture must empty workplace food before testing ground fallback."
 	)
 	var survival_ground_match := (
-		CityResourceMatcherScript.find_best_survival_food_source(
+		CityResourceMatcherScript.find_best_survival_food_source_for_city_state(test_city_state,
 			citizen,
 			100,
 			10,
@@ -1803,7 +1809,7 @@ func _test_unreachable_food_tier_does_not_hide_fallbacks() -> void:
 	)
 
 	var household_ground_match := (
-		CityResourceMatcherScript.find_best_household_food_source(
+		CityResourceMatcherScript.find_best_household_food_source_for_city_state(test_city_state,
 			citizen,
 			WorldData.RESOURCE_FISH,
 			1,
@@ -1841,14 +1847,14 @@ func _test_unified_food_search_avoids_budget_starvation() -> void:
 	var second := _add_hungry_citizen("Second scan", Vector2i(28, 15))
 	var first_id := int(first.get("id", -1))
 	var second_id := int(second.get("id", -1))
-	var house := CityObjectSystem.add_city_object({
+	var house := CityObjectSystem.add_city_object_for_city_state(test_city_state, {
 		"object_type": CityObjectCatalog.CITY_OBJECT_HOUSE,
 		"top_left": Vector2i(7, 2),
 		"size_tiles": CityObjectCatalog.get_city_object_size_for_type(CityObjectCatalog.CITY_OBJECT_HOUSE),
 		"object_owner": "player",
 		"city_world": city_world,
 	})
-	var stockpile := CityObjectSystem.add_city_object({
+	var stockpile := CityObjectSystem.add_city_object_for_city_state(test_city_state, {
 		"object_type": CityObjectCatalog.CITY_OBJECT_STOCKPILE,
 		"top_left": Vector2i(11, 2),
 		"size_tiles": CityObjectCatalog.get_city_object_size_for_type(CityObjectCatalog.CITY_OBJECT_STOCKPILE),
@@ -1856,7 +1862,7 @@ func _test_unified_food_search_avoids_budget_starvation() -> void:
 		"city_world": city_world,
 	})
 	var keep := _add_keep(city_world, Vector2i(15, 1))
-	var fishery := CityObjectSystem.add_city_object({
+	var fishery := CityObjectSystem.add_city_object_for_city_state(test_city_state, {
 		"object_type": CityObjectCatalog.CITY_OBJECT_FISHING_GROUNDS,
 		"top_left": Vector2i(21, 2),
 		"size_tiles": CityObjectCatalog.get_city_object_size_for_type(
@@ -1867,20 +1873,20 @@ func _test_unified_food_search_avoids_budget_starvation() -> void:
 	})
 
 	_expect(
-		CityAssignmentSystem.assign_city_citizen_home(
+		CityAssignmentSystem.assign_city_citizen_home_for_city_state(test_city_state,
 			first_id,
 			int(house.get("id", -1))
 		),
 		"The first hungry citizen must own the isolated pantry source."
 	)
 	_expect(
-		CityAssignmentSystem.remove_city_citizen_home(second_id),
+		CityAssignmentSystem.remove_city_citizen_home_for_city_state(test_city_state, second_id),
 		"The later hungry citizen must have no private pantry source."
 	)
 
 	for food_object in [house, stockpile, keep, fishery]:
 		_expect(
-			CityResourceContainerSystem.add_resource_to_city_object_storage(
+			CityResourceContainerSystem.add_resource_to_city_object_storage_for_city_state(test_city_state,
 				int(food_object.get("id", -1)),
 				WorldData.RESOURCE_FISH,
 				1
@@ -1888,7 +1894,7 @@ func _test_unified_food_search_avoids_budget_starvation() -> void:
 			"Every isolated container source must contain one physical fish."
 		)
 
-	var pile_result := CityLogisticsSystem.add_resource_to_city_ground_piles_with_result({
+	var pile_result := CityLogisticsSystem.add_resource_to_city_ground_piles_with_result_for_city_state(test_city_state, {
 		"tile_position": Vector2i(27, 15),
 		"resource": WorldData.RESOURCE_FISH,
 		"amount_delta": 2,
@@ -1907,15 +1913,15 @@ func _test_unified_food_search_avoids_budget_starvation() -> void:
 			Vector2i(x, 10),
 			WorldData.TERRAIN_MOUNTAIN
 		)
-	first = CityCitizenRegistrySystem.get_city_citizen_by_id(first_id)
-	second = CityCitizenRegistrySystem.get_city_citizen_by_id(second_id)
-	var first_probe := CityResourceMatcherScript.find_best_survival_food_source(
+	first = CityCitizenRegistrySystem.get_city_citizen_by_id_for_city_state(test_city_state, first_id)
+	second = CityCitizenRegistrySystem.get_city_citizen_by_id_for_city_state(test_city_state, second_id)
+	var first_probe := CityResourceMatcherScript.find_best_survival_food_source_for_city_state(test_city_state,
 		first,
 		100,
 		10,
 		8
 	)
-	var second_probe := CityResourceMatcherScript.find_best_survival_food_source(
+	var second_probe := CityResourceMatcherScript.find_best_survival_food_source_for_city_state(test_city_state,
 		second,
 		100,
 		10,
@@ -1934,11 +1940,18 @@ func _test_unified_food_search_avoids_budget_starvation() -> void:
 		"A reachable later citizen must find ground food without tier-budget starvation."
 	)
 
-	CitizenDecisionSystemScript.reset_runtime_state()
-	CitizenDecisionSystemScript._process_food_needs(true)
-	var second_task := CityCitizenTaskRuntimeSystem.get_city_citizen_current_task(second_id)
+	CitizenDecisionSystemScript._reset_runtime_state_for_city_state(
+		test_city_state,
+		test_city_state.citizen_decision_runtime_state
+	)
+	CitizenDecisionSystemScript._process_food_needs_for_city_state(
+		test_city_state,
+		test_city_state.citizen_decision_runtime_state,
+		true
+	)
+	var second_task := CityCitizenTaskRuntimeSystem.get_city_citizen_current_task_for_city_state(test_city_state, second_id)
 	_expect(
-		str(CityCitizenTaskRuntimeSystem.get_city_citizen_current_task(first_id).get("kind", ""))
+		str(CityCitizenTaskRuntimeSystem.get_city_citizen_current_task_for_city_state(test_city_state, first_id).get("kind", ""))
 		== CityCitizens.CITY_CITIZEN_TASK_KIND_NONE
 		and str(second_task.get("kind", ""))
 		== CityCitizens.CITY_CITIZEN_TASK_KIND_ACQUIRE_FOOD
@@ -1947,16 +1960,30 @@ func _test_unified_food_search_avoids_budget_starvation() -> void:
 	)
 
 	_expect(
-		CityCitizenTaskRuntimeSystem.clear_city_citizen_task(
+		CityCitizenTaskRuntimeSystem.clear_city_citizen_task_for_city_state(test_city_state,
 			second_id,
 			CityCitizens.CITY_CITIZEN_TASK_SOURCE_AUTONOMY
 		),
 		"The fixture must release the critical food reservation before normal seeking."
 	)
-	CitizenNeedsSystem.set_city_citizen_hunger_state(first_id, 40, 0)
-	CitizenNeedsSystem.set_city_citizen_hunger_state(second_id, 40, 0)
-	CitizenDecisionSystemScript._process_food_needs(false)
-	second_task = CityCitizenTaskRuntimeSystem.get_city_citizen_current_task(second_id)
+	CitizenNeedsSystem.set_city_citizen_hunger_state_for_city_state(
+		test_city_state,
+		first_id,
+		40,
+		0
+	)
+	CitizenNeedsSystem.set_city_citizen_hunger_state_for_city_state(
+		test_city_state,
+		second_id,
+		40,
+		0
+	)
+	CitizenDecisionSystemScript._process_food_needs_for_city_state(
+		test_city_state,
+		test_city_state.citizen_decision_runtime_state,
+		false
+	)
+	second_task = CityCitizenTaskRuntimeSystem.get_city_citizen_current_task_for_city_state(test_city_state, second_id)
 	_expect(
 		str(second_task.get("kind", ""))
 		== CityCitizens.CITY_CITIZEN_TASK_KIND_ACQUIRE_FOOD
@@ -1972,7 +1999,7 @@ func _test_full_storage_construction_relocation_and_cancel_preview() -> void:
 	var stockpile_size := CityObjectCatalog.get_city_object_size_for_type(
 		CityObjectCatalog.CITY_OBJECT_STOCKPILE
 	)
-	var stockpile := CityObjectSystem.add_city_object({
+	var stockpile := CityObjectSystem.add_city_object_for_city_state(test_city_state, {
 		"object_type": CityObjectCatalog.CITY_OBJECT_STOCKPILE,
 		"top_left": Vector2i(2, 2),
 		"size_tiles": stockpile_size,
@@ -1984,7 +2011,7 @@ func _test_full_storage_construction_relocation_and_cancel_preview() -> void:
 		stockpile
 	)
 	_expect(
-		CityResourceContainerSystem.add_resource_to_city_object_storage(
+		CityResourceContainerSystem.add_resource_to_city_object_storage_for_city_state(test_city_state,
 			stockpile_id,
 			WorldData.RESOURCE_COAL,
 			stockpile_capacity
@@ -1995,7 +2022,7 @@ func _test_full_storage_construction_relocation_and_cancel_preview() -> void:
 	var house_size := CityObjectCatalog.get_city_object_size_for_type(
 		CityObjectCatalog.CITY_OBJECT_HOUSE
 	)
-	var house_site := CityConstructionSystemScript.create_rectangular_site({
+	var house_site := CityConstructionSystemScript.create_rectangular_site_for_city_state(test_city_state, {
 		"object_type": CityObjectCatalog.CITY_OBJECT_HOUSE,
 		"top_left": Vector2i(15, 14),
 		"size_tiles": house_size,
@@ -2009,14 +2036,14 @@ func _test_full_storage_construction_relocation_and_cancel_preview() -> void:
 		return
 
 	var footprint_tiles: Array = house_site.get("footprint_tiles", [])
-	var pile_result := CityLogisticsSystem.add_resource_to_city_ground_piles_with_result({
+	var pile_result := CityLogisticsSystem.add_resource_to_city_ground_piles_with_result_for_city_state(test_city_state, {
 		"tile_position": footprint_tiles[0],
 		"resource": WorldData.RESOURCE_COAL,
 		"amount_delta": 1,
 	})
 	var pile_id := _first_ground_pile_id(pile_result)
-	CityConstructionSystemScript.refresh_city_construction_site(site_id)
-	CityWorkSystemScript.synchronize_player_work_board()
+	CityConstructionSystemScript.refresh_city_construction_site_for_city_state(test_city_state, site_id)
+	CityWorkSystemScript.synchronize_player_work_board_for_city_state(test_city_state)
 
 	var site_order := _find_order(
 		CityWorkSystemScript.ORDER_TYPE_CONSTRUCTION_SITE,
@@ -2039,7 +2066,7 @@ func _test_full_storage_construction_relocation_and_cancel_preview() -> void:
 		"A footprint pile must expose an actionable ground-relocation job when public storage is full."
 	)
 	_expect(
-		CityConstructionSystemScript.can_relocate_ground_pile_outside_site(
+		CityConstructionSystemScript.can_relocate_ground_pile_outside_site_for_city_state(test_city_state,
 			site_id,
 			pile_id
 		),
@@ -2047,19 +2074,19 @@ func _test_full_storage_construction_relocation_and_cancel_preview() -> void:
 	)
 
 	var relocation_candidate := (
-		CityWorkSystemScript.get_best_player_job_for_citizen(citizen_id)
+		CityWorkSystemScript.get_best_player_job_for_citizen_for_city_state(test_city_state, citizen_id)
 	)
 	_expect(
 		not relocation_candidate.is_empty()
 		and int(relocation_candidate.get("work_order_id", -1))
 		== int(site_order.get("id", -2))
-		and CityWorkSystemScript.assign_player_job(
+		and CityWorkSystemScript.assign_player_job_for_city_state(test_city_state,
 			citizen_id,
 			relocation_candidate
 		),
 		"The relocation worker must claim the site-owned cleanup job."
 	)
-	CityWorkSystemScript.synchronize_player_work_board()
+	CityWorkSystemScript.synchronize_player_work_board_for_city_state(test_city_state)
 	site_order = _find_order(
 		CityWorkSystemScript.ORDER_TYPE_CONSTRUCTION_SITE,
 		site_id
@@ -2094,7 +2121,7 @@ func _test_full_storage_construction_relocation_and_cancel_preview() -> void:
 		"An active cleanup job must expose its claim and both reservation quantities."
 	)
 
-	var preview_tiles := CityWorkSystemScript.get_cancel_preview_tiles(
+	var preview_tiles := CityWorkSystemScript.get_cancel_preview_tiles_for_city_state(test_city_state,
 		[footprint_tiles.back()]
 	)
 	var expected_preview: Array[Vector2i] = []
@@ -2153,7 +2180,7 @@ func _test_safe_boundary_and_cancellation_preserve_physical_cargo() -> void:
 	if site_id <= 0:
 		return
 
-	var source_result := CityLogisticsSystem.add_resource_to_city_ground_piles_with_result({
+	var source_result := CityLogisticsSystem.add_resource_to_city_ground_piles_with_result_for_city_state(test_city_state, {
 		"tile_position": Vector2i(7, 7),
 		"resource": WorldData.RESOURCE_STONE,
 		"amount_delta": 2,
@@ -2164,14 +2191,14 @@ func _test_safe_boundary_and_cancellation_preserve_physical_cargo() -> void:
 		site_id
 	)
 	_expect(
-		CityCitizenInventorySystem.set_city_citizen_haul_cargo(
+		CityCitizenInventorySystem.set_city_citizen_haul_cargo_for_city_state(test_city_state,
 			citizen_id,
 			WorldData.RESOURCE_STONE,
 			2
 		) == 2,
 		"The cancellation fixture must put physical stone in transit."
 	)
-	var assigned := CityCitizenTaskRuntimeSystem.assign_city_citizen_task(
+	var assigned := CityCitizenTaskRuntimeSystem.assign_city_citizen_task_for_city_state(test_city_state,
 		citizen_id,
 		{
 			"kind": CityCitizens.CITY_CITIZEN_TASK_KIND_HAUL,
@@ -2201,37 +2228,37 @@ func _test_safe_boundary_and_cancellation_preserve_physical_cargo() -> void:
 	)
 	_expect(assigned, "The fixture must attach carried cargo to the site request.")
 
-	var total_before := CityResourceAccountingSystem.get_total_physical_city_resource_amount(
+	var total_before := CityResourceAccountingSystem.get_total_physical_city_resource_amount_for_city_state(test_city_state,
 		WorldData.RESOURCE_STONE
 	)
-	var task_before := CityCitizenTaskRuntimeSystem.get_city_citizen_current_task(citizen_id)
+	var task_before := CityCitizenTaskRuntimeSystem.get_city_citizen_current_task_for_city_state(test_city_state, citizen_id)
 	_expect(
 		not CitizenTaskSystemScript
-		.prepare_unemployed_citizen_for_priority_interrupt(citizen_id),
+		.prepare_unemployed_citizen_for_priority_interrupt_for_city_state(test_city_state, citizen_id),
 		"Normal player work must wait when an unemployed citizen already carries cargo."
 	)
 	_expect(
-		CityCitizenInventorySystem.get_city_citizen_haul_cargo_resource_amount(
+		CityCitizenInventorySystem.get_city_citizen_haul_cargo_resource_amount_for_city_state(test_city_state,
 			citizen_id,
 			WorldData.RESOURCE_STONE
 		) == 2
-		and CityCitizenTaskRuntimeSystem.get_city_citizen_current_task(citizen_id) == task_before,
+		and CityCitizenTaskRuntimeSystem.get_city_citizen_current_task_for_city_state(test_city_state, citizen_id) == task_before,
 		"The normal safe-boundary check must preserve both cargo and its current delivery."
 	)
 
 	_expect(
-		CityConstructionSystemScript.cancel_city_construction_site(site_id),
+		CityConstructionSystemScript.cancel_city_construction_site_for_city_state(test_city_state, site_id),
 		"Cancel Task must cancel the blueprint referenced by in-flight cargo."
 	)
 	_expect(
-		CityCitizenInventorySystem.get_city_citizen_haul_cargo_resource_amount(
+		CityCitizenInventorySystem.get_city_citizen_haul_cargo_resource_amount_for_city_state(test_city_state,
 			citizen_id,
 			WorldData.RESOURCE_STONE
 		) == 2,
 		"Blueprint cancellation must preserve picked-up cargo instead of spilling or deleting it."
 	)
 	_expect(
-		CityResourceAccountingSystem.get_total_physical_city_resource_amount(
+		CityResourceAccountingSystem.get_total_physical_city_resource_amount_for_city_state(test_city_state,
 			WorldData.RESOURCE_STONE
 		) == total_before,
 		"Blueprint cancellation must conserve the total amount of physical cargo and resources."
@@ -2269,7 +2296,7 @@ func _test_cargo_ready_demand_preempts_soft_claim() -> void:
 	var keep_endpoint := CityLogisticsSystem.make_city_citizen_haul_endpoint(
 		keep_id
 	)
-	var house_site := CityConstructionSystemScript.create_rectangular_site({
+	var house_site := CityConstructionSystemScript.create_rectangular_site_for_city_state(test_city_state, {
 		"object_type": CityObjectCatalog.CITY_OBJECT_HOUSE,
 		"top_left": Vector2i(12, 9),
 		"size_tiles": house_size,
@@ -2292,7 +2319,7 @@ func _test_cargo_ready_demand_preempts_soft_claim() -> void:
 	if keep_id <= 0 or site_id <= 0:
 		return
 
-	var source_result := CityLogisticsSystem.add_resource_to_city_ground_piles_with_result({
+	var source_result := CityLogisticsSystem.add_resource_to_city_ground_piles_with_result_for_city_state(test_city_state, {
 		"tile_position": Vector2i(24, 10),
 		"resource": WorldData.RESOURCE_STONE,
 		"amount_delta": 4,
@@ -2301,7 +2328,7 @@ func _test_cargo_ready_demand_preempts_soft_claim() -> void:
 	var source_endpoint := CityLogisticsSystem.make_city_ground_pile_haul_endpoint(
 		source_id
 	)
-	var soft_task_assigned := CityCitizenTaskRuntimeSystem.assign_city_citizen_task(
+	var soft_task_assigned := CityCitizenTaskRuntimeSystem.assign_city_citizen_task_for_city_state(test_city_state,
 		claimant_id,
 		{
 			"kind": CityCitizens.CITY_CITIZEN_TASK_KIND_HAUL,
@@ -2330,27 +2357,28 @@ func _test_cargo_ready_demand_preempts_soft_claim() -> void:
 		}
 	)
 	var soft_reservation_id := (
-		CityLogisticsSystem.get_city_haul_reservation_id_for_citizen(
+		CityLogisticsSystem.get_city_haul_reservation_id_for_citizen_for_city_state(test_city_state,
 			claimant_id
 		)
 	)
 	_expect(
 		soft_task_assigned
-		and CityLogisticsSystem.city_haul_reservation_is_soft(
+		and CityLogisticsSystem.city_haul_reservation_is_soft_for_city_state(
+			test_city_state,
 			soft_reservation_id
 		),
 		"An unpicked construction assignment must remain a transferable soft reservation."
 	)
 
 	_expect(
-		CityCitizenInventorySystem.set_city_citizen_haul_cargo(
+		CityCitizenInventorySystem.set_city_citizen_haul_cargo_for_city_state(test_city_state,
 			carrier_id,
 			WorldData.RESOURCE_STONE,
 			4
 		) == 4,
 		"The ready carrier must physically hold the site's complete stone deficit."
 	)
-	var carrier_task_assigned := CityCitizenTaskRuntimeSystem.assign_city_citizen_task(
+	var carrier_task_assigned := CityCitizenTaskRuntimeSystem.assign_city_citizen_task_for_city_state(test_city_state,
 		carrier_id,
 		{
 			"kind": CityCitizens.CITY_CITIZEN_TASK_KIND_HAUL,
@@ -2388,14 +2416,15 @@ func _test_cargo_ready_demand_preempts_soft_claim() -> void:
 	if not soft_task_assigned or not carrier_task_assigned:
 		return
 
-	carrier = CityCitizenRegistrySystem.get_city_citizen_by_id(carrier_id)
-	var carrier_task := CityCitizenTaskRuntimeSystem.get_city_citizen_current_task(
+	carrier = CityCitizenRegistrySystem.get_city_citizen_by_id_for_city_state(test_city_state, carrier_id)
+	var carrier_task := CityCitizenTaskRuntimeSystem.get_city_citizen_current_task_for_city_state(test_city_state,
 		carrier_id
 	)
-	var carrier_haul := CityCitizenTaskRuntimeSystem.get_city_citizen_current_haul(
+	var carrier_haul := CityCitizenTaskRuntimeSystem.get_city_citizen_current_haul_for_city_state(test_city_state,
 		carrier_id
 	)
-	CitizenHaulingSystemScript._advance_pending_destination(
+	CitizenHaulingSystemScript._advance_pending_destination_for_city_state(
+		test_city_state,
 		city_world,
 		{
 			"citizen_id": carrier_id,
@@ -2405,8 +2434,8 @@ func _test_cargo_ready_demand_preempts_soft_claim() -> void:
 			"path_requests_remaining": 8,
 		}
 	)
-	var final_reservation := CityLogisticsSystem.get_city_haul_reservation(
-		CityLogisticsSystem.get_city_haul_reservation_id_for_citizen(
+	var final_reservation := CityLogisticsSystem.get_city_haul_reservation_for_city_state(test_city_state,
+		CityLogisticsSystem.get_city_haul_reservation_id_for_citizen_for_city_state(test_city_state,
 			carrier_id
 		)
 	)
@@ -2425,18 +2454,18 @@ func _test_cargo_ready_demand_preempts_soft_claim() -> void:
 		"Cargo already in hand must reroute from passive storage to the compatible player-command demand."
 	)
 	_expect(
-		CityLogisticsSystem.get_city_haul_reservation(
+		CityLogisticsSystem.get_city_haul_reservation_for_city_state(test_city_state,
 			soft_reservation_id
 		).is_empty()
 		and str(
-			CityCitizenTaskRuntimeSystem.get_city_citizen_current_task(
+			CityCitizenTaskRuntimeSystem.get_city_citizen_current_task_for_city_state(test_city_state,
 				claimant_id
 			).get("kind", "")
 		) == CityCitizens.CITY_CITIZEN_TASK_KIND_NONE,
 		"The ready carrier must displace the other citizen's unpicked claim without duplicating the delivery."
 	)
 	_expect(
-		CityCitizenInventorySystem.get_city_citizen_haul_cargo_resource_amount(
+		CityCitizenInventorySystem.get_city_citizen_haul_cargo_resource_amount_for_city_state(test_city_state,
 			carrier_id,
 			WorldData.RESOURCE_STONE
 		) == 4,
@@ -2444,8 +2473,7 @@ func _test_cargo_ready_demand_preempts_soft_claim() -> void:
 	)
 
 
-func _test_resource_demand_priorities_are_adjustable() -> void:
-	CityResourceMatcherScript.reset_resource_demand_category_priorities()
+func _test_resource_demand_priorities_are_immutable() -> void:
 	var default_command_score := (
 		CityResourceMatcherScript.score_resource_destination({
 			"category": (
@@ -2473,48 +2501,34 @@ func _test_resource_demand_priorities_are_adjustable() -> void:
 		"The default policy must strongly favor compatible player-command demand over passive storage."
 	)
 	_expect(
-		CityResourceMatcherScript.set_resource_demand_category_priority(
-			CityResourceMatcherScript.RESOURCE_DEMAND_CATEGORY_PLAYER_COMMAND,
-			0
+		CityResourceMatcherScript.RESOURCE_DEMAND_CATEGORY_PRIORITIES.is_read_only()
+		and CityResourceMatcherScript.get_resource_demand_category_priority(
+			CityResourceMatcherScript.RESOURCE_DEMAND_CATEGORY_PLAYER_COMMAND
+		) > CityResourceMatcherScript.get_resource_demand_category_priority(
+			CityResourceMatcherScript.RESOURCE_DEMAND_CATEGORY_STORAGE
 		)
-		and CityResourceMatcherScript.set_resource_demand_category_priority(
-			CityResourceMatcherScript.RESOURCE_DEMAND_CATEGORY_STORAGE,
-			100
-		),
-		"Demand category priorities must expose bounded runtime adjustment hooks."
-	)
-	var adjusted_command_score := (
-		CityResourceMatcherScript.score_resource_destination({
-			"category": (
-				CityResourceMatcherScript
-				.RESOURCE_DEMAND_CATEGORY_PLAYER_COMMAND
-			),
+		and CityResourceMatcherScript.score_resource_destination({
+			"category": CityResourceMatcherScript.RESOURCE_DEMAND_CATEGORY_PLAYER_COMMAND,
 			"path_cost": 100_000,
 			"fulfillment_amount": 4,
 			"cargo_ready": true,
-		})
-	)
-	var adjusted_storage_score := (
-		CityResourceMatcherScript.score_resource_destination({
-			"category": (
-				CityResourceMatcherScript
-				.RESOURCE_DEMAND_CATEGORY_STORAGE
-			),
+		}) == default_command_score
+		and CityResourceMatcherScript.score_resource_destination({
+			"category": CityResourceMatcherScript.RESOURCE_DEMAND_CATEGORY_STORAGE,
 			"path_cost": 10_000,
 			"fulfillment_amount": 4,
 			"cargo_ready": true,
-		})
+		}) == default_storage_score,
+		"Demand category priorities must be immutable configuration with deterministic scoring."
 	)
-	_expect(
-		adjusted_storage_score > adjusted_command_score,
-		"Changing policy weights must alter destination selection without rewriting correctness rules."
-	)
-	CityResourceMatcherScript.reset_resource_demand_category_priorities()
 
 
 func _test_off_shift_homeless_idle_wander() -> void:
 	var city_world := _reset_fixture()
-	CitizenDecisionSystemScript.reset_runtime_state()
+	CitizenDecisionSystemScript._reset_runtime_state_for_city_state(
+		test_city_state,
+		test_city_state.citizen_decision_runtime_state
+	)
 	var keep := _add_keep(city_world, Vector2i(2, 2))
 	_expect(
 		not keep.is_empty(),
@@ -2527,7 +2541,7 @@ func _test_off_shift_homeless_idle_wander() -> void:
 	var starting_tile := Vector2i(26, 16)
 	var citizen := _add_citizen("Off Shift Wanderer", starting_tile)
 	var citizen_id := int(citizen.get("id", -1))
-	var fishery := CityObjectSystem.add_city_object({
+	var fishery := CityObjectSystem.add_city_object_for_city_state(test_city_state, {
 		"object_type": CityObjectCatalog.CITY_OBJECT_FISHING_GROUNDS,
 		"top_left": Vector2i(21, 14),
 		"size_tiles": CityObjectCatalog.get_city_object_size_for_type(
@@ -2539,14 +2553,16 @@ func _test_off_shift_homeless_idle_wander() -> void:
 	var fishery_id := int(fishery.get("id", -1))
 	_expect(
 		fishery_id > 0
-		and CityAssignmentSystem.assign_city_citizen_job(citizen_id, fishery_id),
+		and CityAssignmentSystem.assign_city_citizen_job_for_city_state(test_city_state, citizen_id, fishery_id),
 		"The off-shift wanderer must retain a distant Fishery job."
 	)
 	_expect(
 		int(citizen.get("home_object_id", -1)) < 0,
 		"The off-shift wander fixture citizen must remain homeless."
 	)
-	var idle_anchor := CitizenDecisionSystemScript._get_idle_anchor_tile(
+	var idle_anchor := CitizenDecisionSystemScript._get_idle_anchor_tile_for_city_state(
+		test_city_state,
+		test_city_state.citizen_decision_runtime_state,
 		citizen,
 		starting_tile
 	)
@@ -2561,11 +2577,15 @@ func _test_off_shift_homeless_idle_wander() -> void:
 	# Force only the decision deadline, not the deterministic choice. Repeated
 	# choices include the intended brief standing periods before a short walk.
 	for _attempt in range(12):
-		CitizenDecisionSystemScript._next_idle_decision_minute_by_citizen_id[
+		test_city_state.citizen_decision_runtime_state.next_idle_decision_minute_by_citizen_id[
 			citizen_id
 		] = SimulationClock.absolute_world_minutes
-		CitizenDecisionSystemScript._process_bounded_idle_behaviors(false)
-		citizen = CityCitizenRegistrySystem.get_city_citizen_by_id(citizen_id)
+		CitizenDecisionSystemScript._process_bounded_idle_behaviors_for_city_state(
+			test_city_state,
+			test_city_state.citizen_decision_runtime_state,
+			false
+		)
+		citizen = CityCitizenRegistrySystem.get_city_citizen_by_id_for_city_state(test_city_state, citizen_id)
 
 		if (
 			str(citizen.get("movement_state", ""))
@@ -2581,12 +2601,12 @@ func _test_off_shift_homeless_idle_wander() -> void:
 	_expect(
 		int(citizen.get("job_object_id", -1)) == fishery_id
 		and str(
-			CityCitizenTaskRuntimeSystem.get_city_citizen_current_task(citizen_id).get(
+			CityCitizenTaskRuntimeSystem.get_city_citizen_current_task_for_city_state(test_city_state, citizen_id).get(
 				"kind",
 				""
 			)
 		) == CityCitizens.CITY_CITIZEN_TASK_KIND_NONE
-		and CityCitizenInventorySystem.get_city_citizen_haul_cargo_amount(citizen_id) == 0,
+		and CityCitizenInventorySystem.get_city_citizen_haul_cargo_amount_for_city_state(test_city_state, citizen_id) == 0,
 		"Idle wandering must preserve the Fishery job without creating a task or cargo."
 	)
 
@@ -2610,16 +2630,20 @@ func _test_off_shift_homeless_idle_wander() -> void:
 	)
 
 	SimulationClock.start_new_game(1, 8, 0)
-	CitizenDecisionSystemScript._queue_all_eligible_scheduled_tasks(
+	CitizenDecisionSystemScript._queue_all_eligible_scheduled_tasks_for_city_state(
+		test_city_state,
+		test_city_state.citizen_decision_runtime_state,
 		CitizenDecisionSystemScript.SCHEDULE_PHASE_WORK_SHIFT
 	)
-	CitizenDecisionSystemScript._process_decision_queue(
+	CitizenDecisionSystemScript._process_decision_queue_for_city_state(
+		test_city_state,
+		test_city_state.citizen_decision_runtime_state,
 		CitizenDecisionSystemScript.SCHEDULE_PHASE_WORK_SHIFT
 	)
-	citizen = CityCitizenRegistrySystem.get_city_citizen_by_id(citizen_id)
+	citizen = CityCitizenRegistrySystem.get_city_citizen_by_id_for_city_state(test_city_state, citizen_id)
 	_expect(
 		str(
-			CityCitizenTaskRuntimeSystem.get_city_citizen_current_task(citizen_id).get(
+			CityCitizenTaskRuntimeSystem.get_city_citizen_current_task_for_city_state(test_city_state, citizen_id).get(
 				"kind",
 				""
 			)
@@ -2632,7 +2656,6 @@ func _test_off_shift_homeless_idle_wander() -> void:
 
 func _reset_fixture() -> WorldData:
 	WorldData.reset_runtime_session_state()
-	CityResourceMatcherScript.reset_resource_demand_category_priorities()
 	SimulationClock.start_new_game()
 	var city_world := WorldData.new()
 	city_world.setup(TEST_WORLD_SIZE.x, TEST_WORLD_SIZE.y, TEST_WORLD_SEED)
@@ -2646,23 +2669,28 @@ func _reset_fixture() -> WorldData:
 			tile["fertility"] = 50.0
 
 	city_world.mark_tile_data_changed()
-	WorldData.store_city_world_save(city_world, TEST_WORLD_SEED)
-	var test_culture := WorldData.create_culture(
-		"Work System Test Culture"
-	)
-	test_culture_id = int(test_culture.get("id", -1))
-	WorldPoliticalState.replace_current_city_runtime_data({
+	test_fixture = CitySettlementTestFixtureScript.create({
+		"label": "Work System Test",
+		"city_world": city_world,
+		"city_seed": TEST_WORLD_SEED,
+	})
+	_expect(test_fixture != null, "The work-system fixture must be created.")
+	if test_fixture == null:
+		return null
+	test_city_state = test_fixture.city_state
+	test_culture_id = test_fixture.culture_id
+	test_city_state.city_runtime_data.merge({
 		"name": "Work System Test City",
 		"primary_culture_id": test_culture_id,
 		"founded": true,
 		"can_build": true,
-	})
+	}, true)
 	return city_world
 
 
 func _add_citizen(_display_name: String, tile_position: Vector2i) -> Dictionary:
 	# An empty name requests the normal deterministic sex-specific pool entry.
-	return CityCitizenRegistrySystem.add_city_citizen(
+	return CityCitizenRegistrySystem.add_city_citizen_for_city_state(test_city_state,
 		"",
 		tile_position,
 		CityCitizens.CITY_CITIZEN_SEX_FEMALE,
@@ -2674,8 +2702,8 @@ func _add_keep(
 	city_world: WorldData,
 	top_left: Vector2i
 ) -> Dictionary:
-	var city_state = WorldPoliticalState.get_current_city_simulation_state()
-	if not city_state is CitySettlementSimulationState:
+	var city_state := test_city_state
+	if city_state == null:
 		return {}
 
 	var runtime_data: Dictionary = city_state.city_runtime_data
@@ -2683,7 +2711,7 @@ func _add_keep(
 	var could_build := bool(runtime_data.get("can_build", false))
 	runtime_data["founded"] = false
 	runtime_data["can_build"] = false
-	var keep := CityObjectSystem.add_city_object({
+	var keep := CityObjectSystem.add_city_object_for_city_state(test_city_state, {
 		"object_type": CityObjectCatalog.CITY_OBJECT_CITY_CENTER,
 		"top_left": top_left,
 		"size_tiles": CityObjectCatalog.get_city_object_size_for_type(
@@ -2709,16 +2737,16 @@ func _add_hungry_citizen(
 	tile_position: Vector2i
 ) -> Dictionary:
 	var citizen := _add_citizen(display_name, tile_position)
-	CitizenNeedsSystem.set_city_citizen_hunger_state(
+	CitizenNeedsSystem.set_city_citizen_hunger_state_for_city_state(test_city_state,
 		int(citizen.get("id", -1)),
 		20,
 		0
 	)
-	return CityCitizenRegistrySystem.get_city_citizen_by_id(int(citizen.get("id", -1)))
+	return CityCitizenRegistrySystem.get_city_citizen_by_id_for_city_state(test_city_state, int(citizen.get("id", -1)))
 
 
 func _assign_food_match(citizen_id: int, match_result: Dictionary) -> bool:
-	return CityCitizenTaskRuntimeSystem.assign_city_citizen_task(
+	return CityCitizenTaskRuntimeSystem.assign_city_citizen_task_for_city_state(test_city_state,
 		citizen_id,
 		{
 			"kind": CityCitizens.CITY_CITIZEN_TASK_KIND_ACQUIRE_FOOD,
@@ -2760,7 +2788,7 @@ func _create_material_blocked_site(
 	tile_position: Vector2i,
 	stone_amount: int
 ) -> Dictionary:
-	var site := CityConstructionSystemScript.create_city_construction_site({
+	var site := CityConstructionSystemScript.create_city_construction_site_for_city_state(test_city_state, {
 		"target_kind": CityConstructionSystem.CITY_CONSTRUCTION_TARGET_NEW,
 		"object_type": CityObjectCatalog.CITY_OBJECT_ROAD,
 		"shape_mode": CityObjectCatalog.CITY_OBJECT_SHAPE_TILE_AREA,
@@ -2780,8 +2808,8 @@ func _create_material_blocked_site(
 	if site_id <= 0:
 		return {}
 
-	CityConstructionSystemScript.refresh_city_construction_site(site_id)
-	return CityConstructionSystem.get_city_construction_site_by_id(site_id)
+	CityConstructionSystemScript.refresh_city_construction_site_for_city_state(test_city_state, site_id)
+	return CityConstructionSystem.get_city_construction_site_by_id_for_city_state(test_city_state, site_id)
 
 
 func _create_ready_labor_site(
@@ -2800,7 +2828,7 @@ func _create_ready_labor_site(
 		bottom_right.x = maxi(bottom_right.x, tile_position.x)
 		bottom_right.y = maxi(bottom_right.y, tile_position.y)
 
-	var site := CityConstructionSystemScript.create_city_construction_site({
+	var site := CityConstructionSystemScript.create_city_construction_site_for_city_state(test_city_state, {
 		"target_kind": CityConstructionSystem.CITY_CONSTRUCTION_TARGET_NEW,
 		"object_type": CityObjectCatalog.CITY_OBJECT_ROAD,
 		"shape_mode": CityObjectCatalog.CITY_OBJECT_SHAPE_TILE_AREA,
@@ -2818,17 +2846,17 @@ func _create_ready_labor_site(
 	if site_id <= 0:
 		return {}
 
-	CityConstructionSystemScript.refresh_city_construction_site(site_id)
-	return CityConstructionSystem.get_city_construction_site_by_id(site_id)
+	CityConstructionSystemScript.refresh_city_construction_site_for_city_state(test_city_state, site_id)
+	return CityConstructionSystem.get_city_construction_site_by_id_for_city_state(test_city_state, site_id)
 
 
 func _get_assignment_snapshot(citizen_id: int) -> Dictionary:
-	var citizen := CityCitizenRegistrySystem.get_city_citizen_by_id(citizen_id)
+	var citizen := CityCitizenRegistrySystem.get_city_citizen_by_id_for_city_state(test_city_state, citizen_id)
 
 	return {
-		"task": CityCitizenTaskRuntimeSystem.get_city_citizen_current_task(citizen_id),
-		"haul": CityCitizenTaskRuntimeSystem.get_city_citizen_current_haul(citizen_id),
-		"cargo": CityCitizenInventorySystem.get_city_citizen_haul_cargo(citizen_id),
+		"task": CityCitizenTaskRuntimeSystem.get_city_citizen_current_task_for_city_state(test_city_state, citizen_id),
+		"haul": CityCitizenTaskRuntimeSystem.get_city_citizen_current_haul_for_city_state(test_city_state, citizen_id),
+		"cargo": CityCitizenInventorySystem.get_city_citizen_haul_cargo_for_city_state(test_city_state, citizen_id),
 		"movement_state": str(citizen.get("movement_state", "")),
 		"movement_path": citizen.get("movement_path", []).duplicate(),
 		"movement_path_index": int(citizen.get("movement_path_index", 0)),
@@ -2840,7 +2868,7 @@ func _get_assignment_snapshot(citizen_id: int) -> Dictionary:
 
 
 func _find_order(order_type: String, source_id: int) -> Dictionary:
-	for raw_order in CityWorkSystem.get_city_work_order_snapshot():
+	for raw_order in CityWorkSystem.get_city_work_order_snapshot_for_city_state(test_city_state):
 		if (
 			raw_order is Dictionary
 			and str(raw_order.get("order_type", "")) == order_type

@@ -20,6 +20,7 @@ const TEST_WORLD_SIZE := Vector2i(40, 30)
 
 var failure_count: int = 0
 var test_culture_id: int = -1
+var fixture_city_state: CitySettlementSimulationState = null
 
 
 func _ready() -> void:
@@ -69,27 +70,39 @@ func _test_scheduled_home_delivery_accounting() -> void:
 		and stockpile_id > 0
 		and citizen_id > 0
 		and source_tile != CityCitizens.INVALID_CITY_TILE_POSITION
-		and CityAssignmentSystem.assign_city_citizen_home(citizen_id, house_id),
+		and CityAssignmentSystem.assign_city_citizen_home_for_city_state(
+			fixture_city_state,
+			citizen_id,
+			house_id
+		),
 		"The home-delivery fixture must create one healthy resident, House, and Stockpile."
 	)
 	if house_id <= 0 or stockpile_id <= 0 or citizen_id <= 0:
 		return
 
 	_expect(
-		CityResourceContainerSystem.add_resource_to_city_object_storage(
+		CityResourceContainerSystem.add_resource_to_city_object_storage_for_city_state(
+			fixture_city_state,
 			stockpile_id,
 			WorldData.RESOURCE_FISH,
 			3
 		) == 3,
 		"The home-delivery Stockpile must begin with exactly three fish."
 	)
-	var accounting_state := CityResourceAccountingSystem.get_current_state()
+	var accounting_state := CityResourceAccountingSystem.get_state_for_city_state(
+		fixture_city_state
+	)
 	var container_before_haul := accounting_state.container_version
 	var public_before_haul := accounting_state.public_storage_version
 	var task_request := (
 		CitizenDecisionSystemScript
-		._get_scheduled_home_food_delivery_task_request(
-			CityCitizenRegistrySystem.get_city_citizen_by_id(citizen_id)
+		._get_scheduled_home_food_delivery_task_request_for_city_state(
+			fixture_city_state,
+			fixture_city_state.citizen_decision_runtime_state,
+			CityCitizenRegistrySystem.get_city_citizen_by_id_for_city_state(
+				fixture_city_state,
+				citizen_id
+			)
 		)
 	)
 	var requested_haul: Dictionary = task_request.get("haul", {})
@@ -110,15 +123,21 @@ func _test_scheduled_home_delivery_accounting() -> void:
 		return
 
 	_expect(
-		CityCitizenTaskRuntimeSystem.assign_city_citizen_task(citizen_id, task_request),
+		CityCitizenTaskRuntimeSystem.assign_city_citizen_task_for_city_state(
+			fixture_city_state,
+			citizen_id,
+			task_request
+		),
 		"The generated home-delivery request must create a real haul assignment."
 	)
 	var reservation_id := (
-		CityLogisticsSystem.get_city_haul_reservation_id_for_citizen(
+		CityLogisticsSystem.get_city_haul_reservation_id_for_citizen_for_city_state(
+			fixture_city_state,
 			citizen_id
 		)
 	)
-	var reservation := CityLogisticsSystem.get_city_haul_reservation(
+	var reservation := CityLogisticsSystem.get_city_haul_reservation_for_city_state(
+		fixture_city_state,
 		reservation_id
 	)
 	_expect(
@@ -130,14 +149,21 @@ func _test_scheduled_home_delivery_accounting() -> void:
 
 	_advance_single_haul_tick(city_world, citizen_id, 1)
 	_advance_single_haul_tick(city_world, citizen_id, 2)
-	stockpile = CityObjectSystem.get_city_object_by_id(stockpile_id)
-	reservation = CityLogisticsSystem.get_city_haul_reservation(reservation_id)
+	stockpile = CityObjectSystem.get_city_object_by_id_for_city_state(
+		fixture_city_state,
+		stockpile_id
+	)
+	reservation = CityLogisticsSystem.get_city_haul_reservation_for_city_state(
+		fixture_city_state,
+		reservation_id
+	)
 	_expect(
 		CityResourceContainerSystem.get_city_object_stored_resource_amount(
 			stockpile,
 			WorldData.RESOURCE_FISH
 		) == 1
-		and CityCitizenInventorySystem.get_city_citizen_haul_cargo_resource_amount(
+		and CityCitizenInventorySystem.get_city_citizen_haul_cargo_resource_amount_for_city_state(
+			fixture_city_state,
 			citizen_id,
 			WorldData.RESOURCE_FISH
 		) == 2
@@ -154,8 +180,14 @@ func _test_scheduled_home_delivery_accounting() -> void:
 		3,
 		80
 	)
-	house = CityObjectSystem.get_city_object_by_id(house_id)
-	stockpile = CityObjectSystem.get_city_object_by_id(stockpile_id)
+	house = CityObjectSystem.get_city_object_by_id_for_city_state(
+		fixture_city_state,
+		house_id
+	)
+	stockpile = CityObjectSystem.get_city_object_by_id_for_city_state(
+		fixture_city_state,
+		stockpile_id
+	)
 	_expect(
 		completed
 		and CityResourceContainerSystem.get_city_object_stored_resource_amount(
@@ -166,20 +198,28 @@ func _test_scheduled_home_delivery_accounting() -> void:
 			house,
 			WorldData.RESOURCE_FISH
 		) == 2
-		and CityCitizenInventorySystem.get_city_citizen_haul_cargo_amount(citizen_id) == 0
+		and CityCitizenInventorySystem.get_city_citizen_haul_cargo_amount_for_city_state(
+			fixture_city_state,
+			citizen_id
+		) == 0
 		and CityResourceContainerSystem.get_resource_container_total_amount(
-			CityCitizenInventorySystem.get_city_citizen_inventory(citizen_id)
+			CityCitizenInventorySystem.get_city_citizen_inventory_for_city_state(
+				fixture_city_state,
+				citizen_id
+			)
 		) == 0,
 		"The real haul must finish with Stockpile 1, House 2, and no citizen inventory or cargo."
 	)
 	_expect(
-		CityResourceAccountingSystem.get_total_physical_city_resource_amount(
+		CityResourceAccountingSystem.get_total_physical_city_resource_amount_for_city_state(
+			fixture_city_state,
 			WorldData.RESOURCE_FISH
 		) == 3
-		and CityResourceAccountingSystem.get_total_public_city_resource_amount(
+		and CityResourceAccountingSystem.get_total_public_city_resource_amount_for_city_state(
+			fixture_city_state,
 			WorldData.RESOURCE_FISH
 		) == 1
-		and CityResourceAccountingSystem.get_total_owned_city_resource_amount(
+		and _get_total_owned_city_resource_amount(
 			WorldData.RESOURCE_FISH
 		) == 1,
 		"Home delivery must conserve three physical fish while public and owned UI totals exclude the pantry."
@@ -233,7 +273,8 @@ func _test_construction_supply_and_delivery() -> void:
 		[fishery_id, 1],
 	]:
 		_expect(
-			CityResourceContainerSystem.add_resource_to_city_object_storage(
+			CityResourceContainerSystem.add_resource_to_city_object_storage_for_city_state(
+				fixture_city_state,
 				int(storage_fixture[0]),
 				WorldData.RESOURCE_FISH,
 				int(storage_fixture[1])
@@ -241,7 +282,8 @@ func _test_construction_supply_and_delivery() -> void:
 			"Every construction-source classification container must hold its fixture fish."
 		)
 	_expect(
-		CityResourceContainerSystem.add_resource_to_city_object_storage(
+		CityResourceContainerSystem.add_resource_to_city_object_storage_for_city_state(
+			fixture_city_state,
 			stockpile_id,
 			WorldData.RESOURCE_LUMBER,
 			8
@@ -249,13 +291,17 @@ func _test_construction_supply_and_delivery() -> void:
 		"The real construction delivery must begin with eight Stockpile lumber."
 	)
 
-	var pile_result := CityLogisticsSystem.add_resource_to_city_ground_piles_with_result({
-		"tile_position": Vector2i(31, 23),
-		"resource": WorldData.RESOURCE_FISH,
-		"amount_delta": 4,
-	})
+	var pile_result := CityLogisticsSystem.add_resource_to_city_ground_piles_with_result_for_city_state(
+		fixture_city_state,
+		{
+			"tile_position": Vector2i(31, 23),
+			"resource": WorldData.RESOURCE_FISH,
+			"amount_delta": 4,
+		}
+	)
 	var pile_id := _first_ground_pile_id(pile_result)
-	var candidates := CityResourceMatcherScript.get_resource_supply_candidates(
+	var candidates := CityResourceMatcherScript.get_resource_supply_candidates_for_city_state(
+		fixture_city_state,
 		CityResourceMatcherScript.PURPOSE_CONSTRUCTION_SUPPLY,
 		WorldData.RESOURCE_FISH,
 		99
@@ -293,25 +339,32 @@ func _test_construction_supply_and_delivery() -> void:
 	)
 
 	var site_top_left := Vector2i(20, 14)
-	var site := CityConstructionSystemScript.create_rectangular_site({
-		"object_type": CityObjectCatalog.CITY_OBJECT_HOUSE,
-		"top_left": site_top_left,
-		"size_tiles": CityObjectCatalog.get_city_object_size_for_type(
-			CityObjectCatalog.CITY_OBJECT_HOUSE
-		),
-		"object_owner": "player",
-		"city_world": city_world,
-	})
+	var site := CityConstructionSystemScript.create_rectangular_site_for_city_state(
+		fixture_city_state,
+		{
+			"object_type": CityObjectCatalog.CITY_OBJECT_HOUSE,
+			"top_left": site_top_left,
+			"size_tiles": CityObjectCatalog.get_city_object_size_for_type(
+				CityObjectCatalog.CITY_OBJECT_HOUSE
+			),
+			"object_owner": "player",
+			"city_world": city_world,
+		}
+	)
 	var site_id := int(site.get("id", -1))
 	var source_tile := _get_object_access_tile(city_world, stockpile)
 	var citizen := _add_citizen(source_tile)
 	var citizen_id := int(citizen.get("id", -1))
-	var physical_before := CityResourceAccountingSystem.get_total_physical_city_resource_amount(
-		WorldData.RESOURCE_LUMBER
+	var physical_before := (
+		CityResourceAccountingSystem.get_total_physical_city_resource_amount_for_city_state(
+			fixture_city_state,
+			WorldData.RESOURCE_LUMBER
+		)
 	)
 	var candidate := (
 		CityConstructionSystemScript
-		.get_best_assignable_player_work_for_citizen_and_site(
+		.get_best_assignable_player_work_for_citizen_and_site_for_city_state(
+			fixture_city_state,
 			citizen_id,
 			site_id
 		)
@@ -334,18 +387,21 @@ func _test_construction_supply_and_delivery() -> void:
 		return
 
 	_expect(
-		CityConstructionSystemScript.assign_player_work_candidate(
+		CityConstructionSystemScript.assign_player_work_candidate_for_city_state(
+			fixture_city_state,
 			citizen_id,
 			candidate
 		),
 		"The selected object-container construction delivery must assign through the production API."
 	)
 	var reservation_id := (
-		CityLogisticsSystem.get_city_haul_reservation_id_for_citizen(
+		CityLogisticsSystem.get_city_haul_reservation_id_for_citizen_for_city_state(
+			fixture_city_state,
 			citizen_id
 		)
 	)
-	var reservation := CityLogisticsSystem.get_city_haul_reservation(
+	var reservation := CityLogisticsSystem.get_city_haul_reservation_for_city_state(
+		fixture_city_state,
 		reservation_id
 	)
 	var stockpile_endpoint := (
@@ -355,12 +411,14 @@ func _test_construction_supply_and_delivery() -> void:
 		reservation_id > 0
 		and int(reservation.get("source_reserved_amount", 0)) == 8
 		and int(reservation.get("destination_reserved_amount", 0)) == 8
-		and CityLogisticsSystem.get_city_haul_endpoint_source_reserved_amount(
+		and CityLogisticsSystem.get_city_haul_endpoint_source_reserved_amount_for_city_state(
+			fixture_city_state,
 			stockpile_endpoint,
 			WorldData.RESOURCE_LUMBER
 		) == 8
 		and CityConstructionSystemScript
-		.get_city_construction_site_destination_reserved_resource_amount(
+		.get_city_construction_site_destination_reserved_resource_amount_for_city_state(
+			fixture_city_state,
 			site_id,
 			WorldData.RESOURCE_LUMBER
 		) == 8,
@@ -369,24 +427,33 @@ func _test_construction_supply_and_delivery() -> void:
 
 	_advance_single_haul_tick(city_world, citizen_id, 1)
 	_advance_single_haul_tick(city_world, citizen_id, 2)
-	reservation = CityLogisticsSystem.get_city_haul_reservation(reservation_id)
+	reservation = CityLogisticsSystem.get_city_haul_reservation_for_city_state(
+		fixture_city_state,
+		reservation_id
+	)
 	_expect(
 		CityResourceContainerSystem.get_city_object_stored_resource_amount(
-			CityObjectSystem.get_city_object_by_id(stockpile_id),
+			CityObjectSystem.get_city_object_by_id_for_city_state(
+				fixture_city_state,
+				stockpile_id
+			),
 			WorldData.RESOURCE_LUMBER
 		) == 0
-		and CityCitizenInventorySystem.get_city_citizen_haul_cargo_resource_amount(
+		and CityCitizenInventorySystem.get_city_citizen_haul_cargo_resource_amount_for_city_state(
+			fixture_city_state,
 			citizen_id,
 			WorldData.RESOURCE_LUMBER
 		) == 8
 		and int(reservation.get("source_reserved_amount", -1)) == 0
 		and int(reservation.get("destination_reserved_amount", 0)) == 8
 		and CityConstructionSystemScript
-		.get_city_construction_site_destination_reserved_resource_amount(
+		.get_city_construction_site_destination_reserved_resource_amount_for_city_state(
+			fixture_city_state,
 			site_id,
 			WorldData.RESOURCE_LUMBER
 		) == 8
-		and CityResourceAccountingSystem.get_total_physical_city_resource_amount(
+		and CityResourceAccountingSystem.get_total_physical_city_resource_amount_for_city_state(
+			fixture_city_state,
 			WorldData.RESOURCE_LUMBER
 		) == physical_before,
 		"Construction pickup must hard-commit the source, retain exact site capacity, and conserve physical lumber in cargo."
@@ -398,24 +465,34 @@ func _test_construction_supply_and_delivery() -> void:
 		3,
 		100
 	)
-	site = CityConstructionSystemScript.get_city_construction_site_by_id(site_id)
+	site = CityConstructionSystemScript.get_city_construction_site_by_id_for_city_state(
+		fixture_city_state,
+		site_id
+	)
 	_expect(
 		completed
-		and CityLogisticsSystem.get_city_haul_reservation(
+		and CityLogisticsSystem.get_city_haul_reservation_for_city_state(
+			fixture_city_state,
 			reservation_id
 		).is_empty()
 		and CityConstructionSystemScript
-		.get_city_construction_site_reserved_resource_amount(
+		.get_city_construction_site_reserved_resource_amount_for_city_state(
+			fixture_city_state,
 			site_id,
 			WorldData.RESOURCE_LUMBER
 		) == 8
 		and CityConstructionSystemScript
-		.get_city_construction_site_remaining_resource_amount(
+		.get_city_construction_site_remaining_resource_amount_for_city_state(
+			fixture_city_state,
 			site_id,
 			WorldData.RESOURCE_LUMBER
 		) == 0
-		and CityCitizenInventorySystem.get_city_citizen_haul_cargo_amount(citizen_id) == 0
-		and CityResourceAccountingSystem.get_total_physical_city_resource_amount(
+		and CityCitizenInventorySystem.get_city_citizen_haul_cargo_amount_for_city_state(
+			fixture_city_state,
+			citizen_id
+		) == 0
+		and CityResourceAccountingSystem.get_total_physical_city_resource_amount_for_city_state(
+			fixture_city_state,
 			WorldData.RESOURCE_LUMBER
 		) == physical_before,
 		"The real Stockpile-to-House-site haul must release reservations, deliver eight lumber, and conserve every physical unit."
@@ -444,7 +521,8 @@ func _test_reserved_stockpile_falls_back_to_keep() -> void:
 	_expect(
 		stockpile_id > 0
 		and keep_id > 0
-		and CityResourceContainerSystem.add_resource_to_city_object_storage(
+		and CityResourceContainerSystem.add_resource_to_city_object_storage_for_city_state(
+			fixture_city_state,
 			stockpile_id,
 			WorldData.RESOURCE_STONE,
 			stockpile_capacity - 1
@@ -455,18 +533,24 @@ func _test_reserved_stockpile_falls_back_to_keep() -> void:
 		return
 
 	var blocker_pile_result := (
-		CityLogisticsSystem.add_resource_to_city_ground_piles_with_result({
-			"tile_position": Vector2i(9, 14),
-			"resource": WorldData.RESOURCE_LUMBER,
-			"amount_delta": 1,
-		})
+		CityLogisticsSystem.add_resource_to_city_ground_piles_with_result_for_city_state(
+			fixture_city_state,
+			{
+				"tile_position": Vector2i(9, 14),
+				"resource": WorldData.RESOURCE_LUMBER,
+				"amount_delta": 1,
+			}
+		)
 	)
 	var cleanup_pile_result := (
-		CityLogisticsSystem.add_resource_to_city_ground_piles_with_result({
-			"tile_position": Vector2i(12, 14),
-			"resource": WorldData.RESOURCE_LUMBER,
-			"amount_delta": 2,
-		})
+		CityLogisticsSystem.add_resource_to_city_ground_piles_with_result_for_city_state(
+			fixture_city_state,
+			{
+				"tile_position": Vector2i(12, 14),
+				"resource": WorldData.RESOURCE_LUMBER,
+				"amount_delta": 2,
+			}
+		)
 	)
 	var blocker_pile_id := _first_ground_pile_id(blocker_pile_result)
 	var cleanup_pile_id := _first_ground_pile_id(cleanup_pile_result)
@@ -483,7 +567,9 @@ func _test_reserved_stockpile_falls_back_to_keep() -> void:
 		)
 	)
 	var blocker_request := (
-		CitizenHaulingSystemScript.make_directed_haul_task_request({
+		CitizenHaulingSystemScript.make_directed_haul_task_request_for_city_state(
+			fixture_city_state,
+			{
 			"city_world": city_world,
 			"citizen": blocker,
 			"source": blocker_source,
@@ -500,25 +586,37 @@ func _test_reserved_stockpile_falls_back_to_keep() -> void:
 			),
 			"task_source": CityCitizens.CITY_CITIZEN_TASK_SOURCE_AUTONOMY,
 			"task_priority": 90,
-		})
+			}
+		)
 	)
 	_expect(
 		blocker_pile_id > 0
 		and cleanup_pile_id > 0
 		and not blocker_request.is_empty()
-		and CityCitizenTaskRuntimeSystem.assign_city_citizen_task(blocker_id, blocker_request),
+		and CityCitizenTaskRuntimeSystem.assign_city_citizen_task_for_city_state(
+			fixture_city_state,
+			blocker_id,
+			blocker_request
+		),
 		"A first cleanup haul must reserve the Stockpile's final shared slot."
 	)
 	var blocker_reservation_id := (
-		CityLogisticsSystem.get_city_haul_reservation_id_for_citizen(
+		CityLogisticsSystem.get_city_haul_reservation_id_for_citizen_for_city_state(
+			fixture_city_state,
 			blocker_id
 		)
 	)
-	stockpile = CityObjectSystem.get_city_object_by_id(stockpile_id)
+	stockpile = CityObjectSystem.get_city_object_by_id_for_city_state(
+		fixture_city_state,
+		stockpile_id
+	)
 	_expect(
 		blocker_reservation_id > 0
 		and CityResourceContainerSystem
-		.get_city_object_unreserved_storage_free_space(stockpile) == 0,
+		.get_city_object_unreserved_storage_free_space_for_city_state(
+			fixture_city_state,
+			stockpile
+		) == 0,
 		"The active reservation must make the near-full Stockpile unavailable to later cleanup work."
 	)
 
@@ -528,7 +626,9 @@ func _test_reserved_stockpile_falls_back_to_keep() -> void:
 		)
 	)
 	var cleanup_request := (
-		CitizenHaulingSystemScript.make_public_storage_haul_task_request({
+		CitizenHaulingSystemScript.make_public_storage_haul_task_request_for_city_state(
+			fixture_city_state,
+			{
 			"city_world": city_world,
 			"citizen": cleaner,
 			"source": cleanup_source,
@@ -544,7 +644,8 @@ func _test_reserved_stockpile_falls_back_to_keep() -> void:
 			),
 			"task_source": CityCitizens.CITY_CITIZEN_TASK_SOURCE_AUTONOMY,
 			"task_priority": 90,
-		})
+			}
+		)
 	)
 	var cleanup_haul: Dictionary = cleanup_request.get("haul", {})
 	_expect(
@@ -557,22 +658,33 @@ func _test_reserved_stockpile_falls_back_to_keep() -> void:
 	if cleanup_request.is_empty():
 		return
 
-	var physical_before := CityResourceAccountingSystem.get_total_physical_city_resource_amount(
-		WorldData.RESOURCE_LUMBER
+	var physical_before := (
+		CityResourceAccountingSystem.get_total_physical_city_resource_amount_for_city_state(
+			fixture_city_state,
+			WorldData.RESOURCE_LUMBER
+		)
 	)
-	var accounting_state := CityResourceAccountingSystem.get_current_state()
+	var accounting_state := CityResourceAccountingSystem.get_state_for_city_state(
+		fixture_city_state
+	)
 	var container_before_cleanup := accounting_state.container_version
 	var public_before_cleanup := accounting_state.public_storage_version
 	_expect(
-		CityCitizenTaskRuntimeSystem.assign_city_citizen_task(cleaner_id, cleanup_request),
+		CityCitizenTaskRuntimeSystem.assign_city_citizen_task_for_city_state(
+			fixture_city_state,
+			cleaner_id,
+			cleanup_request
+		),
 		"The Keep-fallback request must become a real cleanup assignment."
 	)
 	var cleaner_reservation_id := (
-		CityLogisticsSystem.get_city_haul_reservation_id_for_citizen(
+		CityLogisticsSystem.get_city_haul_reservation_id_for_citizen_for_city_state(
+			fixture_city_state,
 			cleaner_id
 		)
 	)
-	var cleaner_reservation := CityLogisticsSystem.get_city_haul_reservation(
+	var cleaner_reservation := CityLogisticsSystem.get_city_haul_reservation_for_city_state(
+		fixture_city_state,
 		cleaner_reservation_id
 	)
 	_expect(
@@ -590,8 +702,14 @@ func _test_reserved_stockpile_falls_back_to_keep() -> void:
 		1,
 		100
 	)
-	keep = CityObjectSystem.get_city_object_by_id(keep_id)
-	stockpile = CityObjectSystem.get_city_object_by_id(stockpile_id)
+	keep = CityObjectSystem.get_city_object_by_id_for_city_state(
+		fixture_city_state,
+		keep_id
+	)
+	stockpile = CityObjectSystem.get_city_object_by_id_for_city_state(
+		fixture_city_state,
+		stockpile_id
+	)
 	_expect(
 		completed
 		and CityResourceContainerSystem.get_city_object_stored_resource_amount(
@@ -599,18 +717,26 @@ func _test_reserved_stockpile_falls_back_to_keep() -> void:
 			WorldData.RESOURCE_LUMBER
 		) == 2
 		and CityLogisticsSystem.get_city_ground_pile_resource_amount(
-			CityLogisticsSystem.get_city_ground_pile_by_id(blocker_pile_id),
+			CityLogisticsSystem.get_city_ground_pile_by_id_for_city_state(
+				fixture_city_state,
+				blocker_pile_id
+			),
 			WorldData.RESOURCE_LUMBER
 		) == 1
-		and CityLogisticsSystem.get_city_haul_reservation(
+		and CityLogisticsSystem.get_city_haul_reservation_for_city_state(
+			fixture_city_state,
 			blocker_reservation_id
 		).get("destination_reserved_amount", 0) == 1
 		and CityResourceContainerSystem
-		.get_city_object_unreserved_storage_free_space(stockpile) == 0,
+		.get_city_object_unreserved_storage_free_space_for_city_state(
+			fixture_city_state,
+			stockpile
+		) == 0,
 		"The real fallback haul must fill the Keep while preserving the earlier Stockpile reservation."
 	)
 	_expect(
-		CityResourceAccountingSystem.get_total_physical_city_resource_amount(
+		CityResourceAccountingSystem.get_total_physical_city_resource_amount_for_city_state(
+			fixture_city_state,
 			WorldData.RESOURCE_LUMBER
 		) == physical_before
 		and accounting_state.container_version == container_before_cleanup + 1
@@ -620,8 +746,8 @@ func _test_reserved_stockpile_falls_back_to_keep() -> void:
 
 
 func _reset_fixture(seed: int) -> WorldData:
+	fixture_city_state = null
 	WorldData.reset_runtime_session_state()
-	CityResourceMatcherScript.reset_resource_demand_category_priorities()
 	SimulationClock.start_new_game()
 	var city_world := WorldData.new()
 	city_world.setup(TEST_WORLD_SIZE.x, TEST_WORLD_SIZE.y, seed)
@@ -659,11 +785,11 @@ func _reset_fixture(seed: int) -> WorldData:
 	var city_id := int(city.get("id", -1))
 	var city_state = WorldPoliticalState.get_city_simulation_state(city_id)
 	_expect(
-		city_state is CitySettlementSimulationState
-		and WorldPoliticalState.set_active_settlement(city_id),
-		"Fixture must create one settlement-owned city state."
+		city_state is CitySettlementSimulationState,
+		"Fixture must create one exact settlement-owned city state."
 	)
 	if city_state is CitySettlementSimulationState:
+		fixture_city_state = city_state
 		city_state.city_runtime_data.merge({
 			"id": city_id,
 			"name": "Resource Container Integration City",
@@ -671,12 +797,14 @@ func _reset_fixture(seed: int) -> WorldData:
 			"founded": false,
 			"can_build": false,
 		}, true)
-	WorldData.store_city_world_save(city_world, seed)
+	WorldData.store_city_world_for_state(
+		fixture_city_state, city_world, seed
+	)
 	return city_world
 
 
 func _mark_fixture_city_founded(keep: Dictionary) -> void:
-	var city_state = WorldPoliticalState.get_active_city_simulation_state()
+	var city_state := fixture_city_state
 	if not city_state is CitySettlementSimulationState or keep.is_empty():
 		return
 
@@ -700,20 +828,24 @@ func _add_completed_object(
 	top_left: Vector2i,
 	city_world: WorldData
 ) -> Dictionary:
-	return CityObjectSystem.add_city_object({
-		"object_type": object_type,
-		"top_left": top_left,
-		"size_tiles": CityObjectCatalog.get_city_object_size_for_type(object_type),
-		"object_owner": "player",
-		"city_world": city_world,
-	})
+	return CityObjectSystem.register_completed_city_object_for_city_state(
+		fixture_city_state,
+		{
+			"object_type": object_type,
+			"top_left": top_left,
+			"size_tiles": CityObjectCatalog.get_city_object_size_for_type(object_type),
+			"object_owner": "player",
+			"city_world": city_world,
+		}
+	)
 
 
 func _add_citizen(tile_position: Vector2i) -> Dictionary:
 	if tile_position == CityCitizens.INVALID_CITY_TILE_POSITION:
 		return {}
 
-	return CityCitizenRegistrySystem.add_city_citizen(
+	return CityCitizenRegistrySystem.add_city_citizen_for_city_state(
+		fixture_city_state,
 		"",
 		tile_position,
 		CityCitizens.CITY_CITIZEN_SEX_FEMALE,
@@ -725,7 +857,8 @@ func _get_object_access_tile(
 	city_world: WorldData,
 	city_object: Dictionary
 ) -> Vector2i:
-	for raw_tile in CityNavigationSystem.get_city_object_access_tiles(
+	for raw_tile in CityNavigationSystem.get_city_object_access_tiles_for_city_state(
+		fixture_city_state,
 		city_world,
 		city_object
 	):
@@ -741,9 +874,19 @@ func _advance_single_haul_tick(
 	tick_index: int
 ) -> void:
 	SimulationClock.absolute_world_minutes += 2
-	CitizenMovementSystemScript.run_tick(tick_index, 2)
-	var citizen := CityCitizenRegistrySystem.get_city_citizen_by_id(citizen_id)
-	var current_task := CityCitizenTaskRuntimeSystem.get_city_citizen_current_task(citizen_id)
+	CitizenMovementSystemScript.run_tick_for_city_state(
+		fixture_city_state,
+		tick_index,
+		2
+	)
+	var citizen := CityCitizenRegistrySystem.get_city_citizen_by_id_for_city_state(
+		fixture_city_state,
+		citizen_id
+	)
+	var current_task := CityCitizenTaskRuntimeSystem.get_city_citizen_current_task_for_city_state(
+		fixture_city_state,
+		citizen_id
+	)
 
 	if (
 		citizen.is_empty()
@@ -752,7 +895,8 @@ func _advance_single_haul_tick(
 	):
 		return
 
-	CitizenHaulingSystemScript.advance_haul_task(
+	CitizenHaulingSystemScript.advance_haul_task_for_city_state(
+		fixture_city_state,
 		city_world,
 		{
 			"citizen_id": citizen_id,
@@ -775,9 +919,13 @@ func _run_single_haul_to_completion(
 			citizen_id,
 			start_tick + tick_offset
 		)
-		var current_task := CityCitizenTaskRuntimeSystem.get_city_citizen_current_task(citizen_id)
+		var current_task := CityCitizenTaskRuntimeSystem.get_city_citizen_current_task_for_city_state(
+			fixture_city_state,
+			citizen_id
+		)
 		var reservation_id := (
-			CityLogisticsSystem.get_city_haul_reservation_id_for_citizen(
+			CityLogisticsSystem.get_city_haul_reservation_id_for_citizen_for_city_state(
+				fixture_city_state,
 				citizen_id
 			)
 		)
@@ -785,13 +933,27 @@ func _run_single_haul_to_completion(
 		if (
 			str(current_task.get("kind", ""))
 			== CityCitizens.CITY_CITIZEN_TASK_KIND_NONE
-			and CityCitizenInventorySystem.get_city_citizen_haul_cargo_amount(citizen_id) == 0
+			and CityCitizenInventorySystem.get_city_citizen_haul_cargo_amount_for_city_state(
+				fixture_city_state,
+				citizen_id
+			) == 0
 			and reservation_id
 			== CityCitizens.INVALID_CITY_CITIZEN_HAUL_RESERVATION_ID
 		):
 			return true
 
 	return false
+
+
+func _get_total_owned_city_resource_amount(resource: String) -> int:
+	return maxi(
+		int(
+			CityResourceAccountingSystem.get_total_owned_city_resource_amounts_for_city_state(
+				fixture_city_state
+			).get(resource, 0)
+		),
+		0
+	)
 
 
 func _first_ground_pile_id(add_result: Dictionary) -> int:

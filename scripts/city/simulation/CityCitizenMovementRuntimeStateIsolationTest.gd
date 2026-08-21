@@ -65,11 +65,17 @@ func _test_equal_and_unequal_city_isolation() -> void:
 	_expect(
 		WorldPoliticalState.set_active_settlement(city_b_id)
 		and _bind_fixture_city(city_a_id)
-		and is_same(CityCitizenMovementRuntimeSystem.get_current_state(), state_a),
+		and is_same(
+			city_a["city_state"].citizen_movement_runtime_state,
+			state_a
+		),
 		"Explicit City A movement binding must ignore presentation selection B."
 	)
-	var taken_a := CityCitizenMovementRuntimeSystem.take_city_citizen_movement_visual_events(
-		SHARED_VISUAL_TICK
+	var taken_a := (
+		CityCitizenMovementRuntimeSystem.take_city_citizen_movement_visual_events_for_city_state(
+			city_a["city_state"],
+			SHARED_VISUAL_TICK
+		)
 	)
 	_expect(
 		taken_a.size() == 1
@@ -80,14 +86,20 @@ func _test_equal_and_unequal_city_isolation() -> void:
 		"Taking A's equal-tick visual buffer must not consume B's buffer."
 	)
 	_expect(
-		CityCitizenMovementRuntimeSystem.cancel_city_citizen_movement(1)
+		CityCitizenMovementRuntimeSystem.cancel_city_citizen_movement_for_city_state(
+			city_a["city_state"],
+			1
+		)
 		and state_a.active_mover_ids.is_empty()
 		and state_b.active_mover_ids == [1],
 		"Cancelling A's equal local mover must not cancel B's mover."
 	)
 	_expect(
 		_bind_fixture_city(city_b_id)
-		and is_same(CityCitizenMovementRuntimeSystem.get_current_state(), state_b)
+		and is_same(
+			city_b["city_state"].citizen_movement_runtime_state,
+			state_b
+		)
 		and state_b.active_mover_ids == [1],
 		"A -> B must restore B's exact movement runtime."
 	)
@@ -128,9 +140,13 @@ func _seed_city(
 		"The seeded City must select presentation and bind its citizen owner."
 	)
 	var city_world := _make_world(12, 12, seed_value)
-	WorldPoliticalState.set_current_city_world(city_world)
-	WorldPoliticalState.set_current_city_seed(seed_value)
-	var citizen := CityCitizenRegistrySystem.add_city_citizen(
+	var city_state = WorldPoliticalState.get_city_simulation_state(city_id)
+	if not city_state is CitySettlementSimulationState:
+		_expect(false, "Each City must expose an explicit movement owner.")
+		return {}
+	WorldData.store_city_world_for_state(city_state, city_world, seed_value)
+	var citizen := CityCitizenRegistrySystem.add_city_citizen_for_city_state(
+		city_state,
 		"",
 		SHARED_CITIZEN_TILE,
 		CityCitizens.CITY_CITIZEN_SEX_MALE,
@@ -141,13 +157,14 @@ func _seed_city(
 		_expect(false, "Each City must create local citizen 1.")
 		return {}
 	_expect(
-		CityCitizenMovementRuntimeSystem.assign_city_citizen_movement_order(
+		CityCitizenMovementRuntimeSystem.assign_city_citizen_movement_order_for_city_state(
+			city_state,
 			citizen_id,
 			[SHARED_CITIZEN_TILE, destination]
 		),
 		"Each City must assign its own local movement order."
 	)
-	var movement_state := CityCitizenMovementRuntimeSystem.get_current_state()
+	var movement_state: CityCitizenMovementRuntimeState = city_state.citizen_movement_runtime_state
 	movement_state.citizen_movement_visual_events = [{
 		"marker": marker,
 		"citizen_id": citizen_id,
@@ -155,6 +172,7 @@ func _seed_city(
 	}]
 	movement_state.citizen_movement_visual_tick_index = SHARED_VISUAL_TICK
 	return {
+		"city_state": city_state,
 		"citizen_id": citizen_id,
 		"movement_state": movement_state,
 	}
@@ -164,7 +182,6 @@ func _bind_fixture_city(city_id: int) -> bool:
 	var city_state = WorldPoliticalState.get_city_simulation_state(city_id)
 	if not city_state is CitySettlementSimulationState:
 		return false
-	CityCitizenUnboundCompatibility.bind_legacy_fixture_state(city_state)
 	return true
 
 

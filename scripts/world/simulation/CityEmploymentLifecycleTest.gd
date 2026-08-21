@@ -49,11 +49,11 @@ func _test_settlement_local_employment_lifecycle() -> void:
 	_expect(
 		initial_worker_ids == [1, 2, 3, 4]
 		and WorldPoliticalState.active_settlement_id == city_b_id,
-		"Explicit City A employment must auto-fill the Fishery in ID order without changing the active City."
+		"Explicit City A employment must auto-fill the Fishery in ID order without changing the presented City."
 	)
 	_expect(
 		_capture_employment_state(state_b) == b_before_a_tick,
-		"Simulating City A while City B is active must leave every City B employment owner unchanged."
+		"Simulating City A while City B is presented must leave every City B employment owner unchanged."
 	)
 
 	var a_before_foreign_rejections := _capture_employment_state(state_a)

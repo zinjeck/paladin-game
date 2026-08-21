@@ -1,5 +1,8 @@
 extends Node
 
+const CitySettlementTestFixtureScript = preload(
+	"res://scripts/city/simulation/test_support/CitySettlementTestFixture.gd"
+)
 const CityCitizenDecisionRuntimeStateScript = preload(
 	"res://scripts/city/simulation/CityCitizenDecisionRuntimeState.gd"
 )
@@ -59,12 +62,17 @@ func _test_state_defaults() -> void:
 
 
 func _test_pre_context_state_adoption() -> void:
-	WorldData.reset_runtime_session_state()
-	var world := _make_world(8, 8, 93_001)
-	if not _lock_founding_world(world):
+	var fixture = CitySettlementTestFixtureScript.create({
+		"label": "Decision Bootstrap",
+	})
+	_expect(fixture != null, "The decision fixture must be created.")
+	if fixture == null:
 		return
 
-	var bootstrap_state := CitizenDecisionSystem.get_current_state()
+	var city_state: CitySettlementSimulationState = fixture.city_state
+	var bootstrap_state: CityCitizenDecisionRuntimeState = (
+		city_state.citizen_decision_runtime_state
+	)
 	var pending_ids: Array[int] = [9, 4]
 	var pending_lookup: Dictionary = {9: true, 4: true}
 	var anchors: Dictionary = {4: Vector2i(3, 2)}
@@ -85,17 +93,7 @@ func _test_pre_context_state_adoption() -> void:
 	bootstrap_state.normal_food_scan_cursor = 6
 
 	_expect(
-		WorldPoliticalState.synchronize_foundation_with_world_data(),
-		"Founding must establish a City settlement context."
-	)
-	var capital_state = WorldPoliticalState.get_active_city_simulation_state()
-	var context = WorldPoliticalState.get_active_settlement_context()
-	_expect(
-		capital_state is CitySettlementSimulationState
-		and is_same(
-			capital_state.citizen_decision_runtime_state,
-			bootstrap_state
-		)
+		is_same(city_state.citizen_decision_runtime_state, bootstrap_state)
 		and is_same(bootstrap_state.pending_decision_ids, pending_ids)
 		and is_same(bootstrap_state.pending_decision_id_lookup, pending_lookup)
 		and is_same(bootstrap_state.idle_anchor_tile_by_citizen_id, anchors)
@@ -107,35 +105,43 @@ func _test_pre_context_state_adoption() -> void:
 			bootstrap_state.idle_choice_sequence_by_citizen_id,
 			sequences
 		),
-		"The founding City must adopt the exact pre-context decision owner."
+		"The registered City must retain its exact decision owner."
 	)
 	_expect(
-		context != null
+		fixture.settlement_context != null
 		and is_same(
-			context.get_city_citizen_decision_runtime_state(),
+			fixture.settlement_context.get_city_citizen_decision_runtime_state(),
 			bootstrap_state
 		)
-		and is_same(CitizenDecisionSystem.get_current_state(), bootstrap_state)
 		and _state_has_seeded_values(bootstrap_state),
-		"Context and the focused scheduler must resolve one exact owner."
+		"The settlement context must expose the exact explicit decision owner."
 	)
-	_expect(
-		WorldPoliticalState.synchronize_foundation_with_world_data()
-		and is_same(CitizenDecisionSystem.get_current_state(), bootstrap_state),
-		"Repeated foundation synchronization must retain decision runtime."
-	)
+	fixture.cleanup()
 
 
 func _test_city_and_session_reset() -> void:
-	var state := CitizenDecisionSystem.get_current_state()
+	var fixture = CitySettlementTestFixtureScript.create({
+		"label": "Decision Reset",
+	})
+	_expect(fixture != null, "The reset fixture must be created.")
+	if fixture == null:
+		return
+	var city_state: CitySettlementSimulationState = fixture.city_state
+	var state: CityCitizenDecisionRuntimeState = (
+		city_state.citizen_decision_runtime_state
+	)
+	_seed_reset_state(state)
 	var pending_ids := state.pending_decision_ids
 	var pending_lookup := state.pending_decision_id_lookup
 	var anchors := state.idle_anchor_tile_by_citizen_id
 	var deadlines := state.next_idle_decision_minute_by_citizen_id
 	var sequences := state.idle_choice_sequence_by_citizen_id
-	CitizenDecisionSystem.reset_runtime_state()
+	CitizenDecisionSystem._reset_runtime_state_for_city_state(
+		city_state,
+		state
+	)
 	_expect(
-		is_same(CitizenDecisionSystem.get_current_state(), state)
+		is_same(city_state.citizen_decision_runtime_state, state)
 		and is_same(state.pending_decision_ids, pending_ids)
 		and is_same(state.pending_decision_id_lookup, pending_lookup)
 		and is_same(state.idle_anchor_tile_by_citizen_id, anchors)
@@ -145,13 +151,38 @@ func _test_city_and_session_reset() -> void:
 		"A city reset must clear the exact active decision owner in place."
 	)
 
-	WorldData.reset_runtime_session_state()
-	var fresh_state := CitizenDecisionSystem.get_current_state()
+	fixture.cleanup()
+	var fresh_fixture = CitySettlementTestFixtureScript.create({
+		"label": "Decision Reset Fresh",
+	})
+	_expect(fresh_fixture != null, "The fresh reset fixture must be created.")
+	if fresh_fixture == null:
+		return
+	var fresh_state: CityCitizenDecisionRuntimeState = (
+		fresh_fixture.city_state.citizen_decision_runtime_state
+	)
 	_expect(
 		not is_same(fresh_state, state)
 		and _state_has_clean_defaults(fresh_state),
 		"A session reset must replace decision runtime with fresh defaults."
 	)
+	fresh_fixture.cleanup()
+
+
+func _seed_reset_state(state: CityCitizenDecisionRuntimeStateScript) -> void:
+	state.pending_decision_ids.append(1)
+	state.pending_decision_id_lookup[1] = true
+	state.runtime_initialized = true
+	state.work_shift_was_active = true
+	state.observed_assignment_version = 5
+	state.recovery_scan_cursor = 1
+	state.idle_scan_cursor = 1
+	state.idle_anchor_tile_by_citizen_id[1] = Vector2i.ONE
+	state.next_idle_decision_minute_by_citizen_id[1] = 10
+	state.idle_choice_sequence_by_citizen_id[1] = 2
+	state.autonomous_haul_scan_cursor = 1
+	state.critical_food_scan_cursor = 1
+	state.normal_food_scan_cursor = 1
 
 
 func _state_has_seeded_values(state: CityCitizenDecisionRuntimeStateScript) -> bool:

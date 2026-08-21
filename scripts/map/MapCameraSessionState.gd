@@ -32,7 +32,7 @@ static func reset_world_camera() -> void:
 
 #region City Camera
 
-static func store_city_camera_for_binding(
+static func store_settlement_camera_for_binding(
 	binding: CityPresentationBinding,
 	position: Vector2,
 	zoom: Vector2
@@ -54,7 +54,7 @@ static func store_city_camera_for_binding(
 	return true
 
 
-static func get_city_camera_for_binding(
+static func get_settlement_camera_for_binding(
 	binding: CityPresentationBinding
 ) -> Dictionary:
 	if binding == null or not binding.is_valid():
@@ -85,30 +85,64 @@ static func get_city_camera_for_binding(
 		!= int(binding.city_world.get_instance_id())
 		or int(entry.get("city_seed", 0)) != binding.city_seed
 	):
-		reset_city_camera_for_settlement(binding.settlement_id)
+		reset_settlement_camera_for_settlement(binding.settlement_id)
 		return {}
 	_touch_city_camera_entry(binding.settlement_id)
 	return entry.duplicate(true)
 
 
-static func has_city_camera_for_binding(
+static func has_settlement_camera_for_binding(
 	binding: CityPresentationBinding
 ) -> bool:
-	return not get_city_camera_for_binding(binding).is_empty()
+	return not get_settlement_camera_for_binding(binding).is_empty()
 
 
-static func reset_city_camera_for_settlement(settlement_id: int) -> void:
+static func reset_settlement_camera_for_settlement(settlement_id: int) -> void:
 	city_camera_state_by_settlement_id.erase(settlement_id)
 	city_camera_recency.erase(settlement_id)
 
 
-static func reset_city_camera() -> void:
+static func reset_settlement_cameras() -> void:
 	city_camera_state_by_settlement_id.clear()
 	city_camera_recency.clear()
 
 
-static func get_city_camera_entry_count() -> int:
+static func get_settlement_camera_entry_count() -> int:
 	return city_camera_state_by_settlement_id.size()
+
+
+# City-named entry points remain as backend-compatible aliases while the scene
+# and save schema still use the detailed-city implementation.
+static func store_city_camera_for_binding(
+	binding: CityPresentationBinding,
+	position: Vector2,
+	zoom: Vector2
+) -> bool:
+	return store_settlement_camera_for_binding(binding, position, zoom)
+
+
+static func get_city_camera_for_binding(
+	binding: CityPresentationBinding
+) -> Dictionary:
+	return get_settlement_camera_for_binding(binding)
+
+
+static func has_city_camera_for_binding(
+	binding: CityPresentationBinding
+) -> bool:
+	return has_settlement_camera_for_binding(binding)
+
+
+static func reset_city_camera_for_settlement(settlement_id: int) -> void:
+	reset_settlement_camera_for_settlement(settlement_id)
+
+
+static func reset_city_camera() -> void:
+	reset_settlement_cameras()
+
+
+static func get_city_camera_entry_count() -> int:
+	return get_settlement_camera_entry_count()
 
 
 static func _touch_city_camera_entry(settlement_id: int) -> void:

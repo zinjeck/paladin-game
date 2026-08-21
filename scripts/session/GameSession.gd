@@ -89,7 +89,7 @@ func _enter_requested_initial_city_view() -> void:
 func prepare_city_view(request: Dictionary) -> void:
 	if (
 		city_view != null
-		or WorldData.has_active_city_save()
+		or WorldData.has_player_capital_city_save()
 		or pending_city_switch
 	):
 		return
@@ -134,16 +134,18 @@ func cancel_city_preparation() -> void:
 
 func show_city_view(request: Dictionary = {}) -> void:
 	if city_view != null:
-		var selected_settlement_id := WorldPoliticalState.active_settlement_id
+		var selected_settlement_id := (
+			WorldPoliticalState.get_presented_settlement_id()
+		)
 		if selected_settlement_id <= 0:
 			selected_settlement_id = (
 				WorldPoliticalState.get_player_capital_settlement_id()
 			)
 		if selected_settlement_id > 0:
-			show_settlement_city_view(selected_settlement_id)
+			show_settlement_view(selected_settlement_id)
 		return
 
-	if WorldData.has_active_city_save():
+	if WorldData.has_player_capital_city_save():
 		cancel_city_preparation()
 		if _ensure_city_view({}):
 			_activate_view(city_view)
@@ -196,7 +198,7 @@ func show_city_view(request: Dictionary = {}) -> void:
 		_set_world_transition_pending(true)
 
 
-func show_settlement_city_view(
+func show_settlement_view(
 	settlement_id: int,
 	prepared_payload: Dictionary = {}
 ) -> bool:
@@ -208,7 +210,7 @@ func show_settlement_city_view(
 	)
 	if (
 		target_context == null
-		or not target_context.supports_city_simulation()
+		or not target_context.supports_detailed_simulation()
 		or not _install_prepared_city_payload_for_context(
 			target_context,
 			prepared_payload
@@ -217,13 +219,28 @@ func show_settlement_city_view(
 		return false
 
 	var lifecycle_owner := _find_view_lifecycle_owner(city_view)
+	var can_rebind_method := _resolve_settlement_presentation_method(
+		lifecycle_owner,
+		&"can_rebind_settlement_presentation",
+		&"can_rebind_city_presentation"
+	)
+	var rebind_method := _resolve_settlement_presentation_method(
+		lifecycle_owner,
+		&"rebind_settlement_presentation",
+		&"rebind_city_presentation"
+	)
+	var validate_method := _resolve_settlement_presentation_method(
+		lifecycle_owner,
+		&"validate_settlement_presentation_binding",
+		&"validate_city_presentation_binding"
+	)
 	if (
 		lifecycle_owner == null
-		or not lifecycle_owner.has_method("can_rebind_city_presentation")
-		or not lifecycle_owner.has_method("rebind_city_presentation")
-		or not lifecycle_owner.has_method("validate_city_presentation_binding")
+		or can_rebind_method == &""
+		or rebind_method == &""
+		or validate_method == &""
 		or not bool(lifecycle_owner.call(
-			"can_rebind_city_presentation",
+			can_rebind_method,
 			target_context,
 			prepared_payload
 		))
@@ -234,35 +251,37 @@ func show_settlement_city_view(
 	if not bool(bootstrap_result.get("success", false)):
 		return false
 
-	var previous_settlement_id := WorldPoliticalState.active_settlement_id
+	var previous_settlement_id := (
+		WorldPoliticalState.get_presented_settlement_id()
+	)
 	var previous_detailed_simulation_settlement_id := (
 		SimulationCoordinator.get_detailed_simulation_settlement_id()
 	)
-	var previous_bound_context = _get_renderer_bound_context(lifecycle_owner)
+	var previous_bound_context = _get_presentation_bound_context(lifecycle_owner)
 	if previous_bound_context == null:
 		previous_bound_context = WorldPoliticalState.get_settlement_context(
 			previous_settlement_id
 		)
-	var city_was_active := active_view == city_view
+	var settlement_view_was_active := active_view == city_view
 	var simulation_was_paused := SimulationClock.simulation_paused
 	var simulation_speed_before := SimulationClock.speed_multiplier
 
 	cancel_city_preparation()
 	_set_world_transition_pending(true)
 	SimulationClock.set_simulation_paused(true)
-	if city_was_active:
+	if settlement_view_was_active:
 		_set_view_active(city_view, false)
 
 	# The renderer proves it can bind the explicit target before the session
 	# changes either presentation selection or detailed-simulation policy.
 	var rebound := bool(lifecycle_owner.call(
-		"rebind_city_presentation",
+		rebind_method,
 		target_context,
 		prepared_payload
 	))
 	if rebound:
 		rebound = bool(lifecycle_owner.call(
-			"validate_city_presentation_binding",
+			validate_method,
 			target_context
 		))
 	if rebound:
@@ -273,28 +292,77 @@ func show_settlement_city_view(
 		rebound = WorldPoliticalState.set_active_settlement(settlement_id)
 
 	if not rebound:
+		var presentation_rollback_restored := false
 		if previous_bound_context != null:
-			lifecycle_owner.call(
-				"rebind_city_presentation",
+			presentation_rollback_restored = bool(lifecycle_owner.call(
+				rebind_method,
 				previous_bound_context,
 				{}
-			)
-		_restore_detailed_simulation_target(
+			))
+			if presentation_rollback_restored:
+				presentation_rollback_restored = bool(lifecycle_owner.call(
+					validate_method,
+					previous_bound_context
+				))
+		var detailed_authority_restored := _restore_detailed_simulation_target(
 			previous_detailed_simulation_settlement_id
 		)
+		var presented_authority_restored := false
 		if previous_settlement_id > 0:
-			WorldPoliticalState.set_active_settlement(
+			presented_authority_restored = (
+				WorldPoliticalState.set_active_settlement(
 				previous_settlement_id
+				)
 			)
-		if city_was_active:
+		else:
+			presented_authority_restored = (
+				WorldPoliticalState.get_presented_settlement_id() <= 0
+			)
+
+		var restored_bound_context = _get_presentation_bound_context(
+			lifecycle_owner
+		)
+		var restored_bound_settlement_id := (
+			SettlementData.INVALID_SETTLEMENT_ID
+		)
+		if restored_bound_context is SettlementSimulationContext:
+			restored_bound_settlement_id = (
+				restored_bound_context.settlement_id
+			)
+		var rollback_binding_aligned := (
+			presentation_rollback_restored
+			and detailed_authority_restored
+			and presented_authority_restored
+			and restored_bound_settlement_id > 0
+			and restored_bound_settlement_id
+			== WorldPoliticalState.get_presented_settlement_id()
+			and restored_bound_settlement_id
+			== SimulationCoordinator.get_detailed_simulation_settlement_id()
+		)
+
+		if settlement_view_was_active and rollback_binding_aligned:
 			_set_view_active(city_view, true)
 			active_view = city_view
+		elif not rollback_binding_aligned:
+			# A failed or misaligned rollback poisons the persistent view. Retire
+			# it so a later entry can configure a fresh renderer from explicit
+			# settlement context instead of preserving split presentation state.
+			_set_view_active(city_view, false)
+			if settlement_view_was_active and world_view != null:
+				_activate_view(world_view)
+			elif settlement_view_was_active:
+				active_view = null
+			_retire_invalid_city_view(city_view)
+			push_warning(
+				"Settlement presentation rollback did not restore exact binding authority; "
+				+ "the invalid detailed view was retired."
+			)
 		_set_world_transition_pending(false)
 		SimulationClock.set_speed_multiplier(simulation_speed_before)
 		SimulationClock.set_simulation_paused(simulation_was_paused)
 		return false
 
-	if city_was_active:
+	if settlement_view_was_active:
 		_set_view_active(city_view, true)
 		active_view = city_view
 	else:
@@ -304,6 +372,15 @@ func show_settlement_city_view(
 	SimulationClock.set_speed_multiplier(simulation_speed_before)
 	SimulationClock.set_simulation_paused(simulation_was_paused)
 	return true
+
+
+func show_settlement_city_view(
+	settlement_id: int,
+	prepared_payload: Dictionary = {}
+) -> bool:
+	# Compatibility entry point for current city callers. Presentation routing is
+	# settlement-scoped; detailed-backend capability decides whether it can open.
+	return show_settlement_view(settlement_id, prepared_payload)
 
 
 func show_world_view() -> void:
@@ -441,16 +518,22 @@ func _ensure_city_view(prepared_payload: Dictionary) -> bool:
 		return false
 
 	var lifecycle_owner := _find_view_lifecycle_owner(candidate_city_view)
+	var configure_method := _resolve_settlement_presentation_method(
+		lifecycle_owner,
+		&"configure_initial_settlement_presentation",
+		&"configure_initial_city_presentation"
+	)
+	var validate_method := _resolve_settlement_presentation_method(
+		lifecycle_owner,
+		&"validate_settlement_presentation_binding",
+		&"validate_city_presentation_binding"
+	)
 	if (
 		lifecycle_owner == null
-		or not lifecycle_owner.has_method(
-			"configure_initial_city_presentation"
-		)
-		or not lifecycle_owner.has_method(
-			"validate_city_presentation_binding"
-		)
+		or configure_method == &""
+		or validate_method == &""
 		or not bool(lifecycle_owner.call(
-			"configure_initial_city_presentation",
+			configure_method,
 			settlement_context,
 			prepared_payload
 		))
@@ -481,7 +564,7 @@ func _ensure_city_view(prepared_payload: Dictionary) -> bool:
 	add_child(city_view)
 	_set_view_active(city_view, false)
 	if not bool(lifecycle_owner.call(
-		"validate_city_presentation_binding",
+		validate_method,
 		settlement_context
 	)):
 		remove_child(city_view)
@@ -590,8 +673,8 @@ func _synchronize_first_city_entry_foundation() -> bool:
 	)
 	return (
 		capital_context != null
-		and capital_context.supports_city_simulation()
-		and capital_context.get_city_simulation_state() != null
+		and capital_context.supports_detailed_simulation()
+		and capital_context.get_detailed_simulation_state() != null
 	)
 
 
@@ -608,7 +691,7 @@ func _install_prepared_city_payload_for_context(
 		return false
 
 	var city_state: CitySettlementSimulationState = (
-		settlement_context.get_city_simulation_state()
+		settlement_context.get_detailed_simulation_state()
 	)
 	if city_state == null:
 		return false
@@ -667,16 +750,49 @@ func _commit_first_city_entry() -> void:
 	_hide_world_region_selection_after_city_entry()
 
 
-func _restore_detailed_simulation_target(settlement_id: int) -> void:
+func _restore_detailed_simulation_target(settlement_id: int) -> bool:
 	if settlement_id > 0:
-		SimulationCoordinator.select_detailed_simulation_settlement(
+		return SimulationCoordinator.select_detailed_simulation_settlement(
 			settlement_id
 		)
+
+	SimulationCoordinator.clear_detailed_simulation_settlement()
+	return (
+		SimulationCoordinator.get_detailed_simulation_settlement_id() <= 0
+	)
+
+
+func _retire_invalid_city_view(invalid_view: Node) -> void:
+	if invalid_view == null or not is_instance_valid(invalid_view):
+		return
+
+	_set_view_active(invalid_view, false)
+	if is_same(active_view, invalid_view):
+		active_view = null
+	if is_same(city_view, invalid_view):
+		city_view = null
+
+	if invalid_view.is_inside_tree():
+		invalid_view.queue_free()
 	else:
-		SimulationCoordinator.clear_detailed_simulation_settlement()
+		invalid_view.free()
 
 
-func _get_renderer_bound_context(lifecycle_owner: Node):
+func _resolve_settlement_presentation_method(
+	lifecycle_owner: Node,
+	settlement_method: StringName,
+	legacy_city_method: StringName
+) -> StringName:
+	if lifecycle_owner == null:
+		return &""
+	if lifecycle_owner.has_method(settlement_method):
+		return settlement_method
+	if lifecycle_owner.has_method(legacy_city_method):
+		return legacy_city_method
+	return &""
+
+
+func _get_presentation_bound_context(lifecycle_owner: Node):
 	if (
 		lifecycle_owner != null
 		and lifecycle_owner.has_method("get_bound_settlement_context")

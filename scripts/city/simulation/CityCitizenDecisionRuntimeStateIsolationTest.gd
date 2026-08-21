@@ -29,12 +29,30 @@ func _test_city_isolation_and_future_ordering() -> void:
 		return
 	var city_a_id := int(fixture["city_a_id"])
 	var city_b_id := int(fixture["city_b_id"])
+	var city_a_state: CitySettlementSimulationState = (
+		WorldPoliticalState.get_city_simulation_state(city_a_id)
+	)
+	var city_b_state: CitySettlementSimulationState = (
+		WorldPoliticalState.get_city_simulation_state(city_b_id)
+	)
+	_expect(
+		city_a_state is CitySettlementSimulationState
+		and city_b_state is CitySettlementSimulationState,
+		"Both City fixtures must expose explicit simulation owners."
+	)
+	if (
+		not city_a_state is CitySettlementSimulationState
+		or not city_b_state is CitySettlementSimulationState
+	):
+		return
 
 	_expect(
 		_bind_fixture_city(city_a_id),
 		"City A must become active."
 	)
-	var state_a := CitizenDecisionSystem.get_current_state()
+	var state_a: CityCitizenDecisionRuntimeState = (
+		city_a_state.citizen_decision_runtime_state
+	)
 	_seed_state(state_a, 10)
 	var identity_a := _capture_identity(state_a)
 	var values_a := _capture_values(state_a)
@@ -43,7 +61,9 @@ func _test_city_isolation_and_future_ordering() -> void:
 		_bind_fixture_city(city_b_id),
 		"City B must become active."
 	)
-	var state_b := CitizenDecisionSystem.get_current_state()
+	var state_b: CityCitizenDecisionRuntimeState = (
+		city_b_state.citizen_decision_runtime_state
+	)
 	_seed_state(state_b, 20)
 	var identity_b := _capture_identity(state_b)
 	var values_b := _capture_values(state_b)
@@ -75,14 +95,14 @@ func _test_city_isolation_and_future_ordering() -> void:
 
 	_expect(
 		_bind_fixture_city(city_a_id)
-		and is_same(CitizenDecisionSystem.get_current_state(), state_a)
+		and is_same(city_a_state.citizen_decision_runtime_state, state_a)
 		and _matches_identity(state_a, identity_a)
 		and _matches_values(state_a, values_a),
 		"A -> B -> A must restore City A exactly."
 	)
 	_expect(
 		_bind_fixture_city(city_b_id)
-		and is_same(CitizenDecisionSystem.get_current_state(), state_b)
+		and is_same(city_b_state.citizen_decision_runtime_state, state_b)
 		and _matches_identity(state_b, identity_b)
 		and _matches_values(state_b, values_b),
 		"Returning to City B must restore its exact scheduler state."
@@ -90,7 +110,7 @@ func _test_city_isolation_and_future_ordering() -> void:
 
 	# Execute the public scheduler boundary in B. With no B citizens it takes the
 	# deterministic empty-city reset path; City A must remain byte-for-byte stable.
-	CitizenDecisionSystem.run_tick(1, 1)
+	CitizenDecisionSystem.run_tick_for_city_state(city_b_state, 1, 1)
 	_expect(
 		_state_has_clean_defaults(state_b),
 		"Running City B must mutate only City B's scheduler owner."
@@ -103,9 +123,19 @@ func _test_city_isolation_and_future_ordering() -> void:
 	)
 
 	# Drive the real pending-queue and scan-order seams in A.
-	CitizenDecisionSystem._queue_citizen_id(77)
-	CitizenDecisionSystem._queue_citizen_id(77)
-	var first_a_scan := CitizenDecisionSystem._take_food_scan_start_index(
+	CitizenDecisionSystem._queue_citizen_id_for_city_state(
+		city_a_state,
+		state_a,
+		77
+	)
+	CitizenDecisionSystem._queue_citizen_id_for_city_state(
+		city_a_state,
+		state_a,
+		77
+	)
+	var first_a_scan := CitizenDecisionSystem._take_food_scan_start_index_for_city_state(
+		city_a_state,
+		state_a,
 		false,
 		50
 	)
@@ -125,7 +155,12 @@ func _test_city_isolation_and_future_ordering() -> void:
 		"City B must become visible for the ordering check."
 	)
 	state_b.normal_food_scan_cursor = 4
-	var first_b_scan := CitizenDecisionSystem._take_food_scan_start_index(false, 5)
+	var first_b_scan := CitizenDecisionSystem._take_food_scan_start_index_for_city_state(
+		city_b_state,
+		state_b,
+		false,
+		5
+	)
 	_expect(
 		first_b_scan == 4 and state_b.normal_food_scan_cursor == 0,
 		"City B must advance its own independent future ordering."
@@ -136,7 +171,9 @@ func _test_city_isolation_and_future_ordering() -> void:
 		and _matches_values(state_a, a_values_after_step),
 		"A visible-city round trip alone must not alter City A's future order."
 	)
-	var second_a_scan := CitizenDecisionSystem._take_food_scan_start_index(
+	var second_a_scan := CitizenDecisionSystem._take_food_scan_start_index_for_city_state(
+		city_a_state,
+		state_a,
 		false,
 		50
 	)
@@ -145,16 +182,13 @@ func _test_city_isolation_and_future_ordering() -> void:
 		"City A must resume at the exact next scheduled scan index."
 	)
 
-	var city_b_root = WorldPoliticalState.get_city_simulation_state(city_b_id)
-	var context := SettlementSimulationContext.new({
-		"settlement_id": city_b_id,
-		"polity_id": int(fixture["polity_id"]),
-		"settlement_type": SettlementData.SETTLEMENT_TYPE_CITY,
-		"backend_kind": SettlementSimulationContext.BACKEND_CITY_SETTLEMENT_STATE,
-		"local_state": city_b_root,
-	})
+	var context: SettlementSimulationContext = (
+		WorldPoliticalState.get_settlement_context(city_b_id)
+	)
 	_expect(
-		is_same(
+		context != null
+		and WorldPoliticalState.is_registered_settlement_context(context)
+		and is_same(
 			context.get_city_citizen_decision_runtime_state(),
 			state_b
 		),
@@ -166,7 +200,6 @@ func _bind_fixture_city(city_id: int) -> bool:
 	var city_state = WorldPoliticalState.get_city_simulation_state(city_id)
 	if not city_state is CitySettlementSimulationState:
 		return false
-	CityCitizenUnboundCompatibility.bind_legacy_fixture_state(city_state)
 	return WorldPoliticalState.set_active_settlement(city_id)
 
 

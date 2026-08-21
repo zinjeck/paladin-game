@@ -2,11 +2,23 @@ extends Node2D
 class_name CityRenderLayer
 
 var _draw_callback: Callable
+var _draw_observer: Callable
 var _redraw_requested: bool = false
+var layer_name: String = ""
+var draw_count: int = 0
+var last_draw_duration_usec: int = 0
+var total_draw_duration_usec: int = 0
+var last_draw_timestamp_usec: int = 0
 
 
-func setup(draw_callback: Callable) -> void:
+func setup(
+	draw_callback: Callable,
+	presentation_layer_name: String = "",
+	draw_observer: Callable = Callable()
+) -> void:
 	_draw_callback = draw_callback
+	_draw_observer = draw_observer
+	layer_name = presentation_layer_name
 	texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
 
 
@@ -24,7 +36,27 @@ func _draw() -> void:
 	_redraw_requested = false
 
 	if _draw_callback.is_valid():
+		var draw_started_usec := Time.get_ticks_usec()
 		_draw_callback.call(self)
+		last_draw_duration_usec = maxi(
+			Time.get_ticks_usec() - draw_started_usec,
+			0
+		)
+		draw_count += 1
+		total_draw_duration_usec += last_draw_duration_usec
+		last_draw_timestamp_usec = Time.get_ticks_usec()
+		if _draw_observer.is_valid():
+			_draw_observer.call(self, last_draw_duration_usec)
+
+
+func get_metrics() -> Dictionary:
+	return {
+		"layer_name": layer_name,
+		"draw_count": draw_count,
+		"last_draw_duration_usec": last_draw_duration_usec,
+		"total_draw_duration_usec": total_draw_duration_usec,
+		"last_draw_timestamp_usec": last_draw_timestamp_usec,
+	}
 
 
 #region Shared Drawing Primitives
@@ -269,4 +301,3 @@ static func draw_tile_footprint_border(values: Dictionary) -> void:
 			)
 
 #endregion
-

@@ -8,7 +8,7 @@ const CityCitizenDecisionRuntimeStateScript = preload(
 # Instance-owned mutable state for one CITY settlement.
 #
 # City runtime identity and mutable simulation state live directly on this
-# settlement owner. No state is copied through WorldData when settlements switch.
+# settlement owner and remain independent of presentation selection.
 #
 # Do not add world/polity identity here. SettlementData and PolityData own that
 # information. This class is only local city-simulation state.
@@ -17,8 +17,8 @@ var city_world = null
 var city_seed: int = 0
 var city_runtime_data: Dictionary = {}
 
-# Physically extracted settlement-local subsystems. Their state is selected by
-# settlement identity rather than copied through the legacy WorldData workspace.
+# Each focused subsystem below is an authoritative local owner for this exact
+# settlement and is reached through its registered simulation context.
 var object_state: CityObjectState = CityObjectState.new()
 var resource_accounting_state: CityResourceAccountingState = (
 	CityResourceAccountingState.new()
@@ -46,9 +46,9 @@ var construction_state: CityConstructionState = CityConstructionState.new()
 var navigation_state: CityNavigationState = CityNavigationState.new()
 
 
-# Settlement-local gameplay facts remain in the existing runtime record so
-# founding has one authority. These typed readers keep simulation and
-# presentation code from falling back to the global player-capital mirrors.
+# Settlement-local gameplay facts remain in the runtime record so founding has
+# one authority. These typed readers keep simulation and presentation code bound
+# to that exact owner; player-capital mirrors are session metadata only.
 func is_city_founded() -> bool:
 	return bool(city_runtime_data.get("founded", false))
 

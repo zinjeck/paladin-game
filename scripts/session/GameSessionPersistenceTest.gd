@@ -254,7 +254,181 @@ class NullCityViewTransactionSession:
 		first_entry_failure_messages.append(message)
 
 
+class NeutralSettlementLifecycleProbe:
+	extends Node
+
+
+	func rebind_settlement_presentation() -> void:
+		pass
+
+
+	func rebind_city_presentation() -> void:
+		pass
+
+
+class LegacyCityLifecycleProbe:
+	extends Node
+
+
+	func rebind_city_presentation() -> void:
+		pass
+
+
+class RollbackFailureLifecycleView:
+	extends Control
+
+	var previous_context: SettlementSimulationContext
+	var target_context: SettlementSimulationContext
+	var bound_context: SettlementSimulationContext
+	var session_active: bool = true
+	var target_bind_succeeded: bool = false
+	var rollback_rejected: bool = false
+	var trace: Dictionary = {}
+
+
+	func can_rebind_settlement_presentation(
+		context: SettlementSimulationContext,
+		_prepared_payload: Dictionary = {}
+	) -> bool:
+		return context != null
+
+
+	func rebind_settlement_presentation(
+		context: SettlementSimulationContext,
+		_prepared_payload: Dictionary = {}
+	) -> bool:
+		if (
+			context != null
+			and previous_context != null
+			and bound_context != null
+			and target_context != null
+			and context.settlement_id == previous_context.settlement_id
+			and bound_context.settlement_id == target_context.settlement_id
+		):
+			rollback_rejected = true
+			trace["rollback_rejected"] = true
+			return false
+		bound_context = context
+		if (
+			context != null
+			and target_context != null
+			and context.settlement_id == target_context.settlement_id
+		):
+			target_bind_succeeded = true
+			trace["target_bind_succeeded"] = true
+		return true
+
+
+	func validate_settlement_presentation_binding(
+		context: SettlementSimulationContext
+	) -> bool:
+		# The target bind succeeds, then post-bind validation forces the session
+		# rollback path. The subsequent previous-context bind is rejected above.
+		return (
+			bound_context != null
+			and context != null
+			and target_context != null
+			and bound_context.settlement_id == context.settlement_id
+			and context.settlement_id != target_context.settlement_id
+		)
+
+
+	func get_bound_settlement_context():
+		return bound_context
+
+
+	func set_session_view_active(is_active: bool) -> void:
+		session_active = is_active
+		visible = is_active
+
+
+class RollbackFailureSession:
+	extends GameSession
+
+	var city_view_creation_count: int = 0
+
+
+	func _install_prepared_city_payload_for_context(
+		_settlement_context: SettlementSimulationContext,
+		_prepared_payload: Dictionary
+	) -> bool:
+		return true
+
+
+	func _bootstrap_city_context(
+		_settlement_context: SettlementSimulationContext
+	) -> Dictionary:
+		return {"success": true}
+
+
+	func _create_city_view() -> Node:
+		city_view_creation_count += 1
+		return ExplicitBindingTransactionCityView.new()
+
+
+class AlignmentRollbackLifecycleView:
+	extends Control
+
+	var previous_context: SettlementSimulationContext
+	var target_context: SettlementSimulationContext
+	var bound_context: SettlementSimulationContext
+	var session_active: bool = true
+	var trace: Dictionary = {}
+
+
+	func can_rebind_settlement_presentation(
+		context: SettlementSimulationContext,
+		_prepared_payload: Dictionary = {}
+	) -> bool:
+		return context != null
+
+
+	func rebind_settlement_presentation(
+		context: SettlementSimulationContext,
+		_prepared_payload: Dictionary = {}
+	) -> bool:
+		bound_context = context
+		if context != null and target_context != null:
+			if context.settlement_id == target_context.settlement_id:
+				trace["target_bound"] = true
+			elif (
+				previous_context != null
+				and context.settlement_id == previous_context.settlement_id
+			):
+				trace["rollback_bound"] = true
+		return context != null
+
+
+	func validate_settlement_presentation_binding(
+		context: SettlementSimulationContext
+	) -> bool:
+		if bound_context == null or context == null:
+			return false
+		if (
+			target_context != null
+			and context.settlement_id == target_context.settlement_id
+		):
+			trace["target_validation_rejected"] = true
+			return false
+		var valid := bound_context.settlement_id == context.settlement_id
+		if valid:
+			trace["rollback_validated"] = true
+		return valid
+
+
+	func get_bound_settlement_context():
+		return bound_context
+
+
+	func set_session_view_active(is_active: bool) -> void:
+		session_active = is_active
+		visible = is_active
+
+
 func _ready() -> void:
+	_test_settlement_presentation_lifecycle_resolution()
+	_test_failed_session_presentation_rollback_stays_inactive()
+	_test_split_prestate_rollback_requires_exact_alignment()
 	_test_thread_start_failure_terminal()
 	_test_invalid_worker_result_terminal()
 	_test_cancel_retry_and_stale_result()
@@ -277,6 +451,252 @@ func _ready() -> void:
 
 	print("Game session persistence tests passed.")
 	get_tree().quit(0)
+
+
+func _test_settlement_presentation_lifecycle_resolution() -> void:
+	var session := GameSession.new()
+	var neutral_probe := NeutralSettlementLifecycleProbe.new()
+	var legacy_probe := LegacyCityLifecycleProbe.new()
+	_expect(
+		session._resolve_settlement_presentation_method(
+			neutral_probe,
+			&"rebind_settlement_presentation",
+			&"rebind_city_presentation"
+		) == &"rebind_settlement_presentation",
+		"Settlement presentation dispatch must prefer the neutral lifecycle name."
+	)
+	_expect(
+		session._resolve_settlement_presentation_method(
+			legacy_probe,
+			&"rebind_settlement_presentation",
+			&"rebind_city_presentation"
+		) == &"rebind_city_presentation",
+		"Settlement presentation dispatch must retain the current city lifecycle fallback."
+	)
+	neutral_probe.free()
+	legacy_probe.free()
+	session.free()
+
+
+func _test_failed_session_presentation_rollback_stays_inactive() -> void:
+	var fixture := _create_two_city_session_fixture()
+	if fixture.is_empty():
+		_expect(false, "The session rollback fixture must create two cities.")
+		return
+
+	var context_a: SettlementSimulationContext = fixture["context_a"]
+	var context_b: SettlementSimulationContext = fixture["context_b"]
+	var settlement_a_id: int = context_a.settlement_id
+	var session := RollbackFailureSession.new()
+	var city_probe := RollbackFailureLifecycleView.new()
+	var world_probe := Control.new()
+	var trace: Dictionary = {}
+	city_probe.previous_context = context_a
+	city_probe.target_context = context_b
+	city_probe.bound_context = context_a
+	city_probe.trace = trace
+	city_probe.visible = true
+	world_probe.visible = false
+	session.city_view = city_probe
+	session.world_view = world_probe
+	session.active_view = city_probe
+	session.city_view_has_been_entered = true
+
+	var switch_result := session.show_settlement_view(
+		context_b.settlement_id
+	)
+	var failed_after_target_bind: bool = (
+		not switch_result
+		and bool(trace.get("target_bind_succeeded", false))
+		and bool(trace.get("rollback_rejected", false))
+	)
+	var split_view_inactive: bool = (
+		session.city_view == null
+		and is_same(session.active_view, world_probe)
+		and world_probe.visible
+	)
+	var prior_session_targets_restored: bool = (
+		WorldPoliticalState.get_presented_settlement_id()
+		== settlement_a_id
+		and SimulationCoordinator.get_detailed_simulation_settlement_id()
+		== settlement_a_id
+	)
+	_expect(
+		failed_after_target_bind,
+		"The session rollback fixture must fail after binding the target presentation."
+	)
+	_expect(
+		split_view_inactive,
+		"A failed presentation rollback must keep the split detailed view inactive."
+	)
+	_expect(
+		prior_session_targets_restored,
+		"A failed presentation rollback must restore prior session/simulation targets."
+	)
+
+	var state_a: CitySettlementSimulationState = (
+		context_a.get_detailed_simulation_state()
+	)
+	var retry_world := _make_world(8, 8, 8091)
+	state_a.city_world = retry_world
+	state_a.city_seed = retry_world.seed
+	session.show_city_view()
+	var recovered_bound_context = session._get_presentation_bound_context(
+		session.city_view
+	)
+	var retry_recovered_prior_target: bool = (
+		session.city_view != null
+		and session.city_view_creation_count == 1
+		and session.active_view == session.city_view
+		and recovered_bound_context is SettlementSimulationContext
+		and recovered_bound_context.settlement_id == settlement_a_id
+		and WorldPoliticalState.get_presented_settlement_id()
+		== settlement_a_id
+		and SimulationCoordinator.get_detailed_simulation_settlement_id()
+		== settlement_a_id
+	)
+	_expect(
+		retry_recovered_prior_target,
+		"A later city entry must replace the retired view and recover the prior exact target."
+	)
+
+	world_probe.free()
+	session.free()
+	WorldData.reset_runtime_session_state()
+
+
+func _test_split_prestate_rollback_requires_exact_alignment() -> void:
+	var fixture := _create_two_city_session_fixture()
+	if fixture.is_empty():
+		_expect(false, "The split-prestate rollback fixture must create two cities.")
+		return
+
+	var context_a: SettlementSimulationContext = fixture["context_a"]
+	var context_b: SettlementSimulationContext = fixture["context_b"]
+	var settlement_b_id := context_b.settlement_id
+	if (
+		not WorldPoliticalState.set_active_settlement(settlement_b_id)
+		or not SimulationCoordinator.select_detailed_simulation_settlement(
+			settlement_b_id
+		)
+	):
+		_expect(false, "The split-prestate rollback fixture must select settlement B.")
+		WorldData.reset_runtime_session_state()
+		return
+
+	var session := RollbackFailureSession.new()
+	var city_probe := AlignmentRollbackLifecycleView.new()
+	var world_probe := Control.new()
+	var trace: Dictionary = {}
+	city_probe.previous_context = context_a
+	city_probe.target_context = context_b
+	city_probe.bound_context = context_a
+	city_probe.trace = trace
+	city_probe.visible = true
+	world_probe.visible = false
+	session.city_view = city_probe
+	session.world_view = world_probe
+	session.active_view = city_probe
+	session.city_view_has_been_entered = true
+
+	var switch_result := session.show_settlement_view(settlement_b_id)
+	var rollback_succeeded_but_misaligned := (
+		not switch_result
+		and bool(trace.get("target_bound", false))
+		and bool(trace.get("target_validation_rejected", false))
+		and bool(trace.get("rollback_bound", false))
+		and bool(trace.get("rollback_validated", false))
+		and WorldPoliticalState.get_presented_settlement_id()
+		== settlement_b_id
+		and SimulationCoordinator.get_detailed_simulation_settlement_id()
+		== settlement_b_id
+	)
+	var misaligned_view_retired := (
+		session.city_view == null
+		and session.active_view == world_probe
+		and world_probe.visible
+	)
+	_expect(
+		rollback_succeeded_but_misaligned,
+		"The split-prestate fixture must restore renderer A while authority remains B."
+	)
+	_expect(
+		misaligned_view_retired,
+		"A presentation rollback may reactivate only when bound, presented, and detailed IDs align."
+	)
+
+	world_probe.free()
+	session.free()
+	WorldData.reset_runtime_session_state()
+
+
+func _create_two_city_session_fixture() -> Dictionary:
+	WorldData.reset_runtime_session_state()
+	var culture := WorldData.create_culture("Session Rollback Culture")
+	var culture_id := int(culture.get("id", CultureData.INVALID_CULTURE_ID))
+	var polity := WorldPoliticalState.create_polity({
+		"name": "Session Rollback Polity",
+		"polity_type": PolityData.POLITY_TYPE_KINGDOM,
+		"primary_culture_id": culture_id,
+	})
+	var polity_id := int(polity.get("id", PolityData.INVALID_POLITY_ID))
+	if culture_id <= 0 or polity_id <= 0:
+		return {}
+
+	var settlement_a := WorldPoliticalState.create_settlement({
+		"name": "Session Rollback A",
+		"settlement_type": SettlementData.SETTLEMENT_TYPE_CITY,
+		"polity_id": polity_id,
+		"world_region_top_left": Vector2i.ZERO,
+		"world_region_center": Vector2i.ZERO,
+		"world_region_size": 1,
+		"simulation_backend_kind": (
+			SettlementSimulationContext.BACKEND_CITY_SETTLEMENT_STATE
+		),
+	})
+	var settlement_b := WorldPoliticalState.create_settlement({
+		"name": "Session Rollback B",
+		"settlement_type": SettlementData.SETTLEMENT_TYPE_CITY,
+		"polity_id": polity_id,
+		"world_region_top_left": Vector2i(2, 0),
+		"world_region_center": Vector2i(2, 0),
+		"world_region_size": 1,
+		"simulation_backend_kind": (
+			SettlementSimulationContext.BACKEND_CITY_SETTLEMENT_STATE
+		),
+	})
+	var settlement_a_id := int(settlement_a.get(
+		"id",
+		SettlementData.INVALID_SETTLEMENT_ID
+	))
+	var settlement_b_id := int(settlement_b.get(
+		"id",
+		SettlementData.INVALID_SETTLEMENT_ID
+	))
+	if settlement_a_id <= 0 or settlement_b_id <= 0:
+		return {}
+
+	WorldPoliticalState.player_polity_id = polity_id
+	if (
+		not WorldPoliticalState.set_polity_capital(polity_id, settlement_a_id)
+		or not WorldPoliticalState.set_active_settlement(settlement_a_id)
+		or not SimulationCoordinator.select_detailed_simulation_settlement(
+			settlement_a_id
+		)
+	):
+		return {}
+	var context_a: SettlementSimulationContext = (
+		WorldPoliticalState.get_settlement_context(settlement_a_id)
+	)
+	var context_b: SettlementSimulationContext = (
+		WorldPoliticalState.get_settlement_context(settlement_b_id)
+	)
+	if context_a == null or context_b == null:
+		return {}
+	return {
+		"context_a": context_a,
+		"context_b": context_b,
+	}
 
 
 func _test_thread_start_failure_terminal() -> void:
@@ -742,20 +1162,50 @@ func _test_first_city_entry_transaction() -> void:
 	_expect(locked, "The first-entry transaction fixture must lock its world.")
 	if not locked:
 		return
+	var synchronized := WorldPoliticalState.synchronize_foundation_with_world_data()
+	_expect(
+		synchronized,
+		"The first-entry transaction fixture must register its capital context."
+	)
+	var capital_settlement_id := (
+		WorldPoliticalState.get_player_capital_settlement_id()
+	)
+	var capital_state: CitySettlementSimulationState = (
+		WorldPoliticalState.get_city_simulation_state(capital_settlement_id)
+	)
+	_expect(
+		capital_state != null,
+		"The first-entry transaction fixture must expose its capital city state."
+	)
+	if capital_state == null:
+		WorldData.reset_runtime_session_state()
+		return
 
 	var city_world := _make_world(20, 20, 52_102)
-	WorldData.store_city_world_save(city_world, 52_102)
+	var stored_city_world := WorldData.store_city_world_for_state(
+		capital_state, city_world, 52_102
+	)
+	_expect(
+		stored_city_world,
+		"The first-entry transaction fixture must store its exact capital world."
+	)
+	if not stored_city_world:
+		WorldData.reset_runtime_session_state()
+		return
 	var keep_size := CityObjectCatalog.get_city_object_size_for_type(
 		CityObjectCatalog.CITY_OBJECT_CITY_CENTER
 	)
 	var keep_top_left := Vector2i(8, 6)
-	var keep := CityObjectSystem.register_completed_city_object({
-		"object_type": CityObjectCatalog.CITY_OBJECT_CITY_CENTER,
-		"top_left": keep_top_left,
-		"size_tiles": keep_size,
-		"object_owner": "player",
-		"city_world": city_world,
-	})
+	var keep := CityObjectSystem.register_completed_city_object_for_city_state(
+		capital_state,
+		{
+			"object_type": CityObjectCatalog.CITY_OBJECT_CITY_CENTER,
+			"top_left": keep_top_left,
+			"size_tiles": keep_size,
+			"object_owner": "player",
+			"city_world": city_world,
+		}
+	)
 	_expect(
 		not keep.is_empty(),
 		"The first-entry transaction fixture must create one City Keep."
@@ -780,7 +1230,8 @@ func _test_first_city_entry_transaction() -> void:
 	for raw_resource in seeded_resources.keys():
 		var resource := str(raw_resource)
 		var accepted := (
-			CityResourceContainerSystem.add_resource_to_city_object_storage(
+			CityResourceContainerSystem.add_resource_to_city_object_storage_for_city_state(
+				capital_state,
 				keep_id,
 				resource,
 				int(seeded_resources[resource])
@@ -791,10 +1242,16 @@ func _test_first_city_entry_transaction() -> void:
 			"The first-entry fixture must seed exact Keep resources."
 		)
 
-	var object_state_before = CityObjectSystem.get_current_state()
-	var citizen_state_before = CityCitizenRegistrySystem.get_current_state()
-	var resource_state_before = CityResourceAccountingSystem.get_current_state()
-	var objects_before := CityObjectSystem.get_city_object_snapshot()
+	var object_state_before = CityObjectSystem.get_state_for_city_state(capital_state)
+	var citizen_state_before = (
+		CityCitizenRegistrySystem.get_state_for_city_state(capital_state)
+	)
+	var resource_state_before = (
+		CityResourceAccountingSystem.get_state_for_city_state(capital_state)
+	)
+	var objects_before := (
+		CityObjectSystem.get_city_objects_for_city_state(capital_state).duplicate(true)
+	)
 	var citizens_before: Array = citizen_state_before.citizens.duplicate(true)
 	var next_object_id_before: int = int(object_state_before.next_object_id)
 	var next_citizen_id_before: int = int(citizen_state_before.next_citizen_id)
@@ -803,7 +1260,10 @@ func _test_first_city_entry_transaction() -> void:
 	for raw_resource in seeded_resources.keys():
 		var resource := str(raw_resource)
 		resource_totals_before[resource] = (
-			CityResourceAccountingSystem.get_total_physical_city_resource_amount(resource)
+			CityResourceAccountingSystem.get_total_physical_city_resource_amount_for_city_state(
+				capital_state,
+				resource
+			)
 		)
 		_expect(
 			int(resource_totals_before[resource])
@@ -861,13 +1321,16 @@ func _test_first_city_entry_transaction() -> void:
 	_expect(
 		WorldPoliticalState.get_polity_snapshot().size() == 1
 		and WorldPoliticalState.get_settlement_snapshot().size() == 1
-		and is_same(CityObjectSystem.get_current_state(), object_state_before)
 		and is_same(
-			CityCitizenRegistrySystem.get_current_state(),
+			CityObjectSystem.get_state_for_city_state(capital_state),
+			object_state_before
+		)
+		and is_same(
+			CityCitizenRegistrySystem.get_state_for_city_state(capital_state),
 			citizen_state_before
 		)
 		and is_same(
-			CityResourceAccountingSystem.get_current_state(),
+			CityResourceAccountingSystem.get_state_for_city_state(capital_state),
 			resource_state_before
 		),
 		"A post-sync rejection must preserve one exact settlement state owner."
@@ -879,7 +1342,9 @@ func _test_first_city_entry_transaction() -> void:
 		WorldPoliticalState.get_settlement_snapshot()
 	)
 	var player_polity_id_after_rejection := WorldPoliticalState.player_polity_id
-	var capital_id_after_rejection := WorldPoliticalState.active_settlement_id
+	var capital_id_after_rejection := (
+		WorldPoliticalState.get_player_capital_settlement_id()
+	)
 	var capital_state_after_rejection = (
 		WorldPoliticalState.get_city_simulation_state(
 			capital_id_after_rejection
@@ -918,21 +1383,27 @@ func _test_first_city_entry_transaction() -> void:
 	)
 
 	var content_preserved: bool = (
-		is_same(CityObjectSystem.get_current_state(), object_state_before)
+		is_same(
+			CityObjectSystem.get_state_for_city_state(capital_state),
+			object_state_before
+		)
 		and is_same(
-			CityCitizenRegistrySystem.get_current_state(),
+			CityCitizenRegistrySystem.get_state_for_city_state(capital_state),
 			citizen_state_before
 		)
 		and is_same(
-			CityResourceAccountingSystem.get_current_state(),
+			CityResourceAccountingSystem.get_state_for_city_state(capital_state),
 			resource_state_before
 		)
-		and CityObjectSystem.get_city_object_snapshot() == objects_before
-		and CityCitizenRegistrySystem.get_current_state().citizens
+		and CityObjectSystem.get_city_objects_for_city_state(capital_state).duplicate(true)
+		== objects_before
+		and CityCitizenRegistrySystem.get_state_for_city_state(capital_state).citizens
 		== citizens_before
-		and CityObjectSystem.get_current_state().next_object_id
+		and CityObjectSystem.get_state_for_city_state(capital_state).next_object_id
 		== next_object_id_before
-		and CityCitizenRegistrySystem.get_current_state().next_citizen_id
+		and CityCitizenRegistrySystem.get_state_for_city_state(
+			capital_state
+		).next_citizen_id
 		== next_citizen_id_before
 	)
 
@@ -941,7 +1412,10 @@ func _test_first_city_entry_transaction() -> void:
 		content_preserved = (
 			content_preserved
 			and CityResourceAccountingSystem
-			.get_total_physical_city_resource_amount(resource)
+			.get_total_physical_city_resource_amount_for_city_state(
+				capital_state,
+				resource
+			)
 			== int(resource_totals_before[resource])
 		)
 
@@ -953,7 +1427,7 @@ func _test_first_city_entry_transaction() -> void:
 		== settlement_snapshot_after_rejection
 		and WorldPoliticalState.player_polity_id
 		== player_polity_id_after_rejection
-		and WorldPoliticalState.active_settlement_id
+		and WorldPoliticalState.get_player_capital_settlement_id()
 		== capital_id_after_rejection
 		and WorldPoliticalState.next_polity_id
 		== next_polity_id_after_rejection
@@ -984,8 +1458,12 @@ func _test_first_city_entry_transaction() -> void:
 		and session.city_view.get_instance_id() == committed_city_view_id
 		and session.simulation_speed_controls.get_instance_id()
 		== committed_controls_id
-		and CityObjectSystem.get_city_object_snapshot() == objects_before
-		and CityCitizenRegistrySystem.get_current_state().citizens
+		and CityObjectSystem.get_city_object_snapshot_for_city_state(
+			capital_state
+		) == objects_before
+		and CityCitizenRegistrySystem.get_state_for_city_state(
+			capital_state
+		).citizens
 		== citizens_before
 		and WorldPoliticalState.get_polity_snapshot()
 		== polity_snapshot_after_rejection
@@ -1228,9 +1706,36 @@ func _test_persistent_world_city_views() -> void:
 		"culture_name": "Persistence Test Culture",
 	})
 	_expect(locked, "The persistence fixture must lock its world save.")
+	var synchronized := WorldPoliticalState.synchronize_foundation_with_world_data()
+	_expect(
+		synchronized,
+		"The persistence fixture must register its capital context."
+	)
+	var capital_settlement_id := (
+		WorldPoliticalState.get_player_capital_settlement_id()
+	)
+	var capital_state: CitySettlementSimulationState = (
+		WorldPoliticalState.get_city_simulation_state(capital_settlement_id)
+	)
+	_expect(
+		capital_state != null,
+		"The persistence fixture must expose its capital city state."
+	)
+	if capital_state == null:
+		WorldData.reset_runtime_session_state()
+		return
 
 	var city_world := _make_world(16, 16, 8123)
-	WorldData.store_city_world_save(city_world, 8123)
+	var stored_city_world := WorldData.store_city_world_for_state(
+		capital_state, city_world, 8123
+	)
+	_expect(
+		stored_city_world,
+		"The persistence fixture must store its exact capital city world."
+	)
+	if not stored_city_world:
+		WorldData.reset_runtime_session_state()
+		return
 
 	# Reproduce a clock that drifted while the founding world remained visible.
 	# First city entry must discard that pre-settlement time and begin at 06:00.
@@ -1426,7 +1931,36 @@ func _test_requested_initial_city_entry() -> void:
 		"culture_name": "Dev Culture",
 	})
 	_expect(locked, "Requested-entry fixture must lock the dev identity.")
-	WorldData.store_city_world_save(_make_world(16, 16, 7722), 7722)
+	var synchronized := WorldPoliticalState.synchronize_foundation_with_world_data()
+	_expect(
+		synchronized,
+		"Requested-entry fixture must register its capital context."
+	)
+	var capital_settlement_id := (
+		WorldPoliticalState.get_player_capital_settlement_id()
+	)
+	var capital_state: CitySettlementSimulationState = (
+		WorldPoliticalState.get_city_simulation_state(capital_settlement_id)
+	)
+	_expect(
+		capital_state != null,
+		"Requested-entry fixture must expose its capital city state."
+	)
+	if capital_state == null:
+		WorldData.reset_runtime_session_state()
+		return
+	var stored_city_world := WorldData.store_city_world_for_state(
+		capital_state,
+		_make_world(16, 16, 7722),
+		7722
+	)
+	_expect(
+		stored_city_world,
+		"Requested-entry fixture must store its exact capital city world."
+	)
+	if not stored_city_world:
+		WorldData.reset_runtime_session_state()
+		return
 
 	GameSession.request_next_session_city_entry()
 	_expect(
@@ -1471,7 +2005,7 @@ func _test_requested_initial_city_entry() -> void:
 	)
 
 	if session.city_view != null:
-		session.city_view.call("on_back_button_pressed")
+		session.city_view.settlement_ui_controller.back_button.pressed.emit()
 		await get_tree().process_frame
 
 	_expect(

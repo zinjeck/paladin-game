@@ -1,5 +1,8 @@
 extends Node
 
+const CitySettlementTestFixtureScript = preload(
+	"res://scripts/city/simulation/test_support/CitySettlementTestFixture.gd"
+)
 var failure_count: int = 0
 
 func _ready() -> void:
@@ -284,11 +287,27 @@ func _test_environmental_resource_cache_invalidation() -> void:
 	WorkplaceProductionSystem.clear_resource_source_evaluation_cache()
 
 func _test_registry_boundary() -> void:
-	var culture := WorldData.create_culture("Pass 14 Culture")
-	_expect(not culture.is_empty(), "World-level culture creation must remain available.")
-	var citizen := CityCitizenRegistrySystem.add_city_citizen("", Vector2i(1, 1), CityCitizens.CITY_CITIZEN_SEX_MALE, int(culture.get("id", -1)))
+	var fixture = CitySettlementTestFixtureScript.create({
+		"label": "WorldData Boundary",
+	})
+	if fixture == null:
+		_expect(false, "The registry boundary needs a registered City fixture.")
+		return
+	var citizen := CityCitizenRegistrySystem.add_city_citizen_for_city_state(
+		fixture.city_state,
+		"",
+		Vector2i(1, 1),
+		CityCitizens.CITY_CITIZEN_SEX_MALE,
+		fixture.culture_id
+	)
 	_expect(not citizen.is_empty(), "Citizen creation must resolve through CityCitizenRegistrySystem.")
-	_expect(CityCitizenRegistrySystem.get_city_population_count() == 1, "Citizen registry owner must receive the new citizen.")
+	_expect(
+		CityCitizenRegistrySystem.get_city_population_count_for_city_state(
+			fixture.city_state
+		) == 1,
+		"The exact registered citizen owner must receive the new citizen."
+	)
+	fixture.cleanup()
 
 func _expect(condition: bool, message: String) -> void:
 	if condition:

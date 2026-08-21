@@ -3,10 +3,12 @@ extends Node
 const TEST_WORLD_SIZE := Vector2i(40, 28)
 
 var failure_count: int = 0
+var fixture_city_state: CitySettlementSimulationState = null
 
 
 func _ready() -> void:
 	_test_fresh_state_defaults()
+	_test_stockpile_catalog_contract()
 	_test_completed_object_registration_and_lookup()
 	_test_settlement_local_registration_gate_and_atomic_foundation_rollback()
 	_test_rejected_registration_is_atomic()
@@ -27,9 +29,26 @@ func _ready() -> void:
 	get_tree().quit(0)
 
 
+func _test_stockpile_catalog_contract() -> void:
+	var definition := CityObjectCatalog.get_city_object_definition(
+		CityObjectCatalog.CITY_OBJECT_STOCKPILE
+	)
+	var materials := CityObjectCatalog.get_city_object_construction_materials(
+		CityObjectCatalog.CITY_OBJECT_STOCKPILE
+	)
+	_expect(
+		definition.get("size", Vector2i.ZERO) == Vector2i(2, 2)
+		and int(definition.get("storage_capacity", 0)) == 200
+		and int(definition.get("construction_labor_minutes", 0)) == 90
+		and int(materials.get(CityResourceCatalog.RESOURCE_LUMBER, 0)) == 6
+		and int(materials.get(CityResourceCatalog.RESOURCE_STONE, 0)) == 2,
+		"The Stockpile catalog contract must remain a 2x2, 200-capacity object costing 6 Lumber, 2 Stone, and 90 labor minutes."
+	)
+
+
 func _test_fresh_state_defaults() -> void:
 	_reset_fixture(93_101)
-	var state := CityObjectSystem.get_current_state()
+	var state := CityObjectSystem.get_state_for_city_state(fixture_city_state)
 
 	_expect(
 		state is CityObjectState
@@ -38,14 +57,14 @@ func _test_fresh_state_defaults() -> void:
 		and state.occupied_tiles.is_empty()
 		and state.next_object_id == 1
 		and state.object_version == 0,
-		"A fresh active object system must resolve clean state defaults."
+		"A fresh exact object state must resolve clean defaults."
 	)
 
 
 func _test_completed_object_registration_and_lookup() -> void:
 	var city_world := _reset_fixture(93_102, false)
-	var state := CityObjectSystem.get_current_state()
-	var city_state = WorldPoliticalState.get_current_city_simulation_state()
+	var city_state := fixture_city_state
+	var state := CityObjectSystem.get_state_for_city_state(city_state)
 	var requests: Array[Dictionary] = [
 		_make_rectangle_request(
 			CityObjectCatalog.CITY_OBJECT_CITY_CENTER,
@@ -73,7 +92,8 @@ func _test_completed_object_registration_and_lookup() -> void:
 		var expected_id := request_index + 1
 		var version_before := state.object_version
 		var next_id_before := state.next_object_id
-		var city_object := CityObjectSystem.register_completed_city_object(
+		var city_object := CityObjectSystem.register_completed_city_object_for_city_state(
+			city_state,
 			requests[request_index]
 		)
 
@@ -92,45 +112,55 @@ func _test_completed_object_registration_and_lookup() -> void:
 	var road_tile := Vector2i(24, 2)
 	var road_version_before := state.object_version
 	var road_next_id_before := state.next_object_id
-	var road := CityObjectSystem.add_city_road_object(
-		[road_tile],
-		"player",
-		city_world
+	var road := CityObjectSystem.register_completed_city_object_for_city_state(
+		city_state,
+		{
+			"object_type": CityObjectCatalog.CITY_OBJECT_ROAD,
+			"footprint_tiles": [road_tile],
+			"object_owner": "player",
+			"city_world": city_world,
+		}
 	)
 	_expect(
 		int(road.get("id", -1)) == road_next_id_before
 		and state.next_object_id == road_next_id_before + 1
 		and state.object_version == road_version_before + 1
-		and CityObjectSystem.is_completed_city_road_tile(road_tile),
+		and CityObjectSystem.is_completed_city_road_tile_for_city_state(
+			city_state,
+			road_tile
+		),
 		"A completed one-tile road must allocate and version exactly once."
 	)
 	_assert_registered_object(road, requests.size())
 	_expect(
 		state.objects.size() == 5
-		and CityObjectSystem.has_city_object_type(
+		and _has_city_object_type_for_city_state(
+			city_state,
 			CityObjectCatalog.CITY_OBJECT_CITY_CENTER
 		)
-		and CityObjectSystem.has_city_object_type(
+		and _has_city_object_type_for_city_state(
+			city_state,
 			CityObjectCatalog.CITY_OBJECT_HOUSE
 		)
-		and CityObjectSystem.has_city_object_type(
+		and _has_city_object_type_for_city_state(
+			city_state,
 			CityObjectCatalog.CITY_OBJECT_STOCKPILE
 		)
-		and CityObjectSystem.has_city_object_type(
+		and _has_city_object_type_for_city_state(
+			city_state,
 			CityObjectCatalog.CITY_OBJECT_FISHING_GROUNDS
 		)
-		and CityObjectSystem.has_city_object_type(
+		and _has_city_object_type_for_city_state(
+			city_state,
 			CityObjectCatalog.CITY_OBJECT_ROAD
 		),
-		"The completed registry must recognize every current object type."
+		"The completed registry must recognize every supported object type."
 	)
 
 
 func _test_settlement_local_registration_gate_and_atomic_foundation_rollback() -> void:
 	var city_world := _reset_fixture(93_107, false)
-	var city_state: CitySettlementSimulationState = (
-		WorldPoliticalState.get_current_city_simulation_state()
-	)
+	var city_state := fixture_city_state
 	var object_state := city_state.object_state
 	var accounting_state := city_state.resource_accounting_state
 	var house_values := _make_rectangle_request(
@@ -140,12 +170,11 @@ func _test_settlement_local_registration_gate_and_atomic_foundation_rollback() -
 	)
 	WorldData.player_city_founded = true
 	_expect(
-		CityObjectSystem.register_completed_city_object(house_values).is_empty()
-		and CityObjectSystem.register_completed_city_object_for_city_state(
+		CityObjectSystem.register_completed_city_object_for_city_state(
 			city_state,
 			house_values
 		).is_empty(),
-		"Legacy and explicit direct registration must reject requires-city objects for an unfounded target regardless of player globals."
+		"Explicit direct registration must reject requires-city objects for an unfounded target regardless of player globals."
 	)
 
 	var keep_top_left := Vector2i(3, 3)
@@ -200,7 +229,8 @@ func _test_settlement_local_registration_gate_and_atomic_foundation_rollback() -
 		"Deferred Keep rollback must require the exact last ID and restore object, occupancy, allocation, versions, accounting, and untouched terrain exactly."
 	)
 
-	var committed_keep := CityObjectSystem.register_completed_city_object(
+	var committed_keep := CityObjectSystem.register_completed_city_object_for_city_state(
+		city_state,
 		keep_values
 	)
 	var committed_keep_id := int(committed_keep.get("id", -1))
@@ -214,9 +244,6 @@ func _test_settlement_local_registration_gate_and_atomic_foundation_rollback() -
 	}, true)
 	_expect(
 		committed_keep_id > 0
-		and CityObjectSystem.register_completed_city_object(
-			keep_values
-		).is_empty()
 		and CityObjectSystem.register_completed_city_object_for_city_state(
 			city_state,
 			keep_values
@@ -228,7 +255,7 @@ func _test_settlement_local_registration_gate_and_atomic_foundation_rollback() -
 		and not city_world.get_tile(keep_top_left.x, keep_top_left.y).has(
 			"surface_feature"
 		),
-		"A founded settlement must reject another Keep through both registration roots and finalize terrain only after founding commits."
+		"A founded settlement must reject another Keep and finalize terrain only after founding commits."
 	)
 
 	object_state.objects.clear()
@@ -252,7 +279,7 @@ func _test_settlement_local_registration_gate_and_atomic_foundation_rollback() -
 	)
 
 	city_world = _reset_fixture(93_108, true)
-	city_state = WorldPoliticalState.get_current_city_simulation_state()
+	city_state = fixture_city_state
 	house_values = _make_rectangle_request(
 		CityObjectCatalog.CITY_OBJECT_HOUSE,
 		Vector2i(12, 12),
@@ -283,9 +310,6 @@ func _test_settlement_local_registration_gate_and_atomic_foundation_rollback() -
 			site_id
 		)
 	house_values["allowed_construction_site_id"] = site_id
-	var legacy_bypass := CityObjectSystem.register_completed_city_object(
-		house_values
-	)
 	var explicit_bypass := (
 		CityObjectSystem.register_completed_city_object_for_city_state(
 			city_state,
@@ -302,15 +326,16 @@ func _test_settlement_local_registration_gate_and_atomic_foundation_rollback() -
 		)
 	)
 	_expect(
-		legacy_bypass.is_empty()
-		and explicit_bypass.is_empty()
+		explicit_bypass.is_empty()
 		and not authorized_completion.is_empty(),
-		"Caller-supplied site IDs must not bypass completed-object registration, while one exact authoritative preauthorized site may complete after local eligibility changes."
+		"Caller-supplied site IDs must not bypass explicit completed-object registration, while one exact authoritative preauthorized site may complete after local eligibility changes."
 	)
 
 func _test_rejected_registration_is_atomic() -> void:
 	var city_world := _reset_fixture(93_103)
-	var house := CityObjectSystem.register_completed_city_object(
+	var city_state := fixture_city_state
+	var house := CityObjectSystem.register_completed_city_object_for_city_state(
+		city_state,
 		_make_rectangle_request(
 			CityObjectCatalog.CITY_OBJECT_HOUSE,
 			Vector2i(4, 4),
@@ -319,31 +344,39 @@ func _test_rejected_registration_is_atomic() -> void:
 	)
 	_expect(not house.is_empty(), "The rejection fixture must create a House.")
 
-	var state := CityObjectSystem.get_current_state()
-	var objects_before := CityObjectSystem.get_city_object_snapshot()
-	var index_before := CityObjectSystem.get_city_object_index_snapshot()
-	var occupancy_before := CityObjectSystem.get_city_occupied_tiles_snapshot()
+	var state := CityObjectSystem.get_state_for_city_state(city_state)
+	var objects_before := state.objects.duplicate(true)
+	var index_before := state.object_index_by_id.duplicate()
+	var occupancy_before := state.occupied_tiles.duplicate()
 	var next_id_before := state.next_object_id
 	var version_before := state.object_version
-	var overlapping_house := CityObjectSystem.register_completed_city_object(
+	var overlapping_house := CityObjectSystem.register_completed_city_object_for_city_state(
+		city_state,
 		_make_rectangle_request(
 			CityObjectCatalog.CITY_OBJECT_HOUSE,
 			Vector2i(4, 4),
 			city_world
 		)
 	)
-	var multi_tile_road := CityObjectSystem.add_city_road_object(
-		[Vector2i(20, 4), Vector2i(21, 4)],
-		"player",
-		city_world
+	var multi_tile_road := CityObjectSystem.register_completed_city_object_for_city_state(
+		city_state,
+		{
+			"object_type": CityObjectCatalog.CITY_OBJECT_ROAD,
+			"footprint_tiles": [Vector2i(20, 4), Vector2i(21, 4)],
+			"object_owner": "player",
+			"city_world": city_world,
+		}
 	)
-	var unknown_object := CityObjectSystem.register_completed_city_object({
+	var unknown_object := CityObjectSystem.register_completed_city_object_for_city_state(
+		city_state,
+		{
 		"object_type": "test_unknown_object",
 		"top_left": Vector2i(25, 4),
 		"size_tiles": Vector2i.ONE,
 		"object_owner": "player",
 		"city_world": city_world,
-	})
+		}
+	)
 
 	_expect(
 		overlapping_house.is_empty()
@@ -363,7 +396,9 @@ func _test_rejected_registration_is_atomic() -> void:
 
 func _test_snapshots_do_not_alias_authoritative_state() -> void:
 	var city_world := _reset_fixture(93_104)
-	var registration_record := CityObjectSystem.register_completed_city_object(
+	var city_state := fixture_city_state
+	var registration_record := CityObjectSystem.register_completed_city_object_for_city_state(
+		city_state,
 		_make_rectangle_request(
 			CityObjectCatalog.CITY_OBJECT_HOUSE,
 			Vector2i(4, 4),
@@ -374,35 +409,37 @@ func _test_snapshots_do_not_alias_authoritative_state() -> void:
 	var footprint := CityObjectSystem.get_city_object_footprint_tiles(
 		registration_record
 	)
-	var city_state: CitySettlementSimulationState = (
-		WorldPoliticalState.get_current_city_simulation_state()
-	)
-	var state := CityObjectSystem.get_current_state()
-	var object_snapshot := CityObjectSystem.get_city_object_snapshot()
-	var by_id_snapshot := (
-		CityObjectSystem.get_city_object_by_id_snapshot(house_id)
-	)
-	var index_snapshot := CityObjectSystem.get_city_object_index_snapshot()
-	var occupancy_snapshot := (
-		CityObjectSystem.get_city_occupied_tiles_snapshot()
-	)
+	var state := CityObjectSystem.get_state_for_city_state(city_state)
+	var object_snapshot := state.objects.duplicate(true)
+	var by_id_snapshot := CityObjectSystem.get_city_object_by_id_for_city_state(
+		city_state,
+		house_id
+	).duplicate(true)
+	var index_snapshot := state.object_index_by_id.duplicate()
+	var occupancy_snapshot := state.occupied_tiles.duplicate()
 	var snapshot_house: Dictionary = object_snapshot[0]
 	var snapshot_footprint: Array = snapshot_house.get(
 		"footprint_tiles",
 		[]
 	)
-	var active_registry_view := CityObjectSystem.get_city_objects()
+	var registry_view := CityObjectSystem.get_city_objects_for_city_state(
+		city_state
+	)
 	var explicit_registry_view := (
 		CityObjectSystem.get_city_objects_for_city_state(city_state)
 	)
-	var active_by_id := CityObjectSystem.get_city_object_by_id(house_id)
+	var by_id := CityObjectSystem.get_city_object_by_id_for_city_state(
+		city_state,
+		house_id
+	)
 	var explicit_by_id := (
 		CityObjectSystem.get_city_object_by_id_for_city_state(
 			city_state,
 			house_id
 		)
 	)
-	var active_at_tile := CityObjectSystem.get_city_object_at_tile(
+	var at_tile := CityObjectSystem.get_city_object_at_tile_for_city_state(
+		city_state,
 		footprint[0]
 	)
 	var explicit_at_tile := (
@@ -411,17 +448,17 @@ func _test_snapshots_do_not_alias_authoritative_state() -> void:
 			footprint[0]
 		)
 	)
-	var public_footprint = active_by_id.get("footprint_tiles", [])
-	var public_residents = active_by_id.get("resident_ids", [])
-	var public_storage = active_by_id.get("stored_resources", {})
+	var public_footprint = by_id.get("footprint_tiles", [])
+	var public_residents = by_id.get("resident_ids", [])
+	var public_storage = by_id.get("stored_resources", {})
 
 	_expect(
 		registration_record.is_read_only()
-		and active_registry_view[0].is_read_only()
+		and registry_view[0].is_read_only()
 		and explicit_registry_view[0].is_read_only()
-		and active_by_id.is_read_only()
+		and by_id.is_read_only()
 		and explicit_by_id.is_read_only()
-		and active_at_tile.is_read_only()
+		and at_tile.is_read_only()
 		and explicit_at_tile.is_read_only()
 		and public_footprint is Array
 		and public_footprint.is_read_only()
@@ -429,16 +466,16 @@ func _test_snapshots_do_not_alias_authoritative_state() -> void:
 		and public_residents.is_read_only()
 		and public_storage is Dictionary
 		and public_storage.is_read_only(),
-		"Registration, active/explicit by-ID, at-tile, and nested public object records must be recursively read-only."
+		"Registration and repeated explicit by-ID, at-tile, and nested public object records must be recursively read-only."
 	)
-	active_registry_view.clear()
+	registry_view.clear()
 	explicit_registry_view.clear()
 	_expect(
-		active_registry_view.is_empty()
+		registry_view.is_empty()
 		and explicit_registry_view.is_empty()
 		and state.objects.size() == 1
 		and int(state.objects[0].get("id", -1)) == house_id,
-		"Active and explicit registry views must be shallow isolated outer copies."
+		"Repeated explicit registry views must be shallow isolated outer copies."
 	)
 
 	snapshot_house["owner"] = "snapshot"
@@ -447,26 +484,42 @@ func _test_snapshots_do_not_alias_authoritative_state() -> void:
 	index_snapshot.clear()
 	occupancy_snapshot.clear()
 
-	var live_house := CityObjectSystem.get_city_object_by_id(house_id)
+	var live_house := CityObjectSystem.get_city_object_by_id_for_city_state(
+		city_state,
+		house_id
+	)
 	_expect(
 		str(live_house.get("owner", "")) == "player"
 		and CityObjectSystem.get_city_object_footprint_tiles(live_house)
 		== footprint
-		and CityObjectSystem.get_city_object_index_by_id(house_id) == 0
-		and CityObjectSystem.get_city_object_id_at_tile(footprint[0])
+		and CityObjectSystem.get_city_object_index_by_id_for_city_state(
+			city_state,
+			house_id
+		) == 0
+		and CityObjectSystem.get_city_object_id_at_tile_for_city_state(
+			city_state,
+			footprint[0]
+		)
 		== house_id,
 		"Object, ID, index, and occupancy snapshots must not alias authoritative state."
 	)
 	_expect(
-		CityObjectSystem.write_city_object_at_index(
+		CityObjectSystem.write_city_object_at_index_for_city_state(
+			city_state,
 			0,
-			CityObjectSystem.get_city_object_by_id_snapshot(house_id)
+			CityObjectSystem.get_city_object_by_id_for_city_state(
+				city_state,
+				house_id
+			).duplicate(true)
 		),
 		"The compatibility writer must accept an identical record as a no-op."
 	)
 
 	var compatibility_candidate := (
-		CityObjectSystem.get_city_object_by_id_snapshot(house_id)
+		CityObjectSystem.get_city_object_by_id_for_city_state(
+			city_state,
+			house_id
+		).duplicate(true)
 	)
 	var caller_resident_ids: Array = compatibility_candidate.get(
 		"resident_ids",
@@ -476,7 +529,8 @@ func _test_snapshots_do_not_alias_authoritative_state() -> void:
 	compatibility_candidate["resident_ids"] = caller_resident_ids
 	var object_version_before_compatibility_write := state.object_version
 	_expect(
-		CityObjectSystem.write_city_object_at_index(
+		CityObjectSystem.write_city_object_at_index_for_city_state(
+			city_state,
 			0,
 			compatibility_candidate
 		)
@@ -486,7 +540,10 @@ func _test_snapshots_do_not_alias_authoritative_state() -> void:
 	caller_resident_ids.append(93_105)
 	compatibility_candidate["resident_ids"] = []
 	var committed_after_caller_mutation := (
-		CityObjectSystem.get_city_object_by_id(house_id)
+		CityObjectSystem.get_city_object_by_id_for_city_state(
+			city_state,
+			house_id
+		)
 	)
 	var committed_resident_ids = committed_after_caller_mutation.get(
 		"resident_ids",
@@ -500,13 +557,17 @@ func _test_snapshots_do_not_alias_authoritative_state() -> void:
 		"A successful compatibility write must detach and recursively freeze the caller record."
 	)
 
-	var stale_snapshot := CityObjectSystem.get_city_object_by_id_snapshot(
+	var stale_snapshot := CityObjectSystem.get_city_object_by_id_for_city_state(
+		city_state,
 		house_id
+	).duplicate(true)
+	var accounting_state := CityResourceAccountingSystem.get_state_for_city_state(
+		city_state
 	)
-	var accounting_state := CityResourceAccountingSystem.get_current_state()
 	var container_version_before := accounting_state.container_version
 	_expect(
-		CityResourceContainerSystem.add_resource_to_city_object_storage(
+		CityResourceContainerSystem.add_resource_to_city_object_storage_for_city_state(
+			city_state,
 			house_id,
 			WorldData.RESOURCE_FISH,
 			1
@@ -521,11 +582,16 @@ func _test_snapshots_do_not_alias_authoritative_state() -> void:
 	)
 	stale_resources[WorldData.RESOURCE_FISH] = 999
 	stale_snapshot["resident_ids"] = [93_106]
-	var live_after_stale_mutation := CityObjectSystem.get_city_object_by_id(
+	var live_after_stale_mutation := CityObjectSystem.get_city_object_by_id_for_city_state(
+		city_state,
 		house_id
 	)
 	_expect(
-		not CityObjectSystem.write_city_object_at_index(0, stale_snapshot)
+		not CityObjectSystem.write_city_object_at_index_for_city_state(
+			city_state,
+			0,
+			stale_snapshot
+		)
 		and CityResourceContainerSystem.get_city_object_stored_resource_amount(
 			live_after_stale_mutation,
 			WorldData.RESOURCE_FISH
@@ -537,7 +603,10 @@ func _test_snapshots_do_not_alias_authoritative_state() -> void:
 	)
 
 	var cross_domain_candidate := (
-		CityObjectSystem.get_city_object_by_id_snapshot(house_id)
+		CityObjectSystem.get_city_object_by_id_for_city_state(
+			city_state,
+			house_id
+		).duplicate(true)
 	)
 	cross_domain_candidate["resident_ids"] = [93_107]
 	cross_domain_candidate["stored_resources"] = {
@@ -548,23 +617,21 @@ func _test_snapshots_do_not_alias_authoritative_state() -> void:
 	var occupancy_before_rejections := state.occupied_tiles.duplicate()
 	var version_before_rejections := state.object_version
 	_expect(
-		not CityObjectSystem.write_city_object_at_index(
+		not CityObjectSystem.write_city_object_at_index_for_city_state(
+			city_state,
 			0,
 			cross_domain_candidate
 		),
 		"The compatibility writer must reject a cross-domain assignment/storage replacement."
 	)
 
-	var topology_candidate := CityObjectSystem.get_city_object_by_id_snapshot(
+	var topology_candidate := CityObjectSystem.get_city_object_by_id_for_city_state(
+		city_state,
 		house_id
-	)
+	).duplicate(true)
 	topology_candidate["top_left"] = Vector2i(20, 20)
 	_expect(
-		not CityObjectSystem.write_city_object_at_index(
-			0,
-			topology_candidate
-		)
-		and not CityObjectSystem.write_city_object_at_index_for_city_state(
+		not CityObjectSystem.write_city_object_at_index_for_city_state(
 			city_state,
 			0,
 			topology_candidate
@@ -573,20 +640,23 @@ func _test_snapshots_do_not_alias_authoritative_state() -> void:
 		and state.object_index_by_id == index_before_rejections
 		and state.occupied_tiles == occupancy_before_rejections
 		and state.object_version == version_before_rejections,
-		"Active/explicit compatibility writes must reject topology changes atomically."
+		"Explicit compatibility writes must reject topology changes atomically."
 	)
 
 
 func _test_registry_index_and_occupancy_repair() -> void:
 	var city_world := _reset_fixture(93_105)
-	var house := CityObjectSystem.register_completed_city_object(
+	var city_state := fixture_city_state
+	var house := CityObjectSystem.register_completed_city_object_for_city_state(
+		city_state,
 		_make_rectangle_request(
 			CityObjectCatalog.CITY_OBJECT_HOUSE,
 			Vector2i(4, 4),
 			city_world
 		)
 	)
-	var stockpile := CityObjectSystem.register_completed_city_object(
+	var stockpile := CityObjectSystem.register_completed_city_object_for_city_state(
+		city_state,
 		_make_rectangle_request(
 			CityObjectCatalog.CITY_OBJECT_STOCKPILE,
 			Vector2i(10, 4),
@@ -595,14 +665,20 @@ func _test_registry_index_and_occupancy_repair() -> void:
 	)
 	var house_id := int(house.get("id", -1))
 	var stockpile_id := int(stockpile.get("id", -1))
-	var state := CityObjectSystem.get_current_state()
+	var state := CityObjectSystem.get_state_for_city_state(city_state)
 
 	state.object_index_by_id = {}
 	state.object_index_by_id[house_id] = 1
 	state.object_index_by_id[stockpile_id] = 0
 	_expect(
-		CityObjectSystem.get_city_object_index_by_id(house_id) == 0
-		and CityObjectSystem.get_city_object_index_by_id(stockpile_id) == 1,
+		CityObjectSystem.get_city_object_index_by_id_for_city_state(
+			city_state,
+			house_id
+		) == 0
+		and CityObjectSystem.get_city_object_index_by_id_for_city_state(
+			city_state,
+			stockpile_id
+		) == 1,
 		"Lookup must repair a stale completed-object ID index from the authoritative array."
 	)
 
@@ -611,7 +687,10 @@ func _test_registry_index_and_occupancy_repair() -> void:
 		stockpile_id: 1,
 	}
 	_expect(
-		CityObjectSystem.get_city_object_index_by_id(house_id) == 0,
+		CityObjectSystem.get_city_object_index_by_id_for_city_state(
+			city_state,
+			house_id
+		) == 0,
 		"Lookup must repair a full-size index with a wrong object ID key."
 	)
 
@@ -623,7 +702,8 @@ func _test_registry_index_and_occupancy_repair() -> void:
 	var object_count_before_duplicate_id := state.objects.size()
 	var version_before_duplicate_id := state.object_version
 	var duplicate_id_registration := (
-		CityObjectSystem.register_completed_city_object(
+		CityObjectSystem.register_completed_city_object_for_city_state(
+			city_state,
 			_make_rectangle_request(
 				CityObjectCatalog.CITY_OBJECT_HOUSE,
 				Vector2i(20, 4),
@@ -640,7 +720,9 @@ func _test_registry_index_and_occupancy_repair() -> void:
 	)
 
 	state.occupied_tiles.clear()
-	CityObjectSystem.rebuild_city_object_registry_indexes()
+	CityObjectSystem.rebuild_city_object_registry_indexes_for_city_state(
+		city_state
+	)
 	var repaired_occupancy := true
 
 	var registered_objects: Array[Dictionary] = [house, stockpile]
@@ -668,9 +750,12 @@ func _test_registry_index_and_occupancy_repair() -> void:
 
 	var stale_tile := Vector2i(30, 20)
 	state.occupied_tiles[stale_tile] = 9_999
-	CityObjectSystem.rebuild_city_object_occupancy()
+	CityObjectSystem.rebuild_city_object_occupancy_for_city_state(city_state)
 	_expect(
-		CityObjectSystem.get_city_object_id_at_tile(stale_tile) < 0
+		CityObjectSystem.get_city_object_id_at_tile_for_city_state(
+			city_state,
+			stale_tile
+		) < 0
 		and not state.occupied_tiles.has(stale_tile),
 		"Explicit occupancy repair must discard tiles that point to missing objects."
 	)
@@ -678,7 +763,9 @@ func _test_registry_index_and_occupancy_repair() -> void:
 
 func _test_object_reset_is_domain_local() -> void:
 	var city_world := _reset_fixture(93_106)
-	var stockpile := CityObjectSystem.register_completed_city_object(
+	var city_state := fixture_city_state
+	var stockpile := CityObjectSystem.register_completed_city_object_for_city_state(
+		city_state,
 		_make_rectangle_request(
 			CityObjectCatalog.CITY_OBJECT_STOCKPILE,
 			Vector2i(5, 5),
@@ -687,22 +774,19 @@ func _test_object_reset_is_domain_local() -> void:
 	)
 	_expect(not stockpile.is_empty(), "The reset fixture must create a Stockpile.")
 
-	var state := CityObjectSystem.get_current_state()
+	var state := CityObjectSystem.get_state_for_city_state(city_state)
 	var object_version_before := state.object_version
-	var container_version_before := (
-		CityResourceAccountingSystem.get_city_container_version()
-	)
-	var public_storage_version_before := (
-		CityResourceAccountingSystem.get_city_public_storage_version()
-	)
-	var assignment_version_before := CityAssignmentSystem.get_city_assignment_version()
-	var workplace_version_before := CityEmploymentSystem.get_city_workplace_version()
-	var logistics_state := CityLogisticsSystem.get_current_state()
-	var construction_state := CityConstructionSystem.get_current_state()
+	var accounting_state := city_state.resource_accounting_state
+	var container_version_before := accounting_state.container_version
+	var public_storage_version_before := accounting_state.public_storage_version
+	var assignment_version_before := city_state.assignment_state.assignment_version
+	var workplace_version_before := city_state.workplace_state.workplace_version
+	var logistics_state := city_state.logistics_state
+	var construction_state := city_state.construction_state
 	var ground_pile_version_before := logistics_state.ground_pile_version
 	var construction_version_before := construction_state.construction_version
 
-	CityObjectSystem.reset_city_object_state()
+	CityObjectSystem.reset_city_object_state_for_city_state(city_state)
 
 	_expect(
 		state.objects.is_empty()
@@ -713,12 +797,12 @@ func _test_object_reset_is_domain_local() -> void:
 		"Object reset must clear only its five fields and publish one object change."
 	)
 	_expect(
-		CityResourceAccountingSystem.get_city_container_version()
-		== container_version_before
-		and CityResourceAccountingSystem.get_city_public_storage_version()
-		== public_storage_version_before
-		and CityAssignmentSystem.get_current_state().assignment_version == assignment_version_before
-		and CityEmploymentSystem.get_current_state().workplace_version == workplace_version_before
+		accounting_state.container_version == container_version_before
+		and accounting_state.public_storage_version == public_storage_version_before
+		and city_state.assignment_state.assignment_version
+		== assignment_version_before
+		and city_state.workplace_state.workplace_version
+		== workplace_version_before
 		and logistics_state.ground_pile_version
 		== ground_pile_version_before
 		and construction_state.construction_version
@@ -740,10 +824,16 @@ func _assert_registered_object(
 	for raw_tile in footprint:
 		if (
 			not raw_tile is Vector2i
-			or CityObjectSystem.get_city_object_id_at_tile(raw_tile)
+			or CityObjectSystem.get_city_object_id_at_tile_for_city_state(
+				fixture_city_state,
+				raw_tile
+			)
 			!= object_id
 			or int(
-				CityObjectSystem.get_city_object_at_tile(raw_tile).get(
+				CityObjectSystem.get_city_object_at_tile_for_city_state(
+					fixture_city_state,
+					raw_tile
+				).get(
 					"id",
 					-1
 				)
@@ -754,10 +844,16 @@ func _assert_registered_object(
 
 	_expect(
 		object_id > 0
-		and CityObjectSystem.get_city_object_index_by_id(object_id)
+		and CityObjectSystem.get_city_object_index_by_id_for_city_state(
+			fixture_city_state,
+			object_id
+		)
 		== expected_index
 		and int(
-			CityObjectSystem.get_city_object_by_id(object_id).get("id", -1)
+			CityObjectSystem.get_city_object_by_id_for_city_state(
+				fixture_city_state,
+				object_id
+			).get("id", -1)
 		) == object_id
 		and occupancy_is_complete,
 		"A completed object must be indexed and own every footprint tile."
@@ -779,6 +875,7 @@ func _make_rectangle_request(
 
 
 func _reset_fixture(seed: int, founded: bool = true) -> WorldData:
+	fixture_city_state = null
 	WorldPoliticalState.reset_state()
 	WorldData.reset_runtime_session_state()
 	SimulationClock.start_new_game()
@@ -794,14 +891,62 @@ func _reset_fixture(seed: int, founded: bool = true) -> WorldData:
 			tile["fertility"] = 50.0
 			city_world.set_tile(x, y, tile)
 
-	WorldData.store_city_world_save(city_world, seed)
-	var city_state = WorldPoliticalState.get_current_city_simulation_state()
+	var culture := WorldData.create_culture(
+		"City Object System Test Culture " + str(seed)
+	)
+	var culture_id := int(culture.get("id", -1))
+	var polity := WorldPoliticalState.create_polity({
+		"name": "City Object System Test Realm " + str(seed),
+		"polity_type": PolityData.POLITY_TYPE_KINGDOM,
+		"primary_culture_id": culture_id,
+	})
+	var settlement := WorldPoliticalState.create_settlement({
+		"name": "City Object System Test City " + str(seed),
+		"settlement_type": SettlementData.SETTLEMENT_TYPE_CITY,
+		"polity_id": int(polity.get("id", -1)),
+		"world_region_top_left": Vector2i.ZERO,
+		"world_region_center": Vector2i.ZERO,
+		"world_region_size": 1,
+		"simulation_backend_kind": (
+			SettlementSimulationContext.BACKEND_CITY_SETTLEMENT_STATE
+		),
+	})
+	fixture_city_state = WorldPoliticalState.get_city_simulation_state(
+		int(settlement.get("id", -1))
+	)
+	_expect(
+		fixture_city_state is CitySettlementSimulationState,
+		"The object fixture must create one exact settlement-owned city state."
+	)
+	if fixture_city_state == null:
+		return city_world
+	WorldData.store_city_world_for_state(fixture_city_state, city_world, seed)
+	var city_state := fixture_city_state
 	city_state.city_runtime_data.clear()
 	city_state.city_runtime_data.merge({
 		"founded": founded,
 		"can_build": founded,
 	}, true)
 	return city_world
+
+
+func _has_city_object_type_for_city_state(
+	city_state: CitySettlementSimulationState,
+	object_type: String
+) -> bool:
+	if city_state == null:
+		return false
+
+	for raw_city_object in CityObjectSystem.get_city_objects_for_city_state(
+		city_state
+	):
+		if (
+			raw_city_object is Dictionary
+			and str(raw_city_object.get("type", "")) == object_type
+		):
+			return true
+
+	return false
 
 
 func _expect(condition: bool, message: String) -> void:

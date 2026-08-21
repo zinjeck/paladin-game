@@ -138,11 +138,6 @@ func get_request_status(
 	return str(_status_by_generation.get(generation, ""))
 
 
-func get_latest_generation(signature: String) -> int:
-	poll()
-	return int(_latest_generation_by_signature.get(signature, 0))
-
-
 func supersede_request(generation: int) -> bool:
 	if get_request_status(generation, false) != STATUS_RUNNING:
 		return false
@@ -168,76 +163,10 @@ func supersede_request(generation: int) -> bool:
 
 	return false
 
-
-# Compatibility helpers for callers that still consume preparation by
-# signature. They only inspect the latest generation, so an older failure can
-# never be mistaken for the outcome of a same-signature retry.
-func take_completed_payload(signature: String) -> Dictionary:
-	poll()
-	var generation := int(
-		_latest_generation_by_signature.get(signature, 0)
-	)
-
-	if generation <= 0:
-		return {}
-	if get_request_status(generation, false) != STATUS_SUCCEEDED:
-		return {}
-	if not _terminal_results_by_generation.has(generation):
-		return {}
-
-	var terminal := take_terminal_result(generation)
-	var payload = terminal.get("payload", {})
-
-	if payload is Dictionary:
-		return payload
-
-	return {}
-
-
-func has_completed_payload(signature: String) -> bool:
-	poll()
-	var generation := int(
-		_latest_generation_by_signature.get(signature, 0)
-	)
-	return (
-		generation > 0
-		and get_request_status(generation, false) == STATUS_SUCCEEDED
-		and _terminal_results_by_generation.has(generation)
-	)
-
-
-func take_failure(signature: String) -> bool:
-	poll()
-	var generation := int(
-		_latest_generation_by_signature.get(signature, 0)
-	)
-
-	if generation <= 0:
-		return false
-	if get_request_status(generation, false) != STATUS_FAILED:
-		return false
-	if not _terminal_results_by_generation.has(generation):
-		return false
-
-	take_terminal_result(generation)
-	return true
-
-
-func is_preparing_signature(signature: String) -> bool:
-	poll()
-	var generation := int(
-		_latest_generation_by_signature.get(signature, 0)
-	)
-	return (
-		generation > 0
-		and get_request_status(generation, false) == STATUS_RUNNING
-	)
-
-
 func cancel_pending_requests() -> void:
-	# Preserve the old cancellation contract of discarding already cached
-	# success/failure outcomes, then publish exact cancellation outcomes for work
-	# still pending. Earlier cancellation/supersession terminals remain observable.
+	# Discard cached success/failure outcomes, then publish exact cancellation
+	# outcomes for work still pending. Earlier cancellation/supersession terminals
+	# remain observable.
 	for raw_generation in _terminal_results_by_generation.keys():
 		var terminal: Dictionary = (
 			_terminal_results_by_generation[raw_generation]

@@ -33,18 +33,6 @@ const WORK_ACTIVITY_DWELL_REQUIRED_KEYS := [
 
 #region Task Tick Entry Point
 
-static func run_tick(
-	tick_index: int,
-	minutes_advanced: int
-) -> void:
-	var city_state = CityCitizenUnboundCompatibility.get_city_state()
-	run_tick_for_city_state(city_state, tick_index, minutes_advanced)
-
-
-static func _make_legacy_city_state_view() -> CitySettlementSimulationState:
-	return CityCitizenUnboundCompatibility.get_city_state()
-
-
 static func run_tick_for_city_state(
 	city_state: CitySettlementSimulationState,
 	tick_index: int,
@@ -200,15 +188,6 @@ static func _get_city_citizen_by_id(
 #endregion
 
 #region Food Interrupt Boundaries
-
-static func prepare_citizen_for_normal_food_interrupt(
-	citizen_id: int
-) -> bool:
-	return prepare_citizen_for_normal_food_interrupt_for_city_state(
-		_make_legacy_city_state_view(),
-		citizen_id
-	)
-
 
 static func prepare_citizen_for_normal_food_interrupt_for_city_state(
 	city_state: CitySettlementSimulationState,
@@ -396,15 +375,6 @@ static func _release_task_for_normal_food(
 #endregion
 
 #region Critical Food Interrupts
-
-static func prepare_citizen_for_critical_food_interrupt(
-	citizen_id: int
-) -> bool:
-	return prepare_citizen_for_critical_food_interrupt_for_city_state(
-		_make_legacy_city_state_view(),
-		citizen_id
-	)
-
 
 static func prepare_citizen_for_critical_food_interrupt_for_city_state(
 	city_state: CitySettlementSimulationState,
@@ -676,15 +646,6 @@ static func _complete_acquire_food_task(
 
 #region Priority and Player Command Interrupts
 
-static func prepare_unemployed_citizen_for_priority_interrupt(
-	citizen_id: int
-) -> bool:
-	return prepare_unemployed_citizen_for_priority_interrupt_for_city_state(
-		_make_legacy_city_state_view(),
-		citizen_id
-	)
-
-
 static func prepare_unemployed_citizen_for_priority_interrupt_for_city_state(
 	city_state: CitySettlementSimulationState,
 	citizen_id: int
@@ -722,13 +683,6 @@ static func prepare_unemployed_citizen_for_priority_interrupt_for_city_state(
 			CityCitizens.CITY_CITIZEN_TASK_SOURCE_PLAYER
 		)
 	)
-
-
-# Compatibility gateway for the existing player-command decision path.
-static func prepare_unemployed_citizen_for_player_command(
-	citizen_id: int
-) -> bool:
-	return prepare_unemployed_citizen_for_priority_interrupt(citizen_id)
 
 
 static func prepare_unemployed_citizen_for_player_command_for_city_state(

@@ -20,27 +20,6 @@ const BLOCKED_HAUL_RETRY_DELAY_MINUTES: int = 30
 # other container kinds can be added without rewriting the state machine.
 
 
-static func city_citizen_is_hauling(citizen_id: int) -> bool:
-	if (
-		CityCitizenInventorySystem.get_city_citizen_haul_cargo_amount(
-			citizen_id
-		) > 0
-	):
-		return true
-
-	return (
-		str(
-			CityCitizenTaskRuntimeSystem.get_city_citizen_current_haul(
-				citizen_id
-			).get(
-				"phase",
-				CityCitizens.CITY_CITIZEN_HAUL_PHASE_NONE
-			)
-		)
-		!= CityCitizens.CITY_CITIZEN_HAUL_PHASE_NONE
-	)
-
-
 static func city_citizen_is_hauling_for_city_state(
 	city_state: CitySettlementSimulationState,
 	citizen_id: int
@@ -73,24 +52,6 @@ static func city_citizen_is_hauling_for_city_state(
 # atomically converted into one mono-resource ground pile per carried resource,
 # reservations and movement are released, and the interrupted task is cleared.
 #region Priority Interrupt Cargo Handling
-
-static func drop_citizen_haul_cargo_for_priority_interrupt(
-	city_world: WorldData,
-	citizen_id: int,
-	requesting_source: String = (
-		CityCitizens.CITY_CITIZEN_TASK_SOURCE_PLAYER
-	)
-) -> bool:
-	var city_state = CityCitizenUnboundCompatibility.get_city_state()
-	if not city_state is CitySettlementSimulationState:
-		return false
-	return drop_citizen_haul_cargo_for_priority_interrupt_for_city_state(
-		city_state,
-		city_world,
-		citizen_id,
-		requesting_source
-	)
-
 
 static func drop_citizen_haul_cargo_for_priority_interrupt_for_city_state(
 	city_state: CitySettlementSimulationState,
@@ -279,7 +240,9 @@ static func _find_nearest_valid_ground_pile_drop_tile_for_city_state(
 			continue
 
 		var path_result := (
-			CityNavigationSystemScript.find_path_to_any_city_tile({
+			CityNavigationSystemScript.find_path_to_any_city_tile_for_city_state(
+				city_state,
+				{
 				"city_state": city_state,
 				"city_world": city_world,
 				"start_tile": origin_tile,
@@ -341,7 +304,9 @@ static func make_public_storage_haul_task_request_for_city_state(
 	var explicit_values := values.duplicate(false)
 	explicit_values["city_state"] = city_state
 	explicit_values["city_world"] = city_state.city_world
-	return make_public_storage_haul_task_request(explicit_values)
+	return _make_public_storage_haul_task_request_with_explicit_state(
+		explicit_values
+	)
 
 
 static func make_directed_haul_task_request_for_city_state(
@@ -354,14 +319,12 @@ static func make_directed_haul_task_request_for_city_state(
 	var explicit_values := values.duplicate(false)
 	explicit_values["city_state"] = city_state
 	explicit_values["city_world"] = city_state.city_world
-	return make_directed_haul_task_request(explicit_values)
+	return _make_directed_haul_task_request_with_explicit_state(explicit_values)
 
-static func make_public_storage_haul_task_request(
+static func _make_public_storage_haul_task_request_with_explicit_state(
 	values: Dictionary
 ) -> Dictionary:
 	var raw_city_state = values.get("city_state")
-	if not values.has("city_state"):
-		raw_city_state = CityCitizenUnboundCompatibility.get_city_state()
 	if not raw_city_state is CitySettlementSimulationState:
 		return {}
 
@@ -538,7 +501,9 @@ static func make_public_storage_haul_task_request(
 			return {}
 
 		var source_path_result := (
-			CityNavigationSystemScript.find_path_to_any_city_tile({
+			CityNavigationSystemScript.find_path_to_any_city_tile_for_city_state(
+				city_state,
+				{
 				"city_state": city_state,
 				"city_world": city_world,
 				"start_tile": current_tile,
@@ -653,12 +618,10 @@ static func make_public_storage_haul_task_request(
 	}
 
 
-static func make_directed_haul_task_request(
+static func _make_directed_haul_task_request_with_explicit_state(
 	values: Dictionary
 ) -> Dictionary:
 	var raw_city_state = values.get("city_state")
-	if not values.has("city_state"):
-		raw_city_state = CityCitizenUnboundCompatibility.get_city_state()
 	if not raw_city_state is CitySettlementSimulationState:
 		return {}
 
@@ -806,7 +769,9 @@ static func make_directed_haul_task_request(
 		return {}
 
 	var source_path_result := (
-		CityNavigationSystemScript.find_path_to_any_city_tile({
+		CityNavigationSystemScript.find_path_to_any_city_tile_for_city_state(
+			city_state,
+			{
 			"city_state": city_state,
 			"city_world": city_world,
 			"start_tile": current_tile,
@@ -892,16 +857,6 @@ static func make_directed_haul_task_request(
 #endregion
 
 #region Haul Task State Machine
-
-static func advance_haul_task(
-	city_world: WorldData,
-	values: Dictionary
-) -> int:
-	var city_state = CityCitizenUnboundCompatibility.get_city_state()
-	if not city_state is CitySettlementSimulationState:
-		return maxi(int(values.get("path_requests_remaining", 0)), 0)
-	return advance_haul_task_for_city_state(city_state, city_world, values)
-
 
 static func advance_haul_task_for_city_state(
 	city_state: CitySettlementSimulationState,
@@ -1281,7 +1236,9 @@ static func _advance_pending_source(
 
 	path_requests_remaining -= 1
 	var path_result := (
-		CityNavigationSystemScript.find_path_to_any_city_tile({
+		CityNavigationSystemScript.find_path_to_any_city_tile_for_city_state(
+			city_state,
+			{
 			"city_state": city_state,
 			"city_world": city_world,
 			"start_tile": current_tile,
@@ -1997,7 +1954,9 @@ static func _begin_next_ground_pile_pickup(
 
 	path_requests_remaining -= 1
 	var path_result := (
-		CityNavigationSystemScript.find_path_to_any_city_tile({
+		CityNavigationSystemScript.find_path_to_any_city_tile_for_city_state(
+			city_state,
+			{
 			"city_state": city_state,
 			"city_world": city_world,
 			"start_tile": current_tile,
@@ -2449,20 +2408,6 @@ static func _try_route_cargo_to_best_resource_demand(
 #endregion
 
 #region Destination Travel and Delivery
-
-static func _advance_pending_destination(
-	city_world: WorldData,
-	values: Dictionary
-) -> int:
-	var city_state = CityCitizenUnboundCompatibility.get_city_state()
-	if not city_state is CitySettlementSimulationState:
-		return maxi(int(values.get("path_requests_remaining", 0)), 0)
-	return _advance_pending_destination_for_city_state(
-		city_state,
-		city_world,
-		values
-	)
-
 
 static func _advance_pending_destination_for_city_state(
 	city_state: CitySettlementSimulationState,

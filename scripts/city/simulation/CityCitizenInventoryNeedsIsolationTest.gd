@@ -124,9 +124,17 @@ func _exercise_city(values: Dictionary) -> Dictionary:
 	if WorldPoliticalState.active_settlement_id != city_id:
 		return {}
 
-	WorldPoliticalState.set_current_city_world(_make_world(16, 16, world_seed))
-	WorldPoliticalState.set_current_city_seed(world_seed)
-	var citizen := CityCitizenRegistrySystem.add_city_citizen(
+	var city_state = WorldPoliticalState.get_city_simulation_state(city_id)
+	if not city_state is CitySettlementSimulationState:
+		_expect(false, "The City must expose its explicit simulation owner.")
+		return {}
+	WorldData.store_city_world_for_state(
+		city_state,
+		_make_world(16, 16, world_seed),
+		world_seed
+	)
+	var citizen := CityCitizenRegistrySystem.add_city_citizen_for_city_state(
+		city_state,
 		"", SHARED_TILE, str(values.get("sex", "")), culture_id
 	)
 	var citizen_id := int(citizen.get("id", -1))
@@ -134,14 +142,24 @@ func _exercise_city(values: Dictionary) -> Dictionary:
 	if citizen_id <= 0:
 		return {}
 
-	var registry_state := CityCitizenRegistrySystem.get_current_state()
-	var version_after_creation := registry_state.citizen_version
+	var registry_state: CityCitizenRegistryState = city_state.citizen_registry_state
+	var version_after_creation: int = registry_state.citizen_version
 	_expect(
-		CityCitizenInventorySystem.set_city_citizen_carry_capacity(citizen_id, carry_capacity)
-		and CityCitizenInventorySystem.set_city_citizen_inventory_resource_amount(citizen_id, inventory_resource, 2) == 2
-		and CityCitizenInventorySystem.set_city_citizen_haul_cargo_resources(citizen_id, {cargo_resource: 3}) == 3
-		and CitizenNeedsSystem.set_city_citizen_hunger_state(citizen_id, hunger, hunger_remainder)
-		and CitizenNeedsSystem.set_city_citizen_happiness(citizen_id, happiness),
+		CityCitizenInventorySystem.set_city_citizen_carry_capacity_for_city_state(
+			city_state, citizen_id, carry_capacity
+		)
+		and CityCitizenInventorySystem.set_city_citizen_inventory_resource_amount_for_city_state(
+			city_state, citizen_id, inventory_resource, 2
+		) == 2
+		and CityCitizenInventorySystem.set_city_citizen_haul_cargo_resources_for_city_state(
+			city_state, citizen_id, {cargo_resource: 3}
+		) == 3
+		and CitizenNeedsSystem.set_city_citizen_hunger_state_for_city_state(
+			city_state, citizen_id, hunger, hunger_remainder
+		)
+		and CitizenNeedsSystem.set_city_citizen_happiness_for_city_state(
+			city_state, citizen_id, happiness
+		),
 		"Each City must accept independent capacity, inventory, cargo, hunger, and happiness mutations."
 	)
 	_expect(
@@ -149,48 +167,79 @@ func _exercise_city(values: Dictionary) -> Dictionary:
 		"Five real record mutations must publish exactly five citizen versions."
 	)
 
-	var version_before_clipping := registry_state.citizen_version
-	var clipped_inventory_amount := CityCitizenInventorySystem.set_city_citizen_inventory_resource_amount(
-		citizen_id, inventory_resource, 99
+	var version_before_clipping: int = registry_state.citizen_version
+	var clipped_inventory_amount := CityCitizenInventorySystem.set_city_citizen_inventory_resource_amount_for_city_state(
+		city_state, citizen_id, inventory_resource, 99
 	)
 	_expect(
 		clipped_inventory_amount == carry_capacity - 3
-		and CityCitizenInventorySystem.get_city_citizen_total_carried_amount(citizen_id) == carry_capacity
-		and CityCitizenInventorySystem.get_city_citizen_inventory_free_space(citizen_id) == 0
+		and CityCitizenInventorySystem.get_city_citizen_total_carried_amount_for_city_state(
+			city_state, citizen_id
+		) == carry_capacity
+		and CityCitizenInventorySystem.get_city_citizen_inventory_free_space_for_city_state(
+			city_state, citizen_id
+		) == 0
 		and registry_state.citizen_version == version_before_clipping + 1,
 		"Personal inventory must clip against the three-unit cargo share and publish once."
 	)
 
-	var version_before_no_ops := registry_state.citizen_version
+	var version_before_no_ops: int = registry_state.citizen_version
 	var no_op_cargo := {cargo_resource: 3}
 	_expect(
-		CityCitizenInventorySystem.set_city_citizen_inventory_resource_amount(citizen_id, inventory_resource, carry_capacity - 3) == carry_capacity - 3
-		and CityCitizenInventorySystem.set_city_citizen_haul_cargo_resources(citizen_id, no_op_cargo) == 3
-		and CityCitizenInventorySystem.set_city_citizen_haul_cargo_resources(citizen_id, {"not_a_city_resource": 3}) == 3
-		and CityCitizenInventorySystem.set_city_citizen_haul_cargo_resources(citizen_id, {cargo_resource: "3"}) == 3
-		and CitizenNeedsSystem.set_city_citizen_hunger_state(citizen_id, hunger, hunger_remainder)
-		and CitizenNeedsSystem.set_city_citizen_happiness(citizen_id, happiness)
-		and CityCitizenInventorySystem.set_city_citizen_carry_capacity(citizen_id, carry_capacity)
-		and not CityCitizenInventorySystem.set_city_citizen_carry_capacity(citizen_id, carry_capacity - 1)
+		CityCitizenInventorySystem.set_city_citizen_inventory_resource_amount_for_city_state(
+			city_state, citizen_id, inventory_resource, carry_capacity - 3
+		) == carry_capacity - 3
+		and CityCitizenInventorySystem.set_city_citizen_haul_cargo_resources_for_city_state(
+			city_state, citizen_id, no_op_cargo
+		) == 3
+		and CityCitizenInventorySystem.set_city_citizen_haul_cargo_resources_for_city_state(
+			city_state, citizen_id, {"not_a_city_resource": 3}
+		) == 3
+		and CityCitizenInventorySystem.set_city_citizen_haul_cargo_resources_for_city_state(
+			city_state, citizen_id, {cargo_resource: "3"}
+		) == 3
+		and CitizenNeedsSystem.set_city_citizen_hunger_state_for_city_state(
+			city_state, citizen_id, hunger, hunger_remainder
+		)
+		and CitizenNeedsSystem.set_city_citizen_happiness_for_city_state(
+			city_state, citizen_id, happiness
+		)
+		and CityCitizenInventorySystem.set_city_citizen_carry_capacity_for_city_state(
+			city_state, citizen_id, carry_capacity
+		)
+		and not CityCitizenInventorySystem.set_city_citizen_carry_capacity_for_city_state(
+			city_state, citizen_id, carry_capacity - 1
+		)
 		and registry_state.citizen_version == version_before_no_ops,
 		"Idempotent writes and invalid or over-capacity replacements must not publish."
 	)
 
-	var inventory_copy := CityCitizenInventorySystem.get_city_citizen_inventory(citizen_id)
-	var cargo_copy := CityCitizenInventorySystem.get_city_citizen_haul_cargo(citizen_id)
+	var inventory_copy := CityCitizenInventorySystem.get_city_citizen_inventory_for_city_state(
+		city_state, citizen_id
+	)
+	var cargo_copy := CityCitizenInventorySystem.get_city_citizen_haul_cargo_for_city_state(
+		city_state, citizen_id
+	)
 	var cargo_resources_copy: Dictionary = cargo_copy.get("resources", {})
 	inventory_copy[inventory_resource] = 999
 	cargo_resources_copy[cargo_resource] = 999
 	cargo_copy["amount"] = 999
 	_expect(
-		CityCitizenInventorySystem.get_city_citizen_inventory_resource_amount(citizen_id, inventory_resource) == carry_capacity - 3
-		and CityCitizenInventorySystem.get_city_citizen_haul_cargo_resource_amount(citizen_id, cargo_resource) == 3
-		and CityCitizenInventorySystem.get_city_citizen_haul_cargo_amount(citizen_id) == 3,
+		CityCitizenInventorySystem.get_city_citizen_inventory_resource_amount_for_city_state(
+			city_state, citizen_id, inventory_resource
+		) == carry_capacity - 3
+		and CityCitizenInventorySystem.get_city_citizen_haul_cargo_resource_amount_for_city_state(
+			city_state, citizen_id, cargo_resource
+		) == 3
+		and CityCitizenInventorySystem.get_city_citizen_haul_cargo_amount_for_city_state(
+			city_state, citizen_id
+		) == 3,
 		"Inventory and cargo query results must be non-aliasing copies."
 	)
 
 	var authoritative_record: Dictionary = registry_state.citizens[0]
 	return {
+		"city_state": city_state,
 		"citizen_id": citizen_id,
 		"registry_state": registry_state,
 		"citizens_array": registry_state.citizens,
@@ -211,7 +260,6 @@ func _bind_fixture_city(city_id: int) -> bool:
 	var city_state = WorldPoliticalState.get_city_simulation_state(city_id)
 	if not city_state is CitySettlementSimulationState:
 		return false
-	CityCitizenUnboundCompatibility.bind_legacy_fixture_state(city_state)
 	return true
 
 
@@ -220,7 +268,8 @@ func _active_city_matches(expected: Dictionary) -> bool:
 	var inventory_resource := str(expected.get("inventory_resource", ""))
 	var cargo_resource := str(expected.get("cargo_resource", ""))
 	var carry_capacity := int(expected.get("carry_capacity", 0))
-	var registry_state := CityCitizenRegistrySystem.get_current_state()
+	var city_state: CitySettlementSimulationState = expected.get("city_state")
+	var registry_state := city_state.citizen_registry_state
 	return (
 		is_same(registry_state, expected.get("registry_state"))
 		and is_same(registry_state.citizens, expected.get("citizens_array"))
@@ -228,13 +277,25 @@ func _active_city_matches(expected: Dictionary) -> bool:
 		and is_same(registry_state.citizens[0].get("inventory", {}), expected.get("inventory_identity"))
 		and is_same(registry_state.citizens[0].get("haul_cargo", {}), expected.get("cargo_identity"))
 		and registry_state.citizen_version == int(expected.get("version", -1))
-		and CityCitizenInventorySystem.get_city_citizen_inventory_resource_amount(citizen_id, inventory_resource) == carry_capacity - 3
-		and CityCitizenInventorySystem.get_city_citizen_haul_cargo_resource_amount(citizen_id, cargo_resource) == 3
-		and CityCitizenInventorySystem.get_city_citizen_total_carried_amount(citizen_id) == carry_capacity
-		and CityCitizenInventorySystem.get_city_citizen_carry_capacity(citizen_id) == carry_capacity
-		and CitizenNeedsSystem.get_city_citizen_hunger(citizen_id) == int(expected.get("hunger", -1))
+		and CityCitizenInventorySystem.get_city_citizen_inventory_resource_amount_for_city_state(
+			city_state, citizen_id, inventory_resource
+		) == carry_capacity - 3
+		and CityCitizenInventorySystem.get_city_citizen_haul_cargo_resource_amount_for_city_state(
+			city_state, citizen_id, cargo_resource
+		) == 3
+		and CityCitizenInventorySystem.get_city_citizen_total_carried_amount_for_city_state(
+			city_state, citizen_id
+		) == carry_capacity
+		and CityCitizenInventorySystem.get_city_citizen_carry_capacity_for_city_state(
+			city_state, citizen_id
+		) == carry_capacity
+		and CitizenNeedsSystem.get_city_citizen_hunger_for_city_state(
+			city_state, citizen_id
+		) == int(expected.get("hunger", -1))
 		and int(registry_state.citizens[0].get("hunger_decay_remainder", -1)) == int(expected.get("hunger_remainder", -1))
-		and CitizenNeedsSystem.get_city_citizen_happiness(citizen_id) == int(expected.get("happiness", -1))
+		and CitizenNeedsSystem.get_city_citizen_happiness_for_city_state(
+			city_state, citizen_id
+		) == int(expected.get("happiness", -1))
 	)
 
 

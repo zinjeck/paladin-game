@@ -116,8 +116,8 @@ func _test_atomic_settlement_presentation_rebind() -> void:
 		and is_same(renderer.bound_settlement_context, context_a)
 		and is_same(renderer.city_world, state_a.city_world)
 		and renderer.city_seed == state_a.city_seed
-		and renderer.city_tree_multimesh_index_by_tile.has(feature_a)
-		and renderer.city_rock_multimesh_index_by_tile.is_empty()
+		and renderer.settlement_natural_feature_presenter.tree_index_by_tile.has(feature_a)
+		and renderer.settlement_natural_feature_presenter.rock_index_by_tile.is_empty()
 		and renderer.get_city_object_by_id(int(object_a.get("id", -1))).get(
 			"owner", ""
 		) == "owner_a"
@@ -126,6 +126,15 @@ func _test_atomic_settlement_presentation_rebind() -> void:
 		"Renderer _ready() must retain its explicit A binding while global presentation remains B and must not resume the clock."
 	)
 	var renderer_binding_a := renderer.get_city_presentation_binding()
+	_expect(
+		is_same(renderer_binding_a.settlement_state, state_a)
+		and is_same(renderer_binding_a.world, state_a.city_world)
+		and renderer_binding_a.seed == state_a.city_seed
+		and is_same(renderer_binding_a.city_state, renderer_binding_a.settlement_state)
+		and is_same(renderer_binding_a.city_world, renderer_binding_a.world)
+		and renderer_binding_a.city_seed == renderer_binding_a.seed,
+		"The binding must expose one neutral state/world/seed identity with read-only city compatibility aliases."
+	)
 	_expect_renderer_helpers_bound(
 		renderer,
 		renderer_binding_a,
@@ -152,7 +161,7 @@ func _test_atomic_settlement_presentation_rebind() -> void:
 	session.city_view_has_been_entered = true
 	SimulationClock.set_speed_multiplier(3.0)
 	SimulationClock.set_simulation_paused(false)
-	var switched_to_b := session.show_settlement_city_view(city_b_id)
+	var switched_to_b := session.show_settlement_view(city_b_id)
 
 	_expect(
 		switched_to_b
@@ -180,11 +189,11 @@ func _test_atomic_settlement_presentation_rebind() -> void:
 		and renderer.road_preview_tiles.is_empty()
 		and renderer.road_preview_lookup.is_empty()
 		and not renderer.is_city_player_command_tool_active()
-		and not renderer.is_city_player_command_dragging
-		and renderer.city_player_command_drag_preview_tiles.is_empty()
+		and not renderer.settlement_command_controller.is_dragging
+		and renderer.settlement_command_controller.drag_preview_tiles.is_empty()
 		and not renderer.is_object_selection_dragging
-		and renderer.debug_navigation_path.is_empty()
-		and not renderer.workplace_details_open,
+		and renderer.city_debug_presentation.navigation_path.is_empty()
+		and not renderer.settlement_entity_panel_presentation.workplace_details_open,
 		"Selections, attached panels, placement ghosts, roads, commands, and debug paths from A must not cross into B."
 	)
 	_expect(
@@ -193,9 +202,9 @@ func _test_atomic_settlement_presentation_rebind() -> void:
 		) == "owner_b"
 		and renderer.city_information_ui.city_name_label.text
 		== "Presentation B"
-		and renderer.city_tree_multimesh_index_by_tile.is_empty()
-		and renderer.city_rock_multimesh_index_by_tile.has(feature_b)
-		and not renderer.city_rock_multimesh_index_by_tile.has(feature_a),
+		and renderer.settlement_natural_feature_presenter.tree_index_by_tile.is_empty()
+		and renderer.settlement_natural_feature_presenter.rock_index_by_tile.has(feature_b)
+		and not renderer.settlement_natural_feature_presenter.rock_index_by_tile.has(feature_a),
 		"B's object, UI identity, and natural-feature cache must replace every A presentation source."
 	)
 	var renderer_binding_b := renderer.get_city_presentation_binding()
@@ -247,8 +256,8 @@ func _test_atomic_settlement_presentation_rebind() -> void:
 		and is_same(renderer.city_world, state_a.city_world)
 		and renderer.city_information_ui.city_name_label.text
 		== "Presentation A"
-		and renderer.city_tree_multimesh_index_by_tile.has(feature_a)
-		and renderer.city_rock_multimesh_index_by_tile.is_empty()
+		and renderer.settlement_natural_feature_presenter.tree_index_by_tile.has(feature_a)
+		and renderer.settlement_natural_feature_presenter.rock_index_by_tile.is_empty()
 		and renderer.get_city_object_by_id(int(object_a.get("id", -1))).get(
 			"owner", ""
 		) == "owner_a",
@@ -288,6 +297,63 @@ func _test_atomic_settlement_presentation_rebind() -> void:
 		and is_same(renderer.city_world, world_before_rejection),
 		"A mismatched prepared payload must be rejected before the presentation target changes."
 	)
+	_expect(
+		session.show_settlement_city_view(city_b_id, {
+			"city_world": state_b.city_world,
+			"city_seed": state_b.city_seed,
+		})
+		and WorldPoliticalState.active_settlement_id == city_b_id
+		and renderer.bound_city_settlement_id == city_b_id
+		and is_same(renderer.city_world, state_b.city_world),
+		"A rejected rebind must leave the prior binding retryable with the exact target payload."
+	)
+
+	var village := WorldPoliticalState.create_settlement({
+		"name": "Presentation Village",
+		"settlement_type": SettlementData.SETTLEMENT_TYPE_VILLAGE,
+		"polity_id": polity_id,
+		"world_region_top_left": Vector2i(6, 6),
+		"world_region_center": Vector2i(6, 6),
+		"world_region_size": 1,
+		"parent_city_id": city_a_id,
+	})
+	var outpost := WorldPoliticalState.create_settlement({
+		"name": "Presentation Outpost",
+		"settlement_type": SettlementData.SETTLEMENT_TYPE_OUTPOST,
+		"polity_id": polity_id,
+		"world_region_top_left": Vector2i(7, 7),
+		"world_region_center": Vector2i(7, 7),
+		"world_region_size": 1,
+	})
+	var village_id := int(village.get("id", -1))
+	var outpost_id := int(outpost.get("id", -1))
+	var binding_before_nondetailed_rejection := (
+		renderer.get_city_presentation_binding()
+	)
+	var world_before_nondetailed_rejection := renderer.city_world
+	var active_before_nondetailed_rejection := (
+		WorldPoliticalState.get_presented_settlement_id()
+	)
+	var village_context = WorldPoliticalState.get_settlement_context(village_id)
+	var outpost_context = WorldPoliticalState.get_settlement_context(outpost_id)
+	_expect(
+		village_id > 0
+		and outpost_id > 0
+		and village_context != null
+		and outpost_context != null
+		and not village_context.supports_detailed_simulation()
+		and not outpost_context.supports_detailed_simulation()
+		and not session.show_settlement_view(village_id)
+		and not session.show_settlement_view(outpost_id)
+		and WorldPoliticalState.get_presented_settlement_id()
+		== active_before_nondetailed_rejection
+		and is_same(
+			renderer.get_city_presentation_binding(),
+			binding_before_nondetailed_rejection
+		)
+		and is_same(renderer.city_world, world_before_nondetailed_rejection),
+		"Neutral settlement routing must reject unsupported village and outpost backends without disturbing the active detailed presentation."
+	)
 
 	session.free()
 	renderer.queue_free()
@@ -304,14 +370,14 @@ func _expect_renderer_helpers_bound(
 	message: String
 ) -> void:
 	var citizen_debug_text := renderer.get_citizen_debug_list_text()
-	var helpers_match := (
+	var helpers_match: bool = (
 		binding != null
 		and binding.is_valid()
 		and binding.generation > minimum_generation
 		and renderer.city_information_ui.is_bound_to_city_presentation(binding)
-		and renderer.citizen_debug_ui.is_bound_to_city_presentation(binding)
+		and renderer.city_debug_presentation.citizen_debug_panel.is_bound_to_city_presentation(binding)
 		and renderer.city_debug_presentation.is_bound_to_city_presentation(binding)
-		and renderer.city_citizen_movement_presentation.is_bound_to_city_presentation(
+		and renderer.city_citizen_movement_presentation.is_bound_to_settlement_presentation(
 			binding
 		)
 		and renderer.workplace_zone_overlay_cache.is_bound_to_city_presentation(
@@ -342,14 +408,18 @@ func _arm_stale_city_a_presentation(renderer: CityRenderer, object_id: int) -> v
 	renderer.is_road_dragging = true
 	renderer.road_preview_tiles = [Vector2i(4, 4)]
 	renderer.road_preview_lookup = {Vector2i(4, 4): true}
-	renderer.active_city_player_command_type = (
+	renderer.settlement_command_controller.active_command_type = (
 		CityWorkSystem.CITY_PLAYER_COMMAND_TYPE_CHOP_TREE
 	)
-	renderer.is_city_player_command_dragging = true
-	renderer.city_player_command_drag_preview_tiles = [Vector2i(5, 5)]
+	renderer.settlement_command_controller.is_dragging = true
+	renderer.settlement_command_controller.drag_preview_tiles.assign([
+		Vector2i(5, 5)
+	])
 	renderer.is_object_selection_dragging = true
-	renderer.debug_navigation_path = [Vector2i(1, 1), Vector2i(2, 1)]
-	renderer.workplace_details_open = true
+	renderer.city_debug_presentation.replace_navigation_path_for_characterization(
+		[Vector2i(1, 1), Vector2i(2, 1)]
+	)
+	renderer.settlement_entity_panel_presentation.workplace_details_open = true
 
 
 func _seed_city(

@@ -1,14 +1,15 @@
 extends Node
 
-const TEST_CITY_NAME := "Navigation Bootstrap"
-const TEST_CULTURE_NAME := "Navigation Culture"
+const CitySettlementTestFixtureScript = preload(
+	"res://scripts/city/simulation/test_support/CitySettlementTestFixture.gd"
+)
 
 var failure_count: int = 0
 
 
 func _ready() -> void:
 	_test_state_defaults()
-	_test_pre_context_state_adoption()
+	_test_registered_context_owns_navigation_state()
 	WorldData.reset_runtime_session_state()
 
 	if failure_count > 0:
@@ -40,72 +41,55 @@ func _test_state_defaults() -> void:
 	)
 
 
-func _test_pre_context_state_adoption() -> void:
-	WorldData.reset_runtime_session_state()
-	var world := _make_world(8, 8, 72_001)
-	if not _lock_founding_world(world, "Pre-context"):
+func _test_registered_context_owns_navigation_state() -> void:
+	var fixture = CitySettlementTestFixtureScript.create({
+		"label": "Navigation Bootstrap",
+	})
+	_expect(fixture != null, "Fixture must register an explicit City context.")
+	if fixture == null:
 		return
 
-	var bootstrap_state := CityNavigationSystem.get_current_state()
-	bootstrap_state.object_access_tile_cache[77] = {
+	var city_state: CitySettlementSimulationState = fixture.city_state
+	var navigation_state: CityNavigationState = city_state.navigation_state
+	navigation_state.object_access_tile_cache[77] = {
 		"world_instance_id": 123,
 		"access_tiles": [Vector2i(1, 2)],
 	}
 
 	_expect(
-		WorldPoliticalState.synchronize_foundation_with_world_data(),
-		"Founding must establish a City settlement context."
+		fixture.is_registered()
+		and is_same(
+			CityNavigationSystem.get_state_for_city_state(city_state),
+			navigation_state
+		)
+		and navigation_state.object_access_tile_cache.has(77),
+		"Explicit navigation access must retain the registered cache owner."
 	)
-	var capital_state = WorldPoliticalState.get_active_city_simulation_state()
+
+	var rebound_context = WorldPoliticalState.get_settlement_context(
+		fixture.settlement_id
+	)
 	_expect(
-		capital_state is CitySettlementSimulationState
-		and is_same(capital_state.navigation_state, bootstrap_state)
-		and is_same(CityNavigationSystem.get_current_state(), bootstrap_state)
-		and bootstrap_state.object_access_tile_cache.has(77),
-		"The founding City must adopt the exact pre-context navigation owner."
+		rebound_context != null
+		and WorldPoliticalState.is_registered_settlement_context(
+			rebound_context
+		)
+		and is_same(rebound_context.get_city_simulation_state(), city_state)
+		and is_same(
+			CityNavigationSystem.get_state_for_city_state(city_state),
+			navigation_state
+		),
+		"Settlement lookup must preserve the exact registered navigation owner."
 	)
+
+	var stale_context: SettlementSimulationContext = fixture.settlement_context
+	var settlement_id: int = fixture.settlement_id
+	fixture.cleanup()
 	_expect(
-		WorldPoliticalState.synchronize_foundation_with_world_data()
-		and is_same(CityNavigationSystem.get_current_state(), bootstrap_state),
-		"Repeated synchronization must not replace the navigation owner."
+		not WorldPoliticalState.is_registered_settlement_context(stale_context)
+		and WorldPoliticalState.get_city_simulation_state(settlement_id) == null,
+		"Registry reset must invalidate every navigation fixture binding."
 	)
-
-
-
-func _lock_founding_world(world: WorldData, label: String) -> bool:
-	var locked := WorldData.lock_world_save({
-		"source_world": world,
-		"region_top_left": Vector2i(1, 1),
-		"region_center": Vector2i(2, 2),
-		"region_size": 3,
-		"world_scene_path": "res://scenes/GameSession.tscn",
-		"city_scene_path": "res://scenes/CityScreen.tscn",
-		"city_name": TEST_CITY_NAME + " " + label,
-		"culture_name": TEST_CULTURE_NAME + " " + label,
-	})
-	_expect(locked, label + " fixture must lock its founding world.")
-	return locked
-
-
-func _make_world(width: int, height: int, seed_value: int) -> WorldData:
-	var world := WorldData.new()
-	world.setup(width, height, seed_value)
-
-	for y in range(height):
-		for x in range(width):
-			world.tiles[y][x] = {
-				"fertility": 50.0,
-				"elevation": 0.2,
-				"temperature": 0.5,
-				"precipitation": 0.5,
-				"terrain": WorldData.TERRAIN_LAND,
-				"biome": WorldData.BIOME_PLAIN,
-				"resource": WorldData.RESOURCE_NONE,
-				"is_land": true,
-			}
-
-	world.mark_tile_data_changed()
-	return world
 
 
 func _expect(condition: bool, message: String) -> void:

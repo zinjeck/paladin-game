@@ -13,6 +13,15 @@ const CityConstructionSystemScript = preload(
 const CityNavigationSystemScript = preload(
 	"res://scripts/city/simulation/systems/CityNavigationSystem.gd"
 )
+const SettlementNaturalFeaturePresenterScript = preload(
+	"res://scripts/map/visuals/SettlementNaturalFeaturePresenter.gd"
+)
+const SettlementPresentationBindingScript = preload(
+	"res://scripts/settlements/presentation/SettlementPresentationBinding.gd"
+)
+const CityPresentationBindingScript = preload(
+	"res://scripts/city/rendering/CityPresentationBinding.gd"
+)
 const TEST_CITY_NAME := "Smoke Test City"
 const TEST_CULTURE_NAME := "Smoke Test Culture"
 
@@ -80,10 +89,21 @@ func _run_smoke_test() -> void:
 		renderer.city_interaction_render_layer != null,
 		"Interaction render layer must exist."
 	)
+	_expect(
+		renderer.settlement_infrastructure_presenter != null
+		and (
+			renderer.settlement_infrastructure_presenter
+			.is_bound_to_settlement_presentation(
+				renderer.get_settlement_presentation_binding()
+			)
+		),
+		"Infrastructure drawing must be owned by the exact settlement binding."
+	)
 
 	_test_city_map_texture_cache(renderer)
 	_test_city_information_panel_initial(renderer)
 	_test_road_hover_highlight(renderer)
+	_test_settlement_natural_feature_presenter_binding(renderer)
 	_test_city_natural_features(renderer)
 	_test_ground_pile_coalescing(renderer)
 	await _test_focused_layer_invalidation(renderer)
@@ -112,20 +132,20 @@ func _run_smoke_test() -> void:
 
 	# Several fixtures deliberately edit authoritative tile data. The complete
 	# atomic cache must already represent that latest version before re-entry.
-	renderer.update_city_map_mode_button_visuals()
+	renderer.settlement_ui_controller.update_map_mode_button_visuals()
 	_expect(
 		renderer.has_valid_saved_city_map_texture_cache(renderer.city_world),
 		"The latest tile-data version must finish with a complete saved map cache."
 	)
 
-	var cached_tree_multimesh_id := (
-		renderer.city_tree_multimesh.get_instance_id()
-		if renderer.city_tree_multimesh != null
+	var cached_tree_multimesh_id: int = (
+		renderer.settlement_natural_feature_presenter.tree_multimesh.get_instance_id()
+		if renderer.settlement_natural_feature_presenter.tree_multimesh != null
 		else 0
 	)
-	var cached_rock_multimesh_id := (
-		renderer.city_rock_multimesh.get_instance_id()
-		if renderer.city_rock_multimesh != null
+	var cached_rock_multimesh_id: int = (
+		renderer.settlement_natural_feature_presenter.rock_multimesh.get_instance_id()
+		if renderer.settlement_natural_feature_presenter.rock_multimesh != null
 		else 0
 	)
 	renderer.queue_free()
@@ -150,11 +170,11 @@ func _run_smoke_test() -> void:
 	await get_tree().process_frame
 	_expect(
 		reloaded_renderer.city_natural_feature_cache_reused_on_entry
-		and reloaded_renderer.city_tree_multimesh != null
-		and reloaded_renderer.city_rock_multimesh != null
-		and reloaded_renderer.city_tree_multimesh.get_instance_id()
+		and reloaded_renderer.settlement_natural_feature_presenter.tree_multimesh != null
+		and reloaded_renderer.settlement_natural_feature_presenter.rock_multimesh != null
+		and reloaded_renderer.settlement_natural_feature_presenter.tree_multimesh.get_instance_id()
 		== cached_tree_multimesh_id
-		and reloaded_renderer.city_rock_multimesh.get_instance_id()
+		and reloaded_renderer.settlement_natural_feature_presenter.rock_multimesh.get_instance_id()
 		== cached_rock_multimesh_id,
 		"City re-entry must reuse the natural-feature MultiMeshes instead of rescanning the full map."
 	)
@@ -174,8 +194,8 @@ func _run_smoke_test() -> void:
 
 
 func _test_city_map_texture_cache(renderer: CityRenderer) -> void:
-	var view_modes: Array[int] = renderer.get_all_city_view_modes()
-	var original_view_mode := renderer.city_view_mode
+	var view_modes: Array[int] = MapVisuals.get_all_view_modes()
+	var original_view_mode: int = renderer.settlement_ui_controller.view_mode
 	_expect(
 		renderer.city_texture_cache.is_mode_ready(
 			renderer.city_world,
@@ -196,7 +216,7 @@ func _test_city_map_texture_cache(renderer: CityRenderer) -> void:
 		"Every city map mode must be ready in the same atomic preparation pass."
 	)
 
-	renderer.update_city_map_mode_button_visuals()
+	renderer.settlement_ui_controller.update_map_mode_button_visuals()
 	_expect(
 		renderer.has_valid_saved_city_map_texture_cache(
 			renderer.city_world
@@ -246,9 +266,10 @@ func _test_city_map_texture_cache(renderer: CityRenderer) -> void:
 			sample_tile_position.x,
 			sample_tile_position.y
 		)
-		var expected_color := renderer.get_city_tile_color_for_mode(
+		var expected_color := MapVisuals.get_tile_color_for_mode(
 			source_tile,
-			mode
+			mode,
+			0.45
 		)
 		var actual_color := texture.get_image().get_pixelv(
 			sample_tile_position
@@ -446,10 +467,12 @@ func _test_city_information_panel_initial(
 	renderer.camera.zoom = original_zoom
 	renderer.update_city_ui_layout()
 	_expect(
-		renderer.object_info_panel.position.y + 0.01
+		renderer.settlement_entity_panel_presentation.object_info_panel.position.y + 0.01
 		>= city_ui.get_reserved_bottom_y(),
 		"Object details must lay out below the fixed city information panel; "
-		+ "got y=" + str(renderer.object_info_panel.position.y)
+		+ "got y=" + str(
+			renderer.settlement_entity_panel_presentation.object_info_panel.position.y
+		)
 		+ " below reserved y=" + str(city_ui.get_reserved_bottom_y()) + "."
 	)
 
@@ -458,7 +481,18 @@ func _test_city_information_panel_live_data(
 	renderer: CityRenderer
 ) -> void:
 	var city_ui = renderer.city_information_ui
-	var citizen_count := CityCitizenRegistrySystem.get_city_population_count()
+	var city_state := _get_registered_renderer_city_state(renderer)
+	_expect(
+		city_state != null,
+		"The live-data fixture must retain its registered settlement state."
+	)
+	if city_state == null:
+		return
+	var citizen_count := (
+		CityCitizenRegistrySystem.get_city_population_count_for_city_state(
+			city_state
+		)
+	)
 
 	_expect(
 		city_ui.population_button.text == "Pop\n" + str(citizen_count),
@@ -480,7 +514,9 @@ func _test_city_information_panel_live_data(
 	if citizen_count <= 0:
 		return
 
-	var first_citizen: Dictionary = CityCitizenRegistrySystem.get_current_state().citizens[0]
+	var first_citizen: Dictionary = (
+		city_state.citizen_registry_state.citizens[0]
+	)
 	var first_citizen_id := int(first_citizen.get("id", -1))
 	var original_hunger := int(first_citizen.get("hunger", 100))
 	var original_hunger_remainder := int(
@@ -490,7 +526,7 @@ func _test_city_information_panel_live_data(
 	var original_hunger_total := 0.0
 	var original_happiness_total := 0.0
 
-	for raw_citizen in CityCitizenRegistrySystem.get_current_state().citizens:
+	for raw_citizen in city_state.citizen_registry_state.citizens:
 		var citizen: Dictionary = raw_citizen
 		original_hunger_total += float(citizen.get("hunger", 100))
 		original_happiness_total += float(
@@ -498,14 +534,16 @@ func _test_city_information_panel_live_data(
 		)
 
 	_expect(
-		CitizenNeedsSystem.set_city_citizen_happiness(
+		CitizenNeedsSystem.set_city_citizen_happiness_for_city_state(
+			city_state,
 			first_citizen_id,
 			30
 		),
 		"Need-meter fixture must update the first citizen's happiness."
 	)
 	_expect(
-		CitizenNeedsSystem.set_city_citizen_hunger_state(
+		CitizenNeedsSystem.set_city_citizen_hunger_state_for_city_state(
+			city_state,
 			first_citizen_id,
 			40,
 			original_hunger_remainder
@@ -529,11 +567,13 @@ func _test_city_information_panel_live_data(
 		"Citizen version changes must refresh both average need meters."
 	)
 
-	CitizenNeedsSystem.set_city_citizen_happiness(
+	CitizenNeedsSystem.set_city_citizen_happiness_for_city_state(
+		city_state,
 		first_citizen_id,
 		original_happiness
 	)
-	CitizenNeedsSystem.set_city_citizen_hunger_state(
+	CitizenNeedsSystem.set_city_citizen_hunger_state_for_city_state(
+		city_state,
 		first_citizen_id,
 		original_hunger,
 		original_hunger_remainder
@@ -792,6 +832,13 @@ func _on_interaction_layer_draw() -> void:
 func _test_city_natural_features(
 	renderer: CityRenderer
 ) -> void:
+	var city_state := _get_registered_renderer_city_state(renderer)
+	_expect(
+		city_state != null,
+		"Natural-feature coverage requires the registered renderer state."
+	)
+	if city_state == null:
+		return
 	var tree_count := 0
 	var rock_count := 0
 	var first_tree_tile := Vector2i(-1, -1)
@@ -851,44 +898,48 @@ func _test_city_natural_features(
 
 	_expect(tree_count > 0, "The dev city must generate trees.")
 	_expect(
-		renderer.city_tree_multimesh != null
-		and renderer.city_tree_multimesh.instance_count
+		renderer.settlement_natural_feature_presenter.tree_multimesh != null
+		and renderer.settlement_natural_feature_presenter.tree_multimesh.instance_count
 		== tree_count,
 		"Tree MultiMesh count must match generated tree tiles."
 	)
 	_expect(
-		renderer.city_rock_multimesh != null
-		and renderer.city_rock_multimesh.instance_count
+		renderer.settlement_natural_feature_presenter.rock_multimesh != null
+		and renderer.settlement_natural_feature_presenter.rock_multimesh.instance_count
 		== rock_count,
 		"Rock MultiMesh count must match generated rock tiles."
 	)
 	_expect(
-		renderer.city_tree_multimesh_instance != null
-		and renderer.city_tree_multimesh_instance.multimesh
-		== renderer.city_tree_multimesh
-		and renderer.city_rock_multimesh_instance != null
-		and renderer.city_rock_multimesh_instance.multimesh
-		== renderer.city_rock_multimesh,
+		renderer.settlement_natural_feature_presenter.tree_multimesh_instance != null
+		and renderer.settlement_natural_feature_presenter.tree_multimesh_instance.multimesh
+		== renderer.settlement_natural_feature_presenter.tree_multimesh
+		and renderer.settlement_natural_feature_presenter.rock_multimesh_instance != null
+		and renderer.settlement_natural_feature_presenter.rock_multimesh_instance.multimesh
+		== renderer.settlement_natural_feature_presenter.rock_multimesh,
 		"Natural features must be retained by MultiMeshInstance2D nodes."
 	)
 
 	if first_tree_tile != Vector2i(-1, -1):
 		_expect(
-			CityNavigationSystem.is_city_tile_walkable_for_citizen(
+			CityNavigationSystem.is_city_tile_walkable_for_citizen_for_city_state(
+				city_state,
 				renderer.city_world,
 				first_tree_tile
 			),
 			"Citizens must be able to walk beneath tree canopies."
 		)
 		_expect(
-			not CityLogisticsSystem.can_city_ground_pile_exist_at_tile(
+			not CityLogisticsSystem.can_city_ground_pile_exist_at_tile_for_city_state(
+				city_state,
 				renderer.city_world,
 				first_tree_tile
 			),
 			"Ground piles must remain excluded from tree tiles."
 		)
 
-		var tree_multimesh_before := renderer.city_tree_multimesh
+		var tree_multimesh_before: MultiMesh = (
+			renderer.settlement_natural_feature_presenter.tree_multimesh
+		)
 		var tile_data_version_before_harvest := (
 			renderer.city_world.tile_data_version
 		)
@@ -922,11 +973,12 @@ func _test_city_natural_features(
 			"A harvested tree must update its existing MultiMesh in place."
 		)
 		_expect(
-			renderer.city_tree_multimesh == tree_multimesh_before,
+			renderer.settlement_natural_feature_presenter.tree_multimesh
+			== tree_multimesh_before,
 			"Tree harvesting must not rebuild the full tree MultiMesh."
 		)
 		_expect(
-			renderer.city_tree_multimesh.visible_instance_count
+			renderer.settlement_natural_feature_presenter.tree_multimesh.visible_instance_count
 			== tree_count - 1,
 			"Harvesting one tree must hide exactly one tree instance."
 		)
@@ -935,13 +987,25 @@ func _test_city_natural_features(
 			== tile_data_version_before_harvest,
 			"Harvesting a tree must not invalidate broad tile data."
 		)
+		var bound_context: SettlementSimulationContext = (
+			renderer.get_bound_settlement_context()
+		)
+		_expect(
+			bound_context != null
+			and renderer.validate_city_presentation_binding(bound_context)
+			and renderer.rebind_city_presentation(bound_context),
+			(
+				"Incremental feature compaction must preserve same-target "
+				+ "validation and re-entry."
+			)
+		)
 
 		# A full rebuild must not trust the stale session-prepared feature lists
 		# that predate the focused owner mutation.
 		renderer.rebuild_city_natural_feature_multimeshes()
 		_expect(
-			renderer.city_tree_multimesh != null
-			and renderer.city_tree_multimesh.instance_count
+			renderer.settlement_natural_feature_presenter.tree_multimesh != null
+			and renderer.settlement_natural_feature_presenter.tree_multimesh.instance_count
 			== tree_count - 1
 			and WorldData.get_city_surface_feature(
 				renderer.city_world.get_tile(
@@ -966,13 +1030,58 @@ func _test_city_natural_features(
 		)
 		renderer.city_world.consume_city_surface_feature_changes()
 		renderer.rebuild_city_natural_feature_multimeshes()
-		renderer.observed_city_surface_feature_change_version = (
+		renderer.city_presentation_invalidation_tracker.observed_city_surface_feature_change_version = (
+			renderer.city_world.city_surface_feature_change_version
+		)
+
+		# Hidden detailed simulation can advance focused world versions while the
+		# renderer process is disabled. Same-target re-entry must reconcile them
+		# before exact validation instead of rejecting its own retained state.
+		renderer.set_session_view_active(false)
+		_expect(
+			renderer.city_world.remove_tile_surface_feature(
+				first_tree_tile,
+				WorldData.CITY_SURFACE_FEATURE_TREE
+			),
+			"The hidden re-entry fixture must remove one tree through WorldData."
+		)
+		var hidden_bound_context: SettlementSimulationContext = (
+			renderer.get_bound_settlement_context()
+		)
+		_expect(
+			hidden_bound_context != null
+			and renderer.rebind_city_presentation(hidden_bound_context)
+			and renderer.validate_city_presentation_binding(
+				hidden_bound_context
+			)
+			and not renderer.session_view_active
+			and renderer.settlement_natural_feature_presenter.tree_index_by_tile.size()
+			== tree_count - 1
+			and renderer.settlement_natural_feature_presenter.tree_multimesh.visible_instance_count
+			== tree_count - 1,
+			(
+				"Same-target re-entry must reconcile hidden natural-feature "
+				+ "changes before exact validation."
+			)
+		)
+		renderer.set_session_view_active(true)
+		_expect(
+			renderer.city_world.set_tile_surface_feature(
+				first_tree_tile,
+				WorldData.CITY_SURFACE_FEATURE_TREE
+			),
+			"The hidden re-entry fixture must restore its tree through WorldData."
+		)
+		renderer.rebuild_city_natural_feature_multimeshes()
+		renderer.city_world.consume_city_surface_feature_changes()
+		renderer.city_presentation_invalidation_tracker.observed_city_surface_feature_change_version = (
 			renderer.city_world.city_surface_feature_change_version
 		)
 
 	if first_rock_tile != Vector2i(-1, -1):
 		_expect(
-			CityNavigationSystem.is_city_tile_walkable_for_citizen(
+			CityNavigationSystem.is_city_tile_walkable_for_citizen_for_city_state(
+				city_state,
 				renderer.city_world,
 				first_rock_tile
 			),
@@ -994,25 +1103,107 @@ func _test_city_natural_features(
 		"Rocks must map to stone for future foraging."
 	)
 
-	var previous_view_mode := renderer.city_view_mode
+	var previous_view_mode: int = renderer.settlement_ui_controller.view_mode
 	renderer.set_city_view_mode(MapVisuals.ViewMode.RESOURCES)
 	_expect(
 		not renderer.should_draw_city_trees()
-		and not renderer.city_tree_multimesh_instance.visible,
+		and not renderer.settlement_natural_feature_presenter.tree_multimesh_instance.visible,
 		"Trees must be hidden without redrawing citizens in Resources mode."
 	)
 	renderer.set_city_view_mode(MapVisuals.ViewMode.BIOME)
 	_expect(
 		renderer.should_draw_city_trees()
-		and renderer.city_tree_multimesh_instance.visible,
+		and renderer.settlement_natural_feature_presenter.tree_multimesh_instance.visible,
 		"Trees must remain retained and visible outside Resources mode."
 	)
 	renderer.set_city_view_mode(previous_view_mode)
 
-	_test_city_keep_accepts_tree_covered_access()
+	_test_city_keep_accepts_tree_covered_access(city_state)
 
 
-func _test_city_keep_accepts_tree_covered_access() -> void:
+func _test_settlement_natural_feature_presenter_binding(
+	renderer: CityRenderer
+) -> void:
+	var presenter = (
+		renderer.settlement_natural_feature_presenter
+	)
+	var current_binding: CityPresentationBindingScript = (
+		renderer.get_city_presentation_binding()
+	)
+	var binding_generation := current_binding.generation
+	_expect(
+		presenter != null
+		and presenter.get_parent() == renderer
+		and presenter.is_bound_to_settlement_presentation(
+			current_binding
+		)
+		and presenter.tree_multimesh_instance != null
+		and presenter.rock_multimesh_instance != null
+		and presenter.tree_multimesh_instance.get_parent() == presenter
+		and presenter.rock_multimesh_instance.get_parent() == presenter,
+		"The settlement presenter must physically own retained natural-feature state and nodes."
+	)
+
+	var missing_capability_binding := SettlementPresentationBindingScript.new()
+	var missing_capability_bound := missing_capability_binding.rebind(
+		renderer.bound_settlement_context,
+		binding_generation + 1
+	)
+	_expect(
+		missing_capability_bound
+		and not presenter.bind_settlement_presentation(
+			missing_capability_binding
+		)
+		and presenter.is_bound_to_settlement_presentation(
+			current_binding
+		),
+		"The natural-feature owner must reject a registered identity that lacks exact world and seed capabilities."
+	)
+
+	var isolated_presenter = SettlementNaturalFeaturePresenterScript.new()
+	var isolated_binding := CityPresentationBindingScript.new()
+	var isolated_stale_binding := CityPresentationBindingScript.new()
+	var isolated_newer_binding := CityPresentationBindingScript.new()
+	var isolated_bindings_valid := (
+		isolated_binding.rebind(renderer.bound_settlement_context, 5)
+		and isolated_stale_binding.rebind(
+			renderer.bound_settlement_context,
+			4
+		)
+		and isolated_newer_binding.rebind(
+			renderer.bound_settlement_context,
+			6
+		)
+	)
+	var retained_tree_multimesh := MultiMesh.new()
+	_expect(
+		isolated_bindings_valid
+		and isolated_presenter.bind_settlement_presentation(isolated_binding)
+		and not isolated_presenter.bind_settlement_presentation(
+			isolated_stale_binding
+		)
+		and isolated_presenter.accepts_generation(5),
+		"The settlement presenter must reject stale registered bindings transactionally."
+	)
+	isolated_presenter.tree_multimesh = retained_tree_multimesh
+	isolated_presenter.tree_index_by_tile[Vector2i(1, 1)] = 0
+	_expect(
+		isolated_presenter.bind_settlement_presentation(
+			isolated_newer_binding
+		)
+		and is_same(
+			isolated_presenter.tree_multimesh,
+			retained_tree_multimesh
+		)
+		and isolated_presenter.tree_index_by_tile.has(Vector2i(1, 1)),
+		"A fresh token for the exact same settlement source must preserve retained features."
+	)
+	isolated_presenter.free()
+
+
+func _test_city_keep_accepts_tree_covered_access(
+	city_state: CitySettlementSimulationState
+) -> void:
 	var keep_size := CityObjectCatalog.get_city_object_size_for_type(
 		CityObjectCatalog.CITY_OBJECT_CITY_CENTER
 	)
@@ -1023,7 +1214,6 @@ func _test_city_keep_accepts_tree_covered_access() -> void:
 		9091
 	)
 	var keep_top_left := Vector2i.ONE
-
 	for y in range(test_world.height):
 		for x in range(test_world.width):
 			var tile_position := Vector2i(x, y)
@@ -1043,13 +1233,20 @@ func _test_city_keep_accepts_tree_covered_access() -> void:
 					WorldData.CITY_SURFACE_FEATURE_TREE
 				)
 
-	_expect(
-		CityObjectSystem.can_place_city_object(
+	var original_city_world: WorldData = city_state.city_world
+	city_state.city_world = test_world
+	var can_place_keep := (
+		CityObjectSystem.can_place_city_object_for_city_state(
+			city_state,
 			test_world,
 			keep_top_left,
 			keep_size,
 			CityObjectCatalog.CITY_OBJECT_CITY_CENTER
-		),
+		)
+	)
+	city_state.city_world = original_city_world
+	_expect(
+		can_place_keep,
 		"A City Keep must accept tree-covered access tiles."
 	)
 
@@ -1202,7 +1399,15 @@ func _test_resource_catalog_and_bulk_totals() -> void:
 func _test_ground_pile_coalescing(
 	renderer: CityRenderer
 ) -> void:
+	var city_state := _get_registered_renderer_city_state(renderer)
+	_expect(
+		city_state != null,
+		"Ground-pile coverage requires the registered renderer state."
+	)
+	if city_state == null:
+		return
 	var test_tiles := _find_ground_pile_test_pair(
+		city_state,
 		renderer.city_world
 	)
 
@@ -1222,26 +1427,42 @@ func _test_ground_pile_coalescing(
 		CityLogisticsSystem.CITY_GROUND_PILE_MERGE_RADIUS_TILES == 2,
 		"Ground-pile coalescing radius must remain exactly two tiles."
 	)
-	_expect(
-		CityLogisticsSystem.add_resource_to_city_ground_pile(
-			anchor_tile,
-			WorldData.RESOURCE_LUMBER,
-			first_amount
-		) == first_amount,
-		"The anchor ground pile must accept its initial lumber."
+	var anchor_add_result := (
+		CityLogisticsSystem.add_resource_to_city_ground_piles_with_result_for_city_state(
+			city_state,
+			{
+				"tile_position": anchor_tile,
+				"resource": WorldData.RESOURCE_LUMBER,
+				"amount_delta": first_amount,
+			}
+		)
 	)
 	_expect(
-		CityLogisticsSystem.add_resource_to_city_ground_pile(
-			overflow_tile,
-			WorldData.RESOURCE_LUMBER,
-			4
-		) == 4,
+		int(anchor_add_result.get("added_amount", 0)) == first_amount,
+		"The anchor ground pile must accept its initial lumber."
+	)
+	var overflow_add_result := (
+		CityLogisticsSystem.add_resource_to_city_ground_piles_with_result_for_city_state(
+			city_state,
+			{
+				"tile_position": overflow_tile,
+				"resource": WorldData.RESOURCE_LUMBER,
+				"amount_delta": 4,
+			}
+		)
+	)
+	_expect(
+		int(overflow_add_result.get("added_amount", 0)) == 4,
 		"A nearby lumber drop must be accepted atomically."
 	)
 
 	var lumber_piles: Array = []
 
-	for raw_ground_pile in CityLogisticsSystem.get_city_ground_pile_snapshot():
+	for raw_ground_pile in (
+		CityLogisticsSystem.get_city_ground_pile_snapshot_for_city_state(
+			city_state
+		)
+	):
 		if not raw_ground_pile is Dictionary:
 			continue
 
@@ -1293,7 +1514,8 @@ func _test_ground_pile_coalescing(
 		var amount := int(ground_pile.get("amount", 0))
 
 		_expect(
-			CityLogisticsSystem.remove_resource_from_city_ground_pile(
+			CityLogisticsSystem.remove_resource_from_city_ground_pile_for_city_state(
+				city_state,
 				int(ground_pile.get("id", -1)),
 				WorldData.RESOURCE_LUMBER,
 				amount
@@ -1303,16 +1525,18 @@ func _test_ground_pile_coalescing(
 
 
 func _find_ground_pile_test_pair(
+	city_state: CitySettlementSimulationState,
 	city_world: WorldData
 ) -> Array:
-	if city_world == null:
+	if city_state == null or city_world == null:
 		return []
 
 	for y in range(city_world.height):
 		for x in range(city_world.width):
 			var anchor_tile := Vector2i(x, y)
 
-			if not CityLogisticsSystem.can_city_ground_pile_exist_at_tile(
+			if not CityLogisticsSystem.can_city_ground_pile_exist_at_tile_for_city_state(
+				city_state,
 				city_world,
 				anchor_tile
 			):
@@ -1337,7 +1561,8 @@ func _find_ground_pile_test_pair(
 					):
 						continue
 
-					if CityLogisticsSystem.can_city_ground_pile_exist_at_tile(
+					if CityLogisticsSystem.can_city_ground_pile_exist_at_tile_for_city_state(
+						city_state,
 						city_world,
 						candidate_tile
 					):
@@ -1349,10 +1574,18 @@ func _find_ground_pile_test_pair(
 func _place_and_validate_city_fixture(
 	renderer: CityRenderer
 ) -> void:
+	var city_state := _get_registered_renderer_city_state(renderer)
+	_expect(
+		city_state != null,
+		"Immediate-placement coverage requires the registered renderer state."
+	)
+	if city_state == null:
+		return
 	var keep_size := CityObjectCatalog.get_city_object_size_for_type(
 		CityObjectCatalog.CITY_OBJECT_CITY_CENTER
 	)
 	var keep_top_left := _find_placeable_rectangle(
+		city_state,
 		renderer.city_world,
 		keep_size,
 		CityObjectCatalog.CITY_OBJECT_CITY_CENTER
@@ -1390,7 +1623,7 @@ func _place_and_validate_city_fixture(
 		"The immediate-placement fixture must publish tree and rock features through WorldData."
 	)
 	renderer.rebuild_city_natural_feature_multimeshes()
-	renderer.observed_city_surface_feature_change_version = (
+	renderer.city_presentation_invalidation_tracker.observed_city_surface_feature_change_version = (
 		renderer.city_world.city_surface_feature_change_version
 	)
 	renderer.city_world.consume_city_surface_feature_changes()
@@ -1403,7 +1636,8 @@ func _place_and_validate_city_fixture(
 	)
 
 	_expect(
-		CityObjectSystem.can_place_city_object(
+		CityObjectSystem.can_place_city_object_for_city_state(
+			city_state,
 			renderer.city_world,
 			keep_top_left,
 			keep_size,
@@ -1416,7 +1650,9 @@ func _place_and_validate_city_fixture(
 		WorldPoliticalState.synchronize_foundation_with_world_data(),
 		"The atomic foundation fixture must establish its target capital context."
 	)
-	var city_state = WorldPoliticalState.get_current_city_simulation_state()
+	city_state = WorldPoliticalState.get_city_simulation_state(
+		renderer.bound_settlement_context.settlement_id
+	)
 	_expect(
 		city_state is CitySettlementSimulationState,
 		"Immediate placement must resolve a target settlement state."
@@ -1443,29 +1679,26 @@ func _place_and_validate_city_fixture(
 		"top_left": keep_top_left,
 		"size_tiles": keep_size,
 		"object_owner": "player",
-		"city_world": renderer.city_world,
+		"settlement_world": renderer.city_world,
 	}
 
 	# A zero seed is rejected by the local foundation transaction after the Keep
-	# has registered. Temporarily treating the capital as a non-player polity
-	# exercises the silent local transaction boundary rather than deliberately
-	# emitting a player-bridge error. The renderer must roll that exact object
-	# back before a retry.
-	var player_polity_id_before_failure: int = (
-		WorldPoliticalState.player_polity_id
-	)
-	WorldPoliticalState.player_polity_id = PolityData.INVALID_POLITY_ID
+	# has registered. The object owner must roll that exact object back before a
+	# retry; presentation never owns either side of this transaction.
 	renderer.city_seed = 0
+	failed_keep_values["settlement_seed"] = renderer.city_seed
 	var failed_keep := (
-		renderer.register_immediate_city_object_for_city_state(
-			city_state,
+		CityObjectSystem.place_immediate_settlement_object_for_context(
+			renderer.bound_settlement_context,
 			failed_keep_values
 		)
 	)
 	renderer.city_seed = valid_city_seed
-	WorldPoliticalState.player_polity_id = player_polity_id_before_failure
+	failed_keep_values["settlement_seed"] = renderer.city_seed
 	var state_after_failure = (
-		WorldPoliticalState.get_current_city_simulation_state()
+		WorldPoliticalState.get_city_simulation_state(
+			renderer.bound_settlement_context.settlement_id
+		)
 	)
 	_expect(
 		failed_keep.is_empty(),
@@ -1516,11 +1749,14 @@ func _place_and_validate_city_fixture(
 		"Rejected foundation placement must not clear local surface features."
 	)
 
-	city_state = WorldPoliticalState.get_current_city_simulation_state()
-	var keep := renderer.register_immediate_city_object_for_city_state(
-		city_state,
+	city_state = WorldPoliticalState.get_city_simulation_state(
+		renderer.bound_settlement_context.settlement_id
+	)
+	var keep := CityObjectSystem.place_immediate_settlement_object_for_context(
+		renderer.bound_settlement_context,
 		failed_keep_values
 	)
+	renderer.city_information_ui.refresh_all()
 	_expect(
 		int(keep.get("id", -1)) == next_object_id_before_failure,
 		"A successful foundation retry must reuse the rolled-back object ID."
@@ -1558,13 +1794,13 @@ func _place_and_validate_city_fixture(
 	)
 
 	var primary_culture_id := int(
-		WorldPoliticalState.get_current_city_runtime_data().get(
+		city_state.city_runtime_data.get(
 			"primary_culture_id",
 			WorldData.INVALID_CULTURE_ID
 		)
 	)
 	_expect(
-		str(WorldPoliticalState.get_current_city_runtime_data().get("name", ""))
+		str(city_state.city_runtime_data.get("name", ""))
 		== TEST_CITY_NAME,
 		"City Keep placement must use the committed official city name."
 	)
@@ -1577,14 +1813,16 @@ func _place_and_validate_city_fixture(
 	)
 
 	_expect(
-		CityCitizenRegistrySystem.get_city_population_count()
+		CityCitizenRegistrySystem.get_city_population_count_for_city_state(
+			city_state
+		)
 		== CityCitizenRegistrySystem.STARTING_CITY_POPULATION,
 		"Founding must still create the starting population."
 	)
 
 	var all_founders_share_primary_culture := true
 
-	for raw_citizen in CityCitizenRegistrySystem.get_current_state().citizens:
+	for raw_citizen in city_state.citizen_registry_state.citizens:
 		if (
 			not raw_citizen is Dictionary
 			or raw_citizen.get("culture_id") != primary_culture_id
@@ -1599,7 +1837,8 @@ func _place_and_validate_city_fixture(
 
 	var keep_id := int(keep.get("id", -1))
 	var before_totals := (
-		CityResourceAccountingSystem.get_total_owned_city_resource_amounts()
+		CityResourceAccountingSystem
+			.get_total_owned_city_resource_amounts_for_city_state(city_state)
 	)
 	_expect(
 		int(before_totals.get(WorldData.RESOURCE_FISH, 0))
@@ -1608,55 +1847,76 @@ func _place_and_validate_city_fixture(
 	)
 
 	var accepted_fish := (
-		CityResourceContainerSystem.add_resource_to_city_object_storage(
-			keep_id,
-			WorldData.RESOURCE_FISH,
-			3
-		)
+		CityResourceContainerSystem
+			.add_resource_to_city_object_storage_for_city_state(
+				city_state,
+				keep_id,
+				WorldData.RESOURCE_FISH,
+				3
+			)
 	)
 	_expect(accepted_fish == 3, "Keep must accept three fish.")
 	_expect(
-		CityResourceAccountingSystem.get_total_owned_city_resource_amount(
-			WorldData.RESOURCE_FISH
+		int(
+			CityResourceAccountingSystem
+				.get_total_owned_city_resource_amounts_for_city_state(city_state)
+				.get(WorldData.RESOURCE_FISH, 0)
 		)
 		== 3,
 		"Bulk owned-resource cache must invalidate after storage changes."
 	)
 
 
-	var first_citizen: Dictionary = CityCitizenRegistrySystem.get_current_state().citizens[0]
+	var first_citizen: Dictionary = city_state.citizen_registry_state.citizens[0]
 	var first_citizen_id := int(first_citizen.get("id", -1))
-	var removed_fish := CityResourceContainerSystem.remove_resource_from_city_object_storage(
-		keep_id,
-		WorldData.RESOURCE_FISH,
-		1
+	var removed_fish := (
+		CityResourceContainerSystem
+			.remove_resource_from_city_object_storage_for_city_state(
+				city_state,
+				keep_id,
+				WorldData.RESOURCE_FISH,
+				1
+			)
 	)
-	var carried_fish := CityCitizenInventorySystem.set_city_citizen_haul_cargo(
-		first_citizen_id,
-		WorldData.RESOURCE_FISH,
-		removed_fish
+	var carried_fish := (
+		CityCitizenInventorySystem
+			.set_city_citizen_haul_cargo_for_city_state(
+				city_state,
+				first_citizen_id,
+				WorldData.RESOURCE_FISH,
+				removed_fish
+			)
 	)
-	_expect(removed_fish == 1 and carried_fish == 1, "Fixture haul pickup must succeed.")
 	_expect(
-		CityResourceAccountingSystem.get_total_owned_city_resource_amount(
-			WorldData.RESOURCE_FISH
+		removed_fish == 1 and carried_fish == 1,
+		"Fixture haul pickup must succeed."
+	)
+	_expect(
+		int(
+			CityResourceAccountingSystem
+				.get_total_owned_city_resource_amounts_for_city_state(city_state)
+				.get(WorldData.RESOURCE_FISH, 0)
 		)
 		== 2,
 		"In-transit citizen cargo must not count as secured city resources."
 	)
 	_expect(
-		CityResourceAccountingSystem.get_total_physical_city_resource_amount(
-			WorldData.RESOURCE_FISH
-		)
+		CityResourceAccountingSystem
+			.get_total_physical_city_resource_amount_for_city_state(
+				city_state,
+				WorldData.RESOURCE_FISH
+			)
 		== 3,
 		"Resource conservation must still include in-transit cargo."
 	)
-	CityCitizenInventorySystem.set_city_citizen_haul_cargo(
+	CityCitizenInventorySystem.set_city_citizen_haul_cargo_for_city_state(
+		city_state,
 		first_citizen_id,
 		WorldData.RESOURCE_NONE,
 		0
 	)
-	CityResourceContainerSystem.add_resource_to_city_object_storage(
+	CityResourceContainerSystem.add_resource_to_city_object_storage_for_city_state(
+		city_state,
 		keep_id,
 		WorldData.RESOURCE_FISH,
 		1
@@ -1681,20 +1941,23 @@ func _place_and_validate_city_fixture(
 		"Mixed haul cargo must preserve its 4 + 4 + 2 manifest."
 	)
 	_expect(
-		CityCitizenInventorySystem.set_city_citizen_haul_cargo_resources(
+		CityCitizenInventorySystem.set_city_citizen_haul_cargo_resources_for_city_state(
+			city_state,
 			first_citizen_id,
 			mixed_cargo.get("resources", {})
 		) == 10,
 		"A citizen with capacity ten must accept a full mixed load."
 	)
 	_expect(
-		CityCitizenInventorySystem.get_city_citizen_haul_cargo_resource_amount(
+		CityCitizenInventorySystem.get_city_citizen_haul_cargo_resource_amount_for_city_state(
+			city_state,
 			first_citizen_id,
 			WorldData.RESOURCE_STONE
 		) == 4,
 		"Mixed cargo lookup must return the requested resource amount."
 	)
-	CityCitizenInventorySystem.set_city_citizen_haul_cargo_resources(
+	CityCitizenInventorySystem.set_city_citizen_haul_cargo_resources_for_city_state(
+		city_state,
 		first_citizen_id,
 		{}
 	)
@@ -1714,11 +1977,13 @@ func _place_and_validate_city_fixture(
 		"Haul state must preserve multi-stop ground-pile routing."
 	)
 
-	var first_access_tiles := CityNavigationSystem.get_city_object_access_tiles(
+	var first_access_tiles := CityNavigationSystem.get_city_object_access_tiles_for_city_state(
+		city_state,
 		renderer.city_world,
 		keep
 	)
-	var second_access_tiles := CityNavigationSystem.get_city_object_access_tiles(
+	var second_access_tiles := CityNavigationSystem.get_city_object_access_tiles_for_city_state(
+		city_state,
 		renderer.city_world,
 		keep
 	)
@@ -1734,7 +1999,8 @@ func _place_and_validate_city_fixture(
 	if not first_access_tiles.is_empty():
 		first_access_tiles.clear()
 		_expect(
-			not CityNavigationSystem.get_city_object_access_tiles(
+			not CityNavigationSystem.get_city_object_access_tiles_for_city_state(
+				city_state,
 				renderer.city_world,
 				keep
 			).is_empty(),
@@ -1745,24 +2011,34 @@ func _place_and_validate_city_fixture(
 func _test_universal_construction_core(
 	renderer: CityRenderer
 ) -> void:
+	var city_state := _get_registered_renderer_city_state(renderer)
 	_expect(
-		not CityCitizenRegistrySystem.get_current_state().citizens.is_empty(),
+		city_state != null,
+		"Construction coverage requires the registered renderer state."
+	)
+	if city_state == null:
+		return
+	_expect(
+		not city_state.citizen_registry_state.citizens.is_empty(),
 		"Construction coverage requires a starting citizen."
 	)
 
-	if CityCitizenRegistrySystem.get_current_state().citizens.is_empty():
+	if city_state.citizen_registry_state.citizens.is_empty():
 		return
 
-	var citizen_id := int(CityCitizenRegistrySystem.get_current_state().citizens[0].get("id", -1))
+	var citizen_id := int(
+		city_state.citizen_registry_state.citizens[0].get("id", -1)
+	)
 	var keep_access_tiles: Array = []
 
-	for raw_object in CityObjectSystem.get_city_objects():
+	for raw_object in CityObjectSystem.get_city_objects_for_city_state(city_state):
 		if (
 			raw_object is Dictionary
 			and str(raw_object.get("type", ""))
 			== CityObjectCatalog.CITY_OBJECT_CITY_CENTER
 		):
-			keep_access_tiles = CityNavigationSystem.get_city_object_access_tiles(
+			keep_access_tiles = CityNavigationSystem.get_city_object_access_tiles_for_city_state(
+				city_state,
 				renderer.city_world,
 				raw_object
 			)
@@ -1780,6 +2056,7 @@ func _test_universal_construction_core(
 		CityObjectCatalog.CITY_OBJECT_HOUSE
 	)
 	var house_top_left := _find_reachable_construction_rectangle(
+		city_state,
 		renderer.city_world,
 		house_size,
 		CityObjectCatalog.CITY_OBJECT_HOUSE,
@@ -1821,18 +2098,23 @@ func _test_universal_construction_core(
 	)
 	renderer.city_world.remove_tile_surface_feature(cleanup_tile)
 	renderer.rebuild_city_natural_feature_multimeshes()
-	renderer.observed_city_surface_feature_change_version = (
+	renderer.city_presentation_invalidation_tracker.observed_city_surface_feature_change_version = (
 		renderer.city_world.city_surface_feature_change_version
 	)
 	renderer.city_world.consume_city_surface_feature_changes()
 
-	var house_site := CityConstructionSystemScript.create_rectangular_site({
-		"object_type": CityObjectCatalog.CITY_OBJECT_HOUSE,
-		"top_left": house_top_left,
-		"size_tiles": house_size,
-		"object_owner": "player",
-		"city_world": renderer.city_world,
-	})
+	var house_site := (
+		CityConstructionSystemScript.create_rectangular_site_for_city_state(
+			city_state,
+			{
+				"object_type": CityObjectCatalog.CITY_OBJECT_HOUSE,
+				"top_left": house_top_left,
+				"size_tiles": house_size,
+				"object_owner": "player",
+				"city_world": renderer.city_world,
+			}
+		)
+	)
 	var house_site_id := int(house_site.get("id", -1))
 
 	_expect(house_site_id > 0, "House placement must create a blueprint.")
@@ -1841,7 +2123,8 @@ func _test_universal_construction_core(
 		return
 
 	var initial_progress := (
-		CityConstructionSystemScript.get_city_construction_site_progress_summary(
+		CityConstructionSystemScript.get_city_construction_site_progress_summary_for_city_state(
+			city_state,
 			house_site_id
 		)
 	)
@@ -1862,31 +2145,31 @@ func _test_universal_construction_core(
 	renderer.set_selected_city_construction_site(house_site_id)
 	_expect(
 		renderer.selected_city_construction_site_id == house_site_id
-		and renderer.construction_site_info_panel.visible,
+		and renderer.settlement_entity_panel_presentation.construction_site_info_panel.visible,
 		"Selecting a blueprint must open its compact construction panel."
 	)
 	_expect(
-		renderer.construction_site_info_title_label.text
+		renderer.settlement_entity_panel_presentation.construction_site_info_title_label.text
 		== "Construction Progress: 0%",
 		"The construction panel must display the calculated percentage."
 	)
 	_expect(
-		renderer.construction_site_info_body_label.text.contains(
+		renderer.settlement_entity_panel_presentation.construction_site_info_body_label.text.contains(
 			"Lumber: 0/8"
 		)
-		and renderer.construction_site_info_body_label.text.contains(
+		and renderer.settlement_entity_panel_presentation.construction_site_info_body_label.text.contains(
 			"Stone: 0/4"
 		),
 		"The panel must list the blueprint's live data-driven recipe."
 	)
 	var panel_size_before_zoom := (
-		renderer.construction_site_info_panel.size
+		renderer.settlement_entity_panel_presentation.construction_site_info_panel.size
 	)
 	var original_camera_zoom := renderer.camera.zoom
 	renderer.camera.zoom = original_camera_zoom * 1.5
 	renderer.update_construction_site_info_panel_screen_position()
 	var panel_size_after_zoom := (
-		renderer.construction_site_info_panel.size
+		renderer.settlement_entity_panel_presentation.construction_site_info_panel.size
 	)
 	_expect(
 		is_equal_approx(
@@ -1912,7 +2195,7 @@ func _test_universal_construction_core(
 	renderer._input(right_click)
 	_expect(
 		renderer.selected_city_construction_site_id < 0
-		and not renderer.construction_site_info_panel.visible,
+		and not renderer.settlement_entity_panel_presentation.construction_site_info_panel.visible,
 		"Right-click must close the construction panel."
 	)
 	renderer.set_selected_city_construction_site(house_site_id)
@@ -1939,7 +2222,10 @@ func _test_universal_construction_core(
 		)
 
 	_expect(
-		CityObjectSystem.get_city_object_at_tile(house_top_left).is_empty(),
+		CityObjectSystem.get_city_object_at_tile_for_city_state(
+			city_state,
+			house_top_left
+		).is_empty(),
 		"A House blueprint must not be an operational city object."
 	)
 	_expect(
@@ -1949,11 +2235,14 @@ func _test_universal_construction_core(
 	)
 
 	var cleanup_add_result := (
-		CityLogisticsSystem.add_resource_to_city_ground_piles_with_result({
-			"tile_position": cleanup_tile,
-			"resource": WorldData.RESOURCE_COAL,
-			"amount_delta": 1,
-		})
+		CityLogisticsSystem.add_resource_to_city_ground_piles_with_result_for_city_state(
+			city_state,
+			{
+				"tile_position": cleanup_tile,
+				"resource": WorldData.RESOURCE_COAL,
+				"amount_delta": 1,
+			}
+		)
 	)
 	var cleanup_placements: Array = cleanup_add_result.get(
 		"placements",
@@ -1966,7 +2255,10 @@ func _test_universal_construction_core(
 	)
 
 	var cleanup_candidate := (
-		CityConstructionSystemScript.get_best_assignable_player_work_for_citizen(citizen_id)
+		CityConstructionSystemScript.get_best_assignable_player_work_for_citizen_for_city_state(
+			city_state,
+			citizen_id
+		)
 	)
 	_expect(
 		not cleanup_candidate.is_empty()
@@ -1979,14 +2271,16 @@ func _test_universal_construction_core(
 		if not raw_placement is Dictionary:
 			continue
 
-		CityLogisticsSystem.remove_resource_from_city_ground_pile(
+		CityLogisticsSystem.remove_resource_from_city_ground_pile_for_city_state(
+			city_state,
 			int(raw_placement.get("ground_pile_id", -1)),
 			WorldData.RESOURCE_COAL,
 			int(raw_placement.get("amount", 0))
 		)
 
 	for clearing_tile in [tree_tile, rock_tile]:
-		var command := CityWorkSystem.get_city_player_command_at_tile(
+		var command := CityWorkSystem.get_city_player_command_at_tile_for_city_state(
+			city_state,
 			clearing_tile
 		)
 		var command_id := int(command.get("id", -1))
@@ -2002,35 +2296,42 @@ func _test_universal_construction_core(
 			continue
 
 		_expect(
-			CityWorkSystem.claim_city_player_command(
+			CityWorkSystem.claim_city_player_command_for_city_state(
+				city_state,
 				command_id,
 				citizen_id
 			),
 			"The clearing command must be claimable."
 		)
 		_expect(
-			CityWorkSystem.repair_stale_city_player_command_claims() == 1,
+			CityWorkSystem.repair_stale_city_player_command_claims_for_city_state(
+				city_state
+			) == 1,
 			"A claim without its matching citizen task must self-repair."
 		)
 		_expect(
-			CityWorkSystem.claim_city_player_command(
+			CityWorkSystem.claim_city_player_command_for_city_state(
+				city_state,
 				command_id,
 				citizen_id
 			),
 			"A repaired clearing command must become claimable again."
 		)
 		_expect(
-			CityWorkSystem.complete_city_player_command(
+			CityWorkSystem.complete_city_player_command_for_city_state(
+				city_state,
 				command_id,
 				citizen_id
 			),
 			"Clearing must create physical output atomically."
 		)
 
-	CityConstructionSystemScript.refresh_city_construction_site(
+	CityConstructionSystemScript.refresh_city_construction_site_for_city_state(
+		city_state,
 		house_site_id
 	)
-	house_site = CityConstructionSystem.get_city_construction_site_by_id(
+	house_site = CityConstructionSystem.get_city_construction_site_by_id_for_city_state(
+		city_state,
 		house_site_id
 	)
 
@@ -2040,11 +2341,13 @@ func _test_universal_construction_core(
 		"A cleared but under-supplied House must enter gathering."
 	)
 	_expect(
-		CityConstructionSystem.get_city_construction_site_reserved_resource_amount(
+		CityConstructionSystem.get_city_construction_site_reserved_resource_amount_for_city_state(
+			city_state,
 			house_site_id,
 			WorldData.RESOURCE_LUMBER
 		) == 4
-		and CityConstructionSystem.get_city_construction_site_reserved_resource_amount(
+		and CityConstructionSystem.get_city_construction_site_reserved_resource_amount_for_city_state(
+			city_state,
 			house_site_id,
 			WorldData.RESOURCE_STONE
 		) == 4,
@@ -2052,7 +2355,8 @@ func _test_universal_construction_core(
 	)
 
 	var cleared_progress := (
-		CityConstructionSystemScript.get_city_construction_site_progress_summary(
+		CityConstructionSystemScript.get_city_construction_site_progress_summary_for_city_state(
+			city_state,
 			house_site_id
 		)
 	)
@@ -2062,16 +2366,20 @@ func _test_universal_construction_core(
 	)
 	renderer.update_selected_entity_panel()
 	_expect(
-		renderer.construction_site_info_body_label.text.contains(
+		renderer.settlement_entity_panel_presentation.construction_site_info_body_label.text.contains(
 			"Lumber: 4/8"
 		)
-		and renderer.construction_site_info_body_label.text.contains(
+		and renderer.settlement_entity_panel_presentation.construction_site_info_body_label.text.contains(
 			"Stone: 4/4"
 		),
 		"The open construction panel must live-update delivered materials."
 	)
 
-	for raw_ground_pile in CityLogisticsSystem.get_city_ground_pile_snapshot():
+	for raw_ground_pile in (
+		CityLogisticsSystem.get_city_ground_pile_snapshot_for_city_state(
+			city_state
+		)
+	):
 		if (
 			not raw_ground_pile is Dictionary
 			or CityLogisticsSystem.get_city_ground_pile_construction_site_id(
@@ -2084,27 +2392,33 @@ func _test_universal_construction_core(
 			int(raw_ground_pile.get("id", -1))
 		)
 		_expect(
-			not CityLogisticsSystem.city_haul_endpoint_can_provide_resource({
-				"endpoint": pile_endpoint,
-				"resource": str(raw_ground_pile.get("resource_type", "")),
-				"withdrawal_purpose": CityObjectCatalog.CONTAINER_HAUL_PURPOSE_GROUND_PILE_CLEANUP,
-				"require_unreserved_amount": true,
-			}),
+			not CityLogisticsSystem.city_haul_endpoint_can_provide_resource_for_city_state(
+				city_state,
+				{
+					"endpoint": pile_endpoint,
+					"resource": str(raw_ground_pile.get("resource_type", "")),
+					"withdrawal_purpose": CityObjectCatalog.CONTAINER_HAUL_PURPOSE_GROUND_PILE_CLEANUP,
+					"require_unreserved_amount": true,
+				}
+			),
 			"Ordinary hauling must ignore construction-reserved piles."
 		)
 
 	_expect(
-		CityConstructionSystem.add_resource_to_city_construction_site(
+		CityConstructionSystem.add_resource_to_city_construction_site_for_city_state(
+			city_state,
 			house_site_id,
 			WorldData.RESOURCE_LUMBER,
 			4
 		) == 4,
 		"Delivered construction material must become a physical site pile."
 	)
-	CityConstructionSystemScript.refresh_city_construction_site(
+	CityConstructionSystemScript.refresh_city_construction_site_for_city_state(
+		city_state,
 		house_site_id
 	)
-	house_site = CityConstructionSystem.get_city_construction_site_by_id(
+	house_site = CityConstructionSystem.get_city_construction_site_by_id_for_city_state(
+		city_state,
 		house_site_id
 	)
 
@@ -2117,9 +2431,13 @@ func _test_universal_construction_core(
 	house_site["completed_labor_minutes"] = int(
 		house_site.get("required_labor_minutes", 0)
 	)
-	CityConstructionSystem.update_city_construction_site(house_site)
+	CityConstructionSystem.update_city_construction_site_for_city_state(
+		city_state,
+		house_site
+	)
 	var completed_house := (
-		CityConstructionSystemScript.complete_city_construction_site(
+		CityConstructionSystemScript.complete_city_construction_site_for_city_state(
+			city_state,
 			house_site_id
 		)
 	)
@@ -2132,7 +2450,7 @@ func _test_universal_construction_core(
 	renderer.update_selected_entity_panel()
 	_expect(
 		renderer.selected_city_construction_site_id < 0
-		and not renderer.construction_site_info_panel.visible,
+		and not renderer.settlement_entity_panel_presentation.construction_site_info_panel.visible,
 		"Completing a selected site must close its now-invalid panel."
 	)
 
@@ -2144,13 +2462,15 @@ func _test_universal_construction_core(
 		)
 
 	_expect(
-		CityConstructionSystem.get_city_construction_site_by_id(
+		CityConstructionSystem.get_city_construction_site_by_id_for_city_state(
+			city_state,
 			house_site_id
 		).is_empty(),
 		"Completed construction must release its blueprint."
 	)
 	_expect(
-		CityConstructionSystem.get_city_construction_site_reserved_resource_amount(
+		CityConstructionSystem.get_city_construction_site_reserved_resource_amount_for_city_state(
+			city_state,
 			house_site_id,
 			WorldData.RESOURCE_LUMBER
 		) == 0,
@@ -2158,6 +2478,7 @@ func _test_universal_construction_core(
 	)
 
 	var road_tiles := _find_clear_road_construction_tiles(
+		city_state,
 		renderer.city_world,
 		3
 	)
@@ -2169,7 +2490,8 @@ func _test_universal_construction_core(
 	if road_tiles.size() != 3:
 		return
 
-	var road_sites := CityConstructionSystemScript.create_road_sites(
+	var road_sites := CityConstructionSystemScript.create_road_sites_for_city_state(
+		city_state,
 		road_tiles,
 		"player",
 		renderer.city_world
@@ -2213,7 +2535,8 @@ func _test_universal_construction_core(
 	var selected_road_site_id := int(selected_road_site.get("id", -1))
 	var selected_road_tile: Vector2i = road_tiles[1]
 	var road_progress := (
-		CityConstructionSystemScript.get_city_construction_site_progress_summary(
+		CityConstructionSystemScript.get_city_construction_site_progress_summary_for_city_state(
+			city_state,
 			selected_road_site_id
 		)
 	)
@@ -2230,7 +2553,8 @@ func _test_universal_construction_core(
 		"An unobstructed road tile must begin at zero without phantom clearing work."
 	)
 	_expect(
-		CityConstructionSystem.add_resource_to_city_construction_site(
+		CityConstructionSystem.add_resource_to_city_construction_site_for_city_state(
+			city_state,
 			selected_road_site_id,
 			WorldData.RESOURCE_STONE,
 			1
@@ -2238,44 +2562,54 @@ func _test_universal_construction_core(
 		"Road construction must reject materials because it is labor-only."
 	)
 	_expect(
-		CityWorkSystem.get_cancel_preview_tiles([selected_road_tile])
+		CityWorkSystem.get_cancel_preview_tiles_for_city_state(
+			city_state,
+			[selected_road_tile]
+		)
 		== [selected_road_tile],
 		"Cancel Task must resolve only the road blueprint tile inside the box."
 	)
 	_expect(
-		CityConstructionSystemScript.cancel_city_construction_site(
+		CityConstructionSystemScript.cancel_city_construction_site_for_city_state(
+			city_state,
 			selected_road_site_id
 		),
 		"Canceling one road tile must succeed independently."
 	)
 	_expect(
-		CityConstructionSystem.get_city_construction_site_by_id(
+		CityConstructionSystem.get_city_construction_site_by_id_for_city_state(
+			city_state,
 			selected_road_site_id
 		).is_empty()
-		and not CityConstructionSystem.get_city_construction_site_by_id(
+		and not CityConstructionSystem.get_city_construction_site_by_id_for_city_state(
+			city_state,
 			int(road_sites[0].get("id", -1))
 		).is_empty()
-		and not CityConstructionSystem.get_city_construction_site_by_id(
+		and not CityConstructionSystem.get_city_construction_site_by_id_for_city_state(
+			city_state,
 			int(road_sites[2].get("id", -1))
 		).is_empty(),
 		"Canceling one road tile must leave the neighboring painted tiles intact."
 	)
 
 	var completed_site_id := int(road_sites[0].get("id", -1))
-	var completed_site := CityConstructionSystem.get_city_construction_site_by_id(
+	var completed_site := CityConstructionSystem.get_city_construction_site_by_id_for_city_state(
+		city_state,
 		completed_site_id
 	)
 	completed_site["completed_labor_minutes"] = int(
 		completed_site.get("required_labor_minutes", 0)
 	)
 	_expect(
-		CityConstructionSystemScript.update_city_construction_site(
+		CityConstructionSystemScript.update_city_construction_site_for_city_state(
+			city_state,
 			completed_site
 		),
 		"The road completion fixture must store full tile labor."
 	)
 	var completed_road := (
-		CityConstructionSystemScript.complete_city_construction_site(
+		CityConstructionSystemScript.complete_city_construction_site_for_city_state(
+			city_state,
 			completed_site_id
 		)
 	)
@@ -2288,25 +2622,28 @@ func _test_universal_construction_core(
 		"A completed road tile must become one selectable one-tile object."
 	)
 	_expect(
-		CityNavigationSystem.get_city_citizen_movement_step_cost(
+		CityNavigationSystem.get_city_citizen_movement_step_cost_for_city_state(
+			city_state,
 			road_tiles[0] + Vector2i.LEFT,
 			road_tiles[0]
 		) == CityCitizens.CITY_CITIZEN_ROAD_CARDINAL_MOVEMENT_COST,
 		"Entering a completed road tile must cost half a normal cardinal step."
 	)
 
-	CityConstructionSystemScript.cancel_city_construction_site(
+	CityConstructionSystemScript.cancel_city_construction_site_for_city_state(
+		city_state,
 		int(road_sites[2].get("id", -1))
 	)
 
 
 func _find_clear_road_construction_tiles(
+	city_state: CitySettlementSimulationState,
 	city_world: WorldData,
 	required_count: int
 ) -> Array[Vector2i]:
 	var tiles: Array[Vector2i] = []
 
-	if city_world == null or required_count <= 0:
+	if city_state == null or city_world == null or required_count <= 0:
 		return tiles
 
 	for y in range(city_world.height):
@@ -2314,17 +2651,20 @@ func _find_clear_road_construction_tiles(
 			var tile_position := Vector2i(x, y)
 
 			if (
-				CityConstructionSystem.can_place_city_road_tile(
+				CityConstructionSystem.can_place_city_road_tile_for_city_state(
+					city_state,
 					city_world,
 					tile_position
 				)
 				and WorldData.get_city_surface_feature(
 					city_world.get_tile(x, y)
 				) == WorldData.CITY_SURFACE_FEATURE_NONE
-				and not CityLogisticsSystem.has_city_ground_pile_at_tile(
+				and not CityLogisticsSystem.has_city_ground_pile_at_tile_for_city_state(
+					city_state,
 					tile_position
 				)
-				and not CityCitizenSpatialSystem.has_living_city_citizen_at_tile(
+				and not CityCitizenSpatialSystem.has_living_city_citizen_at_tile_for_city_state(
+					city_state,
 					tile_position
 				)
 			):
@@ -2337,16 +2677,20 @@ func _find_clear_road_construction_tiles(
 
 
 func _find_reachable_construction_rectangle(
+	city_state: CitySettlementSimulationState,
 	city_world: WorldData,
 	size_tiles: Vector2i,
 	object_type: String,
 	citizen_id: int,
 	destination_access_tiles: Array
 ) -> Vector2i:
-	if city_world == null or citizen_id <= 0:
+	if city_state == null or city_world == null or citizen_id <= 0:
 		return CityCitizens.INVALID_CITY_TILE_POSITION
 
-	var citizen := CityCitizenRegistrySystem.get_city_citizen_by_id(citizen_id)
+	var citizen := CityCitizenRegistrySystem.get_city_citizen_by_id_for_city_state(
+		city_state,
+		citizen_id
+	)
 	var raw_citizen_tile = citizen.get(
 		"city_tile_position",
 		CityCitizens.INVALID_CITY_TILE_POSITION
@@ -2362,14 +2706,17 @@ func _find_reachable_construction_rectangle(
 		1
 	)
 	var keep_path := (
-		CityNavigationSystemScript.find_path_to_any_city_tile({
-			"city_world": city_world,
-			"start_tile": citizen_tile,
-			"destination_tiles": destination_access_tiles,
-			"max_expanded_nodes": maximum_expanded_nodes,
-			"citizen_id": citizen_id,
-			"heuristic_weight": 1,
-		})
+		CityNavigationSystemScript.find_path_to_any_city_tile_for_city_state(
+			city_state,
+			{
+				"city_world": city_world,
+				"start_tile": citizen_tile,
+				"destination_tiles": destination_access_tiles,
+				"max_expanded_nodes": maximum_expanded_nodes,
+				"citizen_id": citizen_id,
+				"heuristic_weight": 1,
+			}
+		)
 	)
 
 	if not bool(keep_path.get("success", false)):
@@ -2410,15 +2757,21 @@ func _find_reachable_construction_rectangle(
 					if (
 						raw_tile is Vector2i
 						and (
-							not CityObjectSystem.get_city_object_at_tile(
+							not CityObjectSystem.get_city_object_at_tile_for_city_state(
+								city_state,
 								raw_tile
 							).is_empty()
-							or not CityConstructionSystem.get_city_construction_site_at_tile(
+							or not CityConstructionSystem.get_city_construction_site_at_tile_for_city_state(
+								city_state,
 								raw_tile
 							).is_empty()
 							or
-							CityLogisticsSystem.has_city_ground_pile_at_tile(raw_tile)
-							or CityCitizenSpatialSystem.has_living_city_citizen_at_tile(
+							CityLogisticsSystem.has_city_ground_pile_at_tile_for_city_state(
+								city_state,
+								raw_tile
+							)
+							or CityCitizenSpatialSystem.has_living_city_citizen_at_tile_for_city_state(
+								city_state,
 								raw_tile
 							)
 						)
@@ -2438,14 +2791,14 @@ func _find_reachable_construction_rectangle(
 					true
 				)
 
-				if not _fixture_path_is_clear(corridor_tiles):
+				if not _fixture_path_is_clear(city_state, corridor_tiles):
 					corridor_tiles = _make_cardinal_fixture_path(
 						citizen_tile,
 						cleanup_tile,
 						false
 					)
 
-				if not _fixture_path_is_clear(corridor_tiles):
+				if not _fixture_path_is_clear(city_state, corridor_tiles):
 					continue
 
 				var fixture_tiles: Array = footprint_tiles.duplicate()
@@ -2465,7 +2818,8 @@ func _find_reachable_construction_rectangle(
 					)
 					city_world.remove_tile_surface_feature(fixture_tile)
 
-				if not CityConstructionSystem.can_place_city_object_construction(
+				if not CityConstructionSystem.can_place_city_object_construction_for_city_state(
+					city_state,
 					city_world,
 					top_left,
 					size_tiles,
@@ -2474,28 +2828,34 @@ func _find_reachable_construction_rectangle(
 					continue
 
 				var source_path := (
-					CityNavigationSystemScript.find_path_to_any_city_tile({
-						"city_world": city_world,
-						"start_tile": citizen_tile,
-						"destination_tiles": [cleanup_tile],
-						"max_expanded_nodes": maximum_expanded_nodes,
-						"citizen_id": citizen_id,
-						"heuristic_weight": 1,
-					})
+					CityNavigationSystemScript.find_path_to_any_city_tile_for_city_state(
+						city_state,
+						{
+							"city_world": city_world,
+							"start_tile": citizen_tile,
+							"destination_tiles": [cleanup_tile],
+							"max_expanded_nodes": maximum_expanded_nodes,
+							"citizen_id": citizen_id,
+							"heuristic_weight": 1,
+						}
+					)
 				)
 
 				if not bool(source_path.get("success", false)):
 					continue
 
 				var destination_path := (
-					CityNavigationSystemScript.find_path_to_any_city_tile({
-						"city_world": city_world,
-						"start_tile": cleanup_tile,
-						"destination_tiles": destination_access_tiles,
-						"max_expanded_nodes": maximum_expanded_nodes,
-						"citizen_id": citizen_id,
-						"heuristic_weight": 1,
-					})
+					CityNavigationSystemScript.find_path_to_any_city_tile_for_city_state(
+						city_state,
+						{
+							"city_world": city_world,
+							"start_tile": cleanup_tile,
+							"destination_tiles": destination_access_tiles,
+							"max_expanded_nodes": maximum_expanded_nodes,
+							"citizen_id": citizen_id,
+							"heuristic_weight": 1,
+						}
+					)
 				)
 
 				if bool(destination_path.get("success", false)):
@@ -2540,16 +2900,26 @@ func _make_cardinal_fixture_path(
 	return path
 
 
-func _fixture_path_is_clear(path_tiles: Array[Vector2i]) -> bool:
+func _fixture_path_is_clear(
+	city_state: CitySettlementSimulationState,
+	path_tiles: Array[Vector2i]
+) -> bool:
 	for path_index in range(1, path_tiles.size()):
 		var tile_position := path_tiles[path_index]
 
 		if (
-			not CityObjectSystem.get_city_object_at_tile(tile_position).is_empty()
-			or not CityConstructionSystem.get_city_construction_site_at_tile(
+			not CityObjectSystem.get_city_object_at_tile_for_city_state(
+				city_state,
 				tile_position
 			).is_empty()
-			or CityLogisticsSystem.has_city_ground_pile_at_tile(tile_position)
+			or not CityConstructionSystem.get_city_construction_site_at_tile_for_city_state(
+				city_state,
+				tile_position
+			).is_empty()
+			or CityLogisticsSystem.has_city_ground_pile_at_tile_for_city_state(
+				city_state,
+				tile_position
+			)
 		):
 			return false
 
@@ -2572,18 +2942,20 @@ func _normalize_surface_feature_fixture(
 
 
 func _find_placeable_rectangle(
+	city_state: CitySettlementSimulationState,
 	city_world: WorldData,
 	size_tiles: Vector2i,
 	object_type: String = ""
 ) -> Vector2i:
-	if city_world == null:
+	if city_state == null or city_world == null:
 		return Vector2i(-1, -1)
 
 	for y in range(city_world.height - size_tiles.y + 1):
 		for x in range(city_world.width - size_tiles.x + 1):
 			var top_left := Vector2i(x, y)
 
-			if CityObjectSystem.can_place_city_object(
+			if CityObjectSystem.can_place_city_object_for_city_state(
+				city_state,
 				city_world,
 				top_left,
 				size_tiles,
@@ -2592,6 +2964,22 @@ func _find_placeable_rectangle(
 				return top_left
 
 	return Vector2i(-1, -1)
+
+
+func _get_registered_renderer_city_state(
+	renderer: CityRenderer
+) -> CitySettlementSimulationState:
+	if renderer == null:
+		return null
+	var settlement_context := renderer.bound_settlement_context
+	if (
+		settlement_context == null
+		or not WorldPoliticalState.is_registered_settlement_context(
+			settlement_context
+		)
+	):
+		return null
+	return settlement_context.get_city_simulation_state()
 
 
 func _expect(condition: bool, message: String) -> void:

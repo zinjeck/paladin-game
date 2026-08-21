@@ -3,6 +3,8 @@ extends Node
 const TEST_WORLD_SIZE := Vector2i(40, 30)
 
 var failure_count: int = 0
+var fixture_settlement_id: int = SettlementData.INVALID_SETTLEMENT_ID
+var fixture_city_state: CitySettlementSimulationState = null
 
 
 func _ready() -> void:
@@ -50,7 +52,7 @@ func _test_container_accounting_and_cache_invalidation() -> void:
 		and not stockpile.is_empty()
 		and not house.is_empty()
 		and not fishery.is_empty(),
-		"Fixture must register all four current container types."
+		"Fixture must register all four supported container types."
 	)
 	if (
 		keep.is_empty()
@@ -65,37 +67,44 @@ func _test_container_accounting_and_cache_invalidation() -> void:
 	var house_id := int(house["id"])
 	var fishery_id := int(fishery["id"])
 	_expect(
-		CityResourceContainerSystem.add_resource_to_city_object_storage(
+		CityResourceContainerSystem.add_resource_to_city_object_storage_for_city_state(
+			fixture_city_state,
 			keep_id,
 			WorldData.RESOURCE_FISH,
 			3
 		) == 3
-		and CityResourceContainerSystem.add_resource_to_city_object_storage(
+		and CityResourceContainerSystem.add_resource_to_city_object_storage_for_city_state(
+			fixture_city_state,
 			keep_id,
 			WorldData.RESOURCE_LUMBER,
 			17
 		) == 17
-		and CityResourceContainerSystem.add_resource_to_city_object_storage(
+		and CityResourceContainerSystem.add_resource_to_city_object_storage_for_city_state(
+			fixture_city_state,
 			stockpile_id,
 			WorldData.RESOURCE_FISH,
 			5
 		) == 5
-		and CityResourceContainerSystem.add_resource_to_city_object_storage(
+		and CityResourceContainerSystem.add_resource_to_city_object_storage_for_city_state(
+			fixture_city_state,
 			stockpile_id,
 			WorldData.RESOURCE_STONE,
 			25
 		) == 25
-		and CityResourceContainerSystem.add_resource_to_city_object_storage(
+		and CityResourceContainerSystem.add_resource_to_city_object_storage_for_city_state(
+			fixture_city_state,
 			house_id,
 			WorldData.RESOURCE_FISH,
 			7
 		) == 7
-		and CityResourceContainerSystem.add_resource_to_city_object_storage(
+		and CityResourceContainerSystem.add_resource_to_city_object_storage_for_city_state(
+			fixture_city_state,
 			house_id,
 			WorldData.RESOURCE_MEAT,
 			8
 		) == 8
-		and CityResourceContainerSystem.add_resource_to_city_object_storage(
+		and CityResourceContainerSystem.add_resource_to_city_object_storage_for_city_state(
+			fixture_city_state,
 			fishery_id,
 			WorldData.RESOURCE_FISH,
 			11
@@ -103,10 +112,22 @@ func _test_container_accounting_and_cache_invalidation() -> void:
 		"Each physical container must accept its accounting fixture resources."
 	)
 
-	keep = CityObjectSystem.get_city_object_by_id(keep_id)
-	stockpile = CityObjectSystem.get_city_object_by_id(stockpile_id)
-	house = CityObjectSystem.get_city_object_by_id(house_id)
-	fishery = CityObjectSystem.get_city_object_by_id(fishery_id)
+	keep = CityObjectSystem.get_city_object_by_id_for_city_state(
+		fixture_city_state,
+		keep_id
+	)
+	stockpile = CityObjectSystem.get_city_object_by_id_for_city_state(
+		fixture_city_state,
+		stockpile_id
+	)
+	house = CityObjectSystem.get_city_object_by_id_for_city_state(
+		fixture_city_state,
+		house_id
+	)
+	fishery = CityObjectSystem.get_city_object_by_id_for_city_state(
+		fixture_city_state,
+		fishery_id
+	)
 	_expect(
 		CityResourceContainerSystem.city_object_counts_as_public_city_storage(keep)
 		and CityResourceContainerSystem.city_object_counts_as_public_city_storage(stockpile)
@@ -130,26 +151,33 @@ func _test_container_accounting_and_cache_invalidation() -> void:
 		"Owned totals must include public and workplace output, but not pantries."
 	)
 
-	var owned_totals := CityResourceAccountingSystem.get_total_owned_city_resource_amounts()
+	var owned_totals := CityResourceAccountingSystem.get_total_owned_city_resource_amounts_for_city_state(
+		fixture_city_state
+	)
 	var accounting_state := (
-		CityResourceAccountingSystem.get_current_state()
+		CityResourceAccountingSystem.get_state_for_city_state(fixture_city_state)
 	)
 	_expect(
-		CityResourceAccountingSystem.get_total_public_city_resource_amount(
+		CityResourceAccountingSystem.get_total_public_city_resource_amount_for_city_state(
+			fixture_city_state,
 			WorldData.RESOURCE_FISH
 		) == 8
-		and CityResourceAccountingSystem.get_total_stored_city_resource_amount(
+		and CityResourceAccountingSystem.get_total_stored_city_resource_amount_for_city_state(
+			fixture_city_state,
 			WorldData.RESOURCE_FISH
 		) == 19
 		and int(owned_totals.get(WorldData.RESOURCE_FISH, 0)) == 19
-		and CityResourceAccountingSystem.get_total_physical_city_resource_amount(
+		and CityResourceAccountingSystem.get_total_physical_city_resource_amount_for_city_state(
+			fixture_city_state,
 			WorldData.RESOURCE_FISH
 		) == 26,
 		"Public, owned/UI, and total physical fish must preserve distinct scopes."
 	)
 	_expect(
 		is_same(
-			CityResourceAccountingSystem.get_current_state().owned_resource_amount_cache,
+			CityResourceAccountingSystem.get_state_for_city_state(
+				fixture_city_state
+			).owned_resource_amount_cache,
 			accounting_state.owned_resource_amount_cache
 		)
 		and is_same(
@@ -158,7 +186,7 @@ func _test_container_accounting_and_cache_invalidation() -> void:
 		)
 		and accounting_state.owned_resource_amount_cache_container_version
 		== accounting_state.container_version,
-		"The active state must own the exact valid aggregate cache."
+		"The exact fixture state must own the valid aggregate cache."
 	)
 
 	_expect(
@@ -173,10 +201,12 @@ func _test_container_accounting_and_cache_invalidation() -> void:
 		"Used and free capacity must be derived from physical container contents."
 	)
 	_expect(
-		CityResourceAccountingSystem.get_total_public_city_resource_storage_capacity(
+		CityResourceAccountingSystem.get_total_public_city_resource_storage_capacity_for_city_state(
+			fixture_city_state,
 			WorldData.RESOURCE_FISH
 		) == 208
-		and CityResourceAccountingSystem.get_total_city_resource_storage_capacity(
+		and CityResourceAccountingSystem.get_total_city_resource_storage_capacity_for_city_state(
+			fixture_city_state,
 			WorldData.RESOURCE_FISH
 		) == 258
 		and CityResourceContainerSystem.get_city_object_storage_capacity_for_resource(
@@ -188,22 +218,26 @@ func _test_container_accounting_and_cache_invalidation() -> void:
 
 	var renderer := CityRenderer.new()
 	var renderer_context = WorldPoliticalState.get_settlement_context(
-		WorldPoliticalState.active_settlement_id
+		fixture_settlement_id
 	)
 	_expect(
 		renderer.configure_initial_city_presentation(renderer_context),
 		"Resource regression UI requires an explicit renderer settlement binding."
 	)
-	var resource_order := renderer.get_city_resource_order()
+	var resource_order := renderer.settlement_ui_controller.get_resource_order()
 	for _resource in resource_order:
 		var amount_label := Label.new()
 		renderer.add_child(amount_label)
-		renderer.resource_amount_labels.append(amount_label)
-	renderer.update_resource_bar_values()
+		renderer.settlement_ui_controller.resource_amount_labels.append(
+			amount_label
+		)
+	renderer.settlement_ui_controller.update_resource_bar_values()
 	var fish_index := resource_order.find(WorldData.RESOURCE_FISH)
 	_expect(
 		fish_index >= 0
-		and renderer.resource_amount_labels[fish_index].text == "19",
+		and renderer.settlement_ui_controller.resource_amount_labels[
+			fish_index
+		].text == "19",
 		"The resource bar must render the authoritative owned fish total."
 	)
 	renderer.free()
@@ -230,7 +264,8 @@ func _test_cache_invalidation_and_capacity_edges(
 	var container_before_private_mutation := accounting_state.container_version
 	var public_before_private_mutation := accounting_state.public_storage_version
 	_expect(
-		CityResourceContainerSystem.add_resource_to_city_object_storage(
+		CityResourceContainerSystem.add_resource_to_city_object_storage_for_city_state(
+			fixture_city_state,
 			house_id,
 			WorldData.RESOURCE_FISH,
 			1
@@ -244,7 +279,7 @@ func _test_cache_invalidation_and_capacity_edges(
 		"Private pantry mutation must invalidate owned cache without public versioning."
 	)
 	_expect(
-		CityResourceAccountingSystem.get_total_owned_city_resource_amount(
+		_get_total_owned_city_resource_amount(
 			WorldData.RESOURCE_FISH
 		) == 19
 		and not is_same(
@@ -259,7 +294,8 @@ func _test_cache_invalidation_and_capacity_edges(
 	var public_before_workplace_mutation := accounting_state.public_storage_version
 	var container_before_workplace_mutation := accounting_state.container_version
 	_expect(
-		CityResourceContainerSystem.add_resource_to_city_object_storage(
+		CityResourceContainerSystem.add_resource_to_city_object_storage_for_city_state(
+			fixture_city_state,
 			fishery_id,
 			WorldData.RESOURCE_FISH,
 			1
@@ -268,7 +304,7 @@ func _test_cache_invalidation_and_capacity_edges(
 		== container_before_workplace_mutation + 1
 		and accounting_state.public_storage_version
 		== public_before_workplace_mutation
-		and CityResourceAccountingSystem.get_total_owned_city_resource_amount(
+		and _get_total_owned_city_resource_amount(
 			WorldData.RESOURCE_FISH
 		) == 20,
 		"Workplace output must invalidate owned totals without becoming public storage."
@@ -277,7 +313,8 @@ func _test_cache_invalidation_and_capacity_edges(
 	var container_before_public_mutation := accounting_state.container_version
 	var public_before_public_mutation := accounting_state.public_storage_version
 	_expect(
-		CityResourceContainerSystem.add_resource_to_city_object_storage(
+		CityResourceContainerSystem.add_resource_to_city_object_storage_for_city_state(
+			fixture_city_state,
 			stockpile_id,
 			WorldData.RESOURCE_FISH,
 			1
@@ -286,16 +323,20 @@ func _test_cache_invalidation_and_capacity_edges(
 		== container_before_public_mutation + 1
 		and accounting_state.public_storage_version
 		== public_before_public_mutation + 1
-		and CityResourceAccountingSystem.get_total_owned_city_resource_amount(
+		and _get_total_owned_city_resource_amount(
 			WorldData.RESOURCE_FISH
 		) == 21
-		and CityResourceAccountingSystem.get_total_public_city_resource_amount(
+		and CityResourceAccountingSystem.get_total_public_city_resource_amount_for_city_state(
+			fixture_city_state,
 			WorldData.RESOURCE_FISH
 		) == 9,
 		"Stockpile mutation must version both accounting and public availability."
 	)
 
-	stockpile = CityObjectSystem.get_city_object_by_id(stockpile_id)
+	stockpile = CityObjectSystem.get_city_object_by_id_for_city_state(
+		fixture_city_state,
+		stockpile_id
+	)
 	var current_stockpile_fish := CityResourceContainerSystem.get_city_object_stored_resource_amount(
 		stockpile,
 		WorldData.RESOURCE_FISH
@@ -303,12 +344,14 @@ func _test_cache_invalidation_and_capacity_edges(
 	var container_before_no_op := accounting_state.container_version
 	var public_before_no_op := accounting_state.public_storage_version
 	_expect(
-		CityResourceContainerSystem.set_city_object_stored_resource_amount(
+		CityResourceContainerSystem.set_city_object_stored_resource_amount_for_city_state(
+			fixture_city_state,
 			stockpile_id,
 			WorldData.RESOURCE_FISH,
 			current_stockpile_fish
 		) == current_stockpile_fish
-		and CityResourceContainerSystem.add_resource_to_city_object_storage(
+		and CityResourceContainerSystem.add_resource_to_city_object_storage_for_city_state(
+			fixture_city_state,
 			stockpile_id,
 			WorldData.RESOURCE_NONE,
 			1
@@ -318,11 +361,15 @@ func _test_cache_invalidation_and_capacity_edges(
 		"No-op and invalid mutations must not advance accounting versions."
 	)
 
-	stockpile = CityObjectSystem.get_city_object_by_id(stockpile_id)
+	stockpile = CityObjectSystem.get_city_object_by_id_for_city_state(
+		fixture_city_state,
+		stockpile_id
+	)
 	var stockpile_free_space := CityResourceContainerSystem.get_city_object_storage_free_space(
 		stockpile
 	)
-	var accepted_gold := CityResourceContainerSystem.add_resource_to_city_object_storage(
+	var accepted_gold := CityResourceContainerSystem.add_resource_to_city_object_storage_for_city_state(
+		fixture_city_state,
 		stockpile_id,
 		WorldData.RESOURCE_GOLD,
 		999
@@ -331,14 +378,18 @@ func _test_cache_invalidation_and_capacity_edges(
 		accepted_gold == stockpile_free_space
 		and accepted_gold == 169
 		and CityResourceContainerSystem.get_city_object_storage_used_capacity(
-			CityObjectSystem.get_city_object_by_id(stockpile_id)
+			CityObjectSystem.get_city_object_by_id_for_city_state(
+				fixture_city_state,
+				stockpile_id
+			)
 		) == 200,
 		"Over-capacity deposits must accept only the physical free space."
 	)
 	var container_at_capacity := accounting_state.container_version
 	var public_at_capacity := accounting_state.public_storage_version
 	_expect(
-		CityResourceContainerSystem.add_resource_to_city_object_storage(
+		CityResourceContainerSystem.add_resource_to_city_object_storage_for_city_state(
+			fixture_city_state,
 			stockpile_id,
 			WorldData.RESOURCE_GOLD,
 			1
@@ -348,7 +399,8 @@ func _test_cache_invalidation_and_capacity_edges(
 		"A full Stockpile must reject deposits without publishing false changes."
 	)
 
-	var removed_fish := CityResourceContainerSystem.remove_resource_from_city_object_storage(
+	var removed_fish := CityResourceContainerSystem.remove_resource_from_city_object_storage_for_city_state(
+		fixture_city_state,
 		stockpile_id,
 		WorldData.RESOURCE_FISH,
 		999
@@ -358,16 +410,20 @@ func _test_cache_invalidation_and_capacity_edges(
 		and accounting_state.container_version == container_at_capacity + 1
 		and accounting_state.public_storage_version == public_at_capacity + 1
 		and CityResourceContainerSystem.get_city_object_stored_resource_amount(
-			CityObjectSystem.get_city_object_by_id(stockpile_id),
+			CityObjectSystem.get_city_object_by_id_for_city_state(
+				fixture_city_state,
+				stockpile_id
+			),
 			WorldData.RESOURCE_FISH
 		) == 0,
 		"Over-requested removal must remove only the physical stored amount."
 	)
 	_expect(
-		CityResourceAccountingSystem.get_total_owned_city_resource_amount(
+		_get_total_owned_city_resource_amount(
 			WorldData.RESOURCE_FISH
 		) == 15
-		and CityResourceAccountingSystem.get_total_public_city_resource_amount(
+		and CityResourceAccountingSystem.get_total_public_city_resource_amount_for_city_state(
+			fixture_city_state,
 			WorldData.RESOURCE_FISH
 		) == 3
 		and accounting_state.owned_resource_amount_cache_container_version
@@ -381,16 +437,21 @@ func _register_container(
 	top_left: Vector2i,
 	city_world: WorldData
 ) -> Dictionary:
-	return CityObjectSystem.register_completed_city_object({
-		"object_type": object_type,
-		"top_left": top_left,
-		"size_tiles": CityObjectCatalog.get_city_object_size_for_type(object_type),
-		"object_owner": "player",
-		"city_world": city_world,
-	})
+	return CityObjectSystem.register_completed_city_object_for_city_state(
+		fixture_city_state,
+		{
+			"object_type": object_type,
+			"top_left": top_left,
+			"size_tiles": CityObjectCatalog.get_city_object_size_for_type(object_type),
+			"object_owner": "player",
+			"city_world": city_world,
+		}
+	)
 
 
 func _reset_fixture(seed: int) -> WorldData:
+	fixture_settlement_id = SettlementData.INVALID_SETTLEMENT_ID
+	fixture_city_state = null
 	WorldPoliticalState.reset_state()
 	WorldData.reset_runtime_session_state()
 	SimulationClock.start_new_game()
@@ -430,11 +491,12 @@ func _reset_fixture(seed: int) -> WorldData:
 	var city_id := int(city.get("id", -1))
 	var city_state = WorldPoliticalState.get_city_simulation_state(city_id)
 	_expect(
-		city_state is CitySettlementSimulationState
-		and WorldPoliticalState.set_active_settlement(city_id),
-		"Fixture must create one settlement-owned city state."
+		city_state is CitySettlementSimulationState,
+		"Fixture must create one exact settlement-owned city state."
 	)
 	if city_state is CitySettlementSimulationState:
+		fixture_settlement_id = city_id
+		fixture_city_state = city_state
 		city_state.city_runtime_data.merge({
 			"id": city_id,
 			"name": "Resource Accounting Regression City",
@@ -442,12 +504,14 @@ func _reset_fixture(seed: int) -> WorldData:
 			"founded": false,
 			"can_build": false,
 		}, true)
-	WorldData.store_city_world_save(city_world, seed)
+	WorldData.store_city_world_for_state(
+		fixture_city_state, city_world, seed
+	)
 	return city_world
 
 
 func _mark_fixture_city_founded(keep: Dictionary) -> void:
-	var city_state = WorldPoliticalState.get_active_city_simulation_state()
+	var city_state := fixture_city_state
 	if not city_state is CitySettlementSimulationState or keep.is_empty():
 		return
 
@@ -464,6 +528,17 @@ func _mark_fixture_city_founded(keep: Dictionary) -> void:
 		"founded": true,
 		"can_build": true,
 	}, true)
+
+
+func _get_total_owned_city_resource_amount(resource: String) -> int:
+	return maxi(
+		int(
+			CityResourceAccountingSystem.get_total_owned_city_resource_amounts_for_city_state(
+				fixture_city_state
+			).get(resource, 0)
+		),
+		0
+	)
 
 
 func _expect(condition: bool, message: String) -> void:
